@@ -30,11 +30,25 @@ services:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      # Two client listeners: PLAINTEXT (kafka:9092) for in-network containers,
+      # EXTERNAL (localhost:29092) so host processes — services run with tsx/node
+      # on the host in dev, and the self-checks — can produce/consume. A broker
+      # advertising only kafka:9092 is unreachable from the host after the initial
+      # metadata round-trip; this dual listener is the standard Confluent fix.
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,EXTERNAL://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      # Single-broker replication factors. Without these the internal
+      # __consumer_offsets / transaction-state topics default to RF=3, which a
+      # 1-broker cluster can never create — so the group coordinator is
+      # unavailable and NO consumer group can ever form (producers still work,
+      # which is why this stays hidden until you actually consume). RF=1 fixes it.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       # Performance tuning for dev (reduced for RAM constraints)
       KAFKA_NUM_PARTITIONS: 3
       KAFKA_DEFAULT_REPLICATION_FACTOR: 1
@@ -49,6 +63,7 @@ services:
       - kafka-data:/var/lib/kafka/data
     ports:
       - "9092:9092"
+      - "29092:29092"
     networks:
       - usrp-internal
     healthcheck:
@@ -71,71 +86,27 @@ services:
         condition: service_healthy
     networks:
       - usrp-internal
+    # NOTE: single-line commands driven by a loop — NOT backslash line
+    # continuations. YAML block scalars preserve trailing whitespace, and a
+    # space after a `\` silently breaks bash line-continuation, which is why an
+    # earlier multi-line version created NO topics. Keep each command on one line.
+    # command is a SINGLE-ELEMENT LIST so the whole script is passed as one
+    # argv to `bash -c`. Shell `$` MUST be written `$$` — Compose interpolates
+    # `${...}` as its own variables otherwise, blanking $topic/$parts and failing
+    # with "invalid interpolation format". (Both this and the earlier backslash-
+    # continuation form silently created NO topics — hence the escaping notes.)
     entrypoint: ["/bin/bash", "-c"]
-    command: |
-      "
-      echo 'Creating USRP Kafka topics...'
-
-      kafka-topics --create --if-not-exists \
-        --topic applicant.submitted \
-        --partitions 12 \
-        --replication-factor 1 \
-        --config retention.ms=604800000 \
-        --bootstrap-server kafka:9092
-
-      kafka-topics --create --if-not-exists \
-        --topic vetting.nida \
-        --partitions 6 \
-        --replication-factor 1 \
-        --config retention.ms=604800000 \
-        --bootstrap-server kafka:9092
-
-      kafka-topics --create --if-not-exists \
-        --topic vetting.nesa \
-        --partitions 6 \
-        --replication-factor 1 \
-        --config retention.ms=604800000 \
-        --bootstrap-server kafka:9092
-
-      kafka-topics --create --if-not-exists \
-        --topic vetting.rib \
-        --partitions 6 \
-        --replication-factor 1 \
-        --config retention.ms=604800000 \
-        --bootstrap-server kafka:9092
-
-      kafka-topics --create --if-not-exists \
-        --topic biometric.result \
-        --partitions 6 \
-        --replication-factor 1 \
-        --config retention.ms=604800000 \
-        --bootstrap-server kafka:9092
-
-      kafka-topics --create --if-not-exists \
-        --topic slot.assigned \
-        --partitions 6 \
-        --replication-factor 1 \
-        --config retention.ms=604800000 \
-        --bootstrap-server kafka:9092
-
-      kafka-topics --create --if-not-exists \
-        --topic field.score.captured \
-        --partitions 6 \
-        --replication-factor 1 \
-        --config retention.ms=604800000 \
-        --bootstrap-server kafka:9092
-
-      kafka-topics --create --if-not-exists \
-        --topic audit.immutable \
-        --partitions 3 \
-        --replication-factor 1 \
-        --config retention.ms=-1 \
-        --config cleanup.policy=delete \
-        --bootstrap-server kafka:9092
-
-      echo 'All USRP topics created successfully.'
-      kafka-topics --list --bootstrap-server kafka:9092
-      "
+    command:
+      - |
+        set -e
+        echo 'Creating USRP Kafka topics...'
+        for spec in applicant.submitted:12 vetting.nida:6 vetting.nesa:6 vetting.hec:6 vetting.rib:6 biometric.result:6 slot.assigned:6 field.score.captured:6; do
+          topic=$${spec%%:*}; parts=$${spec##*:}
+          kafka-topics --create --if-not-exists --topic $$topic --partitions $$parts --replication-factor 1 --config retention.ms=604800000 --bootstrap-server kafka:9092
+        done
+        kafka-topics --create --if-not-exists --topic audit.immutable --partitions 3 --replication-factor 1 --config retention.ms=-1 --config cleanup.policy=delete --bootstrap-server kafka:9092
+        echo 'All USRP topics created successfully.'
+        kafka-topics --list --bootstrap-server kafka:9092
     restart: on-failure
 
   # ── Confluent Schema Registry ────────────────────────────────────
