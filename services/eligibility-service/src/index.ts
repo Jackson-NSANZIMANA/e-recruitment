@@ -22,6 +22,10 @@ export function createEligibilityService(
 
 // ── Re-exports ────────────────────────────────────────────────────
 export { AGE_CHECK_PATH, ageEligibilityRoute } from './adapters/http/eligibility.controller.js';
+export {
+  ELIGIBILITY_CONSUMER_GROUP,
+  startApplicantSubmittedConsumer,
+} from './adapters/events/applicant-submitted.consumer.js';
 export { EvaluateAgeEligibilityService } from './application/evaluate-age-eligibility.service.js';
 export type {
   EvaluateAgeEligibilityCommand,

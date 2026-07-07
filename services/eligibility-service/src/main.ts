@@ -14,6 +14,7 @@ import { startHttpServer } from '@usrp/shared-http';
 import { createEligibilityService } from './index.js';
 import { loadEligibilityConfig } from './config.js';
 import { ageEligibilityRoute } from './adapters/http/eligibility.controller.js';
+import { startApplicantSubmittedConsumer } from './adapters/events/applicant-submitted.consumer.js';
 
 function createEventBus(serviceName: string): EventBus {
   if (process.env['KAFKA_BROKERS']) {
@@ -35,6 +36,14 @@ async function main(): Promise<void> {
   await bus.connect();
 
   const service = createEligibilityService(config, bus);
+
+  // Event-driven ingress: when a broker is configured, auto-run the age gate
+  // off applicant.submitted. (In-memory bus has no cross-process delivery, so
+  // this is only meaningful with real Kafka.)
+  if (process.env['KAFKA_BROKERS']) {
+    await startApplicantSubmittedConsumer(bus, service);
+    console.log(JSON.stringify({ msg: 'event_consumer_started', topic: 'applicant.submitted' }));
+  }
 
   const server = await startHttpServer({
     serviceName: config.runtime.serviceName,
