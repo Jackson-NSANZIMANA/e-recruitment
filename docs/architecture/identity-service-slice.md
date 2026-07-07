@@ -99,7 +99,9 @@ non-zero on any failure.
 
 ## Deferred to next slices
 
-1. HTTP/message ingress transport + framework decision (candidate ADR-005).
+1. ~~HTTP/message ingress transport + framework decision (candidate ADR-005).~~
+   **Done** — see `ADR-005` and `identity-service-http-slice.md`. The service now
+   runs over `@usrp/shared-http`.
 2. Biometric 1:1 match (populates `nidaMatchConfidence`; biometric-service).
 3. `applicant_sessions` (web/USSD) + phone OTP verification.
 4. `.env.example` ↔ shared-config reconciliation; the three-role-model cleanup.

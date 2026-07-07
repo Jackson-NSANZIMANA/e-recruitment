@@ -35,6 +35,10 @@ export function createIdentityService(
 }
 
 // ── Re-exports ────────────────────────────────────────────────────
+export {
+  VERIFY_IDENTITY_PATH,
+  verifyIdentityRoute,
+} from './adapters/http/verify-identity.controller.js';
 export { VerifyIdentityService } from './application/verify-identity.service.js';
 export type {
   VerifyIdentityCommand,

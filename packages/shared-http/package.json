@@ -1,0 +1,25 @@
+{
+  "name": "@usrp/shared-http",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Zero-dependency minimal HTTP transport (node:http) for all USRP services — ADR-005",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/**/*.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.8.3"
+  }
+}
