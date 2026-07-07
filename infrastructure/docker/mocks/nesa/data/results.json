@@ -1,0 +1,41 @@
+{
+  "RW2024/1001": {
+    "indexNumber": "RW2024/1001",
+    "qualificationLevel": "A2",
+    "yearOfExamination": 2024,
+    "schoolName": "Lycée de Kigali",
+    "subjects": [
+      { "subjectCode": "PHY", "subjectName": "Physics", "grade": "B", "points": 5 },
+      { "subjectCode": "CHEM", "subjectName": "Chemistry", "grade": "B", "points": 5 },
+      { "subjectCode": "MATH", "subjectName": "Mathematics", "grade": "A", "points": 6 }
+    ],
+    "overallPoints": 16,
+    "verificationToken": "NESA-VT-001"
+  },
+  "RW2024/1002": {
+    "indexNumber": "RW2024/1002",
+    "qualificationLevel": "A2",
+    "yearOfExamination": 2024,
+    "schoolName": "École Secondaire de Musanze",
+    "subjects": [
+      { "subjectCode": "ECO", "subjectName": "Economics", "grade": "A", "points": 6 },
+      { "subjectCode": "GEO", "subjectName": "Geography", "grade": "B", "points": 5 },
+      { "subjectCode": "HIS", "subjectName": "History", "grade": "A", "points": 6 }
+    ],
+    "overallPoints": 17,
+    "verificationToken": "NESA-VT-002"
+  },
+  "RW2024/FAIL": {
+    "indexNumber": "RW2024/FAIL",
+    "qualificationLevel": "A2",
+    "yearOfExamination": 2024,
+    "schoolName": "Test School",
+    "subjects": [
+      { "subjectCode": "PHY", "subjectName": "Physics", "grade": "F", "points": 1 },
+      { "subjectCode": "CHEM", "subjectName": "Chemistry", "grade": "F", "points": 1 },
+      { "subjectCode": "MATH", "subjectName": "Mathematics", "grade": "F", "points": 1 }
+    ],
+    "overallPoints": 3,
+    "verificationToken": "NESA-VT-FAIL"
+  }
+}

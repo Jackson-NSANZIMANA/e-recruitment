@@ -1,0 +1,131 @@
+# ══════════════════════════════════════════════════════════════════
+# USRP Kong API Gateway — Development Configuration (DB-less)
+# Production: Kong with PostgreSQL backend + full WAF ruleset
+# ══════════════════════════════════════════════════════════════════
+
+_format_version: "3.0"
+_transform: true
+
+# ── Services ──────────────────────────────────────────────────────
+
+services:
+
+  - name: identity-service
+    url: http://host.docker.internal:4001
+    routes:
+      - name: identity-routes
+        paths:
+          - /api/v1/identity
+        methods: [GET, POST]
+        strip_path: false
+    plugins:
+      - name: rate-limiting
+        config:
+          minute: 30
+          policy: local
+          error_message: "Identity service rate limit exceeded"
+
+  - name: eligibility-service
+    url: http://host.docker.internal:4002
+    routes:
+      - name: eligibility-routes
+        paths:
+          - /api/v1/eligibility
+        methods: [GET, POST]
+        strip_path: false
+    plugins:
+      - name: rate-limiting
+        config:
+          minute: 50
+          policy: local
+
+  - name: biometric-service
+    url: http://host.docker.internal:4003
+    routes:
+      - name: biometric-routes
+        paths:
+          - /api/v1/biometric
+        methods: [GET, POST]
+        strip_path: false
+    plugins:
+      - name: rate-limiting
+        config:
+          minute: 10
+          policy: local
+          error_message: "Biometric service rate limit exceeded"
+
+  - name: rdf-bff
+    url: http://host.docker.internal:4021
+    routes:
+      - name: rdf-bff-routes
+        paths:
+          - /api/v1/rdf
+        methods: [GET, POST, PATCH, DELETE]
+        strip_path: false
+
+  - name: rnp-bff
+    url: http://host.docker.internal:4022
+    routes:
+      - name: rnp-bff-routes
+        paths:
+          - /api/v1/rnp
+        methods: [GET, POST, PATCH, DELETE]
+        strip_path: false
+
+  - name: rcs-bff
+    url: http://host.docker.internal:4023
+    routes:
+      - name: rcs-bff-routes
+        paths:
+          - /api/v1/rcs
+        methods: [GET, POST, PATCH, DELETE]
+        strip_path: false
+
+  - name: superadmin-bff
+    url: http://host.docker.internal:4024
+    routes:
+      - name: superadmin-routes
+        paths:
+          - /api/v1/admin
+        methods: [GET, POST, PATCH]
+        strip_path: false
+
+# ── Global Plugins ─────────────────────────────────────────────────
+
+plugins:
+
+  - name: cors
+    config:
+      origins:
+        - "http://localhost:3000"
+        - "http://localhost:3001"
+        - "http://localhost:3002"
+        - "http://localhost:3003"
+        - "http://localhost:3004"
+        - "http://localhost:3005"
+      methods:
+        - GET
+        - POST
+        - PATCH
+        - DELETE
+        - OPTIONS
+      headers:
+        - Authorization
+        - Content-Type
+        - X-Request-ID
+        - X-Agency
+      credentials: true
+      max_age: 3600
+
+  - name: request-id
+    config:
+      header_name: X-Request-ID
+      generator: uuid
+
+  - name: response-transformer
+    config:
+      add:
+        headers:
+          - "X-Content-Type-Options:nosniff"
+          - "X-Frame-Options:DENY"
+          - "X-XSS-Protection:1; mode=block"

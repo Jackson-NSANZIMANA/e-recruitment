@@ -1,0 +1,32 @@
+{
+  "UR/2023/CS/001": {
+    "registrationNumber": "UR/2023/CS/001",
+    "holderNationalIdHash": "6561ef4517673f33b321cf2004b9d8e31c805c0a927346a4c4b6a71a36b648b0",
+    "institutionName": "University of Rwanda",
+    "degreeTitle": "Bachelor of Science in Computer Science",
+    "educationLevel": "BACHELOR_A0",
+    "specialistField": "ENGINEERING",
+    "graduationYear": 2023,
+    "verified": true
+  },
+  "UR/2022/NURSING/045": {
+    "registrationNumber": "UR/2022/NURSING/045",
+    "holderNationalIdHash": "64d32ed6e2852caa6f28017cd7dcff3c54dac8a1b31bf29f1105fe2f27cfb795",
+    "institutionName": "University of Rwanda, College of Medicine and Health Sciences",
+    "degreeTitle": "Bachelor of Science in Nursing",
+    "educationLevel": "BACHELOR_A0",
+    "specialistField": "NURSING",
+    "graduationYear": 2022,
+    "verified": true
+  },
+  "IPRC/2023/ENG/078": {
+    "registrationNumber": "IPRC/2023/ENG/078",
+    "holderNationalIdHash": "8f516afd16ff960bc22c1614ed1e98956fe9f55bc491c6666520d5d87616e015",
+    "institutionName": "IPRC Kigali",
+    "degreeTitle": "Advanced Diploma in Civil Engineering",
+    "educationLevel": "A1_IPRC",
+    "specialistField": "ENGINEERING",
+    "graduationYear": 2023,
+    "verified": true
+  }
+}

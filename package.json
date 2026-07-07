@@ -1,0 +1,39 @@
+{
+  "name": "usrp-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Unified Security Recruitment Portal — Backend Monorepo (RDF, RNP, RCS)",
+  "author": "Jackson NSANZIMANA",
+  "license": "UNLICENSED",
+  "packageManager": "pnpm@9.15.0+sha512.76e2379760a4328ec4415815bcd6628dee727af3779aaa4c914e3944156c4299921a89f976381ee107d41f12cfa4b66681ca9c718f0668fa0831ed4c6d8ba56c",
+  "engines": {
+    "node": ">=24 <=25",
+    "pnpm": ">=9 <10"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "build:affected": "turbo run build --filter=[HEAD^1]",
+    "dev": "turbo run dev --parallel",
+    "test": "turbo run test",
+    "test:e2e": "turbo run test:e2e",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "db:migrate": "turbo run db:migrate --filter=shared-database",
+    "db:seed": "turbo run db:seed --filter=shared-database",
+    "db:studio": "turbo run db:studio --filter=shared-database",
+    "infra:up": "docker compose -f infrastructure/docker/docker-compose.infra.yml up -d",
+    "infra:up:tier1": "docker compose -f infrastructure/docker/docker-compose.tier1.yml up -d",
+    "infra:up:tier2": "docker compose -f infrastructure/docker/docker-compose.tier2.yml up -d",
+    "infra:down": "docker compose -f infrastructure/docker/docker-compose.infra.yml down",
+    "infra:logs": "docker compose -f infrastructure/docker/docker-compose.infra.yml logs -f",
+    "infra:reset": "docker compose -f infrastructure/docker/docker-compose.infra.yml down -v",
+    "mocks:up": "docker compose -f infrastructure/docker/docker-compose.mocks.yml up -d",
+    "setup": "bash scripts/setup-dev.sh",
+    "generate:env": "bash scripts/generate-env.sh",
+    "security:scan": "bash scripts/security-scan.sh",
+    "certs:rotate": "bash scripts/rotate-dev-certs.sh"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.4"
+  }
+}

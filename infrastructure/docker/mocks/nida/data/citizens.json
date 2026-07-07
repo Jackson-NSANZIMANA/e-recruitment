@@ -1,0 +1,65 @@
+{
+  "6561ef4517673f33b321cf2004b9d8e31c805c0a927346a4c4b6a71a36b648b0": {
+    "fullName": "UWIMANA Jean Pierre",
+    "dateOfBirth": "2003-03-15",
+    "gender": "MALE",
+    "homeDistrict": "GASABO",
+    "homeProvince": "KIGALI_CITY",
+    "registeredPhoneNumber": "078-380-X789",
+    "citizenshipStatus": "RWANDAN_CITIZEN"
+  },
+  "64d32ed6e2852caa6f28017cd7dcff3c54dac8a1b31bf29f1105fe2f27cfb795": {
+    "fullName": "MUKAMANA Aline",
+    "dateOfBirth": "2001-07-22",
+    "gender": "FEMALE",
+    "homeDistrict": "MUSANZE",
+    "homeProvince": "NORTHERN_PROVINCE",
+    "registeredPhoneNumber": "072-180-X890",
+    "citizenshipStatus": "RWANDAN_CITIZEN"
+  },
+  "8f516afd16ff960bc22c1614ed1e98956fe9f55bc491c6666520d5d87616e015": {
+    "fullName": "HABIMANA Eric",
+    "dateOfBirth": "1999-11-08",
+    "gender": "MALE",
+    "homeDistrict": "HUYE",
+    "homeProvince": "SOUTHERN_PROVINCE",
+    "registeredPhoneNumber": "078-980-X901",
+    "citizenshipStatus": "RWANDAN_CITIZEN"
+  },
+  "d95beec31cc542a832e93012a763fe83c5f456d67d58f78f711893cbf260d5d9": {
+    "fullName": "NSHIMIYIMANA Patrick",
+    "dateOfBirth": "2005-06-01",
+    "gender": "MALE",
+    "homeDistrict": "NYAGATARE",
+    "homeProvince": "EASTERN_PROVINCE",
+    "registeredPhoneNumber": "078-580-X012",
+    "citizenshipStatus": "RWANDAN_CITIZEN"
+  },
+  "e8be4a5ba726f1bf4bbe2daf13df8760bc257b2dffc44030e832bddf73638b26": {
+    "fullName": "NZEYIMANA Paul",
+    "dateOfBirth": "1990-01-15",
+    "gender": "MALE",
+    "homeDistrict": "NYARUGENGE",
+    "homeProvince": "KIGALI_CITY",
+    "registeredPhoneNumber": "078-080-X123",
+    "citizenshipStatus": "RWANDAN_CITIZEN"
+  },
+  "6709cb62a5872432d0126af9f6abc92922d1e5fc0e8de58168a8ecb58159c2b5": {
+    "fullName": "UWAMARIYA Divine",
+    "dateOfBirth": "2002-09-30",
+    "gender": "FEMALE",
+    "homeDistrict": "RUBAVU",
+    "homeProvince": "WESTERN_PROVINCE",
+    "registeredPhoneNumber": "072-280-X234",
+    "citizenshipStatus": "RWANDAN_CITIZEN"
+  },
+  "9f15bc15a8765bf059d71626d80fc1a879d55e193793db0e2ad94d331c87a291": {
+    "fullName": "NKURUNZIZA Eric",
+    "dateOfBirth": "2004-04-12",
+    "gender": "MALE",
+    "homeDistrict": "KAYONZA",
+    "homeProvince": "EASTERN_PROVINCE",
+    "registeredPhoneNumber": "078-480-X345",
+    "citizenshipStatus": "RWANDAN_CITIZEN"
+  }
+}

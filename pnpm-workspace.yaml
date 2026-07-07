@@ -1,0 +1,4 @@
+packages:
+  - 'services/*'
+  - 'services/agency-bff/*'
+  - 'packages/*'
