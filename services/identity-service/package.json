@@ -1,0 +1,34 @@
+{
+  "name": "@usrp/identity-service",
+  "version": "1.0.0",
+  "private": true,
+  "description": "USRP Identity Service — NIDA-anchored applicant identity creation (the system-of-record for applicant_identities)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/**/*.ts",
+    "selfcheck": "tsx selfcheck/verify-slice.ts"
+  },
+  "dependencies": {
+    "@usrp/shared-config": "workspace:*",
+    "@usrp/shared-database": "workspace:*",
+    "@usrp/shared-events": "workspace:*",
+    "@usrp/shared-security": "workspace:*",
+    "@usrp/shared-types": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "postgres": "^3.4.5",
+    "tsx": "^4.21.0",
+    "typescript": "^5.8.3"
+  }
+}
