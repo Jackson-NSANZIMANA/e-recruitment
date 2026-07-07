@@ -24,3 +24,20 @@ Apache Kafka in KRaft mode (no Zookeeper).
 - Adds operational complexity over RabbitMQ
 - Requires Schema Registry for Avro schema evolution
 - Consumer group management requires careful offset handling
+
+## Addendum — 2026-07-07 (serialization: JSON interim before Avro)
+**Deciders:** Principal Engineer (handover)
+
+`@usrp/shared-events` implements a versioned **JSON** serializer behind an
+`EventSerializer` interface, not Avro/Schema Registry, for the initial build.
+
+Rationale: unblock service development now; avoid standing up Schema Registry
+before the first vertical slice exists. The interface boundary means the
+migration to Avro is additive — introduce an `AvroEventSerializer`, wire it
+into `KafkaEventBus` construction, and register schemas — with **no change to
+producers or consumers**, which depend only on `EventBus`/`EventSerializer`.
+
+Migration trigger: before multi-team schema evolution or the first
+backward-incompatible event change reaches a shared topic in staging.
+Until then, every event carries `eventVersion` and a validated envelope, so
+consumers already guard against malformed/legacy payloads.
