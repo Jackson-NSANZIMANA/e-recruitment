@@ -28,8 +28,16 @@ GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA rdf_ops TO usrp_rdf_officer
 GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA rnp_ops TO usrp_rnp_officer;
 GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA rcs_ops TO usrp_rcs_officer;
 GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA rdf_ops, rnp_ops, rcs_ops TO usrp_system_service;
+-- Officers may read/update the shared identity (subject to RLS below) but
+-- never CREATE one — identities originate only from the system service after
+-- NIDA verification (identity-service is the system-of-record).
 GRANT SELECT, UPDATE ON public_core.applicant_identities
-  TO usrp_rdf_officer, usrp_rnp_officer, usrp_rcs_officer, usrp_system_service;
+  TO usrp_rdf_officer, usrp_rnp_officer, usrp_rcs_officer;
+-- The system service creates identities (INSERT) and maintains them (UPDATE:
+-- verification metadata, soft-delete erasure). Hard DELETE is intentionally
+-- withheld — erasure under Law N° 058/2021 is the soft-delete path.
+GRANT SELECT, INSERT, UPDATE ON public_core.applicant_identities
+  TO usrp_system_service;
 
 -- ── RLS on the shared identity table (the real leak surface) ──────
 ALTER TABLE public_core.applicant_identities ENABLE ROW LEVEL SECURITY;
