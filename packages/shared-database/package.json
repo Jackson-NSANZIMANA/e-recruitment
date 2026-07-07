@@ -4,37 +4,41 @@
   "private": true,
   "description": "Drizzle ORM schemas, migrations, and seeds for USRP PostgreSQL database",
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./src/index.ts",
+  "//exports": "Runtime resolves to compiled dist JS (so `node dist` works); types resolve to src .ts. This deliberately serves types from source to sidestep TS declaration-emit fragility on drizzle's inferred model types (TS2742). The .sql migrations and drizzle.config stay in src and are untouched by this build.",
   "exports": {
     ".": {
-      "import": "./src/index.ts",
-      "types": "./src/index.ts"
+      "types": "./src/index.ts",
+      "import": "./dist/index.js"
     },
     "./client": {
-      "import": "./src/client.ts",
-      "types": "./src/client.ts"
+      "types": "./src/client.ts",
+      "import": "./dist/client.js"
     },
     "./schemas/public-core": {
-      "import": "./src/schemas/public-core.schema.ts",
-      "types": "./src/schemas/public-core.schema.ts"
+      "types": "./src/schemas/public-core.schema.ts",
+      "import": "./dist/schemas/public-core.schema.js"
     },
     "./schemas/rdf-ops": {
-      "import": "./src/schemas/rdf-ops.schema.ts",
-      "types": "./src/schemas/rdf-ops.schema.ts"
+      "types": "./src/schemas/rdf-ops.schema.ts",
+      "import": "./dist/schemas/rdf-ops.schema.js"
     },
     "./schemas/rnp-ops": {
-      "import": "./src/schemas/rnp-ops.schema.ts",
-      "types": "./src/schemas/rnp-ops.schema.ts"
+      "types": "./src/schemas/rnp-ops.schema.ts",
+      "import": "./dist/schemas/rnp-ops.schema.js"
     },
     "./schemas/rcs-ops": {
-      "import": "./src/schemas/rcs-ops.schema.ts",
-      "types": "./src/schemas/rcs-ops.schema.ts"
+      "types": "./src/schemas/rcs-ops.schema.ts",
+      "import": "./dist/schemas/rcs-ops.schema.js"
     },
     "./schemas/audit-log": {
-      "import": "./src/schemas/audit-log.schema.ts",
-      "types": "./src/schemas/audit-log.schema.ts"
+      "types": "./src/schemas/audit-log.schema.ts",
+      "import": "./dist/schemas/audit-log.schema.js"
     }
   },
   "scripts": {
+    "build": "tsc",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",

@@ -72,20 +72,18 @@ real `KafkaEventBus`**; unset → `InMemoryEventBus` with a loud warning (events
 local-only). This lets the service run on a tier1-only dev stack without a broker,
 while production publishes durably to Kafka.
 
-## Findings surfaced by this slice (tracked, not blocking)
+## Findings surfaced by this slice — both now RESOLVED
 
-1. **`shared-database` is source-only, so `node dist/main.js` cannot run yet.**
-   Its `exports` point at `src/*.ts` (no dist build), so a compiled service
-   entrypoint can't resolve it through a `.js` import specifier. Every runnable
-   path today therefore uses `tsx` (`pnpm --filter @usrp/identity-service start`
-   → `tsx src/main.ts`). **Before production**, `shared-database` needs a real
-   dist build (its own slice/ADR — it also governs the agency-scoped import
-   subpaths), after which `start` should switch to `node dist/main.js`.
-2. **`tsx` does not forward `SIGTERM` to the app handler** — under `tsx` the
-   process exits `143` and our graceful-shutdown handler does not run. Graceful
-   shutdown is proven correct under plain `node` (exit 0, `onShutdown` runs).
-   This is another reason the production runtime target is compiled `node`,
-   gated on finding (1).
+1. ~~`shared-database` is source-only, so `node dist/main.js` cannot run.~~
+   **Resolved (commit follows).** `shared-database` now emits a runtime `dist`
+   (runtime → dist JS; **types → src `.ts`** to sidestep drizzle's declaration-emit
+   fragility, TS2742). All shared packages now resolve to compiled JS, so the
+   service runs as `node dist/main.js`. drizzle-kit tooling is untouched (relative
+   `./src` paths). `start` = `node dist/main.js`; `start:dev` = `tsx src/main.ts`.
+2. ~~`tsx` does not forward `SIGTERM` to the app handler.~~ **Moot for
+   production** — the production runtime is now compiled `node`, under which
+   graceful shutdown is proven (SIGTERM → `service_stopping`/`service_stopped`,
+   socket closed, exit 0). `tsx` remains dev-only, where abrupt reload is fine.
 
 ## Deferred to next slices
 1. Per-endpoint request-schema validation helper (kept explicit for now).
