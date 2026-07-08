@@ -19,7 +19,8 @@
     "dev": "tsx watch src/main.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/**/*.ts",
-    "selfcheck": "tsx selfcheck/verify-submit-http-slice.ts"
+    "selfcheck": "tsx selfcheck/verify-submit-http-slice.ts",
+    "selfcheck:pipeline": "tsx selfcheck/verify-pipeline-e2e.ts"
   },
   "dependencies": {
     "@usrp/shared-config": "workspace:*",
@@ -30,6 +31,8 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@usrp/background-vetting-service": "workspace:*",
+    "@usrp/eligibility-service": "workspace:*",
     "postgres": "^3.4.5",
     "tsx": "^4.21.0",
     "typescript": "^5.8.3"

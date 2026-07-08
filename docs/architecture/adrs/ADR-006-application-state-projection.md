@@ -103,3 +103,17 @@ projector (UPDATE / advance), sharing one `PgApplicationRepository`.
 
 See `docs/architecture/application-state-projection-slice.md` for the build +
 proof detail.
+
+## Update (2026-07-08) — both honest seams closed
+
+- **Age.** Closed by [ADR-007](./ADR-007-age-eligibility-dimension.md): age is
+  now a persisted third dimension and the projection reaches the positive
+  terminal `DOCUMENT_REVIEW_GREEN`.
+- **Academic event-driven.** The NESA/HEC gate is now event-driven off
+  `APPLICANT_SUBMITTED` (consumer group `eligibility-academic`), so all three
+  dimensions flow autonomously from a single submission. A cross-service
+  full-chain self-check now proves one real submission → three real gates →
+  `DOCUMENT_REVIEW_GREEN` over live Kafka. See
+  `docs/architecture/pipeline-autonomous-slice.md`.
+- *Remaining:* enforced `application_status_history` immutability (a `0007`
+  trigger mirroring `0002`) is still a compliance follow-on.

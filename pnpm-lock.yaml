@@ -120,6 +120,12 @@ importers:
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.2
+      '@usrp/background-vetting-service':
+        specifier: workspace:*
+        version: link:../background-vetting-service
+      '@usrp/eligibility-service':
+        specifier: workspace:*
+        version: link:../eligibility-service
       postgres:
         specifier: ^3.4.5
         version: 3.4.9

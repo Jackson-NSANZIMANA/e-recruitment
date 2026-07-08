@@ -75,9 +75,12 @@ run_ts "application-service: vetting projection"   services/application-service/
 run_ts "eligibility-service: age gate"            services/eligibility-service/selfcheck/verify-age-eligibility.ts
 run_ts "eligibility-service: NESA education gate" services/eligibility-service/selfcheck/verify-education-eligibility.ts
 run_ts "eligibility-service: HEC degree gate"     services/eligibility-service/selfcheck/verify-degree-eligibility.ts
-run_ts "eligibility-service: event-driven age"    services/eligibility-service/selfcheck/verify-event-driven.ts
+run_ts "eligibility-service: event-driven age+academic" services/eligibility-service/selfcheck/verify-event-driven.ts
 run_ts "background-vetting: RIB criminal gate"    services/background-vetting-service/selfcheck/verify-vetting-slice.ts
 run_ts "audit-service: immutable trail"           services/audit-service/selfcheck/verify-audit-slice.ts
+# The whole spine composed: one real submission → all 3 gates → DOCUMENT_REVIEW_GREEN.
+# Runs last — it exercises the most services (eligibility + background-vetting + application).
+run_ts "pipeline: full chain → DOCUMENT_REVIEW_GREEN" services/application-service/selfcheck/verify-pipeline-e2e.ts
 
 # ── Summary ────────────────────────────────────────────────────────
 printf '\n\033[1m─────────────────────────────────────────────\033[0m\n'
