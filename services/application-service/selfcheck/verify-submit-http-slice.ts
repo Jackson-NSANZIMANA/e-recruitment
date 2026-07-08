@@ -35,10 +35,12 @@ const admin = postgres(ADMIN_URL, { onnotice: () => {} });
 const VERIFIED_ID = '22222222-2222-4222-8222-222222222222';
 const PENDING_ID = '33333333-3333-4333-8333-333333333333';
 const MISSING_ID = '44444444-4444-4444-8444-444444444444'; // never seeded
-const CAMPAIGN_ID = '55555555-5555-4555-8555-555555555555';
+const CAMPAIGN_ID = '55555555-5555-4555-8555-555555555555';       // RDF, open
+const RNP_CAMPAIGN_ID = '66666666-6666-4666-8666-666666666666';   // RNP, open
 const NID_HASH = 'deadbeef'.repeat(8); // 64 hex chars — the VERIFIED applicant's key
 const PENDING_NID_HASH = 'feedface'.repeat(8); // distinct — the hash column is UNIQUE
 const NESA_INDEX = 'RW2024SC00123';
+const HEC_REG = 'HEC-2024-000789';
 const CORRELATION_ID = '11111111-1111-4111-8111-111111111111';
 
 let failures = 0;
@@ -53,14 +55,18 @@ function check(label: string, condition: boolean, detail = ''): void {
 
 async function cleanup(): Promise<void> {
   // History FK is NO ACTION → delete children first, then applications.
-  await admin`
-    DELETE FROM rdf_ops.application_status_history
-    WHERE application_id IN (
-      SELECT id FROM rdf_ops.applications WHERE applicant_id IN ${admin([VERIFIED_ID, PENDING_ID])}
-    )`;
-  await admin`DELETE FROM rdf_ops.applications WHERE applicant_id IN ${admin([VERIFIED_ID, PENDING_ID])}`;
-  await admin`DELETE FROM public_core.recruitment_campaigns WHERE id = ${CAMPAIGN_ID}`;
-  await admin`DELETE FROM public_core.applicant_identities WHERE id IN ${admin([VERIFIED_ID, PENDING_ID])}`;
+  // Both agency schemas the proof writes into (rdf_ops + rnp_ops).
+  const ids = admin([VERIFIED_ID, PENDING_ID]);
+  for (const schema of ['rdf_ops', 'rnp_ops'] as const) {
+    await admin`
+      DELETE FROM ${admin(schema)}.application_status_history
+      WHERE application_id IN (
+        SELECT id FROM ${admin(schema)}.applications WHERE applicant_id IN ${ids}
+      )`;
+    await admin`DELETE FROM ${admin(schema)}.applications WHERE applicant_id IN ${ids}`;
+  }
+  await admin`DELETE FROM public_core.recruitment_campaigns WHERE id IN ${admin([CAMPAIGN_ID, RNP_CAMPAIGN_ID])}`;
+  await admin`DELETE FROM public_core.applicant_identities WHERE id IN ${ids}`;
 }
 
 async function seed(): Promise<void> {
@@ -77,14 +83,21 @@ async function seed(): Promise<void> {
          registration_channel, identity_status)
       VALUES (${id}, ${hash}, 'x', 'x', 'x', 'x', 'MALE', 'WEB', ${status}::public_core.identity_verification_status)`;
   }
-  // One open RDF campaign accepting GENERAL_ENLISTMENT (and only that).
+  // Two open campaigns: RDF accepting GENERAL_ENLISTMENT (and only that),
+  // RNP accepting CADET_OFFICER — so the proof can show a submission routing
+  // to the OWNING agency's isolated ops schema, per category.
   await admin`
     INSERT INTO public_core.recruitment_campaigns
       (id, campaign_label, agency, status, target_categories,
        registration_opens_at, registration_closes_at,
        examination_start_date, examination_end_date, examination_reporting_hour)
-    VALUES (${CAMPAIGN_ID}, 'Self-check RDF Intake', 'RDF',
+    VALUES
+      (${CAMPAIGN_ID}, 'Self-check RDF Intake', 'RDF',
        'REGISTRATION_OPEN', '["GENERAL_ENLISTMENT"]',
+       now() - interval '1 day', now() + interval '30 days',
+       '2026-09-01', '2026-09-15', 7),
+      (${RNP_CAMPAIGN_ID}, 'Self-check RNP Intake', 'RNP',
+       'REGISTRATION_OPEN', '["CADET_OFFICER"]',
        now() - interval '1 day', now() + interval '30 days',
        '2026-09-01', '2026-09-15', 7)`;
 }
@@ -197,6 +210,33 @@ async function main(): Promise<void> {
     check('history performed_by is SYSTEM', h?.performed_by === 'SYSTEM', String(h?.performed_by));
     check('history correlation_id == inbound', h?.correlation_id === CORRELATION_ID, String(h?.correlation_id));
 
+    console.log('\n── 3b. Cross-agency routing → OWNING schema only (RNP) ───────');
+    // An RNP category (HEC path) must land in rnp_ops, mint an RNP code, and
+    // NOT appear in rdf_ops — the isolated-schema guarantee, per category.
+    const rRnp = await call('POST', SUBMIT_APPLICATION_PATH, {
+      headers: JSON_HEADERS,
+      body: JSON.stringify({
+        applicantId: VERIFIED_ID,
+        category: 'CADET_OFFICER',
+        channel: 'IREMBO_KIOSK',
+        hecRegistrationNumber: HEC_REG,
+      }),
+    });
+    const bRnp = asRecord(rRnp.json);
+    check('RNP submit → 201', rRnp.status === 201, `got ${rRnp.status} ${rRnp.text}`);
+    check('processingCode matches RNP-NNNNN', /^RNP-\d{5}$/.test(String(bRnp['processingCode'])), String(bRnp['processingCode']));
+    check('body.agency is RNP', bRnp['agency'] === 'RNP', String(bRnp['agency']));
+    const rnpAppId = typeof bRnp['applicationId'] === 'string' ? bRnp['applicationId'] : '';
+    const evRnp = asRecord(bus.published[1]);
+    check('2nd event published (RNP)', bus.published.length === 2, `got ${bus.published.length}`);
+    check('RNP event.agency == RNP', evRnp['agency'] === 'RNP');
+    check('RNP event.hecRegistrationNumber == provided', evRnp['hecRegistrationNumber'] === HEC_REG);
+    check('RNP event.nesaIndexNumber is null (HEC path)', evRnp['nesaIndexNumber'] === null);
+    const inRnp = await admin<{ n: number }[]>`SELECT count(*)::int AS n FROM rnp_ops.applications WHERE id = ${rnpAppId}`;
+    check('application row is in rnp_ops', inRnp[0]?.n === 1, String(inRnp[0]?.n));
+    const inRdf = await admin<{ n: number }[]>`SELECT count(*)::int AS n FROM rdf_ops.applications WHERE id = ${rnpAppId}`;
+    check('application row is NOT in rdf_ops (isolation)', inRdf[0]?.n === 0, String(inRdf[0]?.n));
+
     console.log('\n── 4. Business rejections (return-value outcomes) ────────────');
     const notFound = await call('POST', SUBMIT_APPLICATION_PATH, {
       headers: JSON_HEADERS,
@@ -223,11 +263,15 @@ async function main(): Promise<void> {
     check('no open campaign for category → 409 NO_OPEN_CAMPAIGN', noCampaign.status === 409 && asRecord(noCampaign.json)['status'] === 'NO_OPEN_CAMPAIGN', `${noCampaign.status} ${noCampaign.text}`);
     check('NO_OPEN_CAMPAIGN reports agency RDF', asRecord(noCampaign.json)['agency'] === 'RDF');
 
-    check('no further events from rejected submissions', bus.published.length === 1, `got ${bus.published.length}`);
+    check('no further events from rejected submissions', bus.published.length === 2, `got ${bus.published.length}`);
 
     console.log('\n── 5. Input validation → 400 ────────────────────────────────');
     const noId = await call('POST', SUBMIT_APPLICATION_PATH, { headers: JSON_HEADERS, body: JSON.stringify({ category: 'GENERAL_ENLISTMENT', channel: 'WEB' }) });
     check('missing applicantId → 400 MISSING_APPLICANT_ID', noId.status === 400 && asRecord(noId.json)['error'] === 'MISSING_APPLICANT_ID', `${noId.status} ${noId.text}`);
+    // Malformed (non-UUID) id must be a 400 at the edge — never a 5xx from the
+    // uuid-typed column downstream (regression guard for that exact leak).
+    const badId = await call('POST', SUBMIT_APPLICATION_PATH, { headers: JSON_HEADERS, body: JSON.stringify({ applicantId: 'not-a-uuid', category: 'GENERAL_ENLISTMENT', channel: 'WEB', nesaIndexNumber: NESA_INDEX }) });
+    check('malformed applicantId → 400 INVALID_APPLICANT_ID', badId.status === 400 && asRecord(badId.json)['error'] === 'INVALID_APPLICANT_ID', `${badId.status} ${badId.text}`);
     const badCat = await call('POST', SUBMIT_APPLICATION_PATH, { headers: JSON_HEADERS, body: JSON.stringify({ applicantId: VERIFIED_ID, category: 'ASTRONAUT', channel: 'WEB' }) });
     check('invalid category → 400 INVALID_CATEGORY', badCat.status === 400 && asRecord(badCat.json)['error'] === 'INVALID_CATEGORY', `${badCat.status} ${badCat.text}`);
     const badChannel = await call('POST', SUBMIT_APPLICATION_PATH, { headers: JSON_HEADERS, body: JSON.stringify({ applicantId: VERIFIED_ID, category: 'GENERAL_ENLISTMENT', channel: 'CARRIER_PIGEON' }) });

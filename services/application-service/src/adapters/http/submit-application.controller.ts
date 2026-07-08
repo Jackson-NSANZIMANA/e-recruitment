@@ -34,6 +34,11 @@ import type {
 export const SUBMIT_APPLICATION_PATH = '/v1/applications';
 
 const CHANNELS: ReadonlySet<string> = new Set(APPLICATION_CHANNELS);
+// The opaque applicant handle is a UUID. Validating its SHAPE here keeps a
+// malformed id from reaching the uuid-typed column, where Postgres would
+// raise a syntax error that surfaces as a 5xx — a client error dressed as
+// a server fault. Shape only; existence is the use case's APPLICANT_NOT_FOUND.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Wire shape of the request body — every field validated before use. */
 interface SubmitRequestBody {
@@ -56,6 +61,10 @@ export function submitApplicationRoute(service: SubmitApplicationService): Route
       if (typeof applicantId !== 'string' || applicantId.trim().length === 0) {
         throw new HttpError(400, 'MISSING_APPLICANT_ID', 'Field "applicantId" is required.');
       }
+      const applicantIdTrimmed = applicantId.trim();
+      if (!UUID_RE.test(applicantIdTrimmed)) {
+        throw new HttpError(400, 'INVALID_APPLICANT_ID', 'Field "applicantId" must be a UUID.');
+      }
       const category = body.category;
       if (typeof category !== 'string' || !ALL_CATEGORIES.has(category)) {
         throw new HttpError(400, 'INVALID_CATEGORY', 'Field "category" must be a valid application category.');
@@ -76,7 +85,7 @@ export function submitApplicationRoute(service: SubmitApplicationService): Route
       let outcome: SubmitApplicationOutcome;
       try {
         outcome = await service.submit({
-          applicantId: applicantId.trim(),
+          applicantId: applicantIdTrimmed,
           category: category as ApplicationCategory,
           channel: channel as ApplicationChannel,
           nesaIndexNumber,

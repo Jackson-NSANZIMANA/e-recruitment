@@ -66,15 +66,29 @@ is the right minimal fix. Wired into `scripts/bootstrap-db.sh` (step 5).
 Also caught in my own code during the slice: both seed applicants shared one
 `national_id_hash` (UNIQUE) — fixed in the selfcheck.
 
+**Malformed `applicantId` leaked as 5xx (found + fixed).** The controller validated
+only that `applicantId` was non-empty, so a non-UUID value flowed to the uuid-typed
+`id` column, where Postgres raised *invalid input syntax for type uuid* — surfacing
+as a **500** (a client error dressed as a server fault, leaking the driver message).
+Proven live, then fixed: the controller now validates UUID *shape* at the edge →
+**400 `INVALID_APPLICANT_ID`** (existence remains the use case's `APPLICANT_NOT_FOUND`).
+A regression-guard assertion for this exact case is in the selfcheck.
+
 ## Proof
 
-- **`selfcheck/verify-submit-http-slice.ts`** — 41 assertions over a real socket
+- **`selfcheck/verify-submit-http-slice.ts`** — 52 assertions over a real socket
   against LIVE PG (InMemoryEventBus so the event is inspected field-by-field):
-  201 SUBMITTED with `RDF-NNNNN` code; APPLICANT_SUBMITTED envelope + full payload;
-  persisted application + null→SUBMITTED history row with correlationId; all four
-  business rejections (404/409/422/409); input 400s; health/ready; no `national_id_hash`
-  in any response body. Registered in `scripts/run-selfchecks.sh` → **gate now 9/9 green**
-  (no regression in the other 8).
+  201 SUBMITTED with `RDF-NNNNN` code; APPLICANT_SUBMITTED envelope + full payload
+  (incl. `applicationId`); persisted application + null→SUBMITTED history row with
+  correlationId; all four business rejections (404/409/422/409); input 400s;
+  health/ready; no `national_id_hash` in any response body. Registered in
+  `scripts/run-selfchecks.sh` → **gate now 9/9 green** (no regression in the other 8),
+  and proven repeatable + self-cleaning (green 3× in a row, zero residue rows).
+- **Cross-agency routing proven, not assumed** — the proof now submits an RNP
+  category (`CADET_OFFICER`, HEC path) and asserts the row lands in `rnp_ops` and is
+  **absent from `rdf_ops`**, with an `RNP-NNNNN` code and `event.agency=RNP`. This
+  exercises the isolated-schema guarantee per category, plus the HEC credential branch
+  (nesaIndexNumber null / hecRegistrationNumber set) — the RDF happy path alone did not.
 - **Compiled real-Kafka e2e** — `node dist/main.js` with `KAFKA_BROKERS` set: a live
   `curl` POST returned `RDF-00005`, and an independent console consumer observed the
   real `APPLICANT_SUBMITTED` on topic `applicant.submitted` with `correlationId`
@@ -87,6 +101,26 @@ sets it from the just-persisted row. This unblocks **event-driven NESA/HEC** gat
 which need an applicationId to write results back against — previously they were
 forced HTTP-first because the event lacked it. Additive change: the age-gate consumer
 (keys off applicantId+category) is unaffected; gate stayed 9/9 green.
+
+## Campaign seeding — deliberately out of structural bootstrap (decision)
+
+A running front door needs a `REGISTRATION_OPEN` campaign to file under, and a fresh
+bootstrapped DB has none (live check: 0). The tempting shortcut is to seed canonical
+campaigns inside `bootstrap-db.sh`. **Rejected**, because it contradicts the project's
+own boundary:
+
+- `db:seed` is a **deliberate stub** ("No runnable seeder yet"); seed *data*
+  (`exam-venues.seed.ts`) lives as standalone exports, never applied by bootstrap.
+- `bootstrap-db.sh` is **structural** (schema → isolation → audit immutability →
+  processing-code sequences → campaign-read grant). Injecting `now()`-relative business
+  rows would make every bootstrap mint time-sensitive "open" campaigns — data that looks
+  real but is fixture noise, blurring the structural/business line.
+
+So: the front door *resolves* open campaigns (its job); the **selfcheck provisions its
+own campaign hermetically** and cleans up (proven); a canonical campaign **seeder is a
+follow-on slice**, belonging with the stubbed `db:seed` / an admin campaign-management
+surface. Until then, a manual `INSERT` (or the selfcheck's fixture) is what makes a live
+`curl` e2e return a code instead of `NO_OPEN_CAMPAIGN` — by design, not by omission.
 
 Category enum note: each agency ops schema has its **own** `application_category` enum
 holding only its categories (rdf_ops: 4, rnp_ops: 2, rcs_ops: 4) — verified to match
