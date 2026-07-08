@@ -70,5 +70,8 @@ apply_sql "${RLS_DIR}/0003_processing_code_sequences.sql" "rls/0003 (processing-
 # 5. Campaign read grant (the front door resolves the open campaign server-side).
 apply_sql "${RLS_DIR}/0004_campaign_read_grants.sql" "rls/0004 (campaign read grant)"
 
+# 6. G2G subject-hash column (identity-service writes it; HEC/RIB re-present it).
+apply_sql "${RLS_DIR}/0005_nida_lookup_hash.sql" "rls/0005 (g2g subject hash column)"
+
 printf '\n'
-ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads in place"
+ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash in place"

@@ -72,6 +72,15 @@ export const applicantIdentities = publicCore.table(
     encryptedHomeDistrict: text('encrypted_home_district').notNull(),
     encryptedHomeProvince: text('encrypted_home_province').notNull(),
 
+    // The G2G subject hash: HMAC(NIDA-shared secret, NID) — the stable token
+    // every government authority (NIDA/HEC/RIB) recognises for this citizen,
+    // distinct from the USRP-private national_id_hash above. Encrypted at rest
+    // (pgcrypto) because it is a citizen-linked, externally-meaningful
+    // identifier. Written by identity-service at verification (the only place
+    // that holds the raw NID); re-presented by G2G credential checks (e.g. HEC
+    // degree→holder binding). Nullable: pre-existing rows predate it.
+    encryptedNidaLookupHash: text('encrypted_nida_lookup_hash'),
+
     // Non-PII from NIDA — unencrypted for query performance
     gender: genderEnum('gender').notNull(),
 
