@@ -66,6 +66,7 @@ fi
 run_ts "shared-events: Kafka round-trip"          packages/shared-events/selfcheck/verify-kafka-roundtrip.ts
 run_ts "identity-service: core slice"             services/identity-service/selfcheck/verify-slice.ts
 run_ts "identity-service: HTTP slice"             services/identity-service/selfcheck/verify-http-slice.ts
+run_ts "application-service: front-door submit"   services/application-service/selfcheck/verify-submit-http-slice.ts
 run_ts "eligibility-service: age gate"            services/eligibility-service/selfcheck/verify-age-eligibility.ts
 run_ts "eligibility-service: NESA education gate" services/eligibility-service/selfcheck/verify-education-eligibility.ts
 run_ts "eligibility-service: event-driven age"    services/eligibility-service/selfcheck/verify-event-driven.ts

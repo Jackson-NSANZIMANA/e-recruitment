@@ -8,6 +8,7 @@
 #   1. db:migrate      — drizzle applies the schema (5 schemas, tables)
 #   2. rls/0001        — group roles, grants, FORCE'd RLS on identities
 #   3. rls/0002        — audit-log immutability (writer role + triggers)
+#   4. rls/0003        — per-agency processing-code sequences (front door)
 #
 # The schema migration runs as the admin/owner over DATABASE_URL; the
 # role & RLS files are applied with psql as usrp_admin (they CREATE ROLE
@@ -63,5 +64,11 @@ apply_sql "${RLS_DIR}/0001_roles_grants_rls.sql" "rls/0001 (roles + RLS)"
 # 3. Audit-log immutability (INSERT-only writer role + reject-mutation triggers).
 apply_sql "${RLS_DIR}/0002_audit_immutability.sql" "rls/0002 (audit immutability)"
 
+# 4. Per-agency processing-code sequences (the front door mints AGENCY-XXXXX).
+apply_sql "${RLS_DIR}/0003_processing_code_sequences.sql" "rls/0003 (processing-code sequences)"
+
+# 5. Campaign read grant (the front door resolves the open campaign server-side).
+apply_sql "${RLS_DIR}/0004_campaign_read_grants.sql" "rls/0004 (campaign read grant)"
+
 printf '\n'
-ok "database bootstrapped — schema + isolation + audit immutability in place"
+ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads in place"
