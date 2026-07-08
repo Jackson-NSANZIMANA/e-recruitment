@@ -27,6 +27,7 @@ interface BaseEvent {
 export interface ApplicantSubmittedEvent extends BaseEvent {
   readonly eventType: 'APPLICANT_SUBMITTED';
   readonly applicantId: string;
+  readonly applicationId: string;   // The filed application this submission created
   readonly nationalIdHash: string;
   readonly agency: Agency;
   readonly category: ApplicationCategory;

@@ -122,6 +122,7 @@ async function main(): Promise<void> {
     ...newEnvelope(ctx),
     eventType: 'APPLICANT_SUBMITTED',
     applicantId,
+    applicationId: '99999999-9999-4999-8999-999999999999', // synthetic — age gate keys off applicantId+category
     nationalIdHash,
     agency: 'RDF',
     category: CATEGORY,

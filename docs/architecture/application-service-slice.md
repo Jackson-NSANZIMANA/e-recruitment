@@ -81,6 +81,13 @@ Also caught in my own code during the slice: both seed applicants shared one
   preserved from the inbound `x-correlation-id` and `nationalIdHash` (never raw NID).
   Graceful SIGTERM shutdown (service_stopping→stopped) confirmed.
 
+**`applicationId` on the event (2026-07-08):** `APPLICANT_SUBMITTED` now carries
+`applicationId` (the filed application's id) alongside `applicantId`. The front door
+sets it from the just-persisted row. This unblocks **event-driven NESA/HEC** gates,
+which need an applicationId to write results back against — previously they were
+forced HTTP-first because the event lacked it. Additive change: the age-gate consumer
+(keys off applicantId+category) is unaffected; gate stayed 9/9 green.
+
 Category enum note: each agency ops schema has its **own** `application_category` enum
 holding only its categories (rdf_ops: 4, rnp_ops: 2, rcs_ops: 4) — verified to match
 shared-types exactly, so the `::schema.application_category` cast is safe.

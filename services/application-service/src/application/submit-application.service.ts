@@ -107,6 +107,7 @@ export class SubmitApplicationService {
       ...newEnvelope(context),
       eventType: 'APPLICANT_SUBMITTED',
       applicantId: command.applicantId,
+      applicationId: created.applicationId,
       nationalIdHash: identity.nationalIdHash,
       agency,
       category: command.category,

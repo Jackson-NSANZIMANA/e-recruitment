@@ -169,6 +169,7 @@ async function main(): Promise<void> {
     check('eventType is APPLICANT_SUBMITTED', ev['eventType'] === 'APPLICANT_SUBMITTED', String(ev['eventType']));
     check('event.correlationId == inbound', ev['correlationId'] === CORRELATION_ID, String(ev['correlationId']));
     check('event.applicantId == verified id', ev['applicantId'] === VERIFIED_ID);
+    check('event.applicationId == created application', ev['applicationId'] === applicationId, String(ev['applicationId']));
     check('event.nationalIdHash == seeded hash', ev['nationalIdHash'] === NID_HASH);
     check('event.agency == RDF', ev['agency'] === 'RDF');
     check('event.category == GENERAL_ENLISTMENT', ev['category'] === 'GENERAL_ENLISTMENT');
