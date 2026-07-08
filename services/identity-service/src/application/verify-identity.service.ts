@@ -87,6 +87,7 @@ export class VerifyIdentityService {
 
     const { applicantId, created } = await this.deps.repository.createVerifiedIdentity({
       nationalIdHash,
+      nidaLookupHash: lookup.nidaLookupHash,
       fullName: lookup.citizen.fullName,
       dateOfBirth: lookup.citizen.dateOfBirth,
       homeDistrict: lookup.citizen.homeDistrict,

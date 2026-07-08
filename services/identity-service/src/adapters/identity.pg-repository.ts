@@ -61,15 +61,16 @@ export class PgIdentityRepository implements IdentityRepository {
         const inserted = await tx<{ id: string }[]>`
           INSERT INTO public_core.applicant_identities
             (national_id_hash, encrypted_full_name, encrypted_date_of_birth,
-             encrypted_home_district, encrypted_home_province, gender,
-             registration_channel, identity_status, nida_verification_request_id,
+             encrypted_home_district, encrypted_home_province, encrypted_nida_lookup_hash,
+             gender, registration_channel, identity_status, nida_verification_request_id,
              nida_verified_at, nida_match_confidence, phone_number_hash)
           VALUES (
             ${input.nationalIdHash},
-            pgp_sym_encrypt(${input.fullName},      current_setting(${ENCRYPTION_KEY_SETTING})),
-            pgp_sym_encrypt(${input.dateOfBirth},   current_setting(${ENCRYPTION_KEY_SETTING})),
-            pgp_sym_encrypt(${input.homeDistrict},  current_setting(${ENCRYPTION_KEY_SETTING})),
-            pgp_sym_encrypt(${input.homeProvince},  current_setting(${ENCRYPTION_KEY_SETTING})),
+            pgp_sym_encrypt(${input.fullName},       current_setting(${ENCRYPTION_KEY_SETTING})),
+            pgp_sym_encrypt(${input.dateOfBirth},    current_setting(${ENCRYPTION_KEY_SETTING})),
+            pgp_sym_encrypt(${input.homeDistrict},   current_setting(${ENCRYPTION_KEY_SETTING})),
+            pgp_sym_encrypt(${input.homeProvince},   current_setting(${ENCRYPTION_KEY_SETTING})),
+            pgp_sym_encrypt(${input.nidaLookupHash}, current_setting(${ENCRYPTION_KEY_SETTING})),
             ${input.gender}::public_core.gender,
             ${input.registrationChannel}::public_core.application_channel,
             'VERIFIED',

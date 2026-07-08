@@ -33,6 +33,14 @@ export type NidaLookupResult =
       readonly nidaRequestId: string;
       readonly citizen: NidaCitizen;
       /**
+       * The G2G subject hash — HMAC(NIDA-shared secret, NID) — that NIDA
+       * used to resolve this citizen. It is the stable token other
+       * government authorities (HEC/RIB) recognise for the same person, so
+       * identity-service persists it (encrypted) to re-present later. The
+       * raw NID never leaves the gateway; this hash is what does.
+       */
+      readonly nidaLookupHash: string;
+      /**
        * Confidence of the identity match, when NIDA returns one. A pure
        * demographic lookup returns null; biometric 1:1 match (a later
        * pipeline stage, biometric-service) is what populates a score.

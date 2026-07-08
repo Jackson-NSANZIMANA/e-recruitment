@@ -73,7 +73,7 @@ export class NidaHttpGateway implements NidaGateway {
     });
 
     const response = await this.post(body, signed, requestId);
-    return this.mapResponse(response, requestId);
+    return this.mapResponse(response, requestId, nationalIdHash);
   }
 
   private async post(
@@ -100,7 +100,11 @@ export class NidaHttpGateway implements NidaGateway {
     }
   }
 
-  private async mapResponse(response: Response, requestId: string): Promise<NidaLookupResult> {
+  private async mapResponse(
+    response: Response,
+    requestId: string,
+    nidaLookupHash: string,
+  ): Promise<NidaLookupResult> {
     if (!response.ok) {
       throw new NidaUnavailableError(`NIDA returned HTTP ${response.status}`, requestId);
     }
@@ -123,6 +127,7 @@ export class NidaHttpGateway implements NidaGateway {
       status: 'FOUND',
       nidaRequestId: requestId,
       citizen: this.mapCitizen(wire.citizen, requestId),
+      nidaLookupHash, // the G2G subject hash NIDA resolved this citizen by
       matchConfidence: null, // demographic lookup carries no biometric score
     };
   }

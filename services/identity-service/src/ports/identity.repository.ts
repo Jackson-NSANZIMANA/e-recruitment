@@ -14,6 +14,12 @@ import type { ApplicationChannel, Gender } from '@usrp/shared-database';
 export interface CreateVerifiedIdentityInput {
   /** USRP-internal applicant key: HMAC(NATIONAL_ID_HMAC_KEY, NID), 64 hex. */
   readonly nationalIdHash: string;
+  /**
+   * G2G subject hash: HMAC(NIDA-shared secret, NID). Stored ENCRYPTED at
+   * rest so G2G credential checks (HEC/RIB) can re-present it. Distinct from
+   * `nationalIdHash`. Never logged.
+   */
+  readonly nidaLookupHash: string;
   readonly fullName: string;
   readonly dateOfBirth: string; // YYYY-MM-DD
   readonly homeDistrict: string;
