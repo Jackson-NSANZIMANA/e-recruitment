@@ -54,19 +54,24 @@ function check(label: string, condition: boolean, detail = ''): void {
 }
 
 async function cleanup(): Promise<void> {
-  // History FK is NO ACTION → delete children first, then applications.
-  // Both agency schemas the proof writes into (rdf_ops + rnp_ops).
-  const ids = admin([VERIFIED_ID, PENDING_ID]);
-  for (const schema of ['rdf_ops', 'rnp_ops'] as const) {
-    await admin`
-      DELETE FROM ${admin(schema)}.application_status_history
-      WHERE application_id IN (
-        SELECT id FROM ${admin(schema)}.applications WHERE applicant_id IN ${ids}
-      )`;
-    await admin`DELETE FROM ${admin(schema)}.applications WHERE applicant_id IN ${ids}`;
-  }
-  await admin`DELETE FROM public_core.recruitment_campaigns WHERE id IN ${admin([CAMPAIGN_ID, RNP_CAMPAIGN_ID])}`;
-  await admin`DELETE FROM public_core.applicant_identities WHERE id IN ${ids}`;
+  // application_status_history is append-only (0007 trigger binds every role),
+  // so teardown deletes run inside the documented superuser escape hatch —
+  // triggers (immutability + FK) disabled for this maintenance tx only, which
+  // also frees delete order. Both agency schemas the proof writes (rdf + rnp).
+  await admin.begin(async (tx) => {
+    await tx`SET LOCAL session_replication_role = replica`;
+    const ids = tx([VERIFIED_ID, PENDING_ID]);
+    for (const schema of ['rdf_ops', 'rnp_ops'] as const) {
+      await tx`
+        DELETE FROM ${tx(schema)}.application_status_history
+        WHERE application_id IN (
+          SELECT id FROM ${tx(schema)}.applications WHERE applicant_id IN ${ids}
+        )`;
+      await tx`DELETE FROM ${tx(schema)}.applications WHERE applicant_id IN ${ids}`;
+    }
+    await tx`DELETE FROM public_core.recruitment_campaigns WHERE id IN ${tx([CAMPAIGN_ID, RNP_CAMPAIGN_ID])}`;
+    await tx`DELETE FROM public_core.applicant_identities WHERE id IN ${ids}`;
+  });
 }
 
 async function seed(): Promise<void> {

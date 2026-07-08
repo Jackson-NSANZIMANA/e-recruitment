@@ -115,5 +115,8 @@ proof detail.
   full-chain self-check now proves one real submission → three real gates →
   `DOCUMENT_REVIEW_GREEN` over live Kafka. See
   `docs/architecture/pipeline-autonomous-slice.md`.
-- *Remaining:* enforced `application_status_history` immutability (a `0007`
-  trigger mirroring `0002`) is still a compliance follow-on.
+- **History immutability.** Enforced by `0007` (2026-07-09): a trigger +
+  grant-revoke on `application_status_history` in all three ops schemas makes
+  the status timeline truly append-only, binding even the table owner — the
+  mirror of `0002` for audit_log. See
+  `docs/architecture/status-history-immutability-slice.md`.

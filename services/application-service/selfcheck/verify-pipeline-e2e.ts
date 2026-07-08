@@ -88,14 +88,20 @@ function check(label: string, condition: boolean, detail = ''): void {
 }
 
 async function cleanup(): Promise<void> {
-  for (const applicant of [GREEN_APPLICANT, REJECT_APPLICANT]) {
-    await admin`
-      DELETE FROM rdf_ops.application_status_history
-      WHERE application_id IN (SELECT id FROM rdf_ops.applications WHERE applicant_id = ${applicant})`;
-    await admin`DELETE FROM rdf_ops.applications WHERE applicant_id = ${applicant}`;
-  }
-  await admin`DELETE FROM public_core.recruitment_campaigns WHERE id = ${RDF_CAMPAIGN}`;
-  await admin`DELETE FROM public_core.applicant_identities WHERE id IN ${admin([GREEN_APPLICANT, REJECT_APPLICANT])}`;
+  // application_status_history is append-only (0007 trigger binds every role),
+  // so teardown deletes run inside the documented superuser escape hatch —
+  // triggers (immutability + FK) disabled for this maintenance tx only.
+  await admin.begin(async (tx) => {
+    await tx`SET LOCAL session_replication_role = replica`;
+    for (const applicant of [GREEN_APPLICANT, REJECT_APPLICANT]) {
+      await tx`
+        DELETE FROM rdf_ops.application_status_history
+        WHERE application_id IN (SELECT id FROM rdf_ops.applications WHERE applicant_id = ${applicant})`;
+      await tx`DELETE FROM rdf_ops.applications WHERE applicant_id = ${applicant}`;
+    }
+    await tx`DELETE FROM public_core.recruitment_campaigns WHERE id = ${RDF_CAMPAIGN}`;
+    await tx`DELETE FROM public_core.applicant_identities WHERE id IN ${tx([GREEN_APPLICANT, REJECT_APPLICANT])}`;
+  });
 }
 
 async function seedIdentity(id: string, nationalIdHash: string): Promise<void> {

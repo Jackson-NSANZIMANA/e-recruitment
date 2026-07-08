@@ -72,6 +72,7 @@ run_ts "identity-service: core slice"             services/identity-service/self
 run_ts "identity-service: HTTP slice"             services/identity-service/selfcheck/verify-http-slice.ts
 run_ts "application-service: front-door submit"   services/application-service/selfcheck/verify-submit-http-slice.ts
 run_ts "application-service: vetting projection"   services/application-service/selfcheck/verify-vetting-projection.ts
+run_ts "application-service: history immutability" services/application-service/selfcheck/verify-history-immutability.ts
 run_ts "eligibility-service: age gate"            services/eligibility-service/selfcheck/verify-age-eligibility.ts
 run_ts "eligibility-service: NESA education gate" services/eligibility-service/selfcheck/verify-education-eligibility.ts
 run_ts "eligibility-service: HEC degree gate"     services/eligibility-service/selfcheck/verify-degree-eligibility.ts

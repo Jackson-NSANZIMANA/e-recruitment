@@ -58,16 +58,24 @@ function check(label: string, condition: boolean, detail = ''): void {
 }
 
 async function cleanup(): Promise<void> {
-  for (const schema of ['rdf_ops', 'rnp_ops'] as const) {
-    await admin`
-      DELETE FROM ${admin(schema)}.application_status_history
-      WHERE application_id IN (
-        SELECT id FROM ${admin(schema)}.applications WHERE applicant_id = ${APPLICANT_ID}
-      )`;
-    await admin`DELETE FROM ${admin(schema)}.applications WHERE applicant_id = ${APPLICANT_ID}`;
-  }
-  await admin`DELETE FROM public_core.recruitment_campaigns WHERE id IN ${admin([RDF_CAMPAIGN, RNP_CAMPAIGN])}`;
-  await admin`DELETE FROM public_core.applicant_identities WHERE id = ${APPLICANT_ID}`;
+  // Teardown must delete the append-only application_status_history rows this
+  // proof writes — the 0007 immutability trigger blocks that for EVERY role, so
+  // we use the documented superuser escape hatch (disable triggers for this
+  // maintenance transaction only; it snaps back on commit). This also disables
+  // the FK triggers, so delete order is free.
+  await admin.begin(async (tx) => {
+    await tx`SET LOCAL session_replication_role = replica`;
+    for (const schema of ['rdf_ops', 'rnp_ops'] as const) {
+      await tx`
+        DELETE FROM ${tx(schema)}.application_status_history
+        WHERE application_id IN (
+          SELECT id FROM ${tx(schema)}.applications WHERE applicant_id = ${APPLICANT_ID}
+        )`;
+      await tx`DELETE FROM ${tx(schema)}.applications WHERE applicant_id = ${APPLICANT_ID}`;
+    }
+    await tx`DELETE FROM public_core.recruitment_campaigns WHERE id IN ${tx([RDF_CAMPAIGN, RNP_CAMPAIGN])}`;
+    await tx`DELETE FROM public_core.applicant_identities WHERE id = ${APPLICANT_ID}`;
+  });
 }
 
 async function seed(): Promise<void> {

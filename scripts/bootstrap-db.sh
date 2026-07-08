@@ -77,5 +77,8 @@ apply_sql "${RLS_DIR}/0005_nida_lookup_hash.sql" "rls/0005 (g2g subject hash col
 #    dimension → lets the projection reach DOCUMENT_REVIEW_GREEN; see ADR-007).
 apply_sql "${RLS_DIR}/0006_age_eligibility_columns.sql" "rls/0006 (age eligibility columns)"
 
+# 8. Application status-history immutability (append-only trail; mirrors 0002).
+apply_sql "${RLS_DIR}/0007_status_history_immutability.sql" "rls/0007 (status-history immutability)"
+
 printf '\n'
-ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns in place"
+ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability in place"
