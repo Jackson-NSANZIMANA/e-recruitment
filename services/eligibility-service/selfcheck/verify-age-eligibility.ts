@@ -82,9 +82,16 @@ async function cleanup(hashes: readonly string[]): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const config = loadEligibilityConfig();
+  // The age gate never calls NESA, but the composed config now includes the
+  // NESA endpoint (the education gate shares this service). Supply harmless
+  // defaults so this age-only selfcheck needs no live NESA.
+  const config = loadEligibilityConfig({
+    NESA_BASE_URL: 'http://localhost:3101',
+    NESA_HMAC_SECRET: 'dev_nesa_hmac_secret',
+    ...process.env,
+  });
   const bus = new InMemoryEventBus();
-  const service = createEligibilityService(config, bus);
+  const service = createEligibilityService(config, bus).age;
 
   const hashVerified = randomBytes(32).toString('hex');
   const hashPending = randomBytes(32).toString('hex');

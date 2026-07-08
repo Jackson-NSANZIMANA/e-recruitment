@@ -79,7 +79,12 @@ async function seedVerifiedIdentity(encryptionKey: string, nationalIdHash: strin
 }
 
 async function main(): Promise<void> {
-  const config = loadEligibilityConfig();
+  // Age gate never calls NESA; supply harmless NESA defaults for the shared config.
+  const config = loadEligibilityConfig({
+    NESA_BASE_URL: 'http://localhost:3101',
+    NESA_HMAC_SECRET: 'dev_nesa_hmac_secret',
+    ...process.env,
+  });
   const nationalIdHash = randomBytes(32).toString('hex');
   await admin`DELETE FROM public_core.applicant_identities WHERE national_id_hash = ${nationalIdHash}`;
   const applicantId = await seedVerifiedIdentity(config.security.encryptionKey, nationalIdHash);
@@ -88,7 +93,7 @@ async function main(): Promise<void> {
   // The eligibility service's own bus: consumes applicant.submitted AND
   // publishes its AUDIT_ENTRY — both to real Kafka.
   const serviceBus = new KafkaEventBus({ brokers: BROKERS, clientId: 'eligibility-service' });
-  const service = createEligibilityService(config, serviceBus);
+  const service = createEligibilityService(config, serviceBus).age;
 
   // Independent observer of the audit topic — how we SEE the reaction.
   const auditBus = new KafkaEventBus({ brokers: BROKERS, clientId: 'selfcheck-audit-observer' });

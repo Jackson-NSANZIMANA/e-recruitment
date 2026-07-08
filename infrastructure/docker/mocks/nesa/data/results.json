@@ -37,5 +37,33 @@
     ],
     "overallPoints": 3,
     "verificationToken": "NESA-VT-FAIL"
+  },
+  "RW2024/SCI-PASS": {
+    "indexNumber": "RW2024/SCI-PASS",
+    "qualificationLevel": "A2",
+    "yearOfExamination": 2024,
+    "schoolName": "Groupe Scolaire Officiel de Butare",
+    "subjects": [
+      { "subjectCode": "BIO", "subjectName": "Biology", "grade": "A", "points": 6 },
+      { "subjectCode": "CHEM", "subjectName": "Chemistry", "grade": "A", "points": 6 },
+      { "subjectCode": "MATH", "subjectName": "Mathematics", "grade": "A", "points": 6 }
+    ],
+    "overallPoints": 18,
+    "percentageScore": 82,
+    "verificationToken": "NESA-VT-SCI-PASS"
+  },
+  "RW2024/SCI-LOW": {
+    "indexNumber": "RW2024/SCI-LOW",
+    "qualificationLevel": "A2",
+    "yearOfExamination": 2024,
+    "schoolName": "Groupe Scolaire Officiel de Butare",
+    "subjects": [
+      { "subjectCode": "BIO", "subjectName": "Biology", "grade": "C", "points": 4 },
+      { "subjectCode": "CHEM", "subjectName": "Chemistry", "grade": "D", "points": 3 },
+      { "subjectCode": "MATH", "subjectName": "Mathematics", "grade": "C", "points": 4 }
+    ],
+    "overallPoints": 11,
+    "percentageScore": 61,
+    "verificationToken": "NESA-VT-SCI-LOW"
   }
 }

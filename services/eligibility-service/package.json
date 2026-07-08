@@ -20,13 +20,15 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/**/*.ts",
     "selfcheck": "tsx selfcheck/verify-age-eligibility.ts",
-    "selfcheck:events": "tsx selfcheck/verify-event-driven.ts"
+    "selfcheck:events": "tsx selfcheck/verify-event-driven.ts",
+    "selfcheck:education": "tsx selfcheck/verify-education-eligibility.ts"
   },
   "dependencies": {
     "@usrp/shared-config": "workspace:*",
     "@usrp/shared-database": "workspace:*",
     "@usrp/shared-events": "workspace:*",
     "@usrp/shared-http": "workspace:*",
+    "@usrp/shared-security": "workspace:*",
     "@usrp/shared-types": "workspace:*"
   },
   "devDependencies": {
