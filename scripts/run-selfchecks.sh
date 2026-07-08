@@ -32,6 +32,8 @@ export NESA_BASE_URL="${NESA_BASE_URL:-http://localhost:3101}"
 export NESA_HMAC_SECRET="${NESA_HMAC_SECRET:-dev_nesa_hmac_secret}"
 export HEC_BASE_URL="${HEC_BASE_URL:-http://localhost:3103}"
 export HEC_HMAC_SECRET="${HEC_HMAC_SECRET:-dev_hec_hmac_secret}"
+export RIB_BASE_URL="${RIB_BASE_URL:-http://localhost:3102}"
+export RIB_HMAC_SECRET="${RIB_HMAC_SECRET:-dev_rib_hmac_secret}"
 export NATIONAL_ID_HMAC_KEY="${NATIONAL_ID_HMAC_KEY:-dev_national_id_hmac_key_min_32_chars!!}"
 export PII_ENCRYPTION_KEY="${PII_ENCRYPTION_KEY:-dev_pii_encryption_key_min_32_chars_ok!!}"
 
@@ -73,6 +75,7 @@ run_ts "eligibility-service: age gate"            services/eligibility-service/s
 run_ts "eligibility-service: NESA education gate" services/eligibility-service/selfcheck/verify-education-eligibility.ts
 run_ts "eligibility-service: HEC degree gate"     services/eligibility-service/selfcheck/verify-degree-eligibility.ts
 run_ts "eligibility-service: event-driven age"    services/eligibility-service/selfcheck/verify-event-driven.ts
+run_ts "background-vetting: RIB criminal gate"    services/background-vetting-service/selfcheck/verify-vetting-slice.ts
 run_ts "audit-service: immutable trail"           services/audit-service/selfcheck/verify-audit-slice.ts
 
 # ── Summary ────────────────────────────────────────────────────────

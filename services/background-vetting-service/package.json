@@ -1,0 +1,36 @@
+{
+  "name": "@usrp/background-vetting-service",
+  "version": "1.0.0",
+  "private": true,
+  "description": "USRP Background-Vetting Service — event-driven criminal-clearance gate: consumes applicant.submitted, checks RIB over G2G, emits RIB_VETTING_COMPLETED + AUDIT_ENTRY (stage 3)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "start:dev": "tsx src/main.ts",
+    "dev": "tsx watch src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/**/*.ts",
+    "selfcheck": "tsx selfcheck/verify-vetting-slice.ts"
+  },
+  "dependencies": {
+    "@usrp/shared-config": "workspace:*",
+    "@usrp/shared-events": "workspace:*",
+    "@usrp/shared-http": "workspace:*",
+    "@usrp/shared-security": "workspace:*",
+    "@usrp/shared-types": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.8.3"
+  }
+}

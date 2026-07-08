@@ -161,6 +161,34 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
+  services/background-vetting-service:
+    dependencies:
+      '@usrp/shared-config':
+        specifier: workspace:*
+        version: link:../../packages/shared-config
+      '@usrp/shared-events':
+        specifier: workspace:*
+        version: link:../../packages/shared-events
+      '@usrp/shared-http':
+        specifier: workspace:*
+        version: link:../../packages/shared-http
+      '@usrp/shared-security':
+        specifier: workspace:*
+        version: link:../../packages/shared-security
+      '@usrp/shared-types':
+        specifier: workspace:*
+        version: link:../../packages/shared-types
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.2
+      tsx:
+        specifier: ^4.21.0
+        version: 4.23.0
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
   services/eligibility-service:
     dependencies:
       '@usrp/shared-config':
