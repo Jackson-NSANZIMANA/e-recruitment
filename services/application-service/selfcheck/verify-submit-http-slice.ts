@@ -114,7 +114,7 @@ async function main(): Promise<void> {
     serviceName: 'application-service-selfcheck',
     port: 0,
     host: '127.0.0.1',
-    routes: [submitApplicationRoute(service)],
+    routes: [submitApplicationRoute(service.submit)],
     readiness: async (): Promise<boolean> => {
       try {
         await sql`SELECT 1`;

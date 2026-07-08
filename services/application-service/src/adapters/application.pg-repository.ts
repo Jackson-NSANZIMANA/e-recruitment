@@ -20,27 +20,26 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { sql } from '@usrp/shared-database';
-import type { Agency } from '@usrp/shared-types';
+import type { ApplicationStatus } from '@usrp/shared-types';
 import type {
   ApplicationRepository,
+  ApplyVettingOutcome,
   CreateApplicationInput,
   CreateApplicationResult,
+  VettingResult,
 } from '../ports/application-repository.js';
 import { ApplicationPersistenceError } from '../domain/application.errors.js';
+import { AGENCY_TARGET } from '../domain/agency-schema.js';
+import { deriveApplicationStatus } from '../domain/lifecycle.js';
 
 const SYSTEM_ROLE = 'usrp_system_service';
 
-/** Per-agency write target — fixed mapping, never derived from user input. */
-interface AgencyTarget {
-  readonly schema: 'rdf_ops' | 'rnp_ops' | 'rcs_ops';
-  readonly codePrefix: 'RDF' | 'RNP' | 'RCS';
+/** The lifecycle columns the projection reads under FOR UPDATE. */
+interface ApplicationStateRow {
+  readonly status: ApplicationStatus;
+  readonly academic_status: import('@usrp/shared-types').AcademicEligibilityStatus;
+  readonly criminal_clearance_status: import('@usrp/shared-types').CriminalClearanceStatus;
 }
-
-const AGENCY_TARGET: Readonly<Record<Agency, AgencyTarget>> = {
-  RDF: { schema: 'rdf_ops', codePrefix: 'RDF' },
-  RNP: { schema: 'rnp_ops', codePrefix: 'RNP' },
-  RCS: { schema: 'rcs_ops', codePrefix: 'RCS' },
-};
 
 export class PgApplicationRepository implements ApplicationRepository {
   async createApplication(input: CreateApplicationInput): Promise<CreateApplicationResult> {
@@ -93,6 +92,115 @@ export class PgApplicationRepository implements ApplicationRepository {
     } catch (cause) {
       if (cause instanceof ApplicationPersistenceError) throw cause;
       throw new ApplicationPersistenceError('Failed to create application', { cause });
+    }
+  }
+
+  async applyVettingResult(result: VettingResult): Promise<ApplyVettingOutcome> {
+    const target = AGENCY_TARGET[result.agency];
+    const schema = sql(target.schema); // quoted identifier fragment
+
+    try {
+      return await sql.begin(async (tx): Promise<ApplyVettingOutcome> => {
+        await tx`SET LOCAL ROLE ${sql(SYSTEM_ROLE)}`;
+
+        // Lock the row for the life of the transaction. All events for one
+        // applicant share a Kafka partition (keyed by applicantId) so they are
+        // already serialized per applicant; FOR UPDATE additionally guards
+        // against rebalance/redelivery races and any second process.
+        const rows = await tx<ApplicationStateRow[]>`
+          SELECT status, academic_status, criminal_clearance_status
+          FROM ${schema}.applications
+          WHERE id = ${result.applicationId}
+          FOR UPDATE
+        `;
+        const current = rows[0];
+        // 0 rows ⇒ this application does not exist in THIS agency's schema.
+        // The engine cannot stop a cross-agency mis-route (no RLS on ops
+        // applications), so we assert it here rather than silently succeed.
+        if (!current) return { kind: 'NOT_FOUND' };
+
+        // Post-update per-dimension verdicts (only the projected one changes).
+        const newAcademic =
+          result.dimension === 'ACADEMIC' ? result.academicStatus : current.academic_status;
+        const newCriminal =
+          result.dimension === 'CRIMINAL' ? result.criminalStatus : current.criminal_clearance_status;
+
+        const columnChanged =
+          result.dimension === 'ACADEMIC'
+            ? newAcademic !== current.academic_status
+            : newCriminal !== current.criminal_clearance_status;
+
+        const toStatus = deriveApplicationStatus(current.status, {
+          academicStatus: newAcademic,
+          criminalStatus: newCriminal,
+        });
+        const statusChanged = toStatus !== current.status;
+
+        // Idempotent redelivery: nothing to do, write nothing.
+        if (!columnChanged && !statusChanged) return { kind: 'NO_CHANGE' };
+
+        if (result.dimension === 'ACADEMIC') {
+          const verifiedAtCol =
+            result.verifiedVia === 'NESA' ? sql('nesa_verified_at') : sql('hec_verified_at');
+          const requestIdCol =
+            result.verifiedVia === 'NESA'
+              ? sql('nesa_verification_request_id')
+              : sql('hec_verification_request_id');
+          await tx`
+            UPDATE ${schema}.applications SET
+              academic_status = ${newAcademic}::${schema}.academic_eligibility_status,
+              ${verifiedAtCol} = now(),
+              ${requestIdCol} = ${result.requestId},
+              academic_eligibility_detail = ${JSON.stringify(result.detail)}::jsonb,
+              status = ${toStatus}::${schema}.application_status,
+              updated_at = now()
+            WHERE id = ${result.applicationId}
+          `;
+        } else {
+          // applied_criminal_threshold exists only on rnp_ops.applications.
+          const thresholdAssign =
+            result.agency === 'RNP'
+              ? sql`, applied_criminal_threshold = ${result.appliedThreshold}`
+              : sql``;
+          await tx`
+            UPDATE ${schema}.applications SET
+              criminal_clearance_status = ${newCriminal}::${schema}.criminal_clearance_status,
+              criminal_clearance_at = now(),
+              rib_request_id = ${result.ribRequestId}${thresholdAssign},
+              status = ${toStatus}::${schema}.application_status,
+              updated_at = now()
+            WHERE id = ${result.applicationId}
+          `;
+        }
+
+        // The immutable trail records TOP-LEVEL status transitions only; the
+        // per-dimension column change is captured by the audit event upstream.
+        if (statusChanged) {
+          await tx`
+            INSERT INTO ${schema}.application_status_history
+              (application_id, from_status, to_status, reason, performed_by, correlation_id)
+            VALUES (
+              ${result.applicationId},
+              ${current.status}::${schema}.application_status,
+              ${toStatus}::${schema}.application_status,
+              ${`Projected ${result.dimension} verdict`},
+              'application-service',
+              ${result.correlationId}
+            )
+          `;
+        }
+
+        return {
+          kind: 'APPLIED',
+          dimension: result.dimension,
+          fromStatus: current.status,
+          toStatus,
+          statusChanged,
+        };
+      });
+    } catch (cause) {
+      if (cause instanceof ApplicationPersistenceError) throw cause;
+      throw new ApplicationPersistenceError('Failed to apply vetting result', { cause });
     }
   }
 }

@@ -12,28 +12,41 @@ import { PgIdentityReader } from './adapters/identity.pg-reader.js';
 import { PgCampaignReader } from './adapters/campaign.pg-reader.js';
 import { PgApplicationRepository } from './adapters/application.pg-repository.js';
 import { SubmitApplicationService } from './application/submit-application.service.js';
+import { ProjectVettingResultService } from './application/project-vetting-result.service.js';
 import type { ApplicationServiceConfig } from './config.js';
 
+/** The application aggregate's two adapters over one repository. */
+export interface ApplicationService {
+  /** HTTP front door — CREATE an application (POST /v1/applications). */
+  readonly submit: SubmitApplicationService;
+  /** Event projector — ADVANCE an application from vetting verdicts. */
+  readonly projector: ProjectVettingResultService;
+}
+
 /**
- * Assemble the submit-application use case from config + a chosen event
- * transport. The front door reads identities + campaigns and writes into
- * the agency ops schemas — all through postgres.js `sql` (shared-database),
- * so config carries no adapter handles, only the event bus does.
+ * Assemble the application aggregate from config + a chosen event transport.
+ * Both use cases share ONE PgApplicationRepository — the single writer of the
+ * applications table (front door INSERTs, projector UPDATEs). All adapters go
+ * through postgres.js `sql` (shared-database), so config carries no handles;
+ * only the event bus does.
  */
 export function createApplicationService(
   _config: ApplicationServiceConfig,
   eventBus: EventBus,
-): SubmitApplicationService {
+): ApplicationService {
   const identityReader = new PgIdentityReader();
   const campaignReader = new PgCampaignReader();
   const repository = new PgApplicationRepository();
 
-  return new SubmitApplicationService({
-    identityReader,
-    campaignReader,
-    repository,
-    eventBus,
-  });
+  return {
+    submit: new SubmitApplicationService({
+      identityReader,
+      campaignReader,
+      repository,
+      eventBus,
+    }),
+    projector: new ProjectVettingResultService({ repository, eventBus }),
+  };
 }
 
 // ── Re-exports ────────────────────────────────────────────────────
@@ -47,6 +60,18 @@ export type {
   SubmitApplicationDeps,
   SubmitApplicationOutcome,
 } from './application/submit-application.service.js';
+export { ProjectVettingResultService } from './application/project-vetting-result.service.js';
+export type {
+  ProjectVettingResultCommand,
+  ProjectVettingResultDeps,
+} from './application/project-vetting-result.service.js';
+export {
+  APPLICATION_PROJECTION_GROUP,
+  startVettingResultConsumer,
+} from './adapters/events/vetting-result.consumer.js';
+export { deriveApplicationStatus } from './domain/lifecycle.js';
+export type { VettingEvidence } from './domain/lifecycle.js';
+export { AGENCY_TARGET, schemaForAgency } from './domain/agency-schema.js';
 export { PgIdentityReader } from './adapters/identity.pg-reader.js';
 export { PgCampaignReader } from './adapters/campaign.pg-reader.js';
 export { PgApplicationRepository } from './adapters/application.pg-repository.js';
@@ -58,6 +83,10 @@ export type {
   ApplicationRepository,
   CreateApplicationInput,
   CreateApplicationResult,
+  VettingResult,
+  AcademicVettingResult,
+  CriminalVettingResult,
+  ApplyVettingOutcome,
 } from './ports/application-repository.js';
 export {
   academicPathForCategory,

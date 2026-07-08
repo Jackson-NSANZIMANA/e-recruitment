@@ -1,16 +1,21 @@
 // ══════════════════════════════════════════════════════════════════
 // application-service — Runtime entrypoint (composition + bootstrap)
 //
-// THE FRONT DOOR process: it composes the hexagonal core with a real event
-// transport and exposes it over HTTP (ADR-005): load config → build the
-// event bus → assemble the use case → serve → shut down cleanly. It is a
-// pure producer — POST /v1/applications files an application and publishes
-// APPLICANT_SUBMITTED; it consumes no topic.
+// THE FRONT DOOR + STATE OWNER process. It composes the application aggregate
+// with a real event transport and exposes two adapters (ADR-005 / ADR-006):
+//   • HTTP front door — POST /v1/applications files an application and
+//     publishes APPLICANT_SUBMITTED.
+//   • Event projector — consumes the vetting result topics (vetting.nesa/hec/
+//     rib) and advances the application through its lifecycle.
+// load config → build the bus → assemble the aggregate → (subscribe) → serve →
+// shut down cleanly.
 //
-// Transport is chosen by environment: with KAFKA_BROKERS set we publish to
-// Kafka (prod/tier2); without it we fall back to an in-memory bus so the
-// service still runs on a tier1-only dev stack (events are then local-only
-// — logged loudly so this is never mistaken for durable publishing).
+// Transport is chosen by environment: with KAFKA_BROKERS set we publish AND
+// consume over Kafka (prod/tier2); without it we fall back to an in-memory bus
+// so the service still runs on a tier1-only dev stack (events are then
+// local-only — logged loudly so this is never mistaken for durable transport).
+// The projection consumer is only meaningful with a real broker, so it is wired
+// only when KAFKA_BROKERS is set.
 // ══════════════════════════════════════════════════════════════════
 
 import { sql } from '@usrp/shared-database';
@@ -20,6 +25,7 @@ import { startHttpServer } from '@usrp/shared-http';
 import { createApplicationService } from './index.js';
 import { loadApplicationConfig } from './config.js';
 import { submitApplicationRoute } from './adapters/http/submit-application.controller.js';
+import { startVettingResultConsumer } from './adapters/events/vetting-result.consumer.js';
 
 function createEventBus(serviceName: string): EventBus {
   if (process.env['KAFKA_BROKERS']) {
@@ -42,10 +48,20 @@ async function main(): Promise<void> {
 
   const service = createApplicationService(config, bus);
 
+  // State-projection ingress: consume the vetting result topics and advance
+  // applications. Subscribe BEFORE serving so a "ready" signal implies we are
+  // consuming. Only meaningful with a real broker.
+  if (process.env['KAFKA_BROKERS']) {
+    await startVettingResultConsumer(bus, service.projector);
+    console.log(
+      JSON.stringify({ msg: 'event_consumer_started', topics: 'vetting.nesa,vetting.hec,vetting.rib' }),
+    );
+  }
+
   const server = await startHttpServer({
     serviceName: config.runtime.serviceName,
     port: config.runtime.port,
-    routes: [submitApplicationRoute(service)],
+    routes: [submitApplicationRoute(service.submit)],
     // Ready only when the database — the system-of-record — is reachable.
     readiness: async (): Promise<boolean> => {
       try {
