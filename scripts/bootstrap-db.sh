@@ -73,5 +73,9 @@ apply_sql "${RLS_DIR}/0004_campaign_read_grants.sql" "rls/0004 (campaign read gr
 # 6. G2G subject-hash column (identity-service writes it; HEC/RIB re-present it).
 apply_sql "${RLS_DIR}/0005_nida_lookup_hash.sql" "rls/0005 (g2g subject hash column)"
 
+# 7. Age eligibility columns on all 3 ops schemas (the third projected vetting
+#    dimension → lets the projection reach DOCUMENT_REVIEW_GREEN; see ADR-007).
+apply_sql "${RLS_DIR}/0006_age_eligibility_columns.sql" "rls/0006 (age eligibility columns)"
+
 printf '\n'
-ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash in place"
+ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns in place"

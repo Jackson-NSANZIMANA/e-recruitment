@@ -204,6 +204,26 @@ async function main(): Promise<void> {
     const ready = await call('GET', '/ready');
     check('GET /ready → 200 ready', ready.status === 200 && asRecord(ready.json)['status'] === 'ready', `${ready.status} ${ready.text}`);
 
+    console.log('\n── 6b. Event-driven path (applicationId present) emits AGE_ELIGIBILITY_COMPLETED ──');
+    // The HTTP path above never carries an applicationId → audit-only. Prove that
+    // when the age gate runs off APPLICANT_SUBMITTED (which carries it), it ALSO
+    // emits an applicationId-bearing result event — DOB-free — for the projection.
+    const httpOnly = bus.published.slice(); // snapshot: HTTP path emitted these
+    check('HTTP path emitted only AUDIT_ENTRY (no result event yet)', httpOnly.every((e) => e.eventType === 'AUDIT_ENTRY'));
+    const appId = randomUUID();
+    const before = bus.published.length;
+    const outcome = await service.evaluate({ applicantId: verifiedId, category: 'GENERAL_ENLISTMENT', applicationId: appId });
+    check('service outcome EVALUATED', outcome.kind === 'EVALUATED');
+    const emitted = bus.published.slice(before);
+    const ageResult = emitted.find((e) => e.eventType === 'AGE_ELIGIBILITY_COMPLETED');
+    const ar = asRecord(ageResult);
+    check('AGE_ELIGIBILITY_COMPLETED emitted', ageResult !== undefined);
+    check('AUDIT_ENTRY also emitted on this path', emitted.some((e) => e.eventType === 'AUDIT_ENTRY'));
+    check('result event carries the applicationId', ar['applicationId'] === appId, String(ar['applicationId']));
+    check('result event carries ageStatus (ELIGIBLE/INELIGIBLE)', ar['ageStatus'] === (eligibleGeneral ? 'ELIGIBLE' : 'INELIGIBLE'), String(ar['ageStatus']));
+    check('result event resolved agency RDF', ar['agency'] === 'RDF', String(ar['agency']));
+    check('result event carries NO dateOfBirth key', ageResult !== undefined && !('dateOfBirth' in ar));
+
     console.log('\n── 7. The raw date of birth never leaks ─────────────────────');
     const allBodies = bodies.join('\n');
     check('DOB absent from every HTTP response body', !allBodies.includes(FIXTURE_DOB));

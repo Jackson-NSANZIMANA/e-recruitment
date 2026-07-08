@@ -8,6 +8,7 @@ import type { Agency, ApplicationChannel, ApplicationCategory } from './agency.t
 import type { ApplicationStatus } from './applicant.types';
 import type {
   AcademicEligibilityStatus,
+  AgeEligibilityStatus,
   CriminalClearanceStatus,
   EligibilityResult,
 } from './eligibility.types';
@@ -96,6 +97,28 @@ export interface RIBVettingCompletedEvent extends BaseEvent {
   readonly appliedThreshold: 'ANY_CONVICTION' | 'IMPRISONMENT_GT_6MO' | 'IMPRISONMENT_GTE_6MO';
 }
 
+// ── Topic: vetting.age ────────────────────────────────────────────
+// The age gate's applicationId-bearing result. Emitted alongside the age
+// AUDIT_ENTRY when the gate runs event-driven (off APPLICANT_SUBMITTED, which
+// carries the applicationId). It lets the application-service projection record
+// the age dimension and — with academic + criminal — reach the positive
+// terminal. INVARIANT: raw date of birth NEVER appears here; only the derived
+// age and verdict, mirroring how the age AUDIT_ENTRY is DOB-free.
+
+export interface AgeEligibilityCompletedEvent extends BaseEvent {
+  readonly eventType: 'AGE_ELIGIBILITY_COMPLETED';
+  readonly applicantId: string;
+  readonly applicationId: string;
+  readonly agency: Agency;
+  readonly category: ApplicationCategory;
+  readonly ageStatus: AgeEligibilityStatus;
+  // DOB-free evidence — the derived age and the band actually applied.
+  readonly ageAtEvaluation: number;
+  readonly appliedMaxAge: number;
+  readonly eligible: boolean;
+  readonly reason: string;
+}
+
 // ── Topic: biometric.result ───────────────────────────────────────
 
 export interface BiometricVerificationCompletedEvent extends BaseEvent {
@@ -162,6 +185,7 @@ export type USRPEvent =
   | NESAVerificationCompletedEvent
   | HECVerificationCompletedEvent
   | RIBVettingCompletedEvent
+  | AgeEligibilityCompletedEvent
   | BiometricVerificationCompletedEvent
   | SlotAssignedEvent
   | FieldScoreCapturedEvent
@@ -175,6 +199,7 @@ export const KAFKA_TOPICS = {
   VETTING_NESA: 'vetting.nesa',
   VETTING_HEC: 'vetting.hec',           // NEW — degree verification
   VETTING_RIB: 'vetting.rib',
+  VETTING_AGE: 'vetting.age',           // NEW — age gate result (positive-terminal composition)
   BIOMETRIC_RESULT: 'biometric.result',
   SLOT_ASSIGNED: 'slot.assigned',
   FIELD_SCORE_CAPTURED: 'field.score.captured',

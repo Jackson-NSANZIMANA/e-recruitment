@@ -54,6 +54,10 @@ export const rnpAcademicStatusEnum = rnpOps.enum('academic_eligibility_status', 
   'PENDING', 'ELIGIBLE', 'INELIGIBLE',
 ]);
 
+export const rnpAgeStatusEnum = rnpOps.enum('age_eligibility_status', [
+  'PENDING', 'ELIGIBLE', 'INELIGIBLE',
+]);
+
 export const rnpCriminalStatusEnum = rnpOps.enum('criminal_clearance_status', [
   'PENDING', 'CLEARED', 'FLAGGED_CONVICTION', 'FLAGGED_DISMISSED', 'UNDER_REVIEW',
 ]);
@@ -98,6 +102,11 @@ export const rnpApplications = rnpOps.table(
 
     academicStatus: rnpAcademicStatusEnum('academic_status').notNull().default('PENDING'),
     academicEligibilityDetail: jsonb('academic_eligibility_detail'),
+
+    // ── Age vetting (projected from the age gate; DOB-free detail) ──
+    ageEligibilityStatus: rnpAgeStatusEnum('age_eligibility_status').notNull().default('PENDING'),
+    ageVerifiedAt: timestamp('age_verified_at', { withTimezone: true }),
+    ageEligibilityDetail: jsonb('age_eligibility_detail'),
 
     // ── Criminal vetting ─────────────────────────────────────────
     ribRequestId: varchar('rib_request_id', { length: 128 }),
@@ -149,6 +158,7 @@ export const rnpApplications = rnpOps.table(
     index('idx_rnp_status').on(t.status),
     index('idx_rnp_document_lane').on(t.documentLane),
     index('idx_rnp_academic_status').on(t.academicStatus),
+    index('idx_rnp_age_status').on(t.ageEligibilityStatus),
     index('idx_rnp_category').on(t.category),
     uniqueIndex('idx_rnp_qr_code').on(t.qrInvitationCode),
   ],

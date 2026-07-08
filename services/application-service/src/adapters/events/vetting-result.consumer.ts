@@ -2,9 +2,11 @@
 // application-service — Vetting-result consumer (state-projection ingress)
 //
 // The application aggregate's SECOND ingress. Where the HTTP front door CREATES
-// an application, this consumer ADVANCES it: it subscribes to the three vetting
-// result topics — vetting.nesa, vetting.hec, vetting.rib — that no service
-// consumed before, and projects each verdict onto the application row.
+// an application, this consumer ADVANCES it: it subscribes to the four vetting
+// result topics — vetting.age, vetting.nesa, vetting.hec, vetting.rib — that no
+// service consumed before, and projects each verdict onto the application row.
+// With all three dimensions (age + academic + criminal) it can reach the
+// positive terminal, DOCUMENT_REVIEW_GREEN.
 //
 // It runs in its OWN consumer group (`application-service`). All events for one
 // applicant share a partition (keyed by applicantId), so an applicant's verdicts
@@ -24,7 +26,7 @@ import type { ProjectVettingResultService } from '../../application/project-vett
 export const APPLICATION_PROJECTION_GROUP = 'application-service';
 
 /**
- * Subscribe the projection use case to the three vetting result topics. Each
+ * Subscribe the projection use case to the four vetting result topics. Each
  * event carries applicationId + agency + verdict — everything the projection
  * needs; no DB read of identity is required here.
  */
@@ -36,6 +38,22 @@ export async function startVettingResultConsumer(
     let result: VettingResult;
 
     switch (event.eventType) {
+      case 'AGE_ELIGIBILITY_COMPLETED':
+        result = {
+          dimension: 'AGE',
+          applicationId: event.applicationId,
+          agency: event.agency,
+          ageStatus: event.ageStatus,
+          // DOB-free detail — the event never carries the raw date of birth.
+          detail: {
+            eligible: event.eligible,
+            ageAtEvaluation: event.ageAtEvaluation,
+            appliedMaxAge: event.appliedMaxAge,
+            reason: event.reason,
+          },
+          correlationId: event.correlationId,
+        };
+        break;
       case 'NESA_VERIFICATION_COMPLETED':
         result = {
           dimension: 'ACADEMIC',
@@ -97,7 +115,12 @@ export async function startVettingResultConsumer(
   };
 
   await eventBus.subscribe(
-    [KAFKA_TOPICS.VETTING_NESA, KAFKA_TOPICS.VETTING_HEC, KAFKA_TOPICS.VETTING_RIB],
+    [
+      KAFKA_TOPICS.VETTING_AGE,
+      KAFKA_TOPICS.VETTING_NESA,
+      KAFKA_TOPICS.VETTING_HEC,
+      KAFKA_TOPICS.VETTING_RIB,
+    ],
     APPLICATION_PROJECTION_GROUP,
     handler,
   );

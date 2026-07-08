@@ -415,6 +415,8 @@ export interface HECVerifiedPayload {
 // ── Eligibility Result ────────────────────────────────────────────
 
 export type AcademicEligibilityStatus = 'PENDING' | 'ELIGIBLE' | 'INELIGIBLE';
+/** Age gate verdict as projected onto the application row — mirrors the academic enum. */
+export type AgeEligibilityStatus = 'PENDING' | 'ELIGIBLE' | 'INELIGIBLE';
 export type CriminalClearanceStatus =
   | 'PENDING'
   | 'CLEARED'

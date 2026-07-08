@@ -2,38 +2,43 @@
 // application-service — Application lifecycle composition (pure domain)
 //
 // The projection's decision core. Given the application's CURRENT top-level
-// status and its (post-update) per-dimension verdicts — academic + criminal —
-// compute the next top-level `status`. Pure and total: no I/O, no clock, no
-// throw, so the whole lifecycle policy is unit-testable in isolation.
+// status and its (post-update) per-dimension verdicts — age + academic +
+// criminal — compute the next top-level `status`. Pure and total: no I/O, no
+// clock, no throw, so the whole lifecycle policy is unit-testable in isolation.
 //
 // Design invariants:
-//   • MONOTONIC — status never regresses. The vetting gates run in PARALLEL
-//     (both off APPLICANT_SUBMITTED), so results arrive in any order and may be
-//     redelivered; the top-level status is the FURTHEST stage justified by the
-//     evidence so far, computed by max-rank, never a step backward.
-//   • FAIL-CLOSED — a hard fail (academic INELIGIBLE, or any criminal FLAGGED_*)
-//     drives the application to REJECTED (terminal), overriding stage progress.
-//     UNDER_REVIEW is a HOLD, not a fail: it reaches the criminal stage but does
-//     not reject (it awaits human adjudication).
-//   • HONEST SEAM — this slice advances only as far as CRIMINAL_CLEARANCE. The
-//     positive terminal ("all gates passed → DOCUMENT_REVIEW") needs the AGE
-//     verdict too, and the age gate has no applicationId-bearing result event
-//     yet. So we never declare "fully cleared" here — that is the next slice.
+//   • MONOTONIC — status never regresses. The three vetting gates run in
+//     PARALLEL (all off APPLICANT_SUBMITTED), so results arrive in any order
+//     and may be redelivered; the top-level status is the FURTHEST stage
+//     justified by the evidence so far, computed by max-rank, never a step back.
+//   • FAIL-CLOSED — a hard fail (age INELIGIBLE, academic INELIGIBLE, or any
+//     criminal FLAGGED_*) drives the application to REJECTED (terminal),
+//     overriding stage progress. Criminal UNDER_REVIEW is a HOLD, not a fail: it
+//     reaches the criminal stage but does not reject (awaits human adjudication).
+//   • POSITIVE TERMINAL — the three gates together answer the whole eligibility
+//     question. When ALL pass (age ELIGIBLE, academic ELIGIBLE, criminal
+//     CLEARED) the application advances to DOCUMENT_REVIEW_GREEN — the green
+//     lane, everything auto-verified via G2G. Age has no intermediate ladder
+//     rung of its own (there is no such ApplicationStatus): it is a precondition
+//     gate that can hard-fail and is required for the green terminal.
 //
-// The event verdict enums (AcademicEligibilityStatus, CriminalClearanceStatus)
-// are value-identical to the DB column enums (academic_eligibility_status,
-// criminal_clearance_status) by deliberate design in @usrp/shared-types, so the
-// projection stores them directly — no translation layer.
+// The verdict enums (AgeEligibilityStatus, AcademicEligibilityStatus,
+// CriminalClearanceStatus) are value-identical to the DB column enums
+// (age_eligibility_status, academic_eligibility_status, criminal_clearance_status)
+// by deliberate design in @usrp/shared-types, so the projection stores them
+// directly — no translation layer.
 // ══════════════════════════════════════════════════════════════════
 
 import type {
   AcademicEligibilityStatus,
+  AgeEligibilityStatus,
   ApplicationStatus,
   CriminalClearanceStatus,
 } from '@usrp/shared-types';
 
 /** Post-update per-dimension verdicts read off the application row. */
 export interface VettingEvidence {
+  readonly ageStatus: AgeEligibilityStatus;
   readonly academicStatus: AcademicEligibilityStatus;
   readonly criminalStatus: CriminalClearanceStatus;
 }
@@ -62,6 +67,7 @@ const LADDER: readonly ApplicationStatus[] = [
   'SUBMITTED',
   'ACADEMIC_VETTING',
   'CRIMINAL_CLEARANCE',
+  'DOCUMENT_REVIEW_GREEN',
 ];
 
 function ladderRank(status: ApplicationStatus): number {
@@ -69,7 +75,20 @@ function ladderRank(status: ApplicationStatus): number {
 }
 
 function isHardFail(evidence: VettingEvidence): boolean {
-  return evidence.academicStatus === 'INELIGIBLE' || CRIMINAL_HARD_FAIL.has(evidence.criminalStatus);
+  return (
+    evidence.ageStatus === 'INELIGIBLE' ||
+    evidence.academicStatus === 'INELIGIBLE' ||
+    CRIMINAL_HARD_FAIL.has(evidence.criminalStatus)
+  );
+}
+
+/** True when all three gates have positively passed — the green-lane condition. */
+function allGatesPassed(evidence: VettingEvidence): boolean {
+  return (
+    evidence.ageStatus === 'ELIGIBLE' &&
+    evidence.academicStatus === 'ELIGIBLE' &&
+    evidence.criminalStatus === 'CLEARED'
+  );
 }
 
 /**
@@ -89,9 +108,12 @@ export function deriveApplicationStatus(
   if (isHardFail(evidence)) return 'REJECTED';
 
   // Otherwise advance to the furthest stage the evidence justifies — but only
-  // upward, and only within the linear ladder.
-  const candidate: ApplicationStatus =
-    evidence.criminalStatus !== 'PENDING'
+  // upward, and only within the linear ladder. All three gates passing is the
+  // furthest: it reaches the positive terminal (green lane). Below that, the
+  // stage tracks the deepest vetting dimension that has produced a verdict.
+  const candidate: ApplicationStatus = allGatesPassed(evidence)
+    ? 'DOCUMENT_REVIEW_GREEN'
+    : evidence.criminalStatus !== 'PENDING'
       ? 'CRIMINAL_CLEARANCE'
       : evidence.academicStatus !== 'PENDING'
         ? 'ACADEMIC_VETTING'

@@ -37,6 +37,7 @@ const SYSTEM_ROLE = 'usrp_system_service';
 /** The lifecycle columns the projection reads under FOR UPDATE. */
 interface ApplicationStateRow {
   readonly status: ApplicationStatus;
+  readonly age_eligibility_status: import('@usrp/shared-types').AgeEligibilityStatus;
   readonly academic_status: import('@usrp/shared-types').AcademicEligibilityStatus;
   readonly criminal_clearance_status: import('@usrp/shared-types').CriminalClearanceStatus;
 }
@@ -108,7 +109,7 @@ export class PgApplicationRepository implements ApplicationRepository {
         // already serialized per applicant; FOR UPDATE additionally guards
         // against rebalance/redelivery races and any second process.
         const rows = await tx<ApplicationStateRow[]>`
-          SELECT status, academic_status, criminal_clearance_status
+          SELECT status, age_eligibility_status, academic_status, criminal_clearance_status
           FROM ${schema}.applications
           WHERE id = ${result.applicationId}
           FOR UPDATE
@@ -120,17 +121,22 @@ export class PgApplicationRepository implements ApplicationRepository {
         if (!current) return { kind: 'NOT_FOUND' };
 
         // Post-update per-dimension verdicts (only the projected one changes).
+        const newAge =
+          result.dimension === 'AGE' ? result.ageStatus : current.age_eligibility_status;
         const newAcademic =
           result.dimension === 'ACADEMIC' ? result.academicStatus : current.academic_status;
         const newCriminal =
           result.dimension === 'CRIMINAL' ? result.criminalStatus : current.criminal_clearance_status;
 
         const columnChanged =
-          result.dimension === 'ACADEMIC'
-            ? newAcademic !== current.academic_status
-            : newCriminal !== current.criminal_clearance_status;
+          result.dimension === 'AGE'
+            ? newAge !== current.age_eligibility_status
+            : result.dimension === 'ACADEMIC'
+              ? newAcademic !== current.academic_status
+              : newCriminal !== current.criminal_clearance_status;
 
         const toStatus = deriveApplicationStatus(current.status, {
+          ageStatus: newAge,
           academicStatus: newAcademic,
           criminalStatus: newCriminal,
         });
@@ -139,7 +145,17 @@ export class PgApplicationRepository implements ApplicationRepository {
         // Idempotent redelivery: nothing to do, write nothing.
         if (!columnChanged && !statusChanged) return { kind: 'NO_CHANGE' };
 
-        if (result.dimension === 'ACADEMIC') {
+        if (result.dimension === 'AGE') {
+          await tx`
+            UPDATE ${schema}.applications SET
+              age_eligibility_status = ${newAge}::${schema}.age_eligibility_status,
+              age_verified_at = now(),
+              age_eligibility_detail = ${JSON.stringify(result.detail)}::jsonb,
+              status = ${toStatus}::${schema}.application_status,
+              updated_at = now()
+            WHERE id = ${result.applicationId}
+          `;
+        } else if (result.dimension === 'ACADEMIC') {
           const verifiedAtCol =
             result.verifiedVia === 'NESA' ? sql('nesa_verified_at') : sql('hec_verified_at');
           const requestIdCol =

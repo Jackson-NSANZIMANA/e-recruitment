@@ -34,6 +34,18 @@ export interface ProjectVettingResultDeps {
   readonly eventBus: EventBus;
 }
 
+/** Per-dimension detail recorded on the audit entry (the shared fields are added by the caller). */
+function dimensionMetadata(result: VettingResult): Record<string, unknown> {
+  switch (result.dimension) {
+    case 'AGE':
+      return { ageStatus: result.ageStatus };
+    case 'ACADEMIC':
+      return { academicStatus: result.academicStatus, verifiedVia: result.verifiedVia };
+    case 'CRIMINAL':
+      return { criminalStatus: result.criminalStatus, appliedThreshold: result.appliedThreshold };
+  }
+}
+
 export class ProjectVettingResultService {
   constructor(private readonly deps: ProjectVettingResultDeps) {}
 
@@ -64,12 +76,7 @@ export class ProjectVettingResultService {
       metadata: {
         dimension: outcome.dimension,
         statusChanged: outcome.statusChanged,
-        ...(command.result.dimension === 'ACADEMIC'
-          ? { academicStatus: command.result.academicStatus, verifiedVia: command.result.verifiedVia }
-          : {
-              criminalStatus: command.result.criminalStatus,
-              appliedThreshold: command.result.appliedThreshold,
-            }),
+        ...dimensionMetadata(command.result),
       },
     };
     await this.deps.eventBus.publish(event);

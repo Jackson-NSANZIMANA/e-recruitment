@@ -33,6 +33,9 @@ export async function startApplicantSubmittedConsumer(
     const outcome = await service.evaluate({
       applicantId: event.applicantId,
       category: event.category,
+      // The submitted event carries the filed applicationId → the age gate emits
+      // an applicationId-bearing AGE_ELIGIBILITY_COMPLETED the projection can land.
+      applicationId: event.applicationId,
       // Preserve the trace: same correlationId, caused by THIS submitted event.
       context: deriveContext(event),
     });

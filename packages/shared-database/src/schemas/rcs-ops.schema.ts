@@ -57,6 +57,10 @@ export const rcsAcademicStatusEnum = rcsOps.enum('academic_eligibility_status', 
   'PENDING', 'ELIGIBLE', 'INELIGIBLE',
 ]);
 
+export const rcsAgeStatusEnum = rcsOps.enum('age_eligibility_status', [
+  'PENDING', 'ELIGIBLE', 'INELIGIBLE',
+]);
+
 // RCS has extended criminal clearance statuses
 export const rcsCriminalStatusEnum = rcsOps.enum('criminal_clearance_status', [
   'PENDING',
@@ -125,6 +129,11 @@ export const rcsApplications = rcsOps.table(
     academicStatus: rcsAcademicStatusEnum('academic_status').notNull().default('PENDING'),
     academicEligibilityDetail: jsonb('academic_eligibility_detail'),
 
+    // ── Age vetting (projected from the age gate; DOB-free detail) ──
+    ageEligibilityStatus: rcsAgeStatusEnum('age_eligibility_status').notNull().default('PENDING'),
+    ageVerifiedAt: timestamp('age_verified_at', { withTimezone: true }),
+    ageEligibilityDetail: jsonb('age_eligibility_detail'),
+
     // ── Criminal vetting ─────────────────────────────────────────
     ribRequestId: varchar('rib_request_id', { length: 128 }),
     criminalClearanceStatus: rcsCriminalStatusEnum('criminal_clearance_status')
@@ -184,6 +193,7 @@ export const rcsApplications = rcsOps.table(
     index('idx_rcs_status').on(t.status),
     index('idx_rcs_document_lane').on(t.documentLane),
     index('idx_rcs_academic_status').on(t.academicStatus),
+    index('idx_rcs_age_status').on(t.ageEligibilityStatus),
     index('idx_rcs_category').on(t.category),
     index('idx_rcs_criminal_status').on(t.criminalClearanceStatus),
     uniqueIndex('idx_rcs_qr_code').on(t.qrInvitationCode),

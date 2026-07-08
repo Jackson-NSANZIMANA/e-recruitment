@@ -114,6 +114,9 @@ async function fileApplication(
 
 interface StateRow {
   readonly status: string;
+  readonly age_eligibility_status: string;
+  readonly age_verified_at: Date | null;
+  readonly age_eligibility_detail: unknown;
   readonly academic_status: string;
   readonly criminal_clearance_status: string;
   readonly criminal_clearance_at: Date | null;
@@ -126,7 +129,8 @@ async function readState(schema: 'rdf_ops' | 'rnp_ops', appId: string): Promise<
   const col =
     schema === 'rnp_ops' ? admin`applied_criminal_threshold` : admin`NULL::text AS applied_criminal_threshold`;
   const rows = await admin<StateRow[]>`
-    SELECT status, academic_status, criminal_clearance_status,
+    SELECT status, age_eligibility_status, age_verified_at, age_eligibility_detail,
+           academic_status, criminal_clearance_status,
            criminal_clearance_at, nesa_verified_at, hec_verified_at, ${col}
     FROM ${admin(schema)}.applications WHERE id = ${appId}`;
   return rows[0];
@@ -171,6 +175,22 @@ const eligibility = (eligible: boolean): EligibilityResult => ({
     healthCheck: null,
   },
 });
+
+function ageEvent(appId: string, agency: Agency, category: ApplicationCategory, eligible: boolean): USRPEvent {
+  return {
+    ...newEnvelope(newCorrelationContext()),
+    eventType: 'AGE_ELIGIBILITY_COMPLETED',
+    applicantId: APPLICANT_ID,
+    applicationId: appId,
+    agency,
+    category,
+    ageStatus: eligible ? 'ELIGIBLE' : 'INELIGIBLE',
+    ageAtEvaluation: eligible ? 22 : 45,
+    appliedMaxAge: 25,
+    eligible,
+    reason: eligible ? 'within age band' : 'exceeds maximum age',
+  };
+}
 
 function nesaEvent(appId: string, agency: Agency, category: ApplicationCategory, eligible: boolean): USRPEvent {
   return {
@@ -240,7 +260,11 @@ async function main(): Promise<void> {
   const appIdem = await fileApplication(repo, 'RDF', RDF_CAMPAIGN, 'GENERAL_ENLISTMENT');
   const appOrder = await fileApplication(repo, 'RDF', RDF_CAMPAIGN, 'GENERAL_ENLISTMENT');
   const appRnp = await fileApplication(repo, 'RNP', RNP_CAMPAIGN, 'CADET_OFFICER');
-  console.log(`\nFiled 7 SUBMITTED applications for applicant ${APPLICANT_ID} — brokers ${BROKERS.join(',')}`);
+  // Age-dimension scenarios (the positive terminal).
+  const appGreen = await fileApplication(repo, 'RDF', RDF_CAMPAIGN, 'GENERAL_ENLISTMENT');
+  const appNoAge = await fileApplication(repo, 'RDF', RDF_CAMPAIGN, 'GENERAL_ENLISTMENT');
+  const appAgeReject = await fileApplication(repo, 'RDF', RDF_CAMPAIGN, 'GENERAL_ENLISTMENT');
+  console.log(`\nFiled 10 SUBMITTED applications for applicant ${APPLICANT_ID} — brokers ${BROKERS.join(',')}`);
 
   // Buses: the service consumes the vetting topics AND publishes AUDIT_ENTRY.
   const serviceBus = new KafkaEventBus({ brokers: BROKERS, clientId: 'application-service' });
@@ -359,6 +383,54 @@ async function main(): Promise<void> {
     check('RDF row status unchanged', after?.status === before?.status, `${before?.status}→${after?.status}`);
     const rnpRows = await admin`SELECT id FROM rnp_ops.applications WHERE id = ${guardApp}`;
     check('no row created in rnp_ops for the RDF id', rnpRows.length === 0);
+  }
+
+  // ── 9. Positive terminal: age + academic + criminal all pass → GREEN ─
+  console.log('\n── 9. All three gates pass → DOCUMENT_REVIEW_GREEN ──────────');
+  // Age arrives first and ALONE must not advance past SUBMITTED (no age rung).
+  await producerBus.publish(ageEvent(appGreen, 'RDF', 'GENERAL_ENLISTMENT', true));
+  await waitFor(async () => (await readState('rdf_ops', appGreen))?.age_eligibility_status === 'ELIGIBLE', 'appGreen age ELIGIBLE');
+  {
+    const s = await readState('rdf_ops', appGreen);
+    check('age_eligibility_status = ELIGIBLE', s?.age_eligibility_status === 'ELIGIBLE', s?.age_eligibility_status);
+    check('age_verified_at set', s?.age_verified_at != null);
+    check('age-only does NOT advance status (stays SUBMITTED)', s?.status === 'SUBMITTED', s?.status);
+    const detail = s?.age_eligibility_detail as Record<string, unknown> | null;
+    check('age detail is DOB-free (no dateOfBirth key)', detail != null && !('dateOfBirth' in detail));
+  }
+  // Then academic + criminal pass → the conjunction reaches the green lane.
+  await producerBus.publish(nesaEvent(appGreen, 'RDF', 'GENERAL_ENLISTMENT', true));
+  await producerBus.publish(ribEvent(appGreen, 'RDF', 'GENERAL_ENLISTMENT', 'CLEARED', 'ANY_CONVICTION'));
+  await waitFor(async () => (await readState('rdf_ops', appGreen))?.status === 'DOCUMENT_REVIEW_GREEN', 'appGreen→DOCUMENT_REVIEW_GREEN');
+  {
+    const s = await readState('rdf_ops', appGreen);
+    check('status = DOCUMENT_REVIEW_GREEN (positive terminal)', s?.status === 'DOCUMENT_REVIEW_GREEN', s?.status);
+    const hist = await historyRows('rdf_ops', appGreen);
+    check('history row → DOCUMENT_REVIEW_GREEN appended', hist.some((h) => h.to_status === 'DOCUMENT_REVIEW_GREEN'));
+    check('AUDIT_ENTRY APPLICATION_STATUS_ADVANCED for green', (audits.get(appGreen) ?? []).some((a) => a.action === 'APPLICATION_STATUS_ADVANCED' && a.newStatus === 'DOCUMENT_REVIEW_GREEN'));
+  }
+
+  // ── 10. Age is REQUIRED for green: academic+criminal pass, age PENDING ─
+  console.log('\n── 10. Academic+criminal pass but age PENDING → holds at CRIMINAL_CLEARANCE ──');
+  await producerBus.publish(nesaEvent(appNoAge, 'RDF', 'GENERAL_ENLISTMENT', true));
+  await producerBus.publish(ribEvent(appNoAge, 'RDF', 'GENERAL_ENLISTMENT', 'CLEARED', 'ANY_CONVICTION'));
+  await waitFor(async () => (await readState('rdf_ops', appNoAge))?.criminal_clearance_status === 'CLEARED', 'appNoAge criminal CLEARED');
+  await new Promise((r) => setTimeout(r, 2000)); // let any (wrong) green transition settle
+  {
+    const s = await readState('rdf_ops', appNoAge);
+    check('age still PENDING (never sent)', s?.age_eligibility_status === 'PENDING', s?.age_eligibility_status);
+    check('status = CRIMINAL_CLEARANCE, NOT green (age gates the terminal)', s?.status === 'CRIMINAL_CLEARANCE', s?.status);
+  }
+
+  // ── 11. Age hard fail (INELIGIBLE) → REJECTED ─────────────────────
+  console.log('\n── 11. Age INELIGIBLE → REJECTED (fail-closed) ──────────────');
+  await producerBus.publish(ageEvent(appAgeReject, 'RDF', 'GENERAL_ENLISTMENT', false));
+  await waitFor(async () => (await readState('rdf_ops', appAgeReject))?.status === 'REJECTED', 'appAgeReject→REJECTED');
+  {
+    const s = await readState('rdf_ops', appAgeReject);
+    check('age_eligibility_status = INELIGIBLE', s?.age_eligibility_status === 'INELIGIBLE', s?.age_eligibility_status);
+    check('status = REJECTED (age is a hard-fail gate)', s?.status === 'REJECTED', s?.status);
+    check('AUDIT_ENTRY APPLICATION_REJECTED for age fail', (audits.get(appAgeReject) ?? []).some((a) => a.action === 'APPLICATION_REJECTED'));
   }
 
   await Promise.all([serviceBus.disconnect(), producerBus.disconnect(), auditBus.disconnect()]);

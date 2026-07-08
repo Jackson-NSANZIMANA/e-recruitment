@@ -54,6 +54,10 @@ export const rdfAcademicStatusEnum = rdfOps.enum('academic_eligibility_status', 
   'PENDING', 'ELIGIBLE', 'INELIGIBLE',
 ]);
 
+export const rdfAgeStatusEnum = rdfOps.enum('age_eligibility_status', [
+  'PENDING', 'ELIGIBLE', 'INELIGIBLE',
+]);
+
 export const rdfCriminalStatusEnum = rdfOps.enum('criminal_clearance_status', [
   'PENDING', 'CLEARED', 'FLAGGED_CONVICTION', 'FLAGGED_DISMISSED', 'UNDER_REVIEW',
 ]);
@@ -113,6 +117,12 @@ export const rdfApplications = rdfOps.table(
     // JSON: { eligible: bool, reason: string, details: {...} }
     academicEligibilityDetail: jsonb('academic_eligibility_detail'),
 
+    // ── Age vetting (projected from the age gate; DOB-free detail) ──
+    ageEligibilityStatus: rdfAgeStatusEnum('age_eligibility_status').notNull().default('PENDING'),
+    ageVerifiedAt: timestamp('age_verified_at', { withTimezone: true }),
+    // JSON: { eligible, ageAtEvaluation, appliedMaxAge, reason } — never the DOB
+    ageEligibilityDetail: jsonb('age_eligibility_detail'),
+
     // ── Criminal vetting ─────────────────────────────────────────
     ribRequestId: varchar('rib_request_id', { length: 128 }),
     criminalClearanceStatus: rdfCriminalStatusEnum('criminal_clearance_status')
@@ -171,6 +181,7 @@ export const rdfApplications = rdfOps.table(
     index('idx_rdf_status').on(t.status),
     index('idx_rdf_document_lane').on(t.documentLane),
     index('idx_rdf_academic_status').on(t.academicStatus),
+    index('idx_rdf_age_status').on(t.ageEligibilityStatus),
     index('idx_rdf_criminal_status').on(t.criminalClearanceStatus),
     index('idx_rdf_district').on(t.assignedDistrict),
     uniqueIndex('idx_rdf_qr_code').on(t.qrInvitationCode),

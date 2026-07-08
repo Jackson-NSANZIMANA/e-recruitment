@@ -11,6 +11,7 @@
 
 import type {
   AcademicEligibilityStatus,
+  AgeEligibilityStatus,
   Agency,
   ApplicationCategory,
   ApplicationChannel,
@@ -59,6 +60,17 @@ export interface AcademicVettingResult {
   readonly correlationId: string;
 }
 
+/** An age-eligibility verdict from the age gate. */
+export interface AgeVettingResult {
+  readonly dimension: 'AGE';
+  readonly applicationId: string;
+  readonly agency: Agency;
+  readonly ageStatus: AgeEligibilityStatus;
+  /** DOB-free evidence, stored verbatim in age_eligibility_detail (never the DOB). */
+  readonly detail: unknown;
+  readonly correlationId: string;
+}
+
 /** A criminal-clearance verdict from RIB. */
 export interface CriminalVettingResult {
   readonly dimension: 'CRIMINAL';
@@ -71,13 +83,13 @@ export interface CriminalVettingResult {
   readonly correlationId: string;
 }
 
-export type VettingResult = AcademicVettingResult | CriminalVettingResult;
+export type VettingResult = AgeVettingResult | AcademicVettingResult | CriminalVettingResult;
 
 /** Outcome of projecting one verdict onto an application row. */
 export type ApplyVettingOutcome =
   | {
       readonly kind: 'APPLIED';
-      readonly dimension: 'ACADEMIC' | 'CRIMINAL';
+      readonly dimension: 'AGE' | 'ACADEMIC' | 'CRIMINAL';
       readonly fromStatus: ApplicationStatus;
       readonly toStatus: ApplicationStatus;
       /** True when the top-level status enum transitioned (a history row was written). */
