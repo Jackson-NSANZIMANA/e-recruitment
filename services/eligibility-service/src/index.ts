@@ -55,6 +55,11 @@ export {
   ELIGIBILITY_CONSUMER_GROUP,
   startApplicantSubmittedConsumer,
 } from './adapters/events/applicant-submitted.consumer.js';
+export {
+  ACADEMIC_CONSUMER_GROUP,
+  startAcademicVettingConsumer,
+} from './adapters/events/academic-vetting.consumer.js';
+export type { AcademicVettingServices } from './adapters/events/academic-vetting.consumer.js';
 export { EvaluateAgeEligibilityService } from './application/evaluate-age-eligibility.service.js';
 export type {
   EvaluateAgeEligibilityCommand,

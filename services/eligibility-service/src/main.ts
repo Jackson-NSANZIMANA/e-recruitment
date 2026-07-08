@@ -17,6 +17,7 @@ import { ageEligibilityRoute } from './adapters/http/eligibility.controller.js';
 import { educationCheckRoute } from './adapters/http/education.controller.js';
 import { degreeCheckRoute } from './adapters/http/degree.controller.js';
 import { startApplicantSubmittedConsumer } from './adapters/events/applicant-submitted.consumer.js';
+import { startAcademicVettingConsumer } from './adapters/events/academic-vetting.consumer.js';
 
 function createEventBus(serviceName: string): EventBus {
   if (process.env['KAFKA_BROKERS']) {
@@ -39,14 +40,18 @@ async function main(): Promise<void> {
 
   const services = createEligibilityService(config, bus);
 
-  // Event-driven ingress: when a broker is configured, auto-run the age gate
-  // off applicant.submitted. (In-memory bus has no cross-process delivery, so
-  // this is only meaningful with real Kafka.) The NESA education gate has no
-  // event trigger yet — it is driven synchronously over HTTP (event-driven
-  // NESA is a follow-on slice; see the education slice docs).
+  // Event-driven ingress: when a broker is configured, auto-run BOTH eligibility
+  // gates off applicant.submitted — age (internal compute) and academic (NESA/HEC
+  // over G2G), each in its own consumer group so a G2G outage retries only the
+  // academic reaction, never the already-succeeded age gate. Together with the
+  // criminal gate (background-vetting-service) a single submission autonomously
+  // drives all three vetting dimensions the application-state projection needs to
+  // reach the positive terminal. (In-memory bus has no cross-process delivery, so
+  // this is only meaningful with real Kafka.)
   if (process.env['KAFKA_BROKERS']) {
     await startApplicantSubmittedConsumer(bus, services.age);
-    console.log(JSON.stringify({ msg: 'event_consumer_started', topic: 'applicant.submitted' }));
+    await startAcademicVettingConsumer(bus, { education: services.education, degree: services.degree });
+    console.log(JSON.stringify({ msg: 'event_consumers_started', topic: 'applicant.submitted', gates: ['age', 'academic'] }));
   }
 
   const server = await startHttpServer({
