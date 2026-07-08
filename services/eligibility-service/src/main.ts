@@ -15,6 +15,7 @@ import { createEligibilityService } from './index.js';
 import { loadEligibilityConfig } from './config.js';
 import { ageEligibilityRoute } from './adapters/http/eligibility.controller.js';
 import { educationCheckRoute } from './adapters/http/education.controller.js';
+import { degreeCheckRoute } from './adapters/http/degree.controller.js';
 import { startApplicantSubmittedConsumer } from './adapters/events/applicant-submitted.consumer.js';
 
 function createEventBus(serviceName: string): EventBus {
@@ -51,7 +52,11 @@ async function main(): Promise<void> {
   const server = await startHttpServer({
     serviceName: config.runtime.serviceName,
     port: config.runtime.port,
-    routes: [ageEligibilityRoute(services.age), educationCheckRoute(services.education)],
+    routes: [
+      ageEligibilityRoute(services.age),
+      educationCheckRoute(services.education),
+      degreeCheckRoute(services.degree),
+    ],
     readiness: async (): Promise<boolean> => {
       try {
         await sql`SELECT 1`;

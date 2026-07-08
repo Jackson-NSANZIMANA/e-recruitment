@@ -396,6 +396,22 @@ export interface NESAVerifiedPayload {
   readonly verifiedAt: string;
 }
 
+// ── HEC Verified Degree/Diploma (for degree-path academic vetting) ─
+// The verified credential a degree/diploma category is evaluated against.
+// HEC binds the credential to its holder by the G2G subject hash, so a
+// successful lookup already asserts the degree belongs to this applicant.
+
+export interface HECVerifiedPayload {
+  readonly registrationNumber: string;
+  readonly institutionName: string;
+  readonly degreeTitle: string;
+  readonly educationLevel: EducationLevel;   // BACHELOR_A0 | A1_IPRC | MASTERS | PHD
+  /** e.g. 'ENGINEERING','NURSING' — drives the specialist match + age exception. */
+  readonly specialistField: string | null;
+  readonly graduationYear: number;
+  readonly verifiedAt: string;
+}
+
 // ── Eligibility Result ────────────────────────────────────────────
 
 export type AcademicEligibilityStatus = 'PENDING' | 'ELIGIBLE' | 'INELIGIBLE';

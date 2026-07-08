@@ -21,7 +21,8 @@
     "lint": "eslint src/**/*.ts",
     "selfcheck": "tsx selfcheck/verify-age-eligibility.ts",
     "selfcheck:events": "tsx selfcheck/verify-event-driven.ts",
-    "selfcheck:education": "tsx selfcheck/verify-education-eligibility.ts"
+    "selfcheck:education": "tsx selfcheck/verify-education-eligibility.ts",
+    "selfcheck:degree": "tsx selfcheck/verify-degree-eligibility.ts"
   },
   "dependencies": {
     "@usrp/shared-config": "workspace:*",

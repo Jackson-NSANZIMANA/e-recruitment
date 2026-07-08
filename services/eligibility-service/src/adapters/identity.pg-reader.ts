@@ -11,7 +11,11 @@
 
 import { sql } from '@usrp/shared-database';
 import type { IdentityVerificationStatus } from '@usrp/shared-database';
-import type { ApplicantIdentityRecord, IdentityReader } from '../ports/identity-reader.js';
+import type {
+  ApplicantG2GSubjectRecord,
+  ApplicantIdentityRecord,
+  IdentityReader,
+} from '../ports/identity-reader.js';
 import { EligibilityReadError } from '../domain/eligibility.errors.js';
 
 const SYSTEM_ROLE = 'usrp_system_service';
@@ -43,6 +47,36 @@ export class PgIdentityReader implements IdentityReader {
       });
     } catch (cause) {
       throw new EligibilityReadError('Failed to read applicant identity', { cause });
+    }
+  }
+
+  async findG2GSubjectById(applicantId: string): Promise<ApplicantG2GSubjectRecord | null> {
+    try {
+      return await sql.begin(async (tx) => {
+        await tx`SET LOCAL ROLE ${sql(SYSTEM_ROLE)}`;
+        await tx`SELECT set_config(${ENCRYPTION_KEY_SETTING}, ${this.encryptionKey}, true)`;
+
+        // Decrypt ONLY the G2G subject hash — not the DOB. The column is
+        // nullable (rows created before it existed), so guard the decrypt.
+        const rows = await tx<{ nida_lookup_hash: string | null; identity_status: IdentityVerificationStatus }[]>`
+          SELECT
+            CASE
+              WHEN encrypted_nida_lookup_hash IS NULL THEN NULL
+              ELSE pgp_sym_decrypt(encrypted_nida_lookup_hash::bytea, current_setting(${ENCRYPTION_KEY_SETTING}))
+            END AS nida_lookup_hash,
+            identity_status
+          FROM public_core.applicant_identities
+          WHERE id = ${applicantId}
+            AND deleted_at IS NULL
+          LIMIT 1
+        `;
+
+        const row = rows[0];
+        if (!row) return null;
+        return { nidaLookupHash: row.nida_lookup_hash, identityStatus: row.identity_status };
+      });
+    } catch (cause) {
+      throw new EligibilityReadError('Failed to read applicant G2G subject hash', { cause });
     }
   }
 }

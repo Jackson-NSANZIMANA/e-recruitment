@@ -40,6 +40,34 @@ export interface NESALookupResponse {
   readonly respondedAt: string;
 }
 
+// ── HEC Integration Types ─────────────────────────────────────────
+// HEC verifies a university degree / IPRC diploma AND that it belongs to
+// the person presenting it — matched by the G2G subject hash. A failed
+// match (HOLDER_MISMATCH) or unknown registration is a business outcome,
+// never returned as a verified credential.
+
+export type HECVerifyReason = 'REGISTRATION_NOT_FOUND' | 'HOLDER_MISMATCH';
+
+export interface HECDegreeVerifyRequest {
+  readonly registrationNumber: string;
+  /** G2G subject hash of the holder — HMAC(NIDA-shared secret, NID). */
+  readonly nationalIdHash: string;
+  readonly requestId: string;
+}
+
+export interface HECDegreeVerifyResponse {
+  readonly verified: boolean;
+  readonly reason?: HECVerifyReason;
+  readonly registrationNumber?: string;
+  readonly institutionName?: string;
+  readonly degreeTitle?: string;
+  readonly educationLevel?: import('./eligibility.types').EducationLevel;
+  readonly specialistField?: string | null;
+  readonly graduationYear?: number;
+  readonly requestId: string;
+  readonly respondedAt: string;
+}
+
 // ── RIB Integration Types ─────────────────────────────────────────
 
 export type RIBRecordStatus = 'CLEAR' | 'HAS_RECORDS' | 'UNDER_INVESTIGATION';

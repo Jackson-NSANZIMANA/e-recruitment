@@ -3,11 +3,11 @@
 //
 // Loads runtime, the database, the PII encryption key (to decrypt the
 // applicant's date of birth for the age gate), and the NESA G2G endpoint
-// (for the education gate). Variable names follow the shared-config canon
-// (NESA_BASE_URL, NESA_HMAC_SECRET) and mirror identity-service's
-// loadNidaConfig — see the .env reconciliation note in the slice docs.
-// HEC is NOT loaded here yet: the degree path is a later slice, and this
-// service should not demand secrets for agencies it does not call.
+// (for the A-Level gate) plus the HEC G2G endpoint (for the degree gate).
+// Variable names follow the shared-config canon (NESA_BASE_URL,
+// NESA_HMAC_SECRET, HEC_BASE_URL, HEC_HMAC_SECRET) and mirror
+// identity-service's loadNidaConfig — see the .env reconciliation note in
+// the slice docs.
 // ══════════════════════════════════════════════════════════════════
 
 import {
@@ -34,6 +34,7 @@ export interface EligibilityServiceConfig {
   readonly database: DatabaseConfig;
   readonly security: EligibilitySecurityConfig;
   readonly nesa: G2GEndpointConfig;
+  readonly hec: G2GEndpointConfig;
 }
 
 /** Load just the NESA endpoint config (base URL, HMAC secret, timeout). */
@@ -53,6 +54,23 @@ export function loadNesaConfig(source: EnvSource = process.env): G2GEndpointConf
   };
 }
 
+/** Load just the HEC endpoint config (base URL, HMAC secret, timeout). */
+export function loadHecConfig(source: EnvSource = process.env): G2GEndpointConfig {
+  const env = loadEnv(
+    {
+      HEC_BASE_URL: url({ protocols: ['http', 'https'] }),
+      HEC_HMAC_SECRET: string({ minLength: 8, secret: true }),
+      HEC_REQUEST_TIMEOUT_MS: withDefault(integer({ min: 500, max: 60_000 }), 5_000),
+    },
+    source,
+  );
+  return {
+    baseUrl: env.HEC_BASE_URL,
+    hmacSecret: env.HEC_HMAC_SECRET,
+    timeoutMs: env.HEC_REQUEST_TIMEOUT_MS,
+  };
+}
+
 export function loadEligibilityConfig(source: EnvSource = process.env): EligibilityServiceConfig {
   const env = loadEnv({ PII_ENCRYPTION_KEY: string({ minLength: 32, secret: true }) }, source);
   return {
@@ -60,5 +78,6 @@ export function loadEligibilityConfig(source: EnvSource = process.env): Eligibil
     database: loadDatabaseConfig(source),
     security: { encryptionKey: env.PII_ENCRYPTION_KEY },
     nesa: loadNesaConfig(source),
+    hec: loadHecConfig(source),
   };
 }
