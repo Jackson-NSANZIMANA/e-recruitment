@@ -43,10 +43,7 @@
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
-    "db:seed": "tsx src/seeds/run-seeds.ts",
-    "db:seed:campaigns": "tsx src/seeds/campaigns.seed.ts",
-    "db:seed:venues": "tsx src/seeds/venues.seed.ts",
-    "db:seed:test-applicants": "tsx src/seeds/test-applicants.seed.ts",
+    "db:seed": "echo 'No runnable seeder yet. src/seeds/exam-venues.seed.ts exports venue DATA only; a run-seeds entrypoint is not built. See docs/architecture/ci-quality-gate.md.' && exit 1",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

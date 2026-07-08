@@ -18,6 +18,8 @@
     "test:e2e": "turbo run test:e2e",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
+    "bootstrap:db": "bash scripts/bootstrap-db.sh",
+    "verify": "bash scripts/run-selfchecks.sh",
     "db:migrate": "turbo run db:migrate --filter=shared-database",
     "db:seed": "turbo run db:seed --filter=shared-database",
     "db:studio": "turbo run db:studio --filter=shared-database",
