@@ -80,5 +80,8 @@ apply_sql "${RLS_DIR}/0006_age_eligibility_columns.sql" "rls/0006 (age eligibili
 # 8. Application status-history immutability (append-only trail; mirrors 0002).
 apply_sql "${RLS_DIR}/0007_status_history_immutability.sql" "rls/0007 (status-history immutability)"
 
+# 9. Venue read grant (scheduling-service resolves district → exam venue).
+apply_sql "${RLS_DIR}/0008_venue_read_grants.sql" "rls/0008 (venue read grant)"
+
 printf '\n'
-ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability in place"
+ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads in place"
