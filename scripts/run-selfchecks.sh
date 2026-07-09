@@ -71,6 +71,7 @@ run_ts "shared-events: Kafka round-trip"          packages/shared-events/selfche
 run_ts "identity-service: core slice"             services/identity-service/selfcheck/verify-slice.ts
 run_ts "identity-service: HTTP slice"             services/identity-service/selfcheck/verify-http-slice.ts
 run_ts "application-service: front-door submit"   services/application-service/selfcheck/verify-submit-http-slice.ts
+run_ts "application-service: lifecycle monotonicity" services/application-service/selfcheck/verify-lifecycle.ts
 run_ts "application-service: vetting projection"   services/application-service/selfcheck/verify-vetting-projection.ts
 run_ts "application-service: history immutability" services/application-service/selfcheck/verify-history-immutability.ts
 run_ts "eligibility-service: age gate"            services/eligibility-service/selfcheck/verify-age-eligibility.ts

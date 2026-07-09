@@ -29,6 +29,7 @@
 // directly — no translation layer.
 // ══════════════════════════════════════════════════════════════════
 
+import { APPLICATION_STATUSES } from '@usrp/shared-types';
 import type {
   AcademicEligibilityStatus,
   AgeEligibilityStatus,
@@ -58,20 +59,17 @@ const CRIMINAL_HARD_FAIL: ReadonlySet<CriminalClearanceStatus> = new Set<Crimina
 ]);
 
 /**
- * The linear vetting ladder this slice drives. Rank = index; a status not on
- * the ladder (downstream stages, walk-in path) has rank -1 → we do not advance
- * it (monotonicity is preserved: candidates never outrank an off-ladder status).
+ * Monotonicity rank = position in the CANONICAL lifecycle order
+ * (@usrp/shared-types APPLICATION_STATUSES), the single source of truth for how
+ * far along a status is. This projection only ever proposes candidates up to
+ * DOCUMENT_REVIEW_GREEN, but a row may already be FURTHER along (SLOT_ASSIGNED,
+ * PHYSICAL_TEST_SCHEDULED, …) when a vetting event is redelivered — so the rank
+ * must know the full order, not just the vetting ladder. Ranking a downstream
+ * status against a short local ladder (indexOf → -1) is exactly what let a
+ * redelivered all-pass event regress a scheduled applicant back to GREEN.
  */
-const LADDER: readonly ApplicationStatus[] = [
-  'DRAFT',
-  'SUBMITTED',
-  'ACADEMIC_VETTING',
-  'CRIMINAL_CLEARANCE',
-  'DOCUMENT_REVIEW_GREEN',
-];
-
-function ladderRank(status: ApplicationStatus): number {
-  return LADDER.indexOf(status);
+function stageRank(status: ApplicationStatus): number {
+  return APPLICATION_STATUSES.indexOf(status);
 }
 
 function isHardFail(evidence: VettingEvidence): boolean {
@@ -104,7 +102,12 @@ export function deriveApplicationStatus(
   // Terminal states are never left by the projection.
   if (TERMINAL.has(current)) return current;
 
-  // A hard fail rejects from any non-terminal state.
+  // A hard fail rejects from any non-terminal state. NOTE: this also fires for a
+  // disqualifying verdict that arrives AFTER the eligibility terminal (e.g. a late
+  // criminal flag on an already-SLOT_ASSIGNED row) — auto-rejecting a scheduled
+  // applicant off the backbone. Whether late disqualification should auto-reject or
+  // route to human adjudication is an owner/agency policy decision (flagged, not
+  // silently settled); this preserves the pre-existing fail-closed behaviour.
   if (isHardFail(evidence)) return 'REJECTED';
 
   // Otherwise advance to the furthest stage the evidence justifies — but only
@@ -119,7 +122,7 @@ export function deriveApplicationStatus(
         ? 'ACADEMIC_VETTING'
         : current;
 
-  const currentRank = ladderRank(current);
-  const candidateRank = ladderRank(candidate);
+  const currentRank = stageRank(current);
+  const candidateRank = stageRank(candidate);
   return candidateRank > currentRank ? candidate : current;
 }
