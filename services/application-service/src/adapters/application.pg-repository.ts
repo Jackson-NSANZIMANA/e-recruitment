@@ -23,9 +23,11 @@ import { sql } from '@usrp/shared-database';
 import type { ApplicationStatus } from '@usrp/shared-types';
 import type {
   ApplicationRepository,
+  ApplySlotOutcome,
   ApplyVettingOutcome,
   CreateApplicationInput,
   CreateApplicationResult,
+  SlotAssignmentResult,
   VettingResult,
 } from '../ports/application-repository.js';
 import { ApplicationPersistenceError } from '../domain/application.errors.js';
@@ -40,6 +42,9 @@ interface ApplicationStateRow {
   readonly age_eligibility_status: import('@usrp/shared-types').AgeEligibilityStatus;
   readonly academic_status: import('@usrp/shared-types').AcademicEligibilityStatus;
   readonly criminal_clearance_status: import('@usrp/shared-types').CriminalClearanceStatus;
+  readonly applicant_id: string;
+  readonly campaign_id: string;
+  readonly category: import('@usrp/shared-types').ApplicationCategory;
 }
 
 export class PgApplicationRepository implements ApplicationRepository {
@@ -109,7 +114,8 @@ export class PgApplicationRepository implements ApplicationRepository {
         // already serialized per applicant; FOR UPDATE additionally guards
         // against rebalance/redelivery races and any second process.
         const rows = await tx<ApplicationStateRow[]>`
-          SELECT status, age_eligibility_status, academic_status, criminal_clearance_status
+          SELECT status, age_eligibility_status, academic_status, criminal_clearance_status,
+                 applicant_id, campaign_id, category
           FROM ${schema}.applications
           WHERE id = ${result.applicationId}
           FOR UPDATE
@@ -212,11 +218,82 @@ export class PgApplicationRepository implements ApplicationRepository {
           fromStatus: current.status,
           toStatus,
           statusChanged,
+          applicantId: current.applicant_id,
+          campaignId: current.campaign_id,
+          category: current.category,
         };
       });
     } catch (cause) {
       if (cause instanceof ApplicationPersistenceError) throw cause;
       throw new ApplicationPersistenceError('Failed to apply vetting result', { cause });
+    }
+  }
+
+  async applySlotAssignment(result: SlotAssignmentResult): Promise<ApplySlotOutcome> {
+    const target = AGENCY_TARGET[result.agency];
+    const schema = sql(target.schema);
+
+    try {
+      return await sql.begin(async (tx): Promise<ApplySlotOutcome> => {
+        await tx`SET LOCAL ROLE ${sql(SYSTEM_ROLE)}`;
+
+        const rows = await tx<{ status: ApplicationStatus; applicant_id: string }[]>`
+          SELECT status, applicant_id
+          FROM ${schema}.applications
+          WHERE id = ${result.applicationId}
+          FOR UPDATE
+        `;
+        const current = rows[0];
+        // 0 rows ⇒ not in THIS agency's schema (mis-route / unknown) — no RLS on
+        // ops applications, so assert it here rather than silently succeed.
+        if (!current) return { kind: 'NOT_FOUND' };
+
+        // Already scheduled ⇒ idempotent redelivery, write nothing.
+        if (current.status === 'SLOT_ASSIGNED') return { kind: 'NO_CHANGE' };
+
+        // A slot is only assignable from the positive eligibility terminal. Any
+        // other status (still vetting, rejected, withdrawn, further downstream)
+        // is a hold — never force a row backward or sideways into scheduling.
+        if (current.status !== 'DOCUMENT_REVIEW_GREEN') {
+          return { kind: 'NOT_ASSIGNABLE', currentStatus: current.status };
+        }
+
+        await tx`
+          UPDATE ${schema}.applications SET
+            venue_assignment_id = ${result.venueAssignmentId},
+            assigned_district = ${result.assignedDistrict},
+            assigned_venue_name = ${result.assignedVenueName},
+            physical_test_scheduled_at = ${result.examDate}::date,
+            qr_invitation_code = ${result.qrInvitationCode},
+            qr_invitation_issued_at = now(),
+            status = 'SLOT_ASSIGNED'::${schema}.application_status,
+            updated_at = now()
+          WHERE id = ${result.applicationId}
+        `;
+
+        await tx`
+          INSERT INTO ${schema}.application_status_history
+            (application_id, from_status, to_status, reason, performed_by, correlation_id)
+          VALUES (
+            ${result.applicationId},
+            'DOCUMENT_REVIEW_GREEN'::${schema}.application_status,
+            'SLOT_ASSIGNED'::${schema}.application_status,
+            'Exam slot assigned',
+            'application-service',
+            ${result.correlationId}
+          )
+        `;
+
+        return {
+          kind: 'APPLIED',
+          fromStatus: 'DOCUMENT_REVIEW_GREEN',
+          toStatus: 'SLOT_ASSIGNED',
+          applicantId: current.applicant_id,
+        };
+      });
+    } catch (cause) {
+      if (cause instanceof ApplicationPersistenceError) throw cause;
+      throw new ApplicationPersistenceError('Failed to apply slot assignment', { cause });
     }
   }
 }

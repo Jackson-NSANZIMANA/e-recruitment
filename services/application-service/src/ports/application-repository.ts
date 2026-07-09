@@ -94,9 +94,52 @@ export type ApplyVettingOutcome =
       readonly toStatus: ApplicationStatus;
       /** True when the top-level status enum transitioned (a history row was written). */
       readonly statusChanged: boolean;
+      /** Owning applicant + campaign + category, read off the row — needed to emit downstream triggers. */
+      readonly applicantId: string;
+      readonly campaignId: string;
+      readonly category: ApplicationCategory;
     }
   /** The row was already in the target state — nothing written (idempotent redelivery). */
   | { readonly kind: 'NO_CHANGE' }
+  /** No such application in the agency's schema — the cross-agency write guard. */
+  | { readonly kind: 'NOT_FOUND' };
+
+// ── Slot-assignment projection ─────────────────────────────────────
+//
+// A scheduling verdict (SLOT_ASSIGNED) to materialise onto an application row.
+// Unlike the vetting dimensions, this is a post-eligibility STAGE transition
+// (DOCUMENT_REVIEW_GREEN → SLOT_ASSIGNED), not a verdict folded into the pure
+// vetting lifecycle — so it has its own repository method and only advances a
+// row that is currently at the green terminal.
+
+/** A venue/slot assignment from scheduling-service. */
+export interface SlotAssignmentResult {
+  readonly applicationId: string;
+  readonly agency: Agency;
+  readonly venueAssignmentId: string;
+  readonly assignedDistrict: string;
+  readonly assignedVenueName: string;
+  /** Exam date (YYYY-MM-DD) — stamped as physical_test_scheduled_at. */
+  readonly examDate: string;
+  readonly qrInvitationCode: string;
+  readonly correlationId: string;
+}
+
+/** Outcome of projecting a slot assignment onto an application row. */
+export type ApplySlotOutcome =
+  | {
+      readonly kind: 'APPLIED';
+      readonly fromStatus: ApplicationStatus;
+      readonly toStatus: 'SLOT_ASSIGNED';
+      readonly applicantId: string;
+    }
+  /** Already SLOT_ASSIGNED — idempotent redelivery, nothing written. */
+  | { readonly kind: 'NO_CHANGE' }
+  /**
+   * The row is not at DOCUMENT_REVIEW_GREEN (not yet cleared, already past this
+   * stage, or terminal) — a slot cannot be assigned now; nothing written.
+   */
+  | { readonly kind: 'NOT_ASSIGNABLE'; readonly currentStatus: ApplicationStatus }
   /** No such application in the agency's schema — the cross-agency write guard. */
   | { readonly kind: 'NOT_FOUND' };
 
@@ -109,4 +152,11 @@ export interface ApplicationRepository {
    * absent from that agency's schema returns NOT_FOUND (never a silent success).
    */
   applyVettingResult(result: VettingResult): Promise<ApplyVettingOutcome>;
+  /**
+   * Stamp a venue/slot assignment onto its application row and advance
+   * DOCUMENT_REVIEW_GREEN → SLOT_ASSIGNED, in one transaction. Only assignable
+   * from the green terminal (NOT_ASSIGNABLE otherwise); idempotent on redelivery
+   * (NO_CHANGE); cross-agency guarded (NOT_FOUND).
+   */
+  applySlotAssignment(result: SlotAssignmentResult): Promise<ApplySlotOutcome>;
 }

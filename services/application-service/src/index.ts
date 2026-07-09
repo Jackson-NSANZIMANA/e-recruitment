@@ -13,14 +13,17 @@ import { PgCampaignReader } from './adapters/campaign.pg-reader.js';
 import { PgApplicationRepository } from './adapters/application.pg-repository.js';
 import { SubmitApplicationService } from './application/submit-application.service.js';
 import { ProjectVettingResultService } from './application/project-vetting-result.service.js';
+import { ProjectSlotAssignmentService } from './application/project-slot-assignment.service.js';
 import type { ApplicationServiceConfig } from './config.js';
 
-/** The application aggregate's two adapters over one repository. */
+/** The application aggregate's adapters over one repository. */
 export interface ApplicationService {
   /** HTTP front door — CREATE an application (POST /v1/applications). */
   readonly submit: SubmitApplicationService;
   /** Event projector — ADVANCE an application from vetting verdicts. */
   readonly projector: ProjectVettingResultService;
+  /** Event projector — STAMP the exam slot (DOCUMENT_REVIEW_GREEN → SLOT_ASSIGNED). */
+  readonly slotProjector: ProjectSlotAssignmentService;
 }
 
 /**
@@ -46,6 +49,7 @@ export function createApplicationService(
       eventBus,
     }),
     projector: new ProjectVettingResultService({ repository, eventBus }),
+    slotProjector: new ProjectSlotAssignmentService({ repository, eventBus }),
   };
 }
 
@@ -69,6 +73,12 @@ export {
   APPLICATION_PROJECTION_GROUP,
   startVettingResultConsumer,
 } from './adapters/events/vetting-result.consumer.js';
+export { startSlotAssignedConsumer } from './adapters/events/slot-assigned.consumer.js';
+export { ProjectSlotAssignmentService } from './application/project-slot-assignment.service.js';
+export type {
+  ProjectSlotAssignmentCommand,
+  ProjectSlotAssignmentDeps,
+} from './application/project-slot-assignment.service.js';
 export { deriveApplicationStatus } from './domain/lifecycle.js';
 export type { VettingEvidence } from './domain/lifecycle.js';
 export { AGENCY_TARGET, schemaForAgency } from './domain/agency-schema.js';
@@ -87,6 +97,8 @@ export type {
   AcademicVettingResult,
   CriminalVettingResult,
   ApplyVettingOutcome,
+  SlotAssignmentResult,
+  ApplySlotOutcome,
 } from './ports/application-repository.js';
 export {
   academicPathForCategory,

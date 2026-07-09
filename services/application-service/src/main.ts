@@ -26,6 +26,7 @@ import { createApplicationService } from './index.js';
 import { loadApplicationConfig } from './config.js';
 import { submitApplicationRoute } from './adapters/http/submit-application.controller.js';
 import { startVettingResultConsumer } from './adapters/events/vetting-result.consumer.js';
+import { startSlotAssignedConsumer } from './adapters/events/slot-assigned.consumer.js';
 
 function createEventBus(serviceName: string): EventBus {
   if (process.env['KAFKA_BROKERS']) {
@@ -53,8 +54,12 @@ async function main(): Promise<void> {
   // consuming. Only meaningful with a real broker.
   if (process.env['KAFKA_BROKERS']) {
     await startVettingResultConsumer(bus, service.projector);
+    await startSlotAssignedConsumer(bus, service.slotProjector);
     console.log(
-      JSON.stringify({ msg: 'event_consumer_started', topics: 'vetting.nesa,vetting.hec,vetting.rib' }),
+      JSON.stringify({
+        msg: 'event_consumers_started',
+        topics: 'vetting.nesa,vetting.hec,vetting.rib,vetting.age,slot.assigned',
+      }),
     );
   }
 

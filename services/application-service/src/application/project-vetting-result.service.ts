@@ -14,7 +14,7 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { newEnvelope, type EventBus, type EventContext } from '@usrp/shared-events';
-import type { Agency, AuditEvent } from '@usrp/shared-types';
+import type { Agency, ApplicationEligibilityClearedEvent, AuditEvent } from '@usrp/shared-types';
 import type {
   ApplicationRepository,
   ApplyVettingOutcome,
@@ -80,6 +80,24 @@ export class ProjectVettingResultService {
       },
     };
     await this.deps.eventBus.publish(event);
+
+    // The positive eligibility terminal is the first "stage complete" signal on
+    // the backbone: when the projection advances an application to
+    // DOCUMENT_REVIEW_GREEN, announce it so the next stage (scheduling) can act.
+    // Guarded on a genuine transition INTO green (statusChanged), so redelivery
+    // that recomputes the same green status re-emits nothing.
+    if (outcome.statusChanged && outcome.toStatus === 'DOCUMENT_REVIEW_GREEN') {
+      const cleared: ApplicationEligibilityClearedEvent = {
+        ...newEnvelope(command.context),
+        eventType: 'APPLICATION_ELIGIBILITY_CLEARED',
+        applicationId: command.result.applicationId,
+        applicantId: outcome.applicantId,
+        agency: command.agency,
+        campaignId: outcome.campaignId,
+        category: outcome.category,
+      };
+      await this.deps.eventBus.publish(cleared);
+    }
 
     return outcome;
   }
