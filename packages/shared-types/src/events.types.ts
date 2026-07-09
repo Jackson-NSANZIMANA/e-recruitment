@@ -119,6 +119,21 @@ export interface AgeEligibilityCompletedEvent extends BaseEvent {
   readonly reason: string;
 }
 
+// ── Topic: application.cleared ────────────────────────────────────
+// Emitted by application-service's projection when an application reaches the
+// positive eligibility terminal DOCUMENT_REVIEW_GREEN (age + academic + criminal
+// all passed). The first "stage N complete" signal on the backbone: it triggers
+// the next stage — scheduling-service assigns an exam slot off this event.
+
+export interface ApplicationEligibilityClearedEvent extends BaseEvent {
+  readonly eventType: 'APPLICATION_ELIGIBILITY_CLEARED';
+  readonly applicationId: string;
+  readonly applicantId: string;
+  readonly agency: Agency;
+  readonly campaignId: string;
+  readonly category: ApplicationCategory;
+}
+
 // ── Topic: biometric.result ───────────────────────────────────────
 
 export interface BiometricVerificationCompletedEvent extends BaseEvent {
@@ -186,6 +201,7 @@ export type USRPEvent =
   | HECVerificationCompletedEvent
   | RIBVettingCompletedEvent
   | AgeEligibilityCompletedEvent
+  | ApplicationEligibilityClearedEvent
   | BiometricVerificationCompletedEvent
   | SlotAssignedEvent
   | FieldScoreCapturedEvent
@@ -200,6 +216,7 @@ export const KAFKA_TOPICS = {
   VETTING_HEC: 'vetting.hec',           // NEW — degree verification
   VETTING_RIB: 'vetting.rib',
   VETTING_AGE: 'vetting.age',           // NEW — age gate result (positive-terminal composition)
+  APPLICATION_CLEARED: 'application.cleared', // NEW — eligibility passed → triggers scheduling
   BIOMETRIC_RESULT: 'biometric.result',
   SLOT_ASSIGNED: 'slot.assigned',
   FIELD_SCORE_CAPTURED: 'field.score.captured',
