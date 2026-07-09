@@ -1,8 +1,8 @@
 {
-  "name": "@usrp/application-service",
+  "name": "@usrp/scheduling-service",
   "version": "1.0.0",
   "private": true,
-  "description": "USRP Application Service — the front door: turns a verified applicant's agency+category choice into an application and emits APPLICANT_SUBMITTED",
+  "description": "USRP Scheduling Service — event-driven exam-slot assignment: consumes application.cleared, resolves the applicant's home district to a venue, emits SLOT_ASSIGNED + AUDIT_ENTRY (stage 5)",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -19,8 +19,7 @@
     "dev": "tsx watch src/main.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/**/*.ts",
-    "selfcheck": "tsx selfcheck/verify-submit-http-slice.ts",
-    "selfcheck:pipeline": "tsx selfcheck/verify-pipeline-e2e.ts"
+    "selfcheck": "tsx selfcheck/verify-slot-assignment.ts"
   },
   "dependencies": {
     "@usrp/shared-config": "workspace:*",
@@ -31,9 +30,6 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "@usrp/background-vetting-service": "workspace:*",
-    "@usrp/eligibility-service": "workspace:*",
-    "@usrp/scheduling-service": "workspace:*",
     "postgres": "^3.4.5",
     "tsx": "^4.21.0",
     "typescript": "^5.8.3"
