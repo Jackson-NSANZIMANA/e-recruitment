@@ -31,6 +31,7 @@ export {
 export {
   LOG_LEVELS,
   NODE_ENVS,
+  loadAuthVerifyConfig,
   loadDatabaseConfig,
   loadG2GConfig,
   loadKafkaConfig,
@@ -38,6 +39,7 @@ export {
   loadRuntimeConfig,
   loadSecurityConfig,
   loadServiceConfig,
+  type AuthVerifyConfig,
   type DatabaseConfig,
   type G2GConfig,
   type G2GEndpointConfig,

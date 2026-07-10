@@ -8,6 +8,7 @@
 // (see turbo.json `env`) and docker-compose defines.
 // ══════════════════════════════════════════════════════════════════
 
+import { createPublicKey } from 'node:crypto';
 import {
   boolean,
   deepFreeze,
@@ -178,6 +179,43 @@ export function loadSecurityConfig(source: EnvSource = process.env): SecurityCon
   return deepFreeze({
     nationalIdHmacKey: env.NATIONAL_ID_HMAC_KEY,
     encryptionKey: env.PII_ENCRYPTION_KEY,
+    jwtIssuer: env.JWT_ISSUER,
+    jwtAudience: env.JWT_AUDIENCE,
+  });
+}
+
+// ── Auth verification (Ed25519 bearer tokens) ─────────────────────
+// Every service that exposes HTTP verifies incoming bearer tokens with the
+// issuer's PUBLIC key (asymmetric — the private signing key lives only with
+// the token issuer, never shipped to verifiers). The public key is supplied
+// base64-encoded (SPKI PEM) to dodge multiline-env pain, mirroring the QR
+// signing key. JWT_ISSUER/JWT_AUDIENCE reuse the same names as SecurityConfig.
+
+export interface AuthVerifyConfig {
+  /** Issuer public key (SPKI PEM), decoded + validated at boot. */
+  readonly authPublicKeyPem: string;
+  readonly jwtIssuer: string;
+  readonly jwtAudience: string;
+}
+
+export function loadAuthVerifyConfig(source: EnvSource = process.env): AuthVerifyConfig {
+  const env = loadEnv(
+    {
+      // BASE64 of the SPKI PEM. Public key — NOT a secret. minLength guards
+      // against an empty/truncated value.
+      AUTH_JWT_PUBLIC_KEY_B64: string({ minLength: 40 }),
+      JWT_ISSUER: withDefault(string(), 'usrp'),
+      JWT_AUDIENCE: withDefault(string(), 'usrp-services'),
+    },
+    source,
+  );
+
+  const authPublicKeyPem = Buffer.from(env.AUTH_JWT_PUBLIC_KEY_B64, 'base64').toString('utf8');
+  // Fails loud at boot if the value is not a valid public key.
+  createPublicKey(authPublicKeyPem);
+
+  return deepFreeze({
+    authPublicKeyPem,
     jwtIssuer: env.JWT_ISSUER,
     jwtAudience: env.JWT_AUDIENCE,
   });

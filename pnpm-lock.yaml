@@ -12,6 +12,28 @@ importers:
         specifier: ^2.5.4
         version: 2.10.2
 
+  packages/shared-auth:
+    dependencies:
+      '@usrp/shared-http':
+        specifier: workspace:*
+        version: link:../shared-http
+      '@usrp/shared-security':
+        specifier: workspace:*
+        version: link:../shared-security
+      '@usrp/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.2
+      tsx:
+        specifier: ^4.21.0
+        version: 4.23.0
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
   packages/shared-config:
     devDependencies:
       '@types/node':
@@ -101,6 +123,9 @@ importers:
 
   services/application-service:
     dependencies:
+      '@usrp/shared-auth':
+        specifier: workspace:*
+        version: link:../../packages/shared-auth
       '@usrp/shared-config':
         specifier: workspace:*
         version: link:../../packages/shared-config
@@ -113,6 +138,9 @@ importers:
       '@usrp/shared-http':
         specifier: workspace:*
         version: link:../../packages/shared-http
+      '@usrp/shared-security':
+        specifier: workspace:*
+        version: link:../../packages/shared-security
       '@usrp/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
@@ -200,6 +228,9 @@ importers:
 
   services/eligibility-service:
     dependencies:
+      '@usrp/shared-auth':
+        specifier: workspace:*
+        version: link:../../packages/shared-auth
       '@usrp/shared-config':
         specifier: workspace:*
         version: link:../../packages/shared-config
@@ -234,6 +265,9 @@ importers:
 
   services/identity-service:
     dependencies:
+      '@usrp/shared-auth':
+        specifier: workspace:*
+        version: link:../../packages/shared-auth
       '@usrp/shared-config':
         specifier: workspace:*
         version: link:../../packages/shared-config
