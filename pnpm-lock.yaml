@@ -280,6 +280,9 @@ importers:
       '@usrp/shared-http':
         specifier: workspace:*
         version: link:../../packages/shared-http
+      '@usrp/shared-security':
+        specifier: workspace:*
+        version: link:../../packages/shared-security
       '@usrp/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types

@@ -26,6 +26,7 @@ import postgres from 'postgres';
 import type { ApplicationEligibilityClearedEvent, AuditEvent, SlotAssignedEvent } from '@usrp/shared-types';
 import { sql } from '@usrp/shared-database';
 import { KafkaEventBus, newCorrelationContext, newEnvelope } from '@usrp/shared-events';
+import { generateDeviceKeyPair, verifySlotInvitation } from '@usrp/shared-security';
 import { createSchedulingService, loadSchedulingConfig, startApplicationClearedConsumer } from '../src/index.js';
 
 const BROKERS = (process.env['KAFKA_BROKERS'] ?? 'localhost:29092').split(',');
@@ -34,6 +35,12 @@ const ADMIN_URL =
   'postgresql://usrp_admin:usrp_dev_password@localhost:5432/usrp_db';
 const admin = postgres(ADMIN_URL, { onnotice: () => {} });
 const ENCRYPTION_KEY = process.env['PII_ENCRYPTION_KEY'] ?? 'dev_pii_encryption_key_min_32_chars_ok!!';
+
+// Ephemeral Ed25519 QR-signing key for this run (a fixture, not a shared secret).
+// The service derives the public half in config; we verify tokens against it.
+const QR_KEYPAIR = generateDeviceKeyPair();
+const QR_SIGNING_PRIVATE_KEY_B64 = Buffer.from(QR_KEYPAIR.privateKeyPem, 'utf8').toString('base64');
+const QR_SIGNING_KEY_ID = 'slot-selfcheck-key-1';
 
 const CAMPAIGN_ID = '8e8e8e8e-8e8e-4e8e-8e8e-8e8e8e8e8e8e';
 const VENUE_DISTRICT = 'GASABO';
@@ -124,6 +131,8 @@ async function main(): Promise<void> {
   const config = loadSchedulingConfig({
     DATABASE_URL: process.env['DATABASE_URL'] ?? 'postgresql://usrp_app:app_pw@localhost:5432/usrp_db',
     PII_ENCRYPTION_KEY: ENCRYPTION_KEY,
+    QR_SIGNING_PRIVATE_KEY_B64,
+    QR_SIGNING_KEY_ID,
     ...process.env,
   });
 
@@ -169,6 +178,35 @@ async function main(): Promise<void> {
     // the raw home district was only ever used to look up the venue; assert the
     // event carries the resolved venue, not decrypted PII beyond the location.
     check('event carries the resolved venue district', slot.district === VENUE_DISTRICT, slot.district);
+
+    // ── Signed, offline-verifiable QR credential (ADR-009) ──────────
+    // Verify AS OF exam morning — the real moment a venue scans it. (The token
+    // expires at the end of the exam day; expiry rejection is proven
+    // deterministically in the shared-security proof.)
+    const pub = config.signing.qrSigningPublicKeyPem;
+    const asOf = { now: new Date(`${EXAM_DATE}T06:00:00.000Z`) };
+    check(
+      'qrSignedToken minted + namespaced',
+      typeof slot.qrSignedToken === 'string' && slot.qrSignedToken.startsWith('USRP-SLOT.v1.'),
+      slot.qrSignedToken?.slice(0, 16),
+    );
+    const claims = verifySlotInvitation(pub, slot.qrSignedToken, asOf);
+    check('token verifies with the published public key', claims !== null);
+    if (claims) {
+      check('claim ticketId binds to the qrInvitationCode', claims.ticketId === slot.qrInvitationCode);
+      check('claim applicationId matches the cleared application', claims.applicationId === assigned.applicationId);
+      check('claim slotId matches the resolved venue', claims.slotId === slot.slotId, claims.slotId);
+      check('claim carries the PUBLIC venue name', claims.venueName === VENUE_NAME, claims.venueName);
+      check('claims are PII-free (no home district in the token)', !JSON.stringify(claims).includes(VENUE_DISTRICT));
+    }
+    check(
+      'tampered token is rejected',
+      verifySlotInvitation(pub, `${slot.qrSignedToken.slice(0, -4)}AAAA`, asOf) === null,
+    );
+    check(
+      'token rejected under a different public key',
+      verifySlotInvitation(generateDeviceKeyPair().publicKeyPem, slot.qrSignedToken, asOf) === null,
+    );
   }
 
   // ── 2. District with NO venue → deferral, no SLOT_ASSIGNED ─────────

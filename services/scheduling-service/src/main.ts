@@ -53,8 +53,23 @@ async function main(): Promise<void> {
   const server = await startHttpServer({
     serviceName: config.runtime.serviceName,
     port: config.runtime.port,
-    // No business routes — scheduling runs ONLY off the event backbone.
-    routes: [],
+    // Scheduling runs off the event backbone; the ONLY read route publishes the
+    // Ed25519 public key so a venue/biometric/physical-test stage can verify a
+    // slot-invitation QR OFFLINE (ADR-009). No PII, no state — a public key.
+    routes: [
+      {
+        method: 'GET',
+        path: '/v1/slots/invitation-key',
+        handler: () => ({
+          status: 200,
+          body: {
+            keyId: config.signing.qrSigningKeyId,
+            algorithm: 'Ed25519',
+            publicKeyPem: config.signing.qrSigningPublicKeyPem,
+          },
+        }),
+      },
+    ],
     readiness: async (): Promise<boolean> => {
       try {
         await sql`SELECT 1`;

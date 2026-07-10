@@ -26,8 +26,19 @@
 
 import { randomBytes } from 'node:crypto';
 import { newCorrelationContext, newEnvelope, type EventBus, type EventContext } from '@usrp/shared-events';
-import type { Agency, AuditEvent, SlotAssignedEvent } from '@usrp/shared-types';
+import type { Agency, AuditEvent, SlotAssignedEvent, SlotInvitationClaims } from '@usrp/shared-types';
 import type { HomeDistrictReader, VenueReader } from '../ports/readers.js';
+
+/**
+ * Signs the verifiable slot-invitation credential (ADR-009). The private key
+ * lives in the composition root, not the domain — the service only asks for a
+ * token over a claim set it built. `keyId` is stamped into the claims so an
+ * offline verifier can select the matching public key.
+ */
+export interface SlotInvitationSigner {
+  readonly keyId: string;
+  sign(claims: SlotInvitationClaims): string;
+}
 
 export interface AssignSlotCommand {
   readonly applicationId: string;
@@ -45,6 +56,7 @@ export type AssignSlotOutcome =
       readonly venueName: string;
       readonly examDate: string;
       readonly qrInvitationCode: string;
+      readonly qrSignedToken: string;
       readonly event: SlotAssignedEvent;
     }
   | { readonly kind: 'NO_VENUE'; readonly applicationId: string }
@@ -54,10 +66,15 @@ export interface AssignSlotDeps {
   readonly districtReader: HomeDistrictReader;
   readonly venueReader: VenueReader;
   readonly eventBus: EventBus;
+  readonly invitationSigner: SlotInvitationSigner;
 }
 
-/** Mint an opaque, URL-safe QR invitation token (32 bytes → 43 base64url chars). */
-function mintQrInvitationCode(): string {
+/**
+ * Mint the stable, unique TICKET ID (32 bytes → 43 base64url chars, ≤64). This
+ * is the DB unique key and the anchor physical-test scores bind to — NOT the QR
+ * the applicant scans (that is the signed token built from it).
+ */
+function mintTicketId(): string {
   return randomBytes(32).toString('base64url');
 }
 
@@ -95,7 +112,29 @@ export class AssignSlotService {
       return { kind: 'NO_VENUE', applicationId: command.applicationId };
     }
 
-    const qrInvitationCode = mintQrInvitationCode();
+    const qrInvitationCode = mintTicketId();
+
+    // Build the PII-free claim set and sign it into the applicant's verifiable
+    // QR credential (ADR-009). Only opaque ids + the PUBLIC venue location go in
+    // — never the raw home district, DOB, name, or national id. The invitation
+    // is valid through the end (UTC) of the exam day.
+    const claims: SlotInvitationClaims = {
+      v: 1,
+      keyId: this.deps.invitationSigner.keyId,
+      ticketId: qrInvitationCode,
+      applicationId: command.applicationId,
+      applicantId: command.applicantId,
+      agency: command.agency,
+      campaignId: command.campaignId,
+      slotId: venue.venueAssignmentId,
+      venueName: venue.venueName,
+      examDate: venue.examDate,
+      reportingTimeHour: venue.reportingTimeHour,
+      issuedAt: new Date().toISOString(),
+      expiresAt: `${venue.examDate}T23:59:59.000Z`,
+    };
+    const qrSignedToken = this.deps.invitationSigner.sign(claims);
+
     const event: SlotAssignedEvent = {
       ...newEnvelope(context),
       eventType: 'SLOT_ASSIGNED',
@@ -109,10 +148,12 @@ export class AssignSlotService {
       examDate: venue.examDate,
       reportingTimeHour: venue.reportingTimeHour,
       qrInvitationCode,
+      qrSignedToken,
     };
     await this.deps.eventBus.publish(event);
 
-    // Immutable audit of the assignment (venue is public; QR is an opaque token).
+    // Immutable audit of the assignment (venue is public; neither the ticket id
+    // nor the signed token — which carries only ids + the public venue — is PII).
     const audit: AuditEvent = {
       ...newEnvelope(context),
       eventType: 'AUDIT_ENTRY',
@@ -136,6 +177,7 @@ export class AssignSlotService {
       venueName: venue.venueName,
       examDate: venue.examDate,
       qrInvitationCode,
+      qrSignedToken,
       event,
     };
   }

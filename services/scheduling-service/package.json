@@ -26,6 +26,7 @@
     "@usrp/shared-database": "workspace:*",
     "@usrp/shared-events": "workspace:*",
     "@usrp/shared-http": "workspace:*",
+    "@usrp/shared-security": "workspace:*",
     "@usrp/shared-types": "workspace:*"
   },
   "devDependencies": {
