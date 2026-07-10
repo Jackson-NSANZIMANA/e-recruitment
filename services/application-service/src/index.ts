@@ -73,7 +73,10 @@ export {
   APPLICATION_PROJECTION_GROUP,
   startVettingResultConsumer,
 } from './adapters/events/vetting-result.consumer.js';
-export { startSlotAssignedConsumer } from './adapters/events/slot-assigned.consumer.js';
+export {
+  APPLICATION_SLOT_PROJECTION_GROUP,
+  startSlotAssignedConsumer,
+} from './adapters/events/slot-assigned.consumer.js';
 export { ProjectSlotAssignmentService } from './application/project-slot-assignment.service.js';
 export type {
   ProjectSlotAssignmentCommand,
