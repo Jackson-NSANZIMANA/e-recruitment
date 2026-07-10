@@ -21,10 +21,12 @@
 import { sql } from '@usrp/shared-database';
 import { InMemoryEventBus, KafkaEventBus, type EventBus } from '@usrp/shared-events';
 import { loadKafkaConfig } from '@usrp/shared-config';
+import { makeAuthVerifier } from '@usrp/shared-auth';
 import { startHttpServer } from '@usrp/shared-http';
 import { createApplicationService } from './index.js';
 import { loadApplicationConfig } from './config.js';
 import { submitApplicationRoute } from './adapters/http/submit-application.controller.js';
+import { listApplicationsRoute } from './adapters/http/list-applications.controller.js';
 import { startVettingResultConsumer } from './adapters/events/vetting-result.consumer.js';
 import { startSlotAssignedConsumer } from './adapters/events/slot-assigned.consumer.js';
 
@@ -49,6 +51,13 @@ async function main(): Promise<void> {
 
   const service = createApplicationService(config, bus);
 
+  // Ingress auth: verify inbound bearer tokens with the issuer public key.
+  const verify = makeAuthVerifier({
+    publicKeyPem: config.auth.authPublicKeyPem,
+    issuer: config.auth.jwtIssuer,
+    audience: config.auth.jwtAudience,
+  });
+
   // State-projection ingress: consume the vetting result topics and advance
   // applications. Subscribe BEFORE serving so a "ready" signal implies we are
   // consuming. Only meaningful with a real broker.
@@ -66,7 +75,10 @@ async function main(): Promise<void> {
   const server = await startHttpServer({
     serviceName: config.runtime.serviceName,
     port: config.runtime.port,
-    routes: [submitApplicationRoute(service.submit)],
+    routes: [
+      submitApplicationRoute(service.submit, verify), // system-token required
+      listApplicationsRoute(service.list, verify), // officer-token required
+    ],
     // Ready only when the database — the system-of-record — is reachable.
     readiness: async (): Promise<boolean> => {
       try {

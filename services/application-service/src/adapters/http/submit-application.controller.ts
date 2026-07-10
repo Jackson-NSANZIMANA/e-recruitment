@@ -16,6 +16,7 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { HttpError, type HttpResult, type Route } from '@usrp/shared-http';
+import { withAuth, type AuthVerifier } from '@usrp/shared-auth';
 import {
   ALL_CATEGORIES,
   APPLICATION_CHANNELS,
@@ -49,12 +50,20 @@ interface SubmitRequestBody {
   readonly hecRegistrationNumber?: unknown;
 }
 
-/** Build the `POST /v1/applications` route bound to the use case. */
-export function submitApplicationRoute(service: SubmitApplicationService): Route {
+/**
+ * Build the `POST /v1/applications` route bound to the use case. The front
+ * door is now service-internal: it requires a valid SYSTEM bearer token
+ * (withAuth → 401 unauthenticated, 403 for a non-system principal). Real
+ * applicant-facing auth is a separate, later slice.
+ */
+export function submitApplicationRoute(
+  service: SubmitApplicationService,
+  verify: AuthVerifier,
+): Route {
   return {
     method: 'POST',
     path: SUBMIT_APPLICATION_PATH,
-    handler: async (ctx): Promise<HttpResult> => {
+    handler: withAuth(verify, { kind: 'system' }, async (ctx, _principal): Promise<HttpResult> => {
       const body = await ctx.json<SubmitRequestBody>();
 
       const applicantId = body.applicantId;
@@ -98,7 +107,7 @@ export function submitApplicationRoute(service: SubmitApplicationService): Route
       }
 
       return mapOutcome(outcome);
-    },
+    }),
   };
 }
 

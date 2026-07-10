@@ -23,10 +23,12 @@
     "selfcheck:pipeline": "tsx selfcheck/verify-pipeline-e2e.ts"
   },
   "dependencies": {
+    "@usrp/shared-auth": "workspace:*",
     "@usrp/shared-config": "workspace:*",
     "@usrp/shared-database": "workspace:*",
     "@usrp/shared-events": "workspace:*",
     "@usrp/shared-http": "workspace:*",
+    "@usrp/shared-security": "workspace:*",
     "@usrp/shared-types": "workspace:*"
   },
   "devDependencies": {

@@ -11,8 +11,10 @@
 // ══════════════════════════════════════════════════════════════════
 
 import {
+  loadAuthVerifyConfig,
   loadDatabaseConfig,
   loadRuntimeConfig,
+  type AuthVerifyConfig,
   type DatabaseConfig,
   type EnvSource,
   type RuntimeConfig,
@@ -21,11 +23,15 @@ import {
 export interface ApplicationServiceConfig {
   readonly runtime: RuntimeConfig;
   readonly database: DatabaseConfig;
+  /** Ingress auth: the issuer public key + issuer/audience used to verify
+   *  inbound bearer tokens. Mandatory — every HTTP route is now authenticated. */
+  readonly auth: AuthVerifyConfig;
 }
 
 export function loadApplicationConfig(source: EnvSource = process.env): ApplicationServiceConfig {
   return {
     runtime: loadRuntimeConfig('application-service', source),
     database: loadDatabaseConfig(source),
+    auth: loadAuthVerifyConfig(source),
   };
 }

@@ -11,7 +11,9 @@ import type { EventBus } from '@usrp/shared-events';
 import { PgIdentityReader } from './adapters/identity.pg-reader.js';
 import { PgCampaignReader } from './adapters/campaign.pg-reader.js';
 import { PgApplicationRepository } from './adapters/application.pg-repository.js';
+import { PgApplicationReadRepository } from './adapters/application-read.pg-repository.js';
 import { SubmitApplicationService } from './application/submit-application.service.js';
+import { ListApplicationsService } from './application/list-applications.service.js';
 import { ProjectVettingResultService } from './application/project-vetting-result.service.js';
 import { ProjectSlotAssignmentService } from './application/project-slot-assignment.service.js';
 import type { ApplicationServiceConfig } from './config.js';
@@ -20,6 +22,8 @@ import type { ApplicationServiceConfig } from './config.js';
 export interface ApplicationService {
   /** HTTP front door — CREATE an application (POST /v1/applications). */
   readonly submit: SubmitApplicationService;
+  /** HTTP officer read — LIST an agency's applications (GET /v1/applications). */
+  readonly list: ListApplicationsService;
   /** Event projector — ADVANCE an application from vetting verdicts. */
   readonly projector: ProjectVettingResultService;
   /** Event projector — STAMP the exam slot (DOCUMENT_REVIEW_GREEN → SLOT_ASSIGNED). */
@@ -40,6 +44,7 @@ export function createApplicationService(
   const identityReader = new PgIdentityReader();
   const campaignReader = new PgCampaignReader();
   const repository = new PgApplicationRepository();
+  const readRepository = new PgApplicationReadRepository();
 
   return {
     submit: new SubmitApplicationService({
@@ -48,6 +53,7 @@ export function createApplicationService(
       repository,
       eventBus,
     }),
+    list: new ListApplicationsService({ reader: readRepository }),
     projector: new ProjectVettingResultService({ repository, eventBus }),
     slotProjector: new ProjectSlotAssignmentService({ repository, eventBus }),
   };
@@ -58,7 +64,17 @@ export {
   SUBMIT_APPLICATION_PATH,
   submitApplicationRoute,
 } from './adapters/http/submit-application.controller.js';
+export {
+  LIST_APPLICATIONS_PATH,
+  listApplicationsRoute,
+} from './adapters/http/list-applications.controller.js';
 export { SubmitApplicationService } from './application/submit-application.service.js';
+export { ListApplicationsService } from './application/list-applications.service.js';
+export type {
+  ListApplicationsCommand,
+  ListApplicationsDeps,
+  ListApplicationsOutcome,
+} from './application/list-applications.service.js';
 export type {
   SubmitApplicationCommand,
   SubmitApplicationDeps,
@@ -88,6 +104,12 @@ export { AGENCY_TARGET, schemaForAgency } from './domain/agency-schema.js';
 export { PgIdentityReader } from './adapters/identity.pg-reader.js';
 export { PgCampaignReader } from './adapters/campaign.pg-reader.js';
 export { PgApplicationRepository } from './adapters/application.pg-repository.js';
+export { PgApplicationReadRepository } from './adapters/application-read.pg-repository.js';
+export type {
+  ApplicationReadRepository,
+  ApplicationSummary,
+  ListByAgencyInput,
+} from './ports/application-read-repository.js';
 export { loadApplicationConfig } from './config.js';
 export type { ApplicationServiceConfig } from './config.js';
 export type { IdentityReader, ApplicantIdentitySummary } from './ports/identity-reader.js';
