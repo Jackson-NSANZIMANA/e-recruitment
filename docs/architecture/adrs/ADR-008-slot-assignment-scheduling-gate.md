@@ -124,6 +124,9 @@ the invariant it advertises actually true.
   minted, no district leak) and `NO_VENUE` deferral paths.
 - `verify-pipeline-e2e.ts` (extended) — one real submission drives
   age→academic→criminal→GREEN→`SLOT_ASSIGNED` end-to-end, no synthetic events.
-  NOTE: this full-chain proof crams every consumer group into one process on the
-  single-broker dev Kafka and is the platform's known flake surface; the
-  deterministic proofs above are the authoritative gate for this slice.
+  NOTE (2026-07-10): this proof was long dismissed as a "single-broker flake." It
+  was actually catching a real defect — the slot consumer shared the vetting
+  consumer group with a divergent subscription, causing perpetual rebalancing.
+  Fixed by giving the slot projection its own group; the proof is now
+  deterministic (10/10, ~14s) and the gate is 17/17. See
+  [pipeline-convergence-fix.md](../pipeline-convergence-fix.md).

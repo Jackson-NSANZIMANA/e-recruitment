@@ -70,14 +70,14 @@ Bootstrap applies `0008`; both new proofs are registered in `run-selfchecks.sh`.
 
 ## Known issues / open seams
 
-- **Pipeline e2e flake (test-harness only):** `verify-pipeline-e2e.ts` runs 3
-  `KafkaEventBus` instances and ~6 consumer groups in **one** process against the
-  single-broker dev Kafka. Under that load, consumer-group rebalancing causes
-  redelivery storms (observed: age gate looping, or transient NESA/HEC
-  unavailability) — a different failure each run. Production runs one process per
-  service and does not hit this. **Treat the deterministic proofs as the gate; the
-  full-chain proof is a headline demo.** Candidate hardening: stagger consumer
-  startup / widen the wait window.
+- **~~Pipeline e2e flake~~ — RESOLVED (2026-07-10).** This was NOT a
+  test-harness flake. `verify-pipeline-e2e.ts` was catching a real defect: the
+  slot-assignment consumer shared the vetting consumer group (`application-service`)
+  with a divergent topic subscription, so the group rebalanced perpetually — in
+  production too. Fixed by giving the slot projection its own group
+  (`application-service-slot`). The proof is now deterministic (10/10, ~14s; 0
+  rebalances) and the gate is 17/17. See
+  [pipeline-convergence-fix.md](./pipeline-convergence-fix.md).
 - `NO_VENUE` applications are not auto-rescheduled when a venue is later seeded
   (the `application.cleared` event already committed). Manual re-drive for now.
 - Downstream stages (`PHYSICAL_TEST_SCHEDULED` and beyond), `DOCUMENT_REVIEW_AMBER`
