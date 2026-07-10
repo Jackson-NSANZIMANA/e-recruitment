@@ -14,6 +14,7 @@ import type {
   CreateVerifiedIdentityInput,
   CreateVerifiedIdentityResult,
   IdentityRepository,
+  RecordBiometricResultInput,
 } from '../ports/identity.repository.js';
 import { IdentityPersistenceError } from '../domain/identity.errors.js';
 
@@ -106,6 +107,30 @@ export class PgIdentityRepository implements IdentityRepository {
     } catch (cause) {
       if (cause instanceof IdentityPersistenceError) throw cause;
       throw new IdentityPersistenceError('Failed to create verified identity', { cause });
+    }
+  }
+
+  async recordBiometricResult(
+    input: RecordBiometricResultInput,
+  ): Promise<'updated' | 'not_found'> {
+    // No PII: session id, verdict, and confidence only — no pgcrypto key needed.
+    try {
+      return await sql.begin(async (tx) => {
+        await tx`SET LOCAL ROLE ${sql(SYSTEM_ROLE)}`;
+        const rows = await tx<{ id: string }[]>`
+          UPDATE public_core.applicant_identities SET
+            biometric_session_id = ${input.sessionId},
+            biometric_passed_liveness = ${input.passedLiveness},
+            biometric_face_match_confidence = ${input.faceMatchConfidence.toFixed(2)},
+            biometric_verified_at = ${input.verified ? sql`now()` : sql`NULL`},
+            updated_at = now()
+          WHERE id = ${input.applicantId} AND deleted_at IS NULL
+          RETURNING id
+        `;
+        return rows.length > 0 ? 'updated' : 'not_found';
+      });
+    } catch (cause) {
+      throw new IdentityPersistenceError('Failed to record biometric result', { cause });
     }
   }
 }

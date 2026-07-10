@@ -16,9 +16,10 @@ import { InMemoryEventBus, KafkaEventBus, type EventBus } from '@usrp/shared-eve
 import { loadKafkaConfig } from '@usrp/shared-config';
 import { makeAuthVerifier } from '@usrp/shared-auth';
 import { startHttpServer } from '@usrp/shared-http';
-import { createIdentityService } from './index.js';
+import { createIdentityService, createBiometricResultProjector } from './index.js';
 import { loadIdentityConfig } from './config.js';
 import { verifyIdentityRoute } from './adapters/http/verify-identity.controller.js';
+import { startBiometricResultConsumer } from './adapters/events/biometric-result.consumer.js';
 
 function createEventBus(serviceName: string): EventBus {
   if (process.env['KAFKA_BROKERS']) {
@@ -40,6 +41,14 @@ async function main(): Promise<void> {
   await bus.connect();
 
   const service = createIdentityService(config, bus);
+
+  // Record biometric outcomes onto applicant_identities off the backbone.
+  // Subscribe BEFORE serving so a "ready" signal implies we are consuming.
+  // Only meaningful with a real broker.
+  if (process.env['KAFKA_BROKERS']) {
+    await startBiometricResultConsumer(bus, createBiometricResultProjector(config, bus));
+    console.log(JSON.stringify({ msg: 'event_consumers_started', topics: 'biometric.result' }));
+  }
 
   // Ingress auth: verify inbound bearer tokens with the issuer public key.
   const verify = makeAuthVerifier({

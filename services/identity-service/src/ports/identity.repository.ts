@@ -38,6 +38,16 @@ export interface CreateVerifiedIdentityResult {
   readonly created: boolean;
 }
 
+/** The exam-day biometric outcome to record onto the identity (scores/verdict only). */
+export interface RecordBiometricResultInput {
+  readonly applicantId: string;
+  readonly sessionId: string;
+  /** Overall pass (liveness AND face match) — drives biometric_verified_at. */
+  readonly verified: boolean;
+  readonly passedLiveness: boolean;
+  readonly faceMatchConfidence: number; // 0..100
+}
+
 export interface IdentityRepository {
   /** Return the applicant id for a national-id hash, or null if none. */
   findIdByNationalIdHash(nationalIdHash: string): Promise<string | null>;
@@ -50,4 +60,11 @@ export interface IdentityRepository {
   createVerifiedIdentity(
     input: CreateVerifiedIdentityInput,
   ): Promise<CreateVerifiedIdentityResult>;
+
+  /**
+   * Record the exam-day biometric outcome onto the applicant identity (scores
+   * and verdict only — no biometric data). Idempotent (a plain UPDATE); returns
+   * 'not_found' when no such identity exists (never a silent success).
+   */
+  recordBiometricResult(input: RecordBiometricResultInput): Promise<'updated' | 'not_found'>;
 }
