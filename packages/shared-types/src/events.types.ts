@@ -217,6 +217,21 @@ export interface FieldScoreCapturedEvent extends BaseEvent {
   readonly isWalkIn: boolean;            // Distinguishes pre-registered vs walk-in
 }
 
+// ── Topic: notification.delivered ─────────────────────────────────
+
+export interface NotificationDeliveredEvent extends BaseEvent {
+  readonly eventType: 'NOTIFICATION_DELIVERED';
+  readonly applicantId: string;
+  readonly applicationId: string;
+  readonly agency: Agency;
+  readonly notificationType: 'SLOT_INVITATION';
+  readonly channel: 'SMS' | 'EMAIL';
+  // The delivery OUTCOME only — PII-free. No phone/email, no QR token in the
+  // event. PENDING_NO_CONTACT means the schedule is active but no deliverable
+  // contact is on file yet (contact capture is a flagged follow-on).
+  readonly deliveryStatus: 'DELIVERED' | 'PENDING_NO_CONTACT' | 'FAILED';
+}
+
 // ── Topic: audit.immutable ────────────────────────────────────────
 
 export interface AuditEvent extends BaseEvent {
@@ -245,6 +260,7 @@ export type USRPEvent =
   | BiometricVerificationCompletedEvent
   | SlotAssignedEvent
   | FieldScoreCapturedEvent
+  | NotificationDeliveredEvent
   | AuditEvent;
 
 // ── Kafka Topic Names ─────────────────────────────────────────────
@@ -260,6 +276,7 @@ export const KAFKA_TOPICS = {
   BIOMETRIC_RESULT: 'biometric.result',
   SLOT_ASSIGNED: 'slot.assigned',
   FIELD_SCORE_CAPTURED: 'field.score.captured',
+  NOTIFICATION_DELIVERED: 'notification.delivered', // NEW — invitation delivery outcome → PHYSICAL_TEST_SCHEDULED
   AUDIT_IMMUTABLE: 'audit.immutable',
 } as const;
 
