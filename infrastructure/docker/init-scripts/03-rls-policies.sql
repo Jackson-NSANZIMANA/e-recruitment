@@ -5,8 +5,11 @@
 -- ══════════════════════════════════════════════════════════════════
 
 -- NOTE: RLS policies are applied to tables after Drizzle creates them.
--- This file contains the policy DEFINITIONS.
--- The migration runner applies them after schema creation.
+-- The AUTHORITATIVE policy definitions live in
+--   packages/shared-database/src/rls/0001_roles_grants_rls.sql (+ 0002..)
+-- and are applied by scripts/bootstrap-db.sh AFTER `pnpm db:migrate` creates
+-- the tables. This init-script intentionally stays a no-op placeholder so the
+-- rls/* migrations remain the single source of truth for grants + policies.
 
 -- Placeholder confirming RLS init script loaded:
 DO $$ BEGIN

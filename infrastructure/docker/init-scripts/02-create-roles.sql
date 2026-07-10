@@ -1,80 +1,39 @@
 -- ══════════════════════════════════════════════════════════════════
--- USRP — Database Role Hierarchy
--- Principle of least privilege throughout
+-- USRP — Database Role Hierarchy (canonical)
+--
+-- SINGLE SOURCE OF TRUTH for the role MODEL is packages/shared-database/
+-- src/rls/0001_roles_grants_rls.sql (+ 0002 for the audit writer), applied
+-- by scripts/bootstrap-db.sh. This init-script only pre-creates the SAME
+-- roles in the SAME shape so a fresh docker-entrypoint database already has
+-- them; every GRANT / RLS POLICY is owned by the rls/* migrations, not here.
+--
+-- The model (see rls/0001):
+--   • usrp_rdf_officer / usrp_rnp_officer / usrp_rcs_officer — NOLOGIN group
+--     roles, one per agency; each may read ONLY its own ops schema.
+--   • usrp_system_service — NOLOGIN group role for cross-agency workers.
+--   • usrp_audit_writer — NOLOGIN append-only audit role (created in rls/0002).
+--   • usrp_app — the ONE login role. It carries no privileges of its own; it
+--     assumes a group role per-transaction via SET LOCAL ROLE.
+--
+-- NOTE: officers are NOLOGIN here (not direct logins) and there is deliberately
+-- NO usrp_readonly / usrp_superadmin role — see the engagement decision on
+-- least-privilege (a superadmin DB role is added only when a concrete oversight
+-- requirement exists, as a dedicated SELECT-only role in a new rls migration).
 -- ══════════════════════════════════════════════════════════════════
 
--- ── Service Roles (used by backend microservices) ─────────────────
-DO $$ BEGIN
-  CREATE ROLE usrp_system_service LOGIN PASSWORD 'CHANGE_IN_PRODUCTION';
-  EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'Role usrp_system_service already exists';
-END $$;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='usrp_rdf_officer')    THEN CREATE ROLE usrp_rdf_officer    NOLOGIN; END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='usrp_rnp_officer')    THEN CREATE ROLE usrp_rnp_officer    NOLOGIN; END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='usrp_rcs_officer')    THEN CREATE ROLE usrp_rcs_officer    NOLOGIN; END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='usrp_system_service') THEN CREATE ROLE usrp_system_service NOLOGIN; END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='usrp_app')            THEN CREATE ROLE usrp_app LOGIN PASSWORD 'app_pw'; END IF;
+END$$;
 
--- ── Agency Officer Roles (used by BFF services) ───────────────────
-DO $$ BEGIN
-  CREATE ROLE usrp_rdf_officer LOGIN PASSWORD 'CHANGE_IN_PRODUCTION';
-  EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'Role usrp_rdf_officer already exists';
-END $$;
+-- usrp_app assumes agency/system roles via SET ROLE; it holds nothing itself.
+GRANT usrp_rdf_officer, usrp_rnp_officer, usrp_rcs_officer, usrp_system_service TO usrp_app;
 
-DO $$ BEGIN
-  CREATE ROLE usrp_rnp_officer LOGIN PASSWORD 'CHANGE_IN_PRODUCTION';
-  EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'Role usrp_rnp_officer already exists';
-END $$;
-
-DO $$ BEGIN
-  CREATE ROLE usrp_rcs_officer LOGIN PASSWORD 'CHANGE_IN_PRODUCTION';
-  EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'Role usrp_rcs_officer already exists';
-END $$;
-
--- ── Read-only Role (analytics, monitoring) ────────────────────────
-DO $$ BEGIN
-  CREATE ROLE usrp_readonly LOGIN PASSWORD 'CHANGE_IN_PRODUCTION';
-  EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'Role usrp_readonly already exists';
-END $$;
-
--- ── Superadmin (MoD oversight only) ──────────────────────────────
-DO $$ BEGIN
-  CREATE ROLE usrp_superadmin LOGIN PASSWORD 'CHANGE_IN_PRODUCTION';
-  EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'Role usrp_superadmin already exists';
-END $$;
-
--- ── Schema Grants: System Service (full access for vetting workers) 
-GRANT USAGE ON SCHEMA public_core TO usrp_system_service;
-GRANT USAGE ON SCHEMA rdf_ops TO usrp_system_service;
-GRANT USAGE ON SCHEMA rnp_ops TO usrp_system_service;
-GRANT USAGE ON SCHEMA rcs_ops TO usrp_system_service;
-GRANT USAGE ON SCHEMA audit_log TO usrp_system_service;
-
--- ── Schema Grants: Agency Officers (ISOLATED — cross-access denied)
-GRANT USAGE ON SCHEMA public_core TO usrp_rdf_officer;
-GRANT USAGE ON SCHEMA rdf_ops TO usrp_rdf_officer;
--- CRITICAL: RDF cannot see RNP or RCS schemas
-REVOKE ALL ON SCHEMA rnp_ops FROM usrp_rdf_officer;
-REVOKE ALL ON SCHEMA rcs_ops FROM usrp_rdf_officer;
-
-GRANT USAGE ON SCHEMA public_core TO usrp_rnp_officer;
-GRANT USAGE ON SCHEMA rnp_ops TO usrp_rnp_officer;
-REVOKE ALL ON SCHEMA rdf_ops FROM usrp_rnp_officer;
-REVOKE ALL ON SCHEMA rcs_ops FROM usrp_rnp_officer;
-
-GRANT USAGE ON SCHEMA public_core TO usrp_rcs_officer;
-GRANT USAGE ON SCHEMA rcs_ops TO usrp_rcs_officer;
-REVOKE ALL ON SCHEMA rdf_ops FROM usrp_rcs_officer;
-REVOKE ALL ON SCHEMA rnp_ops FROM usrp_rcs_officer;
-
--- ── Schema Grants: Superadmin (read all, no delete) ───────────────
-GRANT USAGE ON SCHEMA public_core TO usrp_superadmin;
-GRANT USAGE ON SCHEMA rdf_ops TO usrp_superadmin;
-GRANT USAGE ON SCHEMA rnp_ops TO usrp_superadmin;
-GRANT USAGE ON SCHEMA rcs_ops TO usrp_superadmin;
-GRANT USAGE ON SCHEMA audit_log TO usrp_superadmin;
-
--- ── Audit log: append-only enforcement ───────────────────────────
--- Even superadmin cannot delete audit records
-REVOKE DELETE ON ALL TABLES IN SCHEMA audit_log FROM usrp_superadmin;
-REVOKE UPDATE ON ALL TABLES IN SCHEMA audit_log FROM usrp_superadmin;
-REVOKE DELETE ON ALL TABLES IN SCHEMA audit_log FROM usrp_system_service;
-REVOKE UPDATE ON ALL TABLES IN SCHEMA audit_log FROM usrp_system_service;
-
-SELECT rolname FROM pg_roles 
-WHERE rolname LIKE 'usrp_%' 
+SELECT rolname, rolcanlogin
+FROM pg_roles
+WHERE rolname LIKE 'usrp_%'
 ORDER BY rolname;
