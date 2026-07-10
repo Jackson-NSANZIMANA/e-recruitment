@@ -15,16 +15,42 @@
 //   pnpm --filter @usrp/application-service selfcheck
 // ══════════════════════════════════════════════════════════════════
 
+import { createPublicKey } from 'node:crypto';
 import postgres from 'postgres';
 import { InMemoryEventBus } from '@usrp/shared-events';
 import { sql } from '@usrp/shared-database';
 import { startHttpServer } from '@usrp/shared-http';
+import { generateDeviceKeyPair } from '@usrp/shared-security';
+import { makeAuthVerifier, signAuthToken, type AuthTokenClaims } from '@usrp/shared-auth';
 import {
   createApplicationService,
   loadApplicationConfig,
   submitApplicationRoute,
   SUBMIT_APPLICATION_PATH,
 } from '../src/index.js';
+
+// Self-provision an ephemeral issuer keypair BEFORE loading config: the front
+// door is now service-internal (requires a valid SYSTEM bearer token). We set
+// the verify public key in the environment the config reads, and mint a system
+// token with the matching private key to authenticate every POST.
+const AUTH_KEYS = generateDeviceKeyPair();
+process.env['AUTH_JWT_PUBLIC_KEY_B64'] = Buffer.from(
+  createPublicKey(AUTH_KEYS.publicKeyPem).export({ type: 'spki', format: 'pem' }).toString(),
+  'utf8',
+).toString('base64');
+
+function mintSystemToken(): string {
+  const claims: AuthTokenClaims = {
+    v: 1,
+    iss: 'usrp',
+    aud: 'usrp-services',
+    sub: 'selfcheck-system',
+    kind: 'system',
+    issuedAt: '2026-01-01T00:00:00.000Z',
+    expiresAt: '2999-01-01T00:00:00.000Z',
+  };
+  return signAuthToken(AUTH_KEYS.privateKeyPem, claims);
+}
 
 const ADMIN_URL =
   process.env['ADMIN_DATABASE_URL'] ??
@@ -111,6 +137,12 @@ async function main(): Promise<void> {
   const config = loadApplicationConfig();
   const bus = new InMemoryEventBus();
   const service = createApplicationService(config, bus);
+  const verify = makeAuthVerifier({
+    publicKeyPem: config.auth.authPublicKeyPem,
+    issuer: config.auth.jwtIssuer,
+    audience: config.auth.jwtAudience,
+  });
+  const SYSTEM_TOKEN = mintSystemToken();
 
   await cleanup();
   await seed();
@@ -119,7 +151,7 @@ async function main(): Promise<void> {
     serviceName: 'application-service-selfcheck',
     port: 0,
     host: '127.0.0.1',
-    routes: [submitApplicationRoute(service.submit)],
+    routes: [submitApplicationRoute(service.submit, verify)],
     readiness: async (): Promise<boolean> => {
       try {
         await sql`SELECT 1`;
@@ -155,7 +187,12 @@ async function main(): Promise<void> {
     return { status: res.status, text, json, headers: res.headers };
   }
 
-  const JSON_HEADERS: Record<string, string> = { 'content-type': 'application/json' };
+  // Every business POST carries a valid system bearer token (the front door is
+  // service-internal now). The auth-specific assertions below override this.
+  const JSON_HEADERS: Record<string, string> = {
+    'content-type': 'application/json',
+    authorization: `Bearer ${SYSTEM_TOKEN}`,
+  };
   const asRecord = (v: unknown): Record<string, unknown> =>
     v !== null && typeof v === 'object' ? (v as Record<string, unknown>) : {};
 
@@ -241,6 +278,27 @@ async function main(): Promise<void> {
     check('application row is in rnp_ops', inRnp[0]?.n === 1, String(inRnp[0]?.n));
     const inRdf = await admin<{ n: number }[]>`SELECT count(*)::int AS n FROM rdf_ops.applications WHERE id = ${rnpAppId}`;
     check('application row is NOT in rdf_ops (isolation)', inRdf[0]?.n === 0, String(inRdf[0]?.n));
+
+    console.log('\n── 3c. Front door is service-internal (auth enforced) ────────');
+    // No token → 401; a non-system principal (officer token) → 403; a valid
+    // system token → passes the gate (proven by every 201 above).
+    const noAuth = await call('POST', SUBMIT_APPLICATION_PATH, {
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ applicantId: VERIFIED_ID, category: 'GENERAL_ENLISTMENT', channel: 'WEB', nesaIndexNumber: NESA_INDEX }),
+    });
+    check('unauthenticated POST → 401', noAuth.status === 401, `got ${noAuth.status} ${noAuth.text}`);
+
+    const officerClaims: AuthTokenClaims = {
+      v: 1, iss: 'usrp', aud: 'usrp-services', sub: 'selfcheck-officer', kind: 'officer',
+      agency: 'RDF', roles: [], issuedAt: '2026-01-01T00:00:00.000Z', expiresAt: '2999-01-01T00:00:00.000Z',
+    };
+    const officerToken = signAuthToken(AUTH_KEYS.privateKeyPem, officerClaims);
+    const wrongKind = await call('POST', SUBMIT_APPLICATION_PATH, {
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${officerToken}` },
+      body: JSON.stringify({ applicantId: VERIFIED_ID, category: 'GENERAL_ENLISTMENT', channel: 'WEB', nesaIndexNumber: NESA_INDEX }),
+    });
+    check('officer token on system route → 403', wrongKind.status === 403, `got ${wrongKind.status} ${wrongKind.text}`);
+    check('no events from auth-rejected submissions', bus.published.length === 2, `got ${bus.published.length}`);
 
     console.log('\n── 4. Business rejections (return-value outcomes) ────────────');
     const notFound = await call('POST', SUBMIT_APPLICATION_PATH, {

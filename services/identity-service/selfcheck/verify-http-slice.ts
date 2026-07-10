@@ -17,12 +17,32 @@
 //   pnpm --filter @usrp/identity-service selfcheck:http
 // ══════════════════════════════════════════════════════════════════
 
+import { createPublicKey } from 'node:crypto';
 import postgres from 'postgres';
-import { hashNationalId } from '@usrp/shared-security';
+import { generateDeviceKeyPair, hashNationalId } from '@usrp/shared-security';
+import { makeAuthVerifier, signAuthToken, type AuthTokenClaims } from '@usrp/shared-auth';
 import { InMemoryEventBus } from '@usrp/shared-events';
 import { sql } from '@usrp/shared-database';
 import { startHttpServer } from '@usrp/shared-http';
 import { createIdentityService, loadIdentityConfig, verifyIdentityRoute } from '../src/index.js';
+
+// Self-provision an ephemeral issuer key BEFORE loading config (the front door
+// is service-internal now — every verify call needs a valid SYSTEM token).
+const AUTH_KEYS = generateDeviceKeyPair();
+process.env['AUTH_JWT_PUBLIC_KEY_B64'] = Buffer.from(
+  createPublicKey(AUTH_KEYS.publicKeyPem).export({ type: 'spki', format: 'pem' }).toString(),
+  'utf8',
+).toString('base64');
+
+function mintToken(kind: 'system' | 'officer'): string {
+  const base = {
+    v: 1 as const, iss: 'usrp', aud: 'usrp-services', sub: `selfcheck-${kind}`,
+    issuedAt: '2026-01-01T00:00:00.000Z', expiresAt: '2999-01-01T00:00:00.000Z',
+  };
+  const claims: AuthTokenClaims =
+    kind === 'officer' ? { ...base, kind, agency: 'RDF', roles: [] } : { ...base, kind };
+  return signAuthToken(AUTH_KEYS.privateKeyPem, claims);
+}
 
 const ADMIN_URL =
   process.env['ADMIN_DATABASE_URL'] ??
@@ -53,6 +73,12 @@ async function main(): Promise<void> {
   const config = loadIdentityConfig();
   const bus = new InMemoryEventBus();
   const service = createIdentityService(config, bus);
+  const verify = makeAuthVerifier({
+    publicKeyPem: config.auth.authPublicKeyPem,
+    issuer: config.auth.jwtIssuer,
+    audience: config.auth.jwtAudience,
+  });
+  const SYSTEM_TOKEN = mintToken('system');
 
   const citizenHash = hashNationalId(CITIZEN_NID, config.security.nationalIdHmacKey);
   const unknownHash = hashNationalId(UNKNOWN_NID, config.security.nationalIdHmacKey);
@@ -62,7 +88,7 @@ async function main(): Promise<void> {
     serviceName: 'identity-service-selfcheck',
     port: 0,
     host: '127.0.0.1',
-    routes: [verifyIdentityRoute(service)],
+    routes: [verifyIdentityRoute(service, verify)],
     readiness: async (): Promise<boolean> => {
       try {
         await sql`SELECT 1`;
@@ -99,7 +125,12 @@ async function main(): Promise<void> {
     return { status: res.status, text, json, headers: res.headers };
   }
 
-  const JSON_HEADERS: Record<string, string> = { 'content-type': 'application/json' };
+  // Every business POST carries a valid system bearer token (service-internal
+  // front door). Auth-specific assertions below override this.
+  const JSON_HEADERS: Record<string, string> = {
+    'content-type': 'application/json',
+    authorization: `Bearer ${SYSTEM_TOKEN}`,
+  };
   const asRecord = (v: unknown): Record<string, unknown> =>
     v !== null && typeof v === 'object' ? (v as Record<string, unknown>) : {};
 
@@ -159,8 +190,21 @@ async function main(): Promise<void> {
     const badChannel = await call('POST', VERIFY_PATH, { headers: JSON_HEADERS, body: JSON.stringify({ nationalId: CITIZEN_NID, channel: 'ARMY' }) });
     check('invalid channel → 400 INVALID_CHANNEL', badChannel.status === 400 && asRecord(badChannel.json)['error'] === 'INVALID_CHANNEL', `${badChannel.status} ${badChannel.text}`);
 
+    console.log('\n── 4b. Front door is service-internal (auth enforced) ────────');
+    const noAuth = await call('POST', VERIFY_PATH, {
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ nationalId: CITIZEN_NID, channel: 'WEB' }),
+    });
+    check('unauthenticated POST → 401', noAuth.status === 401, `got ${noAuth.status} ${noAuth.text}`);
+    const officerToken = mintToken('officer');
+    const wrongKind = await call('POST', VERIFY_PATH, {
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${officerToken}` },
+      body: JSON.stringify({ nationalId: CITIZEN_NID, channel: 'WEB' }),
+    });
+    check('officer token on system route → 403', wrongKind.status === 403, `got ${wrongKind.status} ${wrongKind.text}`);
+
     console.log('\n── 5. Body / content-type handling ──────────────────────────');
-    const wrongType = await call('POST', VERIFY_PATH, { headers: { 'content-type': 'text/plain' }, body: 'hello' });
+    const wrongType = await call('POST', VERIFY_PATH, { headers: { ...JSON_HEADERS, 'content-type': 'text/plain' }, body: 'hello' });
     check('non-JSON content-type → 415', wrongType.status === 415, `got ${wrongType.status}`);
     const badJson = await call('POST', VERIFY_PATH, { headers: JSON_HEADERS, body: '{ not json' });
     check('malformed JSON → 400 MALFORMED_JSON', badJson.status === 400 && asRecord(badJson.json)['error'] === 'MALFORMED_JSON', `${badJson.status} ${badJson.text}`);

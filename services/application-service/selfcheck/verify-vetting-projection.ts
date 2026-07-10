@@ -19,7 +19,7 @@
 //   pnpm --filter @usrp/application-service selfcheck:projection
 // ══════════════════════════════════════════════════════════════════
 
-import { randomUUID } from 'node:crypto';
+import { randomUUID, generateKeyPairSync } from 'node:crypto';
 import postgres from 'postgres';
 import type {
   Agency,
@@ -42,6 +42,17 @@ const ADMIN_URL =
   process.env['ADMIN_DATABASE_URL'] ??
   'postgresql://usrp_admin:usrp_dev_password@localhost:5432/usrp_db';
 const admin = postgres(ADMIN_URL, { onnotice: () => {} });
+
+// loadApplicationConfig now requires an auth verify key. This proof drives the
+// projector directly (no HTTP, no auth wrapper), so it just needs config to
+// load — provide an ephemeral public key.
+if (process.env['AUTH_JWT_PUBLIC_KEY_B64'] === undefined) {
+  const authKey = generateKeyPairSync('ed25519');
+  process.env['AUTH_JWT_PUBLIC_KEY_B64'] = Buffer.from(
+    authKey.publicKey.export({ type: 'spki', format: 'pem' }).toString(),
+    'utf8',
+  ).toString('base64');
+}
 
 const APPLICANT_ID = '2a2a2a2a-2a2a-4a2a-8a2a-2a2a2a2a2a2a';
 const NID_HASH = 'a1b2c3d4'.repeat(8);

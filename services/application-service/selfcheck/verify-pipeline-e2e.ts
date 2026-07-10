@@ -78,6 +78,17 @@ const ADMIN_URL =
 const admin = postgres(ADMIN_URL, { onnotice: () => {} });
 const ENCRYPTION_KEY = process.env['PII_ENCRYPTION_KEY'] ?? 'dev_pii_encryption_key_min_32_chars_ok!!';
 
+// loadApplicationConfig now requires an auth verify key. This proof files
+// submissions via the use case directly (not HTTP), so it never hits the auth
+// wrapper — it just needs config to load. Provide an ephemeral public key.
+if (process.env['AUTH_JWT_PUBLIC_KEY_B64'] === undefined) {
+  const authKey = generateKeyPairSync('ed25519');
+  process.env['AUTH_JWT_PUBLIC_KEY_B64'] = Buffer.from(
+    authKey.publicKey.export({ type: 'spki', format: 'pem' }).toString(),
+    'utf8',
+  ).toString('base64');
+}
+
 const FIXTURE_DOB = '2003-03-15'; // ~23 → inside GENERAL_ENLISTMENT band
 const HOME_DISTRICT = 'GASABO'; // must match the seeded venue district
 const CATEGORY: ApplicationCategory = 'GENERAL_ENLISTMENT'; // RDF

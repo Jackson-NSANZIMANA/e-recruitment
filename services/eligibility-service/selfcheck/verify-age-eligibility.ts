@@ -20,6 +20,8 @@ import postgres from 'postgres';
 import { sql } from '@usrp/shared-database';
 import { InMemoryEventBus } from '@usrp/shared-events';
 import { startHttpServer } from '@usrp/shared-http';
+// Import BEFORE loadEligibilityConfig — provisions the auth verify key at import time.
+import { AUTH_HEADER, OFFICER_TOKEN, testVerifier } from './_auth-fixture.js';
 import { ageEligibilityRoute, ageInYears, createEligibilityService, loadEligibilityConfig } from '../src/index.js';
 
 const ADMIN_URL =
@@ -108,7 +110,7 @@ async function main(): Promise<void> {
     serviceName: 'eligibility-service-selfcheck',
     port: 0,
     host: '127.0.0.1',
-    routes: [ageEligibilityRoute(service)],
+    routes: [ageEligibilityRoute(service, testVerifier)],
     readiness: async (): Promise<boolean> => {
       try {
         await sql`SELECT 1`;
@@ -143,7 +145,8 @@ async function main(): Promise<void> {
     }
     return { status: res.status, text, json, headers: res.headers };
   }
-  const JSON_HEADERS: Record<string, string> = { 'content-type': 'application/json' };
+  // Business POSTs carry a valid system bearer token (service-internal front door).
+  const JSON_HEADERS: Record<string, string> = { 'content-type': 'application/json', ...AUTH_HEADER };
 
   try {
     console.log('\n── 1. Verified applicant, in-band category → EVALUATED eligible ──');
@@ -197,6 +200,18 @@ async function main(): Promise<void> {
     check('bad applicantId → 400 INVALID_APPLICANT_ID', badId.status === 400 && asRecord(badId.json)['error'] === 'INVALID_APPLICANT_ID', `${badId.status} ${badId.text}`);
     const badCat = await call('POST', AGE_CHECK, { headers: JSON_HEADERS, body: JSON.stringify({ applicantId: verifiedId, category: 'NOT_A_CATEGORY' }) });
     check('bad category → 400 INVALID_CATEGORY', badCat.status === 400 && asRecord(badCat.json)['error'] === 'INVALID_CATEGORY', `${badCat.status} ${badCat.text}`);
+
+    console.log('\n── 5b. Front door is service-internal (auth enforced) ────────');
+    const noAuth = await call('POST', AGE_CHECK, {
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ applicantId: verifiedId, category: 'GENERAL_ENLISTMENT' }),
+    });
+    check('unauthenticated POST → 401', noAuth.status === 401, `got ${noAuth.status} ${noAuth.text}`);
+    const wrongKind = await call('POST', AGE_CHECK, {
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${OFFICER_TOKEN}` },
+      body: JSON.stringify({ applicantId: verifiedId, category: 'GENERAL_ENLISTMENT' }),
+    });
+    check('officer token on system route → 403', wrongKind.status === 403, `got ${wrongKind.status} ${wrongKind.text}`);
 
     console.log('\n── 6. Health & readiness ────────────────────────────────────');
     const health = await call('GET', '/health');

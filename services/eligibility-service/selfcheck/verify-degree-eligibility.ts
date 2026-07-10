@@ -26,6 +26,7 @@ import postgres from 'postgres';
 import { sql } from '@usrp/shared-database';
 import { InMemoryEventBus, type EventBus } from '@usrp/shared-events';
 import { startHttpServer } from '@usrp/shared-http';
+import { AUTH_HEADER, OFFICER_TOKEN, SYSTEM_TOKEN, testVerifier } from './_auth-fixture.js';
 import {
   DEGREE_CHECK_PATH,
   HecHttpGateway,
@@ -119,7 +120,7 @@ function buildRoute(bus: EventBus, fetchImpl?: typeof fetch) {
     ...(fetchImpl ? { fetchImpl } : {}),
   });
   const service = new VerifyHecEducationService({ identityReader, hecGateway, eventBus: bus });
-  return degreeCheckRoute(service);
+  return degreeCheckRoute(service, testVerifier);
 }
 
 async function main(): Promise<void> {
@@ -155,10 +156,12 @@ async function main(): Promise<void> {
   const base = server.url;
 
   const bodies: string[] = [];
+  // Business POSTs carry a valid system bearer token; a caller can override the
+  // Authorization header to exercise the auth failure paths.
   async function call(body: unknown, headers: Record<string, string> = {}): Promise<{ status: number; text: string; json: unknown; headers: Headers }> {
     const res = await fetch(`${base}${DEGREE_CHECK_PATH}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', ...headers },
+      headers: { 'content-type': 'application/json', ...AUTH_HEADER, ...headers },
       body: JSON.stringify(body),
     });
     const text = await res.text();
@@ -256,6 +259,18 @@ async function main(): Promise<void> {
     const badReg = await call({ applicantId: uwimanaId, applicationId: APPLICATION_ID, category: 'RESERVE_FORCE_UNIVERSITY', hecRegistrationNumber: '!!' });
     check('bad registration → 400 INVALID_HEC_REGISTRATION', badReg.status === 400 && asRecord(badReg.json)['error'] === 'INVALID_HEC_REGISTRATION', `${badReg.status} ${badReg.text}`);
 
+    console.log('\n── 10b. Front door is service-internal (auth enforced) ──');
+    const noAuth = await call(
+      { applicantId: uwimanaId, applicationId: APPLICATION_ID, category: 'RESERVE_FORCE_UNIVERSITY', hecRegistrationNumber: REG_ENG_BACHELOR },
+      { authorization: 'Bearer not-a-valid-token' },
+    );
+    check('invalid token → 401', noAuth.status === 401, `got ${noAuth.status} ${noAuth.text}`);
+    const wrongKind = await call(
+      { applicantId: uwimanaId, applicationId: APPLICATION_ID, category: 'RESERVE_FORCE_UNIVERSITY', hecRegistrationNumber: REG_ENG_BACHELOR },
+      { authorization: `Bearer ${OFFICER_TOKEN}` },
+    );
+    check('officer token on system route → 403', wrongKind.status === 403, `got ${wrongKind.status} ${wrongKind.text}`);
+
     console.log('\n── 11. HEC unreachable → 503 HEC_UNAVAILABLE (no event) ──');
     const failBus = new InMemoryEventBus();
     const failFetch: typeof fetch = () => Promise.reject(new Error('ECONNREFUSED'));
@@ -269,7 +284,7 @@ async function main(): Promise<void> {
     try {
       const res = await fetch(`${failServer.url}${DEGREE_CHECK_PATH}`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${SYSTEM_TOKEN}` },
         body: JSON.stringify({ applicantId: uwimanaId, applicationId: APPLICATION_ID, category: 'RESERVE_FORCE_UNIVERSITY', hecRegistrationNumber: REG_ENG_BACHELOR }),
       });
       const txt = await res.text();

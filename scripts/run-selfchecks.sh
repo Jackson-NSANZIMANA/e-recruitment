@@ -36,6 +36,11 @@ export RIB_BASE_URL="${RIB_BASE_URL:-http://localhost:3102}"
 export RIB_HMAC_SECRET="${RIB_HMAC_SECRET:-dev_rib_hmac_secret}"
 export NATIONAL_ID_HMAC_KEY="${NATIONAL_ID_HMAC_KEY:-dev_national_id_hmac_key_min_32_chars!!}"
 export PII_ENCRYPTION_KEY="${PII_ENCRYPTION_KEY:-dev_pii_encryption_key_min_32_chars_ok!!}"
+# Auth (Ed25519 asymmetric bearer tokens). A committed DEV-ONLY keypair — same
+# pattern as the QR signing dev key. The PUBLIC key is what services verify
+# with; the PRIVATE key lets proofs mint tokens. Real keys come from HSM/KMS.
+export AUTH_JWT_PUBLIC_KEY_B64="${AUTH_JWT_PUBLIC_KEY_B64:-LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUNvd0JRWURLMlZ3QXlFQUpjb2FtWEM1NFMvTk51UDRlcXVzLzh5dlhuTk5yTkRhK0JGWFFuSkU1QzQ9Ci0tLS0tRU5EIFBVQkxJQyBLRVktLS0tLQo=}"
+export AUTH_JWT_PRIVATE_KEY_B64="${AUTH_JWT_PRIVATE_KEY_B64:-LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCk1DNENBUUF3QlFZREsyVndCQ0lFSUlUaGJCTVJ0Sm9WQUwzUURrK29yZUgwVTludWw3RUNBNFdRRUxiV21LZmwKLS0tLS1FTkQgUFJJVkFURSBLRVktLS0tLQo=}"
 
 PG_CONTAINER="${PG_CONTAINER:-usrp-postgres}"
 PG_ADMIN_USER="${PG_ADMIN_USER:-usrp_admin}"
@@ -69,10 +74,12 @@ fi
 # ── 2. The service & backbone selfchecks, in dependency order ──────
 # Deterministic crypto proofs first — no infra, fastest signal.
 run_ts "shared-security: signed slot invitation"  packages/shared-security/selfcheck/verify-slot-invitation.ts
+run_ts "shared-auth: signed bearer token + enforcement" packages/shared-auth/selfcheck/verify-auth-token.ts
 run_ts "shared-events: Kafka round-trip"          packages/shared-events/selfcheck/verify-kafka-roundtrip.ts
 run_ts "identity-service: core slice"             services/identity-service/selfcheck/verify-slice.ts
 run_ts "identity-service: HTTP slice"             services/identity-service/selfcheck/verify-http-slice.ts
 run_ts "application-service: front-door submit"   services/application-service/selfcheck/verify-submit-http-slice.ts
+run_ts "application-service: officer auth + RLS"  services/application-service/selfcheck/verify-auth-slice.ts
 run_ts "application-service: lifecycle monotonicity" services/application-service/selfcheck/verify-lifecycle.ts
 run_ts "application-service: vetting projection"   services/application-service/selfcheck/verify-vetting-projection.ts
 run_ts "application-service: history immutability" services/application-service/selfcheck/verify-history-immutability.ts

@@ -23,6 +23,7 @@ import postgres from 'postgres';
 import { sql } from '@usrp/shared-database';
 import { InMemoryEventBus, type EventBus } from '@usrp/shared-events';
 import { startHttpServer } from '@usrp/shared-http';
+import { AUTH_HEADER, OFFICER_TOKEN, SYSTEM_TOKEN, testVerifier } from './_auth-fixture.js';
 import {
   EDUCATION_CHECK_PATH,
   NesaHttpGateway,
@@ -104,7 +105,7 @@ function buildRoute(bus: EventBus, fetchImpl?: typeof fetch) {
     ...(fetchImpl ? { fetchImpl } : {}),
   });
   const service = new VerifyNesaEducationService({ identityReader, nesaGateway, eventBus: bus });
-  return educationCheckRoute(service);
+  return educationCheckRoute(service, testVerifier);
 }
 
 async function main(): Promise<void> {
@@ -134,10 +135,12 @@ async function main(): Promise<void> {
   const base = server.url;
 
   const bodies: string[] = [];
+  // Business POSTs carry a valid system bearer token; a caller can override the
+  // Authorization header to exercise the auth failure paths.
   async function call(body: unknown, headers: Record<string, string> = {}): Promise<{ status: number; text: string; json: unknown; headers: Headers }> {
     const res = await fetch(`${base}${EDUCATION_CHECK_PATH}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', ...headers },
+      headers: { 'content-type': 'application/json', ...AUTH_HEADER, ...headers },
       body: JSON.stringify(body),
     });
     const text = await res.text();
@@ -222,6 +225,18 @@ async function main(): Promise<void> {
     const badIdx = await call({ applicantId: verifiedId, applicationId: APPLICATION_ID, category: 'GENERAL_ENLISTMENT', nesaIndexNumber: '!!' });
     check('bad index → 400 INVALID_NESA_INDEX', badIdx.status === 400 && asRecord(badIdx.json)['error'] === 'INVALID_NESA_INDEX', `${badIdx.status} ${badIdx.text}`);
 
+    console.log('\n── 8b. Front door is service-internal (auth enforced) ──');
+    const noAuth = await call(
+      { applicantId: verifiedId, applicationId: APPLICATION_ID, category: 'GENERAL_ENLISTMENT', nesaIndexNumber: 'RW2024/1001' },
+      { authorization: 'Bearer not-a-valid-token' },
+    );
+    check('invalid token → 401', noAuth.status === 401, `got ${noAuth.status} ${noAuth.text}`);
+    const wrongKind = await call(
+      { applicantId: verifiedId, applicationId: APPLICATION_ID, category: 'GENERAL_ENLISTMENT', nesaIndexNumber: 'RW2024/1001' },
+      { authorization: `Bearer ${OFFICER_TOKEN}` },
+    );
+    check('officer token on system route → 403', wrongKind.status === 403, `got ${wrongKind.status} ${wrongKind.text}`);
+
     console.log('\n── 9. NESA unreachable → 503 NESA_UNAVAILABLE ──');
     const failBus = new InMemoryEventBus();
     const failFetch: typeof fetch = () => Promise.reject(new Error('ECONNREFUSED'));
@@ -235,7 +250,7 @@ async function main(): Promise<void> {
     try {
       const res = await fetch(`${failServer.url}${EDUCATION_CHECK_PATH}`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${SYSTEM_TOKEN}` },
         body: JSON.stringify({ applicantId: verifiedId, applicationId: APPLICATION_ID, category: 'GENERAL_ENLISTMENT', nesaIndexNumber: 'RW2024/1001' }),
       });
       const txt = await res.text();
