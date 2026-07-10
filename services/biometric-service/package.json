@@ -1,0 +1,40 @@
+{
+  "name": "@usrp/biometric-service",
+  "version": "1.0.0",
+  "private": true,
+  "description": "USRP Biometric Service — exam-day check-in gate: verifies the applicant's signed QR offline, runs a 1:1 face-match + liveness check, emits biometric.result (scores only, no raw frames)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "start:dev": "tsx src/main.ts",
+    "dev": "tsx watch src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/**/*.ts",
+    "selfcheck": "tsx selfcheck/verify-biometric-slice.ts"
+  },
+  "dependencies": {
+    "@usrp/shared-auth": "workspace:*",
+    "@usrp/shared-config": "workspace:*",
+    "@usrp/shared-events": "workspace:*",
+    "@usrp/shared-http": "workspace:*",
+    "@usrp/shared-security": "workspace:*",
+    "@usrp/shared-types": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@usrp/identity-service": "workspace:*",
+    "@usrp/shared-database": "workspace:*",
+    "postgres": "^3.4.5",
+    "tsx": "^4.21.0",
+    "typescript": "^5.8.3"
+  }
+}
