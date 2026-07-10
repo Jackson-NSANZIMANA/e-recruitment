@@ -1,0 +1,30 @@
+{
+  "name": "@usrp/shared-auth",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Zero-dependency human auth for USRP (Ed25519 bearer tokens, Principal, principal→DB-role policy, HTTP enforcement wrapper)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/**/*.ts"
+  },
+  "dependencies": {
+    "@usrp/shared-types": "workspace:*",
+    "@usrp/shared-security": "workspace:*",
+    "@usrp/shared-http": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.8.3"
+  }
+}
