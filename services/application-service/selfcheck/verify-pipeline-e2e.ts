@@ -43,7 +43,7 @@
 //   pnpm --filter @usrp/application-service selfcheck:pipeline
 // ══════════════════════════════════════════════════════════════════
 
-import { randomUUID, randomBytes } from 'node:crypto';
+import { randomUUID, randomBytes, generateKeyPairSync } from 'node:crypto';
 import postgres from 'postgres';
 import type { ApplicationCategory, ApplicationEligibilityClearedEvent } from '@usrp/shared-types';
 import { sql } from '@usrp/shared-database';
@@ -218,6 +218,32 @@ async function awaitStatus(
   return false;
 }
 
+// Await a status that may be a TRANSIENT waypoint (e.g. DOCUMENT_REVIEW_GREEN,
+// which scheduling now auto-advances to SLOT_ASSIGNED within milliseconds). We
+// poll the status HISTORY, which is append-only and monotonic — so we catch the
+// waypoint even if the live row has already moved past it. This is the robust
+// way to assert "the pipeline reached X" in a fully autonomous chain.
+async function awaitReached(
+  appId: string,
+  target: string,
+  nudge: () => Promise<void>,
+  desc: string,
+  timeoutMs = 60_000,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  let lastNudge = 0;
+  while (Date.now() < deadline) {
+    if ((await historyToStatuses(appId)).includes(target)) return true;
+    if (Date.now() - lastNudge > 4000) {
+      await nudge();
+      lastNudge = Date.now();
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  console.error(`  ⏱ timed out waiting for history to include: ${desc}`);
+  return false;
+}
+
 async function main(): Promise<void> {
   // Configs — env wins; harmless dev defaults keep the check runnable directly.
   const appConfig = loadApplicationConfig();
@@ -233,9 +259,18 @@ async function main(): Promise<void> {
     RIB_HMAC_SECRET: 'dev_rib_hmac_secret',
     ...process.env,
   });
+  // Ephemeral Ed25519 QR-signing key so scheduling can mint verifiable slot
+  // tokens (ADR-009). A per-run fixture; the pipeline asserts row status, not
+  // the token itself (that is proven in scheduling + shared-security proofs).
+  const qrKey = generateKeyPairSync('ed25519');
   const schedConfig = loadSchedulingConfig({
     DATABASE_URL: process.env['DATABASE_URL'] ?? 'postgresql://usrp_app:app_pw@localhost:5432/usrp_db',
     PII_ENCRYPTION_KEY: ENCRYPTION_KEY,
+    QR_SIGNING_PRIVATE_KEY_B64: Buffer.from(
+      qrKey.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
+      'utf8',
+    ).toString('base64'),
+    QR_SIGNING_KEY_ID: 'pipeline-selfcheck-key',
     ...process.env,
   });
 
@@ -307,15 +342,17 @@ async function main(): Promise<void> {
   const greenApp = green.applicationId;
   console.log(`  → filed ${green.processingCode} (${greenApp}); awaiting autonomous vetting…`);
 
-  const reachedGreen = await awaitStatus(
+  // GREEN is a transient waypoint now (scheduling auto-advances it), so we prove
+  // it was REACHED via the append-only history, not via a live status snapshot.
+  const reachedGreen = await awaitReached(
     greenApp,
     'DOCUMENT_REVIEW_GREEN',
     republish(green.event),
-    'greenApp → DOCUMENT_REVIEW_GREEN',
+    'greenApp reached DOCUMENT_REVIEW_GREEN',
   );
   {
     const s = await readState(greenApp);
-    check('status = DOCUMENT_REVIEW_GREEN (positive terminal reached from ONE submission)', reachedGreen && s?.status === 'DOCUMENT_REVIEW_GREEN', s?.status);
+    check('reached DOCUMENT_REVIEW_GREEN (all 3 gates passed from ONE submission; may have auto-advanced)', reachedGreen, s?.status);
     check('age_eligibility_status = ELIGIBLE (age gate fired)', s?.age_eligibility_status === 'ELIGIBLE', s?.age_eligibility_status);
     check('academic_status = ELIGIBLE (academic gate fired — the new event path)', s?.academic_status === 'ELIGIBLE', s?.academic_status);
     check('criminal_clearance_status = CLEARED (criminal gate fired)', s?.criminal_clearance_status === 'CLEARED', s?.criminal_clearance_status);
