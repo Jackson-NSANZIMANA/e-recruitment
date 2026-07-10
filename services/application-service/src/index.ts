@@ -16,6 +16,7 @@ import { SubmitApplicationService } from './application/submit-application.servi
 import { ListApplicationsService } from './application/list-applications.service.js';
 import { ProjectVettingResultService } from './application/project-vetting-result.service.js';
 import { ProjectSlotAssignmentService } from './application/project-slot-assignment.service.js';
+import { ProjectNotificationDeliveryService } from './application/project-notification-delivery.service.js';
 import type { ApplicationServiceConfig } from './config.js';
 
 /** The application aggregate's adapters over one repository. */
@@ -28,6 +29,8 @@ export interface ApplicationService {
   readonly projector: ProjectVettingResultService;
   /** Event projector — STAMP the exam slot (DOCUMENT_REVIEW_GREEN → SLOT_ASSIGNED). */
   readonly slotProjector: ProjectSlotAssignmentService;
+  /** Event projector — RECORD invitation delivery (SLOT_ASSIGNED → PHYSICAL_TEST_SCHEDULED). */
+  readonly notificationProjector: ProjectNotificationDeliveryService;
 }
 
 /**
@@ -56,6 +59,7 @@ export function createApplicationService(
     list: new ListApplicationsService({ reader: readRepository }),
     projector: new ProjectVettingResultService({ repository, eventBus }),
     slotProjector: new ProjectSlotAssignmentService({ repository, eventBus }),
+    notificationProjector: new ProjectNotificationDeliveryService({ repository, eventBus }),
   };
 }
 
@@ -93,6 +97,15 @@ export {
   APPLICATION_SLOT_PROJECTION_GROUP,
   startSlotAssignedConsumer,
 } from './adapters/events/slot-assigned.consumer.js';
+export {
+  APPLICATION_NOTIFICATION_PROJECTION_GROUP,
+  startNotificationDeliveredConsumer,
+} from './adapters/events/notification-delivered.consumer.js';
+export { ProjectNotificationDeliveryService } from './application/project-notification-delivery.service.js';
+export type {
+  ProjectNotificationDeliveryCommand,
+  ProjectNotificationDeliveryDeps,
+} from './application/project-notification-delivery.service.js';
 export { ProjectSlotAssignmentService } from './application/project-slot-assignment.service.js';
 export type {
   ProjectSlotAssignmentCommand,
@@ -124,6 +137,8 @@ export type {
   ApplyVettingOutcome,
   SlotAssignmentResult,
   ApplySlotOutcome,
+  NotificationDeliveryResult,
+  ApplyNotificationOutcome,
 } from './ports/application-repository.js';
 export {
   academicPathForCategory,

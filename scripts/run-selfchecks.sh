@@ -89,6 +89,7 @@ run_ts "eligibility-service: HEC degree gate"     services/eligibility-service/s
 run_ts "eligibility-service: event-driven age+academic" services/eligibility-service/selfcheck/verify-event-driven.ts
 run_ts "background-vetting: RIB criminal gate"    services/background-vetting-service/selfcheck/verify-vetting-slice.ts
 run_ts "scheduling-service: slot assignment"      services/scheduling-service/selfcheck/verify-slot-assignment.ts
+run_ts "notification-service: invitation delivery + lifecycle advance" services/notification-service/selfcheck/verify-notification-slice.ts
 run_ts "audit-service: immutable trail"           services/audit-service/selfcheck/verify-audit-slice.ts
 # The whole spine composed: one real submission → all 3 gates → DOCUMENT_REVIEW_GREEN.
 # Runs last — it exercises the most services (eligibility + background-vetting + application).

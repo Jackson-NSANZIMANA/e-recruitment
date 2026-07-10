@@ -29,6 +29,7 @@ import { submitApplicationRoute } from './adapters/http/submit-application.contr
 import { listApplicationsRoute } from './adapters/http/list-applications.controller.js';
 import { startVettingResultConsumer } from './adapters/events/vetting-result.consumer.js';
 import { startSlotAssignedConsumer } from './adapters/events/slot-assigned.consumer.js';
+import { startNotificationDeliveredConsumer } from './adapters/events/notification-delivered.consumer.js';
 
 function createEventBus(serviceName: string): EventBus {
   if (process.env['KAFKA_BROKERS']) {
@@ -64,10 +65,11 @@ async function main(): Promise<void> {
   if (process.env['KAFKA_BROKERS']) {
     await startVettingResultConsumer(bus, service.projector);
     await startSlotAssignedConsumer(bus, service.slotProjector);
+    await startNotificationDeliveredConsumer(bus, service.notificationProjector);
     console.log(
       JSON.stringify({
         msg: 'event_consumers_started',
-        topics: 'vetting.nesa,vetting.hec,vetting.rib,vetting.age,slot.assigned',
+        topics: 'vetting.nesa,vetting.hec,vetting.rib,vetting.age,slot.assigned,notification.delivered',
       }),
     );
   }

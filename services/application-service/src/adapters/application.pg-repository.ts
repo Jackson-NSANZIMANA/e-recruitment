@@ -20,13 +20,15 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { sql } from '@usrp/shared-database';
-import type { ApplicationStatus } from '@usrp/shared-types';
+import { APPLICATION_STATUSES, type ApplicationStatus } from '@usrp/shared-types';
 import type {
   ApplicationRepository,
+  ApplyNotificationOutcome,
   ApplySlotOutcome,
   ApplyVettingOutcome,
   CreateApplicationInput,
   CreateApplicationResult,
+  NotificationDeliveryResult,
   SlotAssignmentResult,
   VettingResult,
 } from '../ports/application-repository.js';
@@ -294,6 +296,79 @@ export class PgApplicationRepository implements ApplicationRepository {
     } catch (cause) {
       if (cause instanceof ApplicationPersistenceError) throw cause;
       throw new ApplicationPersistenceError('Failed to apply slot assignment', { cause });
+    }
+  }
+
+  async applyNotificationDelivery(
+    result: NotificationDeliveryResult,
+  ): Promise<ApplyNotificationOutcome> {
+    const schema = sql(AGENCY_TARGET[result.agency].schema);
+    const scheduledRank = APPLICATION_STATUSES.indexOf('PHYSICAL_TEST_SCHEDULED');
+
+    try {
+      return await sql.begin(async (tx) => {
+        await tx`SET LOCAL ROLE ${sql(SYSTEM_ROLE)}`;
+
+        const rows = await tx<{ status: ApplicationStatus; applicant_id: string }[]>`
+          SELECT status, applicant_id
+          FROM ${schema}.applications
+          WHERE id = ${result.applicationId}
+          FOR UPDATE
+        `;
+        const current = rows[0];
+        if (!current) return { kind: 'NOT_FOUND' };
+
+        // Idempotent: already scheduled (or beyond) — refresh the recorded SMS
+        // status only, never regress or re-append history.
+        if (APPLICATION_STATUSES.indexOf(current.status) >= scheduledRank) {
+          await tx`
+            UPDATE ${schema}.applications SET
+              sms_notification_sent_at = now(),
+              sms_notification_status = ${result.deliveryStatus},
+              updated_at = now()
+            WHERE id = ${result.applicationId}
+          `;
+          return { kind: 'NO_CHANGE' };
+        }
+
+        // The invitation only advances the row from the slot terminal. Any
+        // earlier (still vetting/awaiting slot) or terminal status is a hold.
+        if (current.status !== 'SLOT_ASSIGNED') {
+          return { kind: 'NOT_APPLICABLE', currentStatus: current.status };
+        }
+
+        await tx`
+          UPDATE ${schema}.applications SET
+            sms_notification_sent_at = now(),
+            sms_notification_status = ${result.deliveryStatus},
+            status = 'PHYSICAL_TEST_SCHEDULED'::${schema}.application_status,
+            updated_at = now()
+          WHERE id = ${result.applicationId}
+        `;
+
+        await tx`
+          INSERT INTO ${schema}.application_status_history
+            (application_id, from_status, to_status, reason, performed_by, correlation_id)
+          VALUES (
+            ${result.applicationId},
+            'SLOT_ASSIGNED'::${schema}.application_status,
+            'PHYSICAL_TEST_SCHEDULED'::${schema}.application_status,
+            'Slot invitation delivered',
+            'application-service',
+            ${result.correlationId}
+          )
+        `;
+
+        return {
+          kind: 'APPLIED',
+          fromStatus: 'SLOT_ASSIGNED',
+          toStatus: 'PHYSICAL_TEST_SCHEDULED',
+          applicantId: current.applicant_id,
+        };
+      });
+    } catch (cause) {
+      if (cause instanceof ApplicationPersistenceError) throw cause;
+      throw new ApplicationPersistenceError('Failed to apply notification delivery', { cause });
     }
   }
 }

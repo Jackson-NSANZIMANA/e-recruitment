@@ -1,0 +1,38 @@
+{
+  "name": "@usrp/notification-service",
+  "version": "1.0.0",
+  "private": true,
+  "description": "USRP Notification Service — consumes slot.assigned and delivers the signed exam-slot invitation (QR) to the applicant; emits notification.delivered so the lifecycle advances to PHYSICAL_TEST_SCHEDULED",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "start:dev": "tsx src/main.ts",
+    "dev": "tsx watch src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/**/*.ts",
+    "selfcheck": "tsx selfcheck/verify-notification-slice.ts"
+  },
+  "dependencies": {
+    "@usrp/shared-config": "workspace:*",
+    "@usrp/shared-database": "workspace:*",
+    "@usrp/shared-events": "workspace:*",
+    "@usrp/shared-http": "workspace:*",
+    "@usrp/shared-types": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@usrp/application-service": "workspace:*",
+    "postgres": "^3.4.5",
+    "tsx": "^4.21.0",
+    "typescript": "^5.8.3"
+  }
+}

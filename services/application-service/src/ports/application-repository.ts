@@ -143,6 +143,29 @@ export type ApplySlotOutcome =
   /** No such application in the agency's schema — the cross-agency write guard. */
   | { readonly kind: 'NOT_FOUND' };
 
+/** The delivery outcome of the slot invitation, projected onto the row. */
+export interface NotificationDeliveryResult {
+  readonly applicationId: string;
+  readonly agency: Agency;
+  readonly deliveryStatus: 'DELIVERED' | 'PENDING_NO_CONTACT' | 'FAILED';
+  readonly correlationId: string;
+}
+
+/** Outcome of projecting an invitation delivery onto an application row. */
+export type ApplyNotificationOutcome =
+  | {
+      readonly kind: 'APPLIED';
+      readonly fromStatus: 'SLOT_ASSIGNED';
+      readonly toStatus: 'PHYSICAL_TEST_SCHEDULED';
+      readonly applicantId: string;
+    }
+  /** Already at/after PHYSICAL_TEST_SCHEDULED — idempotent; sms_* status refreshed only. */
+  | { readonly kind: 'NO_CHANGE' }
+  /** Row not yet SLOT_ASSIGNED (or terminal/withdrawn) — cannot schedule; nothing written. */
+  | { readonly kind: 'NOT_APPLICABLE'; readonly currentStatus: ApplicationStatus }
+  /** No such application in the agency's schema — the cross-agency write guard. */
+  | { readonly kind: 'NOT_FOUND' };
+
 export interface ApplicationRepository {
   createApplication(input: CreateApplicationInput): Promise<CreateApplicationResult>;
   /**
@@ -159,4 +182,13 @@ export interface ApplicationRepository {
    * (NO_CHANGE); cross-agency guarded (NOT_FOUND).
    */
   applySlotAssignment(result: SlotAssignmentResult): Promise<ApplySlotOutcome>;
+  /**
+   * Record the slot-invitation delivery outcome and advance SLOT_ASSIGNED →
+   * PHYSICAL_TEST_SCHEDULED, in one transaction. Only applicable from
+   * SLOT_ASSIGNED (NOT_APPLICABLE otherwise); idempotent on redelivery
+   * (NO_CHANGE — refreshes sms_notification_* only); cross-agency guarded
+   * (NOT_FOUND). Lifecycle advance is independent of deliveryStatus: the test
+   * is scheduled whether or not the channel reached the applicant.
+   */
+  applyNotificationDelivery(result: NotificationDeliveryResult): Promise<ApplyNotificationOutcome>;
 }
