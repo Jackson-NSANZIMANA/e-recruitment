@@ -24,11 +24,14 @@ export {
   generateDeviceKeyPair,
   signEd25519,
   signFieldScoreRecord,
+  signSlotInvitation,
   verifyEd25519,
   verifyFieldScoreRecord,
+  verifySlotInvitation,
   type Ed25519KeyPairPem,
   type FieldSignature,
   type SignableFieldPayload,
+  type VerifySlotInvitationOptions,
 } from './signing.js';
 
 export {
