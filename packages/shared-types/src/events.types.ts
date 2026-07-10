@@ -160,7 +160,47 @@ export interface SlotAssignedEvent extends BaseEvent {
   readonly venueName: string;
   readonly examDate: string;
   readonly reportingTimeHour: number;
+  /**
+   * Stable, unique TICKET ID for this invitation (≤64 chars). The DB unique
+   * key and the anchor that physical-test field scores bind to
+   * (SignableFieldPayload.qrInvitationCode). Opaque; NOT the QR the applicant
+   * scans.
+   */
   readonly qrInvitationCode: string;
+  /**
+   * The self-contained, OFFLINE-verifiable credential encoded into the
+   * applicant's QR (ADR-009). Ed25519-signed over a PII-free claim set; a
+   * venue/biometric/physical-test stage verifies it with the scheduling public
+   * key without any DB round-trip. See SlotInvitationClaims.
+   */
+  readonly qrSignedToken: string;
+}
+
+/**
+ * The PII-free claim set embedded in the signed slot-invitation QR (ADR-009).
+ * Contains ONLY opaque ids and the PUBLIC venue location — never the raw home
+ * district, DOB, name, or national id. The signed token is
+ * `USRP-SLOT.v1.<base64url(canonicalJson(claims))>.<base64url(ed25519sig)>`.
+ */
+export interface SlotInvitationClaims {
+  /** Credential schema version — enables format evolution. */
+  readonly v: 1;
+  /** Signing-key identifier so verifiers can select the right public key. */
+  readonly keyId: string;
+  /** Stable ticket id — identical to SlotAssignedEvent.qrInvitationCode. */
+  readonly ticketId: string;
+  readonly applicationId: string;
+  readonly applicantId: string;
+  readonly agency: Agency;
+  readonly campaignId: string;
+  readonly slotId: string;
+  readonly venueName: string;
+  readonly examDate: string;
+  readonly reportingTimeHour: number;
+  /** ISO-8601 issue time. */
+  readonly issuedAt: string;
+  /** ISO-8601 expiry — the invitation is rejected after the exam window. */
+  readonly expiresAt: string;
 }
 
 // ── Topic: field.score.captured ───────────────────────────────────
