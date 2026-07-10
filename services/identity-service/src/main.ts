@@ -14,6 +14,7 @@
 import { sql } from '@usrp/shared-database';
 import { InMemoryEventBus, KafkaEventBus, type EventBus } from '@usrp/shared-events';
 import { loadKafkaConfig } from '@usrp/shared-config';
+import { makeAuthVerifier } from '@usrp/shared-auth';
 import { startHttpServer } from '@usrp/shared-http';
 import { createIdentityService } from './index.js';
 import { loadIdentityConfig } from './config.js';
@@ -40,10 +41,17 @@ async function main(): Promise<void> {
 
   const service = createIdentityService(config, bus);
 
+  // Ingress auth: verify inbound bearer tokens with the issuer public key.
+  const verify = makeAuthVerifier({
+    publicKeyPem: config.auth.authPublicKeyPem,
+    issuer: config.auth.jwtIssuer,
+    audience: config.auth.jwtAudience,
+  });
+
   const server = await startHttpServer({
     serviceName: config.runtime.serviceName,
     port: config.runtime.port,
-    routes: [verifyIdentityRoute(service)],
+    routes: [verifyIdentityRoute(service, verify)],
     // Ready only when the database — the system-of-record — is reachable.
     readiness: async (): Promise<boolean> => {
       try {

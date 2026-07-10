@@ -23,6 +23,7 @@
     "selfcheck:http": "tsx selfcheck/verify-http-slice.ts"
   },
   "dependencies": {
+    "@usrp/shared-auth": "workspace:*",
     "@usrp/shared-config": "workspace:*",
     "@usrp/shared-database": "workspace:*",
     "@usrp/shared-events": "workspace:*",

@@ -10,6 +10,7 @@
 
 import {
   integer,
+  loadAuthVerifyConfig,
   loadDatabaseConfig,
   loadEnv,
   loadRuntimeConfig,
@@ -17,6 +18,7 @@ import {
   string,
   url,
   withDefault,
+  type AuthVerifyConfig,
   type DatabaseConfig,
   type EnvSource,
   type G2GEndpointConfig,
@@ -29,6 +31,8 @@ export interface IdentityServiceConfig {
   readonly database: DatabaseConfig;
   readonly security: SecurityConfig;
   readonly nida: G2GEndpointConfig;
+  /** Ingress auth: verify inbound bearer tokens (front door is service-internal). */
+  readonly auth: AuthVerifyConfig;
 }
 
 /** Load just the NIDA endpoint config (base URL, HMAC secret, timeout). */
@@ -54,5 +58,6 @@ export function loadIdentityConfig(source: EnvSource = process.env): IdentitySer
     database: loadDatabaseConfig(source),
     security: loadSecurityConfig(source),
     nida: loadNidaConfig(source),
+    auth: loadAuthVerifyConfig(source),
   };
 }

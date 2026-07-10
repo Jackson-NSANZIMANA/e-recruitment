@@ -8,6 +8,7 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { HttpError, type HttpResult, type Route } from '@usrp/shared-http';
+import { withAuth, type AuthVerifier } from '@usrp/shared-auth';
 import type { ApplicationCategory } from '@usrp/shared-types';
 import { ALL_CATEGORIES } from '../../domain/category-agency.js';
 import { EligibilityReadError } from '../../domain/eligibility.errors.js';
@@ -30,12 +31,15 @@ interface EducationCheckBody {
   readonly nesaIndexNumber?: unknown;
 }
 
-/** Build the `POST /v1/eligibility/education-check` route bound to the use case. */
-export function educationCheckRoute(service: VerifyNesaEducationService): Route {
+/**
+ * Build the `POST /v1/eligibility/education-check` route bound to the use case.
+ * Service-internal: requires a valid SYSTEM bearer token (401/403 via withAuth).
+ */
+export function educationCheckRoute(service: VerifyNesaEducationService, verify: AuthVerifier): Route {
   return {
     method: 'POST',
     path: EDUCATION_CHECK_PATH,
-    handler: async (ctx): Promise<HttpResult> => {
+    handler: withAuth(verify, { kind: 'system' }, async (ctx, _principal): Promise<HttpResult> => {
       const body = await ctx.json<EducationCheckBody>();
 
       const applicantId = body.applicantId;
@@ -69,7 +73,7 @@ export function educationCheckRoute(service: VerifyNesaEducationService): Route 
       }
 
       return mapOutcome(outcome);
-    },
+    }),
   };
 }
 

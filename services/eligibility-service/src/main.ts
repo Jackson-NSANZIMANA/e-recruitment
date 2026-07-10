@@ -10,6 +10,7 @@
 import { sql } from '@usrp/shared-database';
 import { InMemoryEventBus, KafkaEventBus, type EventBus } from '@usrp/shared-events';
 import { loadKafkaConfig } from '@usrp/shared-config';
+import { makeAuthVerifier } from '@usrp/shared-auth';
 import { startHttpServer } from '@usrp/shared-http';
 import { createEligibilityService } from './index.js';
 import { loadEligibilityConfig } from './config.js';
@@ -40,6 +41,13 @@ async function main(): Promise<void> {
 
   const services = createEligibilityService(config, bus);
 
+  // Ingress auth: verify inbound bearer tokens with the issuer public key.
+  const verify = makeAuthVerifier({
+    publicKeyPem: config.auth.authPublicKeyPem,
+    issuer: config.auth.jwtIssuer,
+    audience: config.auth.jwtAudience,
+  });
+
   // Event-driven ingress: when a broker is configured, auto-run BOTH eligibility
   // gates off applicant.submitted — age (internal compute) and academic (NESA/HEC
   // over G2G), each in its own consumer group so a G2G outage retries only the
@@ -58,9 +66,9 @@ async function main(): Promise<void> {
     serviceName: config.runtime.serviceName,
     port: config.runtime.port,
     routes: [
-      ageEligibilityRoute(services.age),
-      educationCheckRoute(services.education),
-      degreeCheckRoute(services.degree),
+      ageEligibilityRoute(services.age, verify),
+      educationCheckRoute(services.education, verify),
+      degreeCheckRoute(services.degree, verify),
     ],
     readiness: async (): Promise<boolean> => {
       try {

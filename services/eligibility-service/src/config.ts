@@ -12,12 +12,14 @@
 
 import {
   integer,
+  loadAuthVerifyConfig,
   loadDatabaseConfig,
   loadEnv,
   loadRuntimeConfig,
   string,
   url,
   withDefault,
+  type AuthVerifyConfig,
   type DatabaseConfig,
   type EnvSource,
   type G2GEndpointConfig,
@@ -35,6 +37,8 @@ export interface EligibilityServiceConfig {
   readonly security: EligibilitySecurityConfig;
   readonly nesa: G2GEndpointConfig;
   readonly hec: G2GEndpointConfig;
+  /** Ingress auth: verify inbound bearer tokens (front door is service-internal). */
+  readonly auth: AuthVerifyConfig;
 }
 
 /** Load just the NESA endpoint config (base URL, HMAC secret, timeout). */
@@ -79,5 +83,6 @@ export function loadEligibilityConfig(source: EnvSource = process.env): Eligibil
     security: { encryptionKey: env.PII_ENCRYPTION_KEY },
     nesa: loadNesaConfig(source),
     hec: loadHecConfig(source),
+    auth: loadAuthVerifyConfig(source),
   };
 }

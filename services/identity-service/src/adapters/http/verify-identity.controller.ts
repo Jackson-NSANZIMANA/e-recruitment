@@ -14,6 +14,7 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { HttpError, type HttpResult, type Route } from '@usrp/shared-http';
+import { withAuth, type AuthVerifier } from '@usrp/shared-auth';
 import { APPLICATION_CHANNELS, type ApplicationChannel } from '@usrp/shared-types';
 import {
   IdentityPersistenceError,
@@ -35,12 +36,17 @@ interface VerifyRequestBody {
   readonly channel?: unknown;
 }
 
-/** Build the `POST /v1/identities/verify` route bound to the use case. */
-export function verifyIdentityRoute(service: VerifyIdentityService): Route {
+/**
+ * Build the `POST /v1/identities/verify` route bound to the use case. The
+ * front door is service-internal: it requires a valid SYSTEM bearer token
+ * (withAuth → 401 unauthenticated, 403 for a non-system principal). Real
+ * applicant-facing auth is a separate, later slice.
+ */
+export function verifyIdentityRoute(service: VerifyIdentityService, verify: AuthVerifier): Route {
   return {
     method: 'POST',
     path: VERIFY_IDENTITY_PATH,
-    handler: async (ctx): Promise<HttpResult> => {
+    handler: withAuth(verify, { kind: 'system' }, async (ctx, _principal): Promise<HttpResult> => {
       const body = await ctx.json<VerifyRequestBody>();
 
       const rawNationalId = body.nationalId;
@@ -69,7 +75,7 @@ export function verifyIdentityRoute(service: VerifyIdentityService): Route {
       }
 
       return mapOutcome(outcome);
-    },
+    }),
   };
 }
 
