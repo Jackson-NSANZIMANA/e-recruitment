@@ -12,11 +12,13 @@ export {
   InvalidNationalIdError,
   canonicalHash,
   hashNationalId,
+  hashPassword,
   hashPhoneNumber,
   hmacSha256Hex,
   isValidRwandanNationalId,
   sha256Hex,
   timingSafeEqualHex,
+  verifyPassword,
 } from './hashing.js';
 
 export {

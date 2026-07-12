@@ -74,6 +74,7 @@ fi
 # ── 2. The service & backbone selfchecks, in dependency order ──────
 # Deterministic crypto proofs first — no infra, fastest signal.
 run_ts "shared-security: signed slot invitation"  packages/shared-security/selfcheck/verify-slot-invitation.ts
+run_ts "shared-security: password KDF (scrypt)"   packages/shared-security/selfcheck/verify-password-kdf.ts
 run_ts "shared-auth: signed bearer token + enforcement" packages/shared-auth/selfcheck/verify-auth-token.ts
 run_ts "shared-events: Kafka round-trip"          packages/shared-events/selfcheck/verify-kafka-roundtrip.ts
 run_ts "identity-service: core slice"             services/identity-service/selfcheck/verify-slice.ts
