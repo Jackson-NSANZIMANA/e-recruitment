@@ -17,6 +17,7 @@ import { ListApplicationsService } from './application/list-applications.service
 import { ProjectVettingResultService } from './application/project-vetting-result.service.js';
 import { ProjectSlotAssignmentService } from './application/project-slot-assignment.service.js';
 import { ProjectNotificationDeliveryService } from './application/project-notification-delivery.service.js';
+import { ProjectPhysicalTestCompleteService } from './application/project-physical-test-complete.service.js';
 import type { ApplicationServiceConfig } from './config.js';
 
 /** The application aggregate's adapters over one repository. */
@@ -31,6 +32,8 @@ export interface ApplicationService {
   readonly slotProjector: ProjectSlotAssignmentService;
   /** Event projector — RECORD invitation delivery (SLOT_ASSIGNED → PHYSICAL_TEST_SCHEDULED). */
   readonly notificationProjector: ProjectNotificationDeliveryService;
+  /** Event projector — COMPLETE the physical test (PHYSICAL_TEST_SCHEDULED → PHYSICAL_TEST_COMPLETE). */
+  readonly physicalTestProjector: ProjectPhysicalTestCompleteService;
 }
 
 /**
@@ -60,6 +63,7 @@ export function createApplicationService(
     projector: new ProjectVettingResultService({ repository, eventBus }),
     slotProjector: new ProjectSlotAssignmentService({ repository, eventBus }),
     notificationProjector: new ProjectNotificationDeliveryService({ repository, eventBus }),
+    physicalTestProjector: new ProjectPhysicalTestCompleteService({ repository, eventBus }),
   };
 }
 
@@ -106,6 +110,15 @@ export type {
   ProjectNotificationDeliveryCommand,
   ProjectNotificationDeliveryDeps,
 } from './application/project-notification-delivery.service.js';
+export {
+  APPLICATION_PHYSICAL_TEST_PROJECTION_GROUP,
+  startFieldScoreCapturedConsumer,
+} from './adapters/events/field-score-captured.consumer.js';
+export { ProjectPhysicalTestCompleteService } from './application/project-physical-test-complete.service.js';
+export type {
+  ProjectPhysicalTestCompleteCommand,
+  ProjectPhysicalTestCompleteDeps,
+} from './application/project-physical-test-complete.service.js';
 export { ProjectSlotAssignmentService } from './application/project-slot-assignment.service.js';
 export type {
   ProjectSlotAssignmentCommand,
@@ -139,6 +152,8 @@ export type {
   ApplySlotOutcome,
   NotificationDeliveryResult,
   ApplyNotificationOutcome,
+  PhysicalTestCompleteResult,
+  ApplyPhysicalTestOutcome,
 } from './ports/application-repository.js';
 export {
   academicPathForCategory,

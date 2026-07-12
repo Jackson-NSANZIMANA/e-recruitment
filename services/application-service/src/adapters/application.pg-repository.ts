@@ -24,11 +24,13 @@ import { APPLICATION_STATUSES, type ApplicationStatus } from '@usrp/shared-types
 import type {
   ApplicationRepository,
   ApplyNotificationOutcome,
+  ApplyPhysicalTestOutcome,
   ApplySlotOutcome,
   ApplyVettingOutcome,
   CreateApplicationInput,
   CreateApplicationResult,
   NotificationDeliveryResult,
+  PhysicalTestCompleteResult,
   SlotAssignmentResult,
   VettingResult,
 } from '../ports/application-repository.js';
@@ -369,6 +371,109 @@ export class PgApplicationRepository implements ApplicationRepository {
     } catch (cause) {
       if (cause instanceof ApplicationPersistenceError) throw cause;
       throw new ApplicationPersistenceError('Failed to apply notification delivery', { cause });
+    }
+  }
+
+  async applyPhysicalTestComplete(
+    result: PhysicalTestCompleteResult,
+  ): Promise<ApplyPhysicalTestOutcome> {
+    const schema = sql(AGENCY_TARGET[result.agency].schema);
+    const completeRank = APPLICATION_STATUSES.indexOf('PHYSICAL_TEST_COMPLETE');
+
+    try {
+      return await sql.begin(async (tx): Promise<ApplyPhysicalTestOutcome> => {
+        await tx`SET LOCAL ROLE ${sql(SYSTEM_ROLE)}`;
+
+        const rows = await tx<{ status: ApplicationStatus; applicant_id: string }[]>`
+          SELECT status, applicant_id
+          FROM ${schema}.applications
+          WHERE id = ${result.applicationId}
+          FOR UPDATE
+        `;
+        const current = rows[0];
+        // 0 rows ⇒ not in THIS agency's schema (mis-route / unknown).
+        if (!current) return { kind: 'NOT_FOUND' };
+
+        // Idempotent: already complete (or beyond) — write nothing.
+        if (APPLICATION_STATUSES.indexOf(current.status) >= completeRank) {
+          return { kind: 'NO_CHANGE' };
+        }
+
+        // A score only completes a row that is at the scheduled stage. Anything
+        // earlier (still vetting/awaiting slot) or terminal is a hold.
+        if (current.status !== 'PHYSICAL_TEST_SCHEDULED') {
+          return { kind: 'NOT_APPLICABLE', currentStatus: current.status };
+        }
+
+        // Never complete while a concurrent-capture conflict is unresolved
+        // (ADR-010 §3). This makes the HOLD an engine guarantee even if a clean
+        // score's event was ordered before the conflicting one was flagged; the
+        // resolve endpoint clears the flag, then the re-emitted event advances.
+        const conflict = await tx<{ one: number }[]>`
+          SELECT 1 AS one
+          FROM ${schema}.physical_test_scores
+          WHERE application_id = ${result.applicationId} AND sync_conflict_detected = true
+          LIMIT 1
+        `;
+        if (conflict[0]) return { kind: 'CONFLICT_HELD' };
+
+        // Biometric-pass precondition (ADR-010 §4): the applicant must have
+        // cleared the exam-day check-in. No verified biometric ⇒ hold.
+        const bio = await tx<{ biometric_verified_at: Date | null }[]>`
+          SELECT biometric_verified_at
+          FROM public_core.applicant_identities
+          WHERE id = ${current.applicant_id}
+        `;
+        if (!bio[0] || bio[0].biometric_verified_at === null) {
+          return { kind: 'BIOMETRIC_NOT_VERIFIED' };
+        }
+
+        // Resolve the accepted score row from the event's metrics hash. The
+        // event carries the hash, not the row id (field-sync owns the id).
+        const scoreRows = await tx<{ id: string }[]>`
+          SELECT id
+          FROM ${schema}.physical_test_scores
+          WHERE application_id = ${result.applicationId}
+            AND signed_payload_hash = ${result.signedPayloadHash}
+          ORDER BY captured_at DESC
+          LIMIT 1
+        `;
+        const scoreId = scoreRows[0]?.id;
+        if (!scoreId) return { kind: 'SCORE_NOT_FOUND' };
+
+        await tx`
+          UPDATE ${schema}.applications SET
+            physical_test_completed_at = now(),
+            physical_test_score_id = ${scoreId},
+            status = 'PHYSICAL_TEST_COMPLETE'::${schema}.application_status,
+            updated_at = now()
+          WHERE id = ${result.applicationId}
+        `;
+
+        await tx`
+          INSERT INTO ${schema}.application_status_history
+            (application_id, from_status, to_status, reason, performed_by, correlation_id)
+          VALUES (
+            ${result.applicationId},
+            'PHYSICAL_TEST_SCHEDULED'::${schema}.application_status,
+            'PHYSICAL_TEST_COMPLETE'::${schema}.application_status,
+            'Physical-test score captured',
+            'application-service',
+            ${result.correlationId}
+          )
+        `;
+
+        return {
+          kind: 'APPLIED',
+          fromStatus: 'PHYSICAL_TEST_SCHEDULED',
+          toStatus: 'PHYSICAL_TEST_COMPLETE',
+          applicantId: current.applicant_id,
+          physicalTestScoreId: scoreId,
+        };
+      });
+    } catch (cause) {
+      if (cause instanceof ApplicationPersistenceError) throw cause;
+      throw new ApplicationPersistenceError('Failed to apply physical-test completion', { cause });
     }
   }
 }

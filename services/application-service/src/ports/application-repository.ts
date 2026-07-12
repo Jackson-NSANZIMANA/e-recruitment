@@ -166,6 +166,54 @@ export type ApplyNotificationOutcome =
   /** No such application in the agency's schema — the cross-agency write guard. */
   | { readonly kind: 'NOT_FOUND' };
 
+// ── Physical-test-complete projection ──────────────────────────────
+//
+// A device-signed field score was accepted by field-sync-service (ADR-010),
+// which emitted FIELD_SCORE_CAPTURED. This advances the STAGE transition
+// PHYSICAL_TEST_SCHEDULED → PHYSICAL_TEST_COMPLETE and stamps the winning score
+// row. The event carries the metrics hash (not the row id), so the accepted
+// score row is resolved by signed_payload_hash within the owning schema.
+
+/** A captured field score to materialise onto an application row. */
+export interface PhysicalTestCompleteResult {
+  readonly applicationId: string;
+  readonly agency: Agency;
+  /** SHA-256 of the accepted record's metrics — locates the score row to stamp. */
+  readonly signedPayloadHash: string;
+  readonly correlationId: string;
+}
+
+/** Outcome of projecting a captured field score onto an application row. */
+export type ApplyPhysicalTestOutcome =
+  | {
+      readonly kind: 'APPLIED';
+      readonly fromStatus: 'PHYSICAL_TEST_SCHEDULED';
+      readonly toStatus: 'PHYSICAL_TEST_COMPLETE';
+      readonly applicantId: string;
+      readonly physicalTestScoreId: string;
+    }
+  /** Already at/after PHYSICAL_TEST_COMPLETE — idempotent redelivery, nothing written. */
+  | { readonly kind: 'NO_CHANGE' }
+  /** Row not yet PHYSICAL_TEST_SCHEDULED (or terminal/withdrawn) — held; nothing written. */
+  | { readonly kind: 'NOT_APPLICABLE'; readonly currentStatus: ApplicationStatus }
+  /**
+   * An unresolved concurrent-capture conflict is flagged on this application's
+   * score rows — do NOT complete on any single score until an officer
+   * adjudicates (ADR-010 §3). A deliberate HOLD that makes "never silently pick
+   * an official score" an engine guarantee, independent of event ordering.
+   */
+  | { readonly kind: 'CONFLICT_HELD' }
+  /**
+   * Biometric check-in precondition unmet (applicant_identities.biometric_verified_at
+   * is null) — no physical-test completion for a check-in that failed biometrics.
+   * A deliberate HOLD, not an error.
+   */
+  | { readonly kind: 'BIOMETRIC_NOT_VERIFIED' }
+  /** No stored score row matches the event's payload hash in this schema. */
+  | { readonly kind: 'SCORE_NOT_FOUND' }
+  /** No such application in the agency's schema — the cross-agency write guard. */
+  | { readonly kind: 'NOT_FOUND' };
+
 export interface ApplicationRepository {
   createApplication(input: CreateApplicationInput): Promise<CreateApplicationResult>;
   /**
@@ -191,4 +239,16 @@ export interface ApplicationRepository {
    * is scheduled whether or not the channel reached the applicant.
    */
   applyNotificationDelivery(result: NotificationDeliveryResult): Promise<ApplyNotificationOutcome>;
+  /**
+   * Advance PHYSICAL_TEST_SCHEDULED → PHYSICAL_TEST_COMPLETE and stamp the
+   * accepted field score (resolved by signed_payload_hash), in one transaction.
+   * Enforces the biometric-pass precondition (BIOMETRIC_NOT_VERIFIED holds the
+   * row); only applicable from PHYSICAL_TEST_SCHEDULED (NOT_APPLICABLE
+   * otherwise); idempotent on redelivery (NO_CHANGE); cross-agency guarded
+   * (NOT_FOUND). Never advances on a conflicted score — field-sync emits
+   * FIELD_SCORE_CAPTURED only for a clean/resolved record.
+   */
+  applyPhysicalTestComplete(
+    result: PhysicalTestCompleteResult,
+  ): Promise<ApplyPhysicalTestOutcome>;
 }
