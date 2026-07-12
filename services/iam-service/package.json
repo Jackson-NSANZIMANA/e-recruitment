@@ -1,0 +1,40 @@
+{
+  "name": "@usrp/iam-service",
+  "version": "1.0.0",
+  "private": true,
+  "description": "USRP IAM Service — the token issuer: officer login that mints Ed25519 bearer tokens the officer endpoints accept. Sole holder of the issuer private key.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "start:dev": "tsx src/main.ts",
+    "dev": "tsx watch src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/**/*.ts",
+    "seed:dev": "tsx scripts/seed-dev-officers.ts",
+    "selfcheck": "tsx selfcheck/verify-iam-issuer-slice.ts"
+  },
+  "dependencies": {
+    "@usrp/shared-auth": "workspace:*",
+    "@usrp/shared-config": "workspace:*",
+    "@usrp/shared-database": "workspace:*",
+    "@usrp/shared-events": "workspace:*",
+    "@usrp/shared-http": "workspace:*",
+    "@usrp/shared-security": "workspace:*",
+    "@usrp/shared-types": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "postgres": "^3.4.5",
+    "tsx": "^4.21.0",
+    "typescript": "^5.8.3"
+  }
+}

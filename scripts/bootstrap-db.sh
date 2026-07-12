@@ -94,3 +94,16 @@ apply_sql "${RLS_DIR}/0010_officer_accounts.sql" "rls/0010 (officer account stor
 
 printf '\n'
 ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts in place"
+
+# 12. Dev officer accounts (one per agency). A CONVENIENCE seed so the officer
+#     console / manual login smoke tests have real credentials to drive —
+#     dev-only, idempotent. Best-effort: it needs the workspace built (tsx
+#     resolves @usrp/* runtime dist), so a failure here NEVER blocks the
+#     structural bootstrap above. Re-run manually after `pnpm -r build`:
+#       pnpm --filter @usrp/iam-service seed:dev
+log "seeding dev officer accounts (best-effort)"
+if pnpm --filter @usrp/iam-service exec tsx scripts/seed-dev-officers.ts; then
+  ok "dev officer accounts seeded (login handles: rdf.officer / rnp.officer / rcs.officer)"
+else
+  log "dev officer seed skipped — build the workspace, then: pnpm --filter @usrp/iam-service seed:dev"
+fi
