@@ -27,6 +27,7 @@ import { createApplicationService } from './index.js';
 import { loadApplicationConfig } from './config.js';
 import { submitApplicationRoute } from './adapters/http/submit-application.controller.js';
 import { listApplicationsRoute } from './adapters/http/list-applications.controller.js';
+import { officerTransitionRoutes } from './adapters/http/officer-transitions.controller.js';
 import { startVettingResultConsumer } from './adapters/events/vetting-result.consumer.js';
 import { startSlotAssignedConsumer } from './adapters/events/slot-assigned.consumer.js';
 import { startNotificationDeliveredConsumer } from './adapters/events/notification-delivered.consumer.js';
@@ -83,6 +84,8 @@ async function main(): Promise<void> {
     routes: [
       submitApplicationRoute(service.submit, verify), // system-token required
       listApplicationsRoute(service.list, verify), // officer-token required
+      // officer-token writes: medical-review / final-decision / accept
+      ...officerTransitionRoutes(service.officerTransitions, verify),
     ],
     // Ready only when the database — the system-of-record — is reachable.
     readiness: async (): Promise<boolean> => {

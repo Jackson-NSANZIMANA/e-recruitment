@@ -12,8 +12,10 @@ import { PgIdentityReader } from './adapters/identity.pg-reader.js';
 import { PgCampaignReader } from './adapters/campaign.pg-reader.js';
 import { PgApplicationRepository } from './adapters/application.pg-repository.js';
 import { PgApplicationReadRepository } from './adapters/application-read.pg-repository.js';
+import { PgOfficerTransitionRepository } from './adapters/officer-transition.pg-repository.js';
 import { SubmitApplicationService } from './application/submit-application.service.js';
 import { ListApplicationsService } from './application/list-applications.service.js';
+import { OfficerTransitionsService } from './application/officer-transitions.service.js';
 import { ProjectVettingResultService } from './application/project-vetting-result.service.js';
 import { ProjectSlotAssignmentService } from './application/project-slot-assignment.service.js';
 import { ProjectNotificationDeliveryService } from './application/project-notification-delivery.service.js';
@@ -26,6 +28,8 @@ export interface ApplicationService {
   readonly submit: SubmitApplicationService;
   /** HTTP officer read — LIST an agency's applications (GET /v1/applications). */
   readonly list: ListApplicationsService;
+  /** HTTP officer writes — DRIVE the tail of the green lane (medical/final/accept). */
+  readonly officerTransitions: OfficerTransitionsService;
   /** Event projector — ADVANCE an application from vetting verdicts. */
   readonly projector: ProjectVettingResultService;
   /** Event projector — STAMP the exam slot (DOCUMENT_REVIEW_GREEN → SLOT_ASSIGNED). */
@@ -51,6 +55,7 @@ export function createApplicationService(
   const campaignReader = new PgCampaignReader();
   const repository = new PgApplicationRepository();
   const readRepository = new PgApplicationReadRepository();
+  const officerTransitionRepository = new PgOfficerTransitionRepository();
 
   return {
     submit: new SubmitApplicationService({
@@ -60,6 +65,10 @@ export function createApplicationService(
       eventBus,
     }),
     list: new ListApplicationsService({ reader: readRepository }),
+    officerTransitions: new OfficerTransitionsService({
+      repository: officerTransitionRepository,
+      eventBus,
+    }),
     projector: new ProjectVettingResultService({ repository, eventBus }),
     slotProjector: new ProjectSlotAssignmentService({ repository, eventBus }),
     notificationProjector: new ProjectNotificationDeliveryService({ repository, eventBus }),
@@ -76,8 +85,31 @@ export {
   LIST_APPLICATIONS_PATH,
   listApplicationsRoute,
 } from './adapters/http/list-applications.controller.js';
+export {
+  MEDICAL_REVIEW_PATH,
+  FINAL_DECISION_PATH,
+  ACCEPT_PATH,
+  officerTransitionRoutes,
+} from './adapters/http/officer-transitions.controller.js';
 export { SubmitApplicationService } from './application/submit-application.service.js';
 export { ListApplicationsService } from './application/list-applications.service.js';
+export { OfficerTransitionsService } from './application/officer-transitions.service.js';
+export type {
+  MedicalReviewCommand,
+  FinalDecisionCommand,
+  AcceptCommand,
+  OfficerCommandOutcome,
+  OfficerTransitionsDeps,
+} from './application/officer-transitions.service.js';
+export { PgOfficerTransitionRepository } from './adapters/officer-transition.pg-repository.js';
+export type {
+  OfficerTransitionRepository,
+  OfficerTransitionOutcome,
+  OfficerActor,
+  MedicalReviewInput,
+  FinalDecisionInput,
+  AcceptInput,
+} from './ports/officer-transition-repository.js';
 export type {
   ListApplicationsCommand,
   ListApplicationsDeps,
