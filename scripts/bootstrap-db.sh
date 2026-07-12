@@ -102,7 +102,7 @@ ok "database bootstrapped — schema + isolation + audit immutability + processi
 #     structural bootstrap above. Re-run manually after `pnpm -r build`:
 #       pnpm --filter @usrp/iam-service seed:dev
 log "seeding dev officer accounts (best-effort)"
-if pnpm --filter @usrp/iam-service exec tsx scripts/seed-dev-officers.ts; then
+if DATABASE_URL="$DATABASE_URL" pnpm --filter @usrp/iam-service exec tsx scripts/seed-dev-officers.ts; then
   ok "dev officer accounts seeded (login handles: rdf.officer / rnp.officer / rcs.officer)"
 else
   log "dev officer seed skipped — build the workspace, then: pnpm --filter @usrp/iam-service seed:dev"
