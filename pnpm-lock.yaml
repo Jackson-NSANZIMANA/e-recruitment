@@ -303,6 +303,46 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
+  services/field-sync-service:
+    dependencies:
+      '@usrp/shared-auth':
+        specifier: workspace:*
+        version: link:../../packages/shared-auth
+      '@usrp/shared-config':
+        specifier: workspace:*
+        version: link:../../packages/shared-config
+      '@usrp/shared-database':
+        specifier: workspace:*
+        version: link:../../packages/shared-database
+      '@usrp/shared-events':
+        specifier: workspace:*
+        version: link:../../packages/shared-events
+      '@usrp/shared-http':
+        specifier: workspace:*
+        version: link:../../packages/shared-http
+      '@usrp/shared-security':
+        specifier: workspace:*
+        version: link:../../packages/shared-security
+      '@usrp/shared-types':
+        specifier: workspace:*
+        version: link:../../packages/shared-types
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.2
+      '@usrp/application-service':
+        specifier: workspace:*
+        version: link:../application-service
+      postgres:
+        specifier: ^3.4.5
+        version: 3.4.9
+      tsx:
+        specifier: ^4.21.0
+        version: 4.23.0
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
   services/identity-service:
     dependencies:
       '@usrp/shared-auth':

@@ -1,0 +1,40 @@
+{
+  "name": "@usrp/field-sync-service",
+  "version": "1.0.0",
+  "private": true,
+  "description": "USRP Field-Sync Service — offline physical-test score capture: enrolls field tablets, verifies device-signed score records, merges them with vector clocks (hybrid conflict resolution), and emits field.score.captured (ADR-010)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "start:dev": "tsx src/main.ts",
+    "dev": "tsx watch src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/**/*.ts",
+    "selfcheck": "tsx selfcheck/verify-field-sync-slice.ts"
+  },
+  "dependencies": {
+    "@usrp/shared-auth": "workspace:*",
+    "@usrp/shared-config": "workspace:*",
+    "@usrp/shared-database": "workspace:*",
+    "@usrp/shared-events": "workspace:*",
+    "@usrp/shared-http": "workspace:*",
+    "@usrp/shared-security": "workspace:*",
+    "@usrp/shared-types": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@usrp/application-service": "workspace:*",
+    "postgres": "^3.4.5",
+    "tsx": "^4.21.0",
+    "typescript": "^5.8.3"
+  }
+}
