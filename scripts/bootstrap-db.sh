@@ -87,5 +87,10 @@ apply_sql "${RLS_DIR}/0008_venue_read_grants.sql" "rls/0008 (venue read grant)"
 #     public_core.field_devices table + grants + own-agency FORCE'd RLS.
 apply_sql "${RLS_DIR}/0009_field_devices.sql" "rls/0009 (field-device registry)"
 
+# 11. Officer account store (the token issuer's credential surface). New
+#     public_core.officer_accounts table, readable/writable by usrp_iam_service
+#     ALONE (least privilege on the credential store) under FORCE'd RLS.
+apply_sql "${RLS_DIR}/0010_officer_accounts.sql" "rls/0010 (officer account store)"
+
 printf '\n'
-ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry in place"
+ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts in place"

@@ -11,14 +11,20 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='usrp_rnp_officer')  THEN CREATE ROLE usrp_rnp_officer  NOLOGIN; END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='usrp_rcs_officer')  THEN CREATE ROLE usrp_rcs_officer  NOLOGIN; END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='usrp_system_service') THEN CREATE ROLE usrp_system_service NOLOGIN; END IF;
+  -- Least-privilege role for the IAM/credential surface. Deliberately NOT
+  -- usrp_system_service: officer password hashes (public_core.officer_accounts)
+  -- must be readable by iam-service ALONE, so a compromise of any other
+  -- system_service caller cannot read credentials. Its table grants + RLS live
+  -- in rls/0010; here we only define the role and its usrp_app membership.
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='usrp_iam_service') THEN CREATE ROLE usrp_iam_service NOLOGIN; END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='usrp_app')          THEN CREATE ROLE usrp_app LOGIN PASSWORD 'app_pw'; END IF;
 END$$;
 
 -- usrp_app carries no privileges of its own; it only assumes agency roles via SET ROLE.
-GRANT usrp_rdf_officer, usrp_rnp_officer, usrp_rcs_officer, usrp_system_service TO usrp_app;
+GRANT usrp_rdf_officer, usrp_rnp_officer, usrp_rcs_officer, usrp_system_service, usrp_iam_service TO usrp_app;
 
 -- ── Schema usage ──────────────────────────────────────────────────
-GRANT USAGE ON SCHEMA public_core TO usrp_rdf_officer, usrp_rnp_officer, usrp_rcs_officer, usrp_system_service;
+GRANT USAGE ON SCHEMA public_core TO usrp_rdf_officer, usrp_rnp_officer, usrp_rcs_officer, usrp_system_service, usrp_iam_service;
 GRANT USAGE ON SCHEMA rdf_ops TO usrp_rdf_officer, usrp_system_service;
 GRANT USAGE ON SCHEMA rnp_ops TO usrp_rnp_officer, usrp_system_service;
 GRANT USAGE ON SCHEMA rcs_ops TO usrp_rcs_officer, usrp_system_service;

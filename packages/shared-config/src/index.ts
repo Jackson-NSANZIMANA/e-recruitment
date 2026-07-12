@@ -31,6 +31,7 @@ export {
 export {
   LOG_LEVELS,
   NODE_ENVS,
+  loadAuthIssuerConfig,
   loadAuthVerifyConfig,
   loadDatabaseConfig,
   loadG2GConfig,
@@ -39,6 +40,7 @@ export {
   loadRuntimeConfig,
   loadSecurityConfig,
   loadServiceConfig,
+  type AuthIssuerConfig,
   type AuthVerifyConfig,
   type DatabaseConfig,
   type G2GConfig,

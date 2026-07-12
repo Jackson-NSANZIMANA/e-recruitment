@@ -272,3 +272,29 @@ export const campaignVenueAssignments = publicCore.table(
     uniqueIndex('idx_pc_venue_campaign_district').on(t.campaignId, t.district),
   ],
 );
+
+// ── officer_accounts ──────────────────────────────────────────────
+// The FIRST human-account table: the token issuer's credential store. iam-service
+// verifies an officer's login_handle + password (scrypt digest — never plaintext)
+// and mints an Ed25519 bearer token whose `sub` is officer_id (a UUID, so it lands
+// in the UUID medical_reviewed_by_id / final_decision_by_id stamp columns). Read
+// and written by usrp_iam_service ALONE (least privilege on the crown jewels).
+// Actual DDL + FORCE'd RLS live in rls/0010 (this mirrors it as the readable
+// schema source of truth).
+
+export const officerAccounts = publicCore.table(
+  'officer_accounts',
+  {
+    // = the minted token's `sub` claim. UUID to match the officer-stamp columns.
+    officerId: uuid('officer_id').defaultRandom().primaryKey(),
+    loginHandle: varchar('login_handle', { length: 128 }).notNull().unique(),
+    // scrypt$N$r$p$saltB64$hashB64 (shared-security hashPassword) — NEVER plaintext.
+    credential: text('credential').notNull(),
+    agency: agencyEnum('agency').notNull(),
+    roles: text('roles').array().notNull().default([]),
+    // 'active' | 'disabled' — CHECK constraint enforced in rls/0010.
+    status: varchar('status', { length: 16 }).notNull().default('active'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex('idx_pc_officer_accounts_handle').on(t.loginHandle)],
+);

@@ -8,7 +8,7 @@
 // (see turbo.json `env`) and docker-compose defines.
 // ══════════════════════════════════════════════════════════════════
 
-import { createPublicKey } from 'node:crypto';
+import { createPrivateKey, createPublicKey } from 'node:crypto';
 import {
   boolean,
   deepFreeze,
@@ -216,6 +216,45 @@ export function loadAuthVerifyConfig(source: EnvSource = process.env): AuthVerif
 
   return deepFreeze({
     authPublicKeyPem,
+    jwtIssuer: env.JWT_ISSUER,
+    jwtAudience: env.JWT_AUDIENCE,
+  });
+}
+
+// ── Auth issuer (PRIVATE key) ─────────────────────────────────────
+// The mirror of loadAuthVerifyConfig for the ONE service that MINTS tokens
+// (iam-service). It holds the Ed25519 PRIVATE key; every other service only
+// ever verifies with the public key — the whole point of the asymmetric design.
+// The private key is a SECRET, supplied base64-encoded (PKCS#8 PEM) to dodge
+// multiline-env pain, and validated with createPrivateKey at boot so a bad key
+// fails loud rather than at first login. JWT_ISSUER/JWT_AUDIENCE reuse the same
+// names as AuthVerifyConfig so mint and verify agree by construction.
+// Production: this key belongs in an HSM/KMS with rotation — a deferred residual.
+
+export interface AuthIssuerConfig {
+  /** Issuer private key (PKCS#8 PEM), decoded + validated at boot. SECRET. */
+  readonly authPrivateKeyPem: string;
+  readonly jwtIssuer: string;
+  readonly jwtAudience: string;
+}
+
+export function loadAuthIssuerConfig(source: EnvSource = process.env): AuthIssuerConfig {
+  const env = loadEnv(
+    {
+      // BASE64 of the PKCS#8 PEM. This is the signing SECRET.
+      AUTH_JWT_PRIVATE_KEY_B64: string({ minLength: 40, secret: true }),
+      JWT_ISSUER: withDefault(string(), 'usrp'),
+      JWT_AUDIENCE: withDefault(string(), 'usrp-services'),
+    },
+    source,
+  );
+
+  const authPrivateKeyPem = Buffer.from(env.AUTH_JWT_PRIVATE_KEY_B64, 'base64').toString('utf8');
+  // Fails loud at boot if the value is not a valid private key.
+  createPrivateKey(authPrivateKeyPem);
+
+  return deepFreeze({
+    authPrivateKeyPem,
     jwtIssuer: env.JWT_ISSUER,
     jwtAudience: env.JWT_AUDIENCE,
   });
