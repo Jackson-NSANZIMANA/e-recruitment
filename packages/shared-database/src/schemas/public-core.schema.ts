@@ -211,6 +211,31 @@ export const recruitmentCampaigns = publicCore.table(
   ],
 );
 
+// ── field_devices ─────────────────────────────────────────────────
+// Registry of enrolled field tablets (ADR-010). Each row binds a device's
+// Ed25519 PUBLIC key to the agency that enrolled it; field-sync-service
+// verifies every uploaded physical-test score's device_signature against it
+// before accepting the score. Revocation is a timestamp, not a delete — what a
+// device was trusted to sign is retained. Actual DDL + FORCE'd RLS live in
+// rls/0009 (this definition mirrors it as the readable schema source of truth).
+
+export const fieldDevices = publicCore.table(
+  'field_devices',
+  {
+    // The device identifier signed into every score record (SignableFieldPayload.deviceId).
+    deviceId: varchar('device_id', { length: 64 }).primaryKey(),
+    // SPKI PEM of the device's Ed25519 public key — the trust anchor.
+    publicKeyPem: text('public_key_pem').notNull(),
+    agency: agencyEnum('agency').notNull(),
+    // Enrolling officer's opaque subject id (from their verified token).
+    enrolledBy: varchar('enrolled_by', { length: 128 }).notNull(),
+    enrolledAt: timestamp('enrolled_at', { withTimezone: true }).defaultNow().notNull(),
+    // NULL = active; set = no longer trusted (verification rejects revoked devices).
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  },
+  (t) => [index('idx_pc_field_devices_agency').on(t.agency)],
+);
+
 // ── campaign_venue_assignments ────────────────────────────────────
 // Maps each district to its exam venue for a given campaign.
 // Data seeded from official announcements.

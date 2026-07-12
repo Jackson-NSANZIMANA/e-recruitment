@@ -83,5 +83,9 @@ apply_sql "${RLS_DIR}/0007_status_history_immutability.sql" "rls/0007 (status-hi
 # 9. Venue read grant (scheduling-service resolves district → exam venue).
 apply_sql "${RLS_DIR}/0008_venue_read_grants.sql" "rls/0008 (venue read grant)"
 
+# 10. Field-device registry (offline physical-test score sync; ADR-010). New
+#     public_core.field_devices table + grants + own-agency FORCE'd RLS.
+apply_sql "${RLS_DIR}/0009_field_devices.sql" "rls/0009 (field-device registry)"
+
 printf '\n'
-ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads in place"
+ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry in place"
