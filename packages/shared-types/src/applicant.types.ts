@@ -44,6 +44,12 @@ export const APPLICATION_STATUSES = [
   'MEDICAL_REVIEW',
   'FINAL_SHORTLIST',
   'ACCEPTED',
+  // Late/post-clearance disqualification hold (ADR-011): a disqualifying verdict
+  // arriving AFTER the eligibility terminal routes HERE for human adjudication
+  // instead of auto-rejecting. Ranked above every in-flight stage (monotonic
+  // max-rank holds it); only the officer adjudicate endpoint exits it. Distinct
+  // from DOCUMENT_REVIEW_AMBER, which is routine document review.
+  'ADJUDICATION_REVIEW',
   'REJECTED',
   'WITHDRAWN',
   // ── Path B: Walk-in flow (RDF only) ──────────────────────────

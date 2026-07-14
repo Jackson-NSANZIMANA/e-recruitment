@@ -42,6 +42,7 @@ export const rdfApplicationStatusEnum = rdfOps.enum('application_status', [
   'MEDICAL_REVIEW',
   'FINAL_SHORTLIST',
   'ACCEPTED',
+  'ADJUDICATION_REVIEW',
   'REJECTED',
   'WITHDRAWN',
   'WALK_IN_REGISTERED',

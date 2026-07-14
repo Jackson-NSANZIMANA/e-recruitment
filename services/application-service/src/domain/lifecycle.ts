@@ -12,8 +12,10 @@
 //     and may be redelivered; the top-level status is the FURTHEST stage
 //     justified by the evidence so far, computed by max-rank, never a step back.
 //   • FAIL-CLOSED — a hard fail (age INELIGIBLE, academic INELIGIBLE, or any
-//     criminal FLAGGED_*) drives the application to REJECTED (terminal),
-//     overriding stage progress. Criminal UNDER_REVIEW is a HOLD, not a fail: it
+//     criminal FLAGGED_*) while still in the vetting ladder drives the
+//     application to REJECTED (terminal); a LATE hard fail on a row at or past
+//     SLOT_ASSIGNED routes to ADJUDICATION_REVIEW for human adjudication
+//     instead (ADR-011). Criminal UNDER_REVIEW is a HOLD, not a fail: it
 //     reaches the criminal stage but does not reject (awaits human adjudication).
 //   • POSITIVE TERMINAL — the three gates together answer the whole eligibility
 //     question. When ALL pass (age ELIGIBLE, academic ELIGIBLE, criminal
@@ -102,13 +104,23 @@ export function deriveApplicationStatus(
   // Terminal states are never left by the projection.
   if (TERMINAL.has(current)) return current;
 
-  // A hard fail rejects from any non-terminal state. NOTE: this also fires for a
-  // disqualifying verdict that arrives AFTER the eligibility terminal (e.g. a late
-  // criminal flag on an already-SLOT_ASSIGNED row) — auto-rejecting a scheduled
-  // applicant off the backbone. Whether late disqualification should auto-reject or
-  // route to human adjudication is an owner/agency policy decision (flagged, not
-  // silently settled); this preserves the pre-existing fail-closed behaviour.
-  if (isHardFail(evidence)) return 'REJECTED';
+  // A hard fail is fail-closed, but WHERE it lands depends on how far the row
+  // has progressed (ADR-011, owner-decided 2026-07-14 — settles the policy
+  // previously parked here):
+  //   • still in the vetting ladder (before SLOT_ASSIGNED) → REJECTED, the
+  //     pre-existing autonomous fail-closed behaviour, unchanged;
+  //   • at or past SLOT_ASSIGNED (a LATE verdict on an already-cleared,
+  //     scheduled applicant — e.g. a late criminal flag) → ADJUDICATION_REVIEW,
+  //     a human-adjudication hold. Auto-rejecting a cleared applicant off the
+  //     backbone gave no human a say; now an officer CLEARs (restores) or
+  //     REJECTs via the adjudicate endpoint. ADJUDICATION_REVIEW ranks above
+  //     every in-flight stage, so redelivered evidence can never move the row
+  //     out of the hold — only the officer path exits it.
+  if (isHardFail(evidence)) {
+    return stageRank(current) >= stageRank('SLOT_ASSIGNED')
+      ? 'ADJUDICATION_REVIEW'
+      : 'REJECTED';
+  }
 
   // Otherwise advance to the furthest stage the evidence justifies — but only
   // upward, and only within the linear ladder. All three gates passing is the

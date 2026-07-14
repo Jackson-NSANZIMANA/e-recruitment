@@ -46,6 +46,7 @@ export const rnpApplicationStatusEnum = rnpOps.enum('application_status', [
   'MEDICAL_REVIEW',
   'FINAL_SHORTLIST',
   'ACCEPTED',
+  'ADJUDICATION_REVIEW',
   'REJECTED',
   'WITHDRAWN',
 ]);

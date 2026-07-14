@@ -49,6 +49,7 @@ export const rcsApplicationStatusEnum = rcsOps.enum('application_status', [
   'MEDICAL_REVIEW',
   'FINAL_SHORTLIST',
   'ACCEPTED',
+  'ADJUDICATION_REVIEW',
   'REJECTED',
   'WITHDRAWN',
 ]);

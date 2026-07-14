@@ -90,11 +90,10 @@ for (const terminal of ['REJECTED', 'WITHDRAWN', 'ACCEPTED'] as const) {
   );
 }
 
-console.log('\n── Fail-closed policy preserved (in-vetting hard fail → REJECTED) ──');
-// A hard fail while still IN the vetting ladder disqualifies (terminal REJECTED),
-// overriding stage progress. This is deliberately unchanged by the monotonicity
-// fix; late disqualification AFTER the eligibility terminal is a separate
-// owner-policy question and is intentionally NOT auto-decided here.
+console.log('\n── Fail-closed policy: in-vetting hard fail → REJECTED ──');
+// A hard fail while still IN the vetting ladder (before SLOT_ASSIGNED)
+// disqualifies autonomously (terminal REJECTED), overriding stage progress —
+// unchanged behaviour. Late disqualification is adjudicated instead (below).
 check(
   'SUBMITTED + age INELIGIBLE → REJECTED',
   deriveApplicationStatus('SUBMITTED', { ...ALL_PASS, ageStatus: 'INELIGIBLE' }) === 'REJECTED',
@@ -105,6 +104,65 @@ check(
     ...ALL_PASS,
     criminalStatus: 'FLAGGED_CONVICTION',
   }) === 'REJECTED',
+);
+check(
+  'DOCUMENT_REVIEW_GREEN + academic INELIGIBLE → REJECTED (pre-slot still autonomous)',
+  deriveApplicationStatus('DOCUMENT_REVIEW_GREEN', {
+    ...ALL_PASS,
+    academicStatus: 'INELIGIBLE',
+  }) === 'REJECTED',
+);
+check(
+  'DOCUMENT_REVIEW_AMBER + criminal FLAGGED_PROSECUTION → REJECTED (pre-slot)',
+  deriveApplicationStatus('DOCUMENT_REVIEW_AMBER', {
+    ...ALL_PASS,
+    criminalStatus: 'FLAGGED_PROSECUTION',
+  }) === 'REJECTED',
+);
+
+console.log('\n── ADR-011: LATE hard fail (at/past SLOT_ASSIGNED) → ADJUDICATION_REVIEW ──');
+// A disqualifying verdict on an already-cleared, scheduled applicant no longer
+// auto-rejects off the backbone — it routes to a human-adjudication hold.
+const LATE_STAGES: readonly ApplicationStatus[] = [
+  'SLOT_ASSIGNED',
+  'PHYSICAL_TEST_SCHEDULED',
+  'PHYSICAL_TEST_COMPLETE',
+  'MEDICAL_REVIEW',
+  'FINAL_SHORTLIST',
+];
+const LATE_FAILS: readonly VettingEvidence[] = [
+  { ...ALL_PASS, ageStatus: 'INELIGIBLE' },
+  { ...ALL_PASS, academicStatus: 'INELIGIBLE' },
+  { ...ALL_PASS, criminalStatus: 'FLAGGED_CONVICTION' },
+];
+for (const stage of LATE_STAGES) {
+  for (const evidence of LATE_FAILS) {
+    const out = deriveApplicationStatus(stage, evidence);
+    const dim =
+      evidence.ageStatus === 'INELIGIBLE'
+        ? 'age'
+        : evidence.academicStatus === 'INELIGIBLE'
+          ? 'academic'
+          : 'criminal';
+    check(`${stage} + late ${dim} fail → ADJUDICATION_REVIEW`, out === 'ADJUDICATION_REVIEW', `got ${out}`);
+  }
+}
+
+console.log('\n── ADJUDICATION_REVIEW is a stable hold (only the officer path exits it) ──');
+check(
+  'ADJUDICATION_REVIEW + redelivered hard-fail → stays ADJUDICATION_REVIEW',
+  deriveApplicationStatus('ADJUDICATION_REVIEW', {
+    ...ALL_PASS,
+    criminalStatus: 'FLAGGED_CONVICTION',
+  }) === 'ADJUDICATION_REVIEW',
+);
+check(
+  'ADJUDICATION_REVIEW + redelivered all-pass → stays ADJUDICATION_REVIEW',
+  deriveApplicationStatus('ADJUDICATION_REVIEW', ALL_PASS) === 'ADJUDICATION_REVIEW',
+);
+check(
+  'ADJUDICATION_REVIEW + all pending → stays ADJUDICATION_REVIEW',
+  deriveApplicationStatus('ADJUDICATION_REVIEW', ALL_PENDING) === 'ADJUDICATION_REVIEW',
 );
 
 console.log('\n── Idempotence & no-evidence no-op ──');

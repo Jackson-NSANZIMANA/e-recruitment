@@ -92,10 +92,15 @@ apply_sql "${RLS_DIR}/0009_field_devices.sql" "rls/0009 (field-device registry)"
 #     ALONE (least privilege on the credential store) under FORCE'd RLS.
 apply_sql "${RLS_DIR}/0010_officer_accounts.sql" "rls/0010 (officer account store)"
 
-printf '\n'
-ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts in place"
+# 12. ADJUDICATION_REVIEW status (ADR-011): late/post-clearance disqualification
+#     routes to human adjudication instead of auto-reject. Adds the enum value
+#     BEFORE 'REJECTED' on all three ops application_status enums.
+apply_sql "${RLS_DIR}/0011_adjudication_review_status.sql" "rls/0011 (ADJUDICATION_REVIEW status)"
 
-# 12. Dev officer accounts (one per agency). A CONVENIENCE seed so the officer
+printf '\n'
+ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status in place"
+
+# 13. Dev officer accounts (one per agency). A CONVENIENCE seed so the officer
 #     console / manual login smoke tests have real credentials to drive —
 #     dev-only, idempotent. Best-effort: it needs the workspace built (tsx
 #     resolves @usrp/* runtime dist), so a failure here NEVER blocks the
