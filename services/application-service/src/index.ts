@@ -20,6 +20,7 @@ import { ProjectVettingResultService } from './application/project-vetting-resul
 import { ProjectSlotAssignmentService } from './application/project-slot-assignment.service.js';
 import { ProjectNotificationDeliveryService } from './application/project-notification-delivery.service.js';
 import { ProjectPhysicalTestCompleteService } from './application/project-physical-test-complete.service.js';
+import { ProjectForensicsResultService } from './application/project-forensics-result.service.js';
 import type { ApplicationServiceConfig } from './config.js';
 
 /** The application aggregate's adapters over one repository. */
@@ -38,6 +39,8 @@ export interface ApplicationService {
   readonly notificationProjector: ProjectNotificationDeliveryService;
   /** Event projector — COMPLETE the physical test (PHYSICAL_TEST_SCHEDULED → PHYSICAL_TEST_COMPLETE). */
   readonly physicalTestProjector: ProjectPhysicalTestCompleteService;
+  /** Event projector — ROUTE a document forensics lane (AMBER hold / RED reject-or-adjudicate). */
+  readonly forensicsProjector: ProjectForensicsResultService;
 }
 
 /**
@@ -73,6 +76,7 @@ export function createApplicationService(
     slotProjector: new ProjectSlotAssignmentService({ repository, eventBus }),
     notificationProjector: new ProjectNotificationDeliveryService({ repository, eventBus }),
     physicalTestProjector: new ProjectPhysicalTestCompleteService({ repository, eventBus }),
+    forensicsProjector: new ProjectForensicsResultService({ repository, eventBus }),
   };
 }
 
@@ -146,6 +150,15 @@ export {
   APPLICATION_PHYSICAL_TEST_PROJECTION_GROUP,
   startFieldScoreCapturedConsumer,
 } from './adapters/events/field-score-captured.consumer.js';
+export {
+  APPLICATION_FORENSICS_PROJECTION_GROUP,
+  startForensicsResultConsumer,
+} from './adapters/events/forensics-result.consumer.js';
+export { ProjectForensicsResultService } from './application/project-forensics-result.service.js';
+export type {
+  ProjectForensicsResultCommand,
+  ProjectForensicsResultDeps,
+} from './application/project-forensics-result.service.js';
 export { ProjectPhysicalTestCompleteService } from './application/project-physical-test-complete.service.js';
 export type {
   ProjectPhysicalTestCompleteCommand,
@@ -186,6 +199,8 @@ export type {
   ApplyNotificationOutcome,
   PhysicalTestCompleteResult,
   ApplyPhysicalTestOutcome,
+  ForensicsRoutingResult,
+  ApplyForensicsOutcome,
 } from './ports/application-repository.js';
 export {
   academicPathForCategory,

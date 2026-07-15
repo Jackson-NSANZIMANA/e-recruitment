@@ -23,12 +23,14 @@ import { sql } from '@usrp/shared-database';
 import { APPLICATION_STATUSES, type ApplicationStatus } from '@usrp/shared-types';
 import type {
   ApplicationRepository,
+  ApplyForensicsOutcome,
   ApplyNotificationOutcome,
   ApplyPhysicalTestOutcome,
   ApplySlotOutcome,
   ApplyVettingOutcome,
   CreateApplicationInput,
   CreateApplicationResult,
+  ForensicsRoutingResult,
   NotificationDeliveryResult,
   PhysicalTestCompleteResult,
   SlotAssignmentResult,
@@ -474,6 +476,77 @@ export class PgApplicationRepository implements ApplicationRepository {
     } catch (cause) {
       if (cause instanceof ApplicationPersistenceError) throw cause;
       throw new ApplicationPersistenceError('Failed to apply physical-test completion', { cause });
+    }
+  }
+
+  async applyForensicsRouting(result: ForensicsRoutingResult): Promise<ApplyForensicsOutcome> {
+    const schema = sql(AGENCY_TARGET[result.agency].schema);
+    const slotRank = APPLICATION_STATUSES.indexOf('SLOT_ASSIGNED');
+    const amberRank = APPLICATION_STATUSES.indexOf('DOCUMENT_REVIEW_AMBER');
+
+    try {
+      return await sql.begin(async (tx): Promise<ApplyForensicsOutcome> => {
+        await tx`SET LOCAL ROLE ${sql(SYSTEM_ROLE)}`;
+
+        const rows = await tx<{ status: ApplicationStatus; applicant_id: string }[]>`
+          SELECT status, applicant_id
+          FROM ${schema}.applications
+          WHERE id = ${result.applicationId}
+          FOR UPDATE
+        `;
+        const current = rows[0];
+        // 0 rows ⇒ not in THIS agency's schema (mis-route / unknown).
+        if (!current) return { kind: 'NOT_FOUND' };
+
+        // Terminal rows are never routed (the verdict stays in document_records).
+        if (current.status === 'REJECTED' || current.status === 'WITHDRAWN' || current.status === 'ACCEPTED') {
+          return { kind: 'NOT_APPLICABLE', currentStatus: current.status };
+        }
+
+        // GREEN never moves the status; a redelivered verdict on an
+        // already-held/adjudicating row changes nothing (idempotent).
+        const currentRank = APPLICATION_STATUSES.indexOf(current.status);
+        let target: ApplicationStatus | null = null;
+        if (result.lane === 'RED') {
+          // ADR-011 lane policy: hostile document → autonomous reject while
+          // still pre-slot, human adjudication once the applicant is cleared.
+          target = currentRank >= slotRank ? 'ADJUDICATION_REVIEW' : 'REJECTED';
+        } else if (result.lane === 'AMBER') {
+          if (currentRank >= slotRank) target = 'ADJUDICATION_REVIEW';
+          else if (currentRank < amberRank) target = 'DOCUMENT_REVIEW_AMBER';
+          // already AMBER (or between AMBER and slot — nothing to hold) → no-op
+        }
+        if (target === null || target === current.status) return { kind: 'NO_CHANGE' };
+
+        await tx`
+          UPDATE ${schema}.applications SET
+            status = ${target}::${schema}.application_status,
+            updated_at = now()
+          WHERE id = ${result.applicationId}
+        `;
+        await tx`
+          INSERT INTO ${schema}.application_status_history
+            (application_id, from_status, to_status, reason, performed_by, correlation_id)
+          VALUES (
+            ${result.applicationId},
+            ${current.status}::${schema}.application_status,
+            ${target}::${schema}.application_status,
+            ${`Document forensics: ${result.lane} lane (document ${result.documentId})`},
+            'application-service',
+            ${result.correlationId}
+          )
+        `;
+
+        return {
+          kind: 'APPLIED',
+          fromStatus: current.status,
+          toStatus: target,
+          applicantId: current.applicant_id,
+        };
+      });
+    } catch (cause) {
+      if (cause instanceof ApplicationPersistenceError) throw cause;
+      throw new ApplicationPersistenceError('Failed to apply forensics routing', { cause });
     }
   }
 }

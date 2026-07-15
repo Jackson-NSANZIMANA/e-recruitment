@@ -214,6 +214,44 @@ export type ApplyPhysicalTestOutcome =
   /** No such application in the agency's schema — the cross-agency write guard. */
   | { readonly kind: 'NOT_FOUND' };
 
+// ── Forensics-routing projection ────────────────────────────────────
+//
+// A document forensics verdict (document-forensics-service) routed onto the
+// application status (ADR-011). Lane policy, applied against the row's
+// CURRENT position in the canonical order:
+//   RED   — hostile/forged document. Before SLOT_ASSIGNED → REJECTED
+//           (autonomous fail-closed, mirrors the vetting hard-fail); at/past
+//           SLOT_ASSIGNED → ADJUDICATION_REVIEW (late adverse signal on a
+//           cleared applicant gets a human, same as late vetting flags).
+//   AMBER — routine document review. Before AMBER's own rank →
+//           DOCUMENT_REVIEW_AMBER (the officer amber queue); at/past
+//           SLOT_ASSIGNED → ADJUDICATION_REVIEW; already AMBER → NO_CHANGE.
+//   GREEN — the verdict lives in document_records; the status never moves.
+
+/** A document forensics verdict to route onto an application row. */
+export interface ForensicsRoutingResult {
+  readonly applicationId: string;
+  readonly agency: Agency;
+  readonly lane: 'GREEN' | 'AMBER' | 'RED';
+  readonly documentId: string;
+  readonly correlationId: string;
+}
+
+/** Outcome of routing a forensics verdict onto an application row. */
+export type ApplyForensicsOutcome =
+  | {
+      readonly kind: 'APPLIED';
+      readonly fromStatus: ApplicationStatus;
+      readonly toStatus: ApplicationStatus;
+      readonly applicantId: string;
+    }
+  /** Verdict recorded but no status transition is due (GREEN, or already routed). */
+  | { readonly kind: 'NO_CHANGE' }
+  /** Terminal/withdrawn row — nothing to route; nothing written. */
+  | { readonly kind: 'NOT_APPLICABLE'; readonly currentStatus: ApplicationStatus }
+  /** No such application in the agency's schema — the cross-agency write guard. */
+  | { readonly kind: 'NOT_FOUND' };
+
 export interface ApplicationRepository {
   createApplication(input: CreateApplicationInput): Promise<CreateApplicationResult>;
   /**
@@ -251,4 +289,13 @@ export interface ApplicationRepository {
   applyPhysicalTestComplete(
     result: PhysicalTestCompleteResult,
   ): Promise<ApplyPhysicalTestOutcome>;
+  /**
+   * Route a document forensics verdict onto its application row (ADR-011 lane
+   * policy above), in one transaction. Monotonic and hold-safe: GREEN never
+   * moves the status, AMBER holds pre-slot rows at DOCUMENT_REVIEW_AMBER, RED
+   * rejects pre-slot and adjudicates post-slot; idempotent on redelivery
+   * (NO_CHANGE); terminal rows untouched (NOT_APPLICABLE); cross-agency
+   * guarded (NOT_FOUND).
+   */
+  applyForensicsRouting(result: ForensicsRoutingResult): Promise<ApplyForensicsOutcome>;
 }

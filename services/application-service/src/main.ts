@@ -32,6 +32,7 @@ import { startVettingResultConsumer } from './adapters/events/vetting-result.con
 import { startSlotAssignedConsumer } from './adapters/events/slot-assigned.consumer.js';
 import { startNotificationDeliveredConsumer } from './adapters/events/notification-delivered.consumer.js';
 import { startFieldScoreCapturedConsumer } from './adapters/events/field-score-captured.consumer.js';
+import { startForensicsResultConsumer } from './adapters/events/forensics-result.consumer.js';
 
 function createEventBus(serviceName: string): EventBus {
   if (process.env['KAFKA_BROKERS']) {
@@ -69,11 +70,12 @@ async function main(): Promise<void> {
     await startSlotAssignedConsumer(bus, service.slotProjector);
     await startNotificationDeliveredConsumer(bus, service.notificationProjector);
     await startFieldScoreCapturedConsumer(bus, service.physicalTestProjector);
+    await startForensicsResultConsumer(bus, service.forensicsProjector);
     console.log(
       JSON.stringify({
         msg: 'event_consumers_started',
         topics:
-          'vetting.nesa,vetting.hec,vetting.rib,vetting.age,slot.assigned,notification.delivered,field.score.captured',
+          'vetting.nesa,vetting.hec,vetting.rib,vetting.age,slot.assigned,notification.delivered,field.score.captured,document.forensics',
       }),
     );
   }
