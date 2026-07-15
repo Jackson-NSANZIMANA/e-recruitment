@@ -41,6 +41,17 @@ export PII_ENCRYPTION_KEY="${PII_ENCRYPTION_KEY:-dev_pii_encryption_key_min_32_c
 # with; the PRIVATE key lets proofs mint tokens. Real keys come from HSM/KMS.
 export AUTH_JWT_PUBLIC_KEY_B64="${AUTH_JWT_PUBLIC_KEY_B64:-LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUNvd0JRWURLMlZ3QXlFQUpjb2FtWEM1NFMvTk51UDRlcXVzLzh5dlhuTk5yTkRhK0JGWFFuSkU1QzQ9Ci0tLS0tRU5EIFBVQkxJQyBLRVktLS0tLQo=}"
 export AUTH_JWT_PRIVATE_KEY_B64="${AUTH_JWT_PRIVATE_KEY_B64:-LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCk1DNENBUUF3QlFZREsyVndCQ0lFSUlUaGJCTVJ0Sm9WQUwzUURrK29yZUgwVTludWw3RUNBNFdRRUxiV21LZmwKLS0tLS1FTkQgUFJJVkFURSBLRVktLS0tLQo=}"
+# Object store + virus scanner (the amber-lane forensics slice). Dev-tier
+# MinIO (tier1) + ClamAV (tier2) — values mirror .env.example dev defaults.
+export MINIO_ENDPOINT="${MINIO_ENDPOINT:-localhost}"
+export MINIO_PORT="${MINIO_PORT:-9000}"
+export MINIO_USE_SSL="${MINIO_USE_SSL:-false}"
+export MINIO_ROOT_USER="${MINIO_ROOT_USER:-usrp_minio_admin}"
+export MINIO_ROOT_PASSWORD="${MINIO_ROOT_PASSWORD:-usrp_minio_dev_password}"
+export CLAMAV_HOST="${CLAMAV_HOST:-localhost}"
+export CLAMAV_PORT="${CLAMAV_PORT:-3310}"
+export CLAMAV_TIMEOUT_MS="${CLAMAV_TIMEOUT_MS:-30000}"
+export QR_SIGNING_KEY_ID="${QR_SIGNING_KEY_ID:-selfcheck-qr-key-1}"
 
 PG_CONTAINER="${PG_CONTAINER:-usrp-postgres}"
 PG_ADMIN_USER="${PG_ADMIN_USER:-usrp_admin}"
@@ -96,6 +107,8 @@ run_ts "notification-service: invitation delivery + lifecycle advance" services/
 run_ts "biometric-service: check-in gate + persistence" services/biometric-service/selfcheck/verify-biometric-slice.ts
 run_ts "field-sync-service: offline capture + CRDT merge + adjudication" services/field-sync-service/selfcheck/verify-field-sync-slice.ts
 run_ts "audit-service: immutable trail"           services/audit-service/selfcheck/verify-audit-slice.ts
+run_ts "document-forensics: bounded-real analyzer (MinIO+ClamAV)" services/document-forensics-service/selfcheck/verify-forensics-slice.ts
+run_ts "application-service: amber routing + adjudication" services/application-service/selfcheck/verify-amber-adjudication-slice.ts
 # The whole spine composed: one real submission → all 3 gates → DOCUMENT_REVIEW_GREEN.
 # Runs last — it exercises the most services (eligibility + background-vetting + application).
 run_ts "pipeline: full chain → DOCUMENT_REVIEW_GREEN" services/application-service/selfcheck/verify-pipeline-e2e.ts

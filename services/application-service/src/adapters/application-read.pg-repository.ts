@@ -92,7 +92,8 @@ interface AmberQueueRow {
   readonly document_type: string | null;
   readonly forensics_score: number | null;
   readonly forensics_flags: Record<string, unknown> | null;
-  readonly forensics_completed_at: Date | null;
+  /** timestamptz — the shared client may surface it as Date or ISO string. */
+  readonly forensics_completed_at: Date | string | null;
 }
 
 function toQueueEntry(row: AmberQueueRow): AmberQueueEntry {
@@ -103,7 +104,10 @@ function toQueueEntry(row: AmberQueueRow): AmberQueueEntry {
     documentType: row.document_type,
     forensicsScore: row.forensics_score,
     forensicsFlags: row.forensics_flags,
-    queuedAt: row.forensics_completed_at === null ? null : row.forensics_completed_at.toISOString(),
+    queuedAt:
+      row.forensics_completed_at === null
+        ? null
+        : new Date(row.forensics_completed_at).toISOString(),
   };
 }
 
