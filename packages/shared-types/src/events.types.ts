@@ -10,8 +10,11 @@ import type {
   AcademicEligibilityStatus,
   AgeEligibilityStatus,
   CriminalClearanceStatus,
+  DocumentLane,
+  DocumentType,
   EligibilityResult,
 } from './eligibility.types';
+import type { ForensicsFlags } from './vetting.types';
 
 // ── Base Event ────────────────────────────────────────────────────
 
@@ -232,6 +235,29 @@ export interface NotificationDeliveredEvent extends BaseEvent {
   readonly deliveryStatus: 'DELIVERED' | 'PENDING_NO_CONTACT' | 'FAILED';
 }
 
+// ── Topic: document.forensics ─────────────────────────────────────
+
+/**
+ * A document forensics verdict (amber-lane trigger). Emitted by
+ * document-forensics-service after analyzing the referenced object's REAL
+ * bytes (virus scan + container/metadata + C2PA-manifest presence — the
+ * bounded-real analyzer tier; perceptual/ML checks are a deferred program).
+ * application-service projects the lane onto the application status:
+ * RED → reject/adjudicate, AMBER → DOCUMENT_REVIEW_AMBER hold, GREEN → no-op.
+ * PII-free: ids, enums, booleans and a score only — never document content.
+ * No applicantId — partition-keyed by applicationId.
+ */
+export interface DocumentForensicsCompletedEvent extends BaseEvent {
+  readonly eventType: 'DOCUMENT_FORENSICS_COMPLETED';
+  readonly applicationId: string;
+  readonly agency: Agency;
+  readonly documentId: string;           // document_records row id
+  readonly documentType: DocumentType;
+  readonly lane: DocumentLane;
+  readonly forensicsScore: number;       // 0-100 (100 = clean)
+  readonly flags: ForensicsFlags;
+}
+
 // ── Topic: audit.immutable ────────────────────────────────────────
 
 export interface AuditEvent extends BaseEvent {
@@ -261,6 +287,7 @@ export type USRPEvent =
   | SlotAssignedEvent
   | FieldScoreCapturedEvent
   | NotificationDeliveredEvent
+  | DocumentForensicsCompletedEvent
   | AuditEvent;
 
 // ── Kafka Topic Names ─────────────────────────────────────────────
@@ -277,6 +304,7 @@ export const KAFKA_TOPICS = {
   SLOT_ASSIGNED: 'slot.assigned',
   FIELD_SCORE_CAPTURED: 'field.score.captured',
   NOTIFICATION_DELIVERED: 'notification.delivered', // NEW — invitation delivery outcome → PHYSICAL_TEST_SCHEDULED
+  DOCUMENT_FORENSICS: 'document.forensics', // NEW — forensics verdict → amber-lane routing
   AUDIT_IMMUTABLE: 'audit.immutable',
 } as const;
 
