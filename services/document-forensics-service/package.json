@@ -1,0 +1,39 @@
+{
+  "name": "@usrp/document-forensics-service",
+  "version": "1.0.0",
+  "private": true,
+  "description": "USRP Document Forensics Service — the amber-lane trigger: retrieves a referenced document's REAL bytes from the object store, runs the bounded-real analyzer tier (ClamAV virus scan + container/metadata parse + C2PA-manifest presence), records the verdict on document_records and emits document.forensics",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "start:dev": "tsx src/main.ts",
+    "dev": "tsx watch src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/**/*.ts",
+    "selfcheck": "tsx selfcheck/verify-forensics-slice.ts"
+  },
+  "dependencies": {
+    "@usrp/shared-auth": "workspace:*",
+    "@usrp/shared-config": "workspace:*",
+    "@usrp/shared-database": "workspace:*",
+    "@usrp/shared-events": "workspace:*",
+    "@usrp/shared-http": "workspace:*",
+    "@usrp/shared-security": "workspace:*",
+    "@usrp/shared-types": "workspace:*",
+    "postgres": "^3.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.8.3"
+  }
+}
