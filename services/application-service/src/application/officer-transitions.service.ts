@@ -18,9 +18,14 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { newEnvelope, type EventBus, type EventContext } from '@usrp/shared-events';
-import type { Agency, AuditEvent } from '@usrp/shared-types';
+import type {
+  Agency,
+  ApplicationEligibilityClearedEvent,
+  AuditEvent,
+} from '@usrp/shared-types';
 import { dbRoleForPrincipal, type Principal } from '@usrp/shared-auth';
 import type {
+  AdjudicateOutcome,
   OfficerActor,
   OfficerTransitionOutcome,
   OfficerTransitionRepository,
@@ -64,6 +69,17 @@ export interface AcceptCommand {
   readonly applicationId: string;
   readonly context: EventContext;
 }
+
+export interface AdjudicateCommand {
+  readonly actor: Principal;
+  readonly applicationId: string;
+  readonly decision: 'CLEAR' | 'REJECT';
+  readonly notes: string | null;
+  readonly context: EventContext;
+}
+
+/** Adjudication outcome plus the non-officer defence-in-depth guard. */
+export type AdjudicateCommandOutcome = AdjudicateOutcome | { readonly kind: 'FORBIDDEN' };
 
 export interface OfficerTransitionsDeps {
   readonly repository: OfficerTransitionRepository;
@@ -116,6 +132,48 @@ export class OfficerTransitionsService {
     const actor = toActor(command.actor, command.context);
     const outcome = await this.#repository.accept({ actor, applicationId: command.applicationId });
     await this.#audit(outcome, command.actor, command.context, command.applicationId, 'ACCEPT', {});
+    return outcome;
+  }
+
+  /**
+   * Adjudicate an amber/late-disqualification hold (ADR-011). When a CLEAR
+   * re-derives the row all the way to DOCUMENT_REVIEW_GREEN, re-emit
+   * application.cleared so the amber-cleared applicant rejoins the SAME slot
+   * lane the green-cleared one travels (owner decision D4 — one
+   * reconvergence path, scheduling-service is none the wiser).
+   */
+  async adjudicate(command: AdjudicateCommand): Promise<AdjudicateCommandOutcome> {
+    if (command.actor.kind !== 'officer') return { kind: 'FORBIDDEN' };
+    const actor = toActor(command.actor, command.context);
+    const outcome = await this.#repository.adjudicate({
+      actor,
+      applicationId: command.applicationId,
+      decision: command.decision,
+      notes: command.notes,
+    });
+    if (outcome.kind !== 'APPLIED') return outcome;
+
+    await this.#audit(
+      { kind: 'APPLIED', fromStatus: outcome.fromStatus, toStatus: outcome.toStatus },
+      command.actor,
+      command.context,
+      command.applicationId,
+      'ADJUDICATION',
+      { decision: command.decision },
+    );
+
+    if (outcome.clearedToGreen) {
+      const cleared: ApplicationEligibilityClearedEvent = {
+        ...newEnvelope(command.context),
+        eventType: 'APPLICATION_ELIGIBILITY_CLEARED',
+        applicationId: command.applicationId,
+        applicantId: outcome.applicantId,
+        agency: command.actor.agency,
+        campaignId: outcome.campaignId,
+        category: outcome.category,
+      };
+      await this.#eventBus.publish(cleared);
+    }
     return outcome;
   }
 

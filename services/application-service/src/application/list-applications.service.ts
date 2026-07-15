@@ -12,6 +12,7 @@
 import type { Agency } from '@usrp/shared-types';
 import { dbRoleForPrincipal, type Principal } from '@usrp/shared-auth';
 import type {
+  AmberQueueEntry,
   ApplicationReadRepository,
   ApplicationSummary,
 } from '../ports/application-read-repository.js';
@@ -24,6 +25,10 @@ export interface ListApplicationsCommand {
 
 export type ListApplicationsOutcome =
   | { readonly kind: 'OK'; readonly agency: Agency; readonly applications: readonly ApplicationSummary[] }
+  | { readonly kind: 'FORBIDDEN' };
+
+export type AmberQueueOutcome =
+  | { readonly kind: 'OK'; readonly agency: Agency; readonly queue: readonly AmberQueueEntry[] }
   | { readonly kind: 'FORBIDDEN' };
 
 export interface ListApplicationsDeps {
@@ -51,5 +56,19 @@ export class ListApplicationsService {
       limit: this.#maxResults,
     });
     return { kind: 'OK', agency: actor.agency, applications };
+  }
+
+  /** The officer's agency review queue (amber + adjudication holds, ADR-011). */
+  async amberQueue(command: ListApplicationsCommand): Promise<AmberQueueOutcome> {
+    const { actor } = command;
+    if (actor.kind !== 'officer') {
+      return { kind: 'FORBIDDEN' };
+    }
+    const queue = await this.#reader.listAmberQueue({
+      agency: actor.agency,
+      dbRole: dbRoleForPrincipal(actor),
+      limit: this.#maxResults,
+    });
+    return { kind: 'OK', agency: actor.agency, queue };
   }
 }

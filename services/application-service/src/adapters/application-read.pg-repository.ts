@@ -18,6 +18,7 @@
 import { sql } from '@usrp/shared-database';
 import type { ApplicationCategory, ApplicationStatus } from '@usrp/shared-types';
 import type {
+  AmberQueueEntry,
   ApplicationReadRepository,
   ApplicationSummary,
   ListByAgencyInput,
@@ -52,6 +53,58 @@ export class PgApplicationReadRepository implements ApplicationReadRepository {
       throw new ApplicationReadError('Could not list applications for the agency.', { cause: err });
     }
   }
+
+  async listAmberQueue(input: ListByAgencyInput): Promise<readonly AmberQueueEntry[]> {
+    const schema = sql(schemaForAgency(input.agency)); // quoted identifier fragment
+    try {
+      return await sql.begin(async (tx) => {
+        await tx`SET LOCAL ROLE ${sql(input.dbRole)}`;
+        // AMBER holds join their yet-unreviewed flagged document; adjudication
+        // holds carry no document (a late vetting flag, not a document issue).
+        // LEFT JOIN keeps an amber application visible even if its document
+        // row was already stamped (defensive — the queue must never lose apps).
+        const rows = await tx<AmberQueueRow[]>`
+          SELECT a.id, a.processing_code, a.status,
+                 d.document_type, d.forensics_score, d.forensics_flags, d.forensics_completed_at
+          FROM ${schema}.applications a
+          LEFT JOIN ${schema}.document_records d
+            ON d.application_id = a.id
+           AND d.forensics_lane = 'AMBER'::${schema}.document_lane
+           AND d.human_reviewed_by_id IS NULL
+          WHERE a.status IN ('DOCUMENT_REVIEW_AMBER'::${schema}.application_status,
+                             'ADJUDICATION_REVIEW'::${schema}.application_status)
+          ORDER BY d.forensics_completed_at ASC NULLS LAST, a.updated_at ASC
+          LIMIT ${input.limit}
+        `;
+        return rows.map(toQueueEntry);
+      });
+    } catch (err) {
+      throw new ApplicationReadError('Could not list the review queue for the agency.', { cause: err });
+    }
+  }
+}
+
+/** The non-PII review-queue columns (document fields null for late holds). */
+interface AmberQueueRow {
+  readonly id: string;
+  readonly processing_code: string;
+  readonly status: ApplicationStatus;
+  readonly document_type: string | null;
+  readonly forensics_score: number | null;
+  readonly forensics_flags: Record<string, unknown> | null;
+  readonly forensics_completed_at: Date | null;
+}
+
+function toQueueEntry(row: AmberQueueRow): AmberQueueEntry {
+  return {
+    applicationId: row.id,
+    processingCode: row.processing_code,
+    status: row.status,
+    documentType: row.document_type,
+    forensicsScore: row.forensics_score,
+    forensicsFlags: row.forensics_flags,
+    queuedAt: row.forensics_completed_at === null ? null : row.forensics_completed_at.toISOString(),
+  };
 }
 
 function toSummary(row: ApplicationSummaryRow): ApplicationSummary {

@@ -21,9 +21,17 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { sql } from '@usrp/shared-database';
-import type { ApplicationStatus } from '@usrp/shared-types';
+import type {
+  AcademicEligibilityStatus,
+  AgeEligibilityStatus,
+  ApplicationCategory,
+  ApplicationStatus,
+  CriminalClearanceStatus,
+} from '@usrp/shared-types';
 import type {
   AcceptInput,
+  AdjudicateInput,
+  AdjudicateOutcome,
   FinalDecisionInput,
   MedicalReviewInput,
   OfficerTransitionOutcome,
@@ -31,6 +39,13 @@ import type {
 } from '../ports/officer-transition-repository.js';
 import { ApplicationPersistenceError } from '../domain/application.errors.js';
 import { schemaForAgency } from '../domain/agency-schema.js';
+import { deriveApplicationStatus } from '../domain/lifecycle.js';
+
+/** Statuses an officer may adjudicate (ADR-011). */
+const ADJUDICABLE: ReadonlySet<ApplicationStatus> = new Set<ApplicationStatus>([
+  'DOCUMENT_REVIEW_AMBER',
+  'ADJUDICATION_REVIEW',
+]);
 
 export class PgOfficerTransitionRepository implements OfficerTransitionRepository {
   async medicalReview(input: MedicalReviewInput): Promise<OfficerTransitionOutcome> {
@@ -161,6 +176,126 @@ export class PgOfficerTransitionRepository implements OfficerTransitionRepositor
       throw wrap(cause, 'Failed to apply acceptance');
     }
   }
+
+  async adjudicate(input: AdjudicateInput): Promise<AdjudicateOutcome> {
+    const { actor, applicationId, decision, notes } = input;
+    const schema = sql(schemaForAgency(actor.agency));
+    try {
+      return await sql.begin(async (tx): Promise<AdjudicateOutcome> => {
+        await tx`SET LOCAL ROLE ${sql(actor.dbRole)}`;
+
+        const rows = await tx<AdjudicableRow[]>`
+          SELECT status, age_eligibility_status, academic_status, criminal_clearance_status,
+                 applicant_id, campaign_id, category
+          FROM ${schema}.applications WHERE id = ${applicationId} FOR UPDATE
+        `;
+        const current = rows[0];
+        if (!current) return { kind: 'NOT_FOUND' };
+        if (!ADJUDICABLE.has(current.status)) {
+          return { kind: 'NOT_APPLICABLE', currentStatus: current.status };
+        }
+
+        let target: ApplicationStatus;
+        if (decision === 'REJECT') {
+          target = 'REJECTED';
+        } else if (current.status === 'DOCUMENT_REVIEW_AMBER') {
+          // CLEAR lifts the document hold; where the row lands is decided by
+          // the SAME pure lifecycle that put every other status there — from
+          // the baseline, on the row's recorded vetting evidence. All-pass →
+          // GREEN (and the use case re-emits application.cleared, so the slot
+          // lane runs exactly as for a green-lane clearance); gates still
+          // pending → the furthest justified vetting stage, never a premature
+          // green on unanswered evidence.
+          target = deriveApplicationStatus('SUBMITTED', {
+            ageStatus: current.age_eligibility_status,
+            academicStatus: current.academic_status,
+            criminalStatus: current.criminal_clearance_status,
+          });
+        } else {
+          // CLEAR from ADJUDICATION_REVIEW: the officer dismisses the late
+          // flag — restore the stage the row held when the flag arrived,
+          // recorded on the append-only history (rls/0007 guarantees it).
+          const prior = await tx<{ from_status: ApplicationStatus | null }[]>`
+            SELECT from_status FROM ${schema}.application_status_history
+            WHERE application_id = ${applicationId}
+              AND to_status = 'ADJUDICATION_REVIEW'::${schema}.application_status
+            ORDER BY performed_at DESC
+            LIMIT 1
+          `;
+          const restored = prior[0]?.from_status;
+          if (!restored) {
+            // No recorded entry into the hold — nothing trustworthy to restore.
+            return { kind: 'NOT_APPLICABLE', currentStatus: current.status };
+          }
+          target = restored;
+        }
+
+        if (target === current.status) return { kind: 'NO_CHANGE', currentStatus: current.status };
+
+        await tx`
+          UPDATE ${schema}.applications SET
+            status = ${target}::${schema}.application_status,
+            updated_at = now()
+          WHERE id = ${applicationId}
+        `;
+
+        // A decision on an AMBER document hold is a HUMAN document review —
+        // stamp the flagged rows with the reviewing officer (UUID sub) and the
+        // decision. A late-disqualification hold is not a document decision,
+        // so ADJUDICATION_REVIEW clears stamp nothing.
+        if (current.status === 'DOCUMENT_REVIEW_AMBER') {
+          await tx`
+            UPDATE ${schema}.document_records SET
+              human_reviewed_by_id = ${actor.officerId},
+              human_reviewed_at = now(),
+              human_review_decision = ${decision}
+            WHERE application_id = ${applicationId}
+              AND forensics_lane = 'AMBER'::${schema}.document_lane
+              AND human_reviewed_by_id IS NULL
+          `;
+        }
+
+        await tx`
+          INSERT INTO ${schema}.application_status_history
+            (application_id, from_status, to_status, reason, performed_by, correlation_id)
+          VALUES (
+            ${applicationId},
+            ${current.status}::${schema}.application_status,
+            ${target}::${schema}.application_status,
+            ${
+              // history reason is varchar(200) — keep the decision, bound the notes
+              (notes === null ? `Adjudication: ${decision}` : `Adjudication: ${decision} — ${notes}`).slice(0, 200)
+            },
+            ${actor.officerId},
+            ${actor.correlationId}
+          )
+        `;
+
+        return {
+          kind: 'APPLIED',
+          fromStatus: current.status,
+          toStatus: target,
+          clearedToGreen: decision === 'CLEAR' && target === 'DOCUMENT_REVIEW_GREEN',
+          applicantId: current.applicant_id,
+          campaignId: current.campaign_id,
+          category: current.category,
+        };
+      });
+    } catch (cause) {
+      throw wrap(cause, 'Failed to apply adjudication');
+    }
+  }
+}
+
+/** Row shape the adjudicate transaction reads under FOR UPDATE. */
+interface AdjudicableRow {
+  readonly status: ApplicationStatus;
+  readonly age_eligibility_status: AgeEligibilityStatus;
+  readonly academic_status: AcademicEligibilityStatus;
+  readonly criminal_clearance_status: CriminalClearanceStatus;
+  readonly applicant_id: string;
+  readonly campaign_id: string;
+  readonly category: ApplicationCategory;
 }
 
 /**

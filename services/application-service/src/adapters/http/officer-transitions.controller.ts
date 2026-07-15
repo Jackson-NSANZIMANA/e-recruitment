@@ -20,6 +20,8 @@ import { withAuth, type AuthVerifier } from '@usrp/shared-auth';
 import { ApplicationPersistenceError } from '../../domain/application.errors.js';
 import type {
   AcceptCommand,
+  AdjudicateCommand,
+  AdjudicateCommandOutcome,
   FinalDecisionCommand,
   MedicalReviewCommand,
   OfficerCommandOutcome,
@@ -29,11 +31,13 @@ import type {
 export const MEDICAL_REVIEW_PATH = '/v1/applications/medical-review';
 export const FINAL_DECISION_PATH = '/v1/applications/final-decision';
 export const ACCEPT_PATH = '/v1/applications/accept';
+export const ADJUDICATE_PATH = '/v1/applications/adjudicate';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FITNESS = new Set(['FIT', 'UNFIT']);
 const DECISIONS = new Set(['SHORTLIST', 'REJECT']);
-const MAX_NOTES = 1000; // final_decision_notes is varchar(1000)
+const ADJUDICATIONS = new Set(['CLEAR', 'REJECT']);
+const MAX_NOTES = 1000; // final_decision_notes is varchar(1000); history reason is varchar(200) — service truncates
 
 interface TransitionBody {
   readonly applicationId?: unknown;
@@ -100,6 +104,39 @@ export function officerTransitionRoutes(
           context: { correlationId: ctx.correlationId, causationId: ctx.correlationId },
         };
         return runTransition(() => service.accept(command));
+      }),
+    },
+    {
+      method: 'POST',
+      path: ADJUDICATE_PATH,
+      handler: withAuth(verify, { kind: 'officer' }, async (ctx, principal): Promise<HttpResult> => {
+        const body = await ctx.json<TransitionBody>();
+        const applicationId = requireApplicationId(body.applicationId);
+        const decision = body.decision;
+        if (typeof decision !== 'string' || !ADJUDICATIONS.has(decision)) {
+          throw new HttpError(400, 'INVALID_DECISION', 'Field "decision" must be "CLEAR" or "REJECT".');
+        }
+        const notes = requireNotes(body.notes);
+        const command: AdjudicateCommand = {
+          actor: principal,
+          applicationId,
+          decision: decision as 'CLEAR' | 'REJECT',
+          notes,
+          context: { correlationId: ctx.correlationId, causationId: ctx.correlationId },
+        };
+        let outcome: AdjudicateCommandOutcome;
+        try {
+          outcome = await service.adjudicate(command);
+        } catch (err) {
+          throw mapDomainError(err);
+        }
+        // The adjudicate APPLIED branch carries event-emit identifiers the
+        // client has no business seeing — map to the standard transition body.
+        return mapOutcome(
+          outcome.kind === 'APPLIED'
+            ? { kind: 'APPLIED', fromStatus: outcome.fromStatus, toStatus: outcome.toStatus }
+            : outcome,
+        );
       }),
     },
   ];

@@ -28,7 +28,30 @@ export interface ListByAgencyInput {
   readonly limit: number;
 }
 
+/**
+ * One row of the officer review queue (ADR-011) — an application held at
+ * DOCUMENT_REVIEW_AMBER (with its flagged document's forensic signals) or at
+ * ADJUDICATION_REVIEW (a late-disqualification hold; document fields null).
+ * Non-PII by construction: the processing code stands in for the applicant.
+ */
+export interface AmberQueueEntry {
+  readonly applicationId: string;
+  readonly processingCode: string;
+  readonly status: ApplicationStatus;
+  readonly documentType: string | null;
+  readonly forensicsScore: number | null;
+  /** The stored ForensicsFlags jsonb, verbatim (null for adjudication holds). */
+  readonly forensicsFlags: Record<string, unknown> | null;
+  readonly queuedAt: string | null;
+}
+
 export interface ApplicationReadRepository {
   /** List an agency's applications, executed under the officer's DB role. */
   listByAgency(input: ListByAgencyInput): Promise<readonly ApplicationSummary[]>;
+  /**
+   * List the officer's agency review queue: applications at
+   * DOCUMENT_REVIEW_AMBER joined to their un-reviewed AMBER document rows,
+   * plus applications at ADJUDICATION_REVIEW. Officer DB role; non-PII.
+   */
+  listAmberQueue(input: ListByAgencyInput): Promise<readonly AmberQueueEntry[]>;
 }

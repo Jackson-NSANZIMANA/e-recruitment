@@ -87,12 +87,15 @@ export {
 } from './adapters/http/submit-application.controller.js';
 export {
   LIST_APPLICATIONS_PATH,
+  AMBER_QUEUE_PATH,
   listApplicationsRoute,
+  amberQueueRoute,
 } from './adapters/http/list-applications.controller.js';
 export {
   MEDICAL_REVIEW_PATH,
   FINAL_DECISION_PATH,
   ACCEPT_PATH,
+  ADJUDICATE_PATH,
   officerTransitionRoutes,
 } from './adapters/http/officer-transitions.controller.js';
 export { SubmitApplicationService } from './application/submit-application.service.js';
@@ -102,6 +105,8 @@ export type {
   MedicalReviewCommand,
   FinalDecisionCommand,
   AcceptCommand,
+  AdjudicateCommand,
+  AdjudicateCommandOutcome,
   OfficerCommandOutcome,
   OfficerTransitionsDeps,
 } from './application/officer-transitions.service.js';
@@ -109,15 +114,18 @@ export { PgOfficerTransitionRepository } from './adapters/officer-transition.pg-
 export type {
   OfficerTransitionRepository,
   OfficerTransitionOutcome,
+  AdjudicateOutcome,
   OfficerActor,
   MedicalReviewInput,
   FinalDecisionInput,
   AcceptInput,
+  AdjudicateInput,
 } from './ports/officer-transition-repository.js';
 export type {
   ListApplicationsCommand,
   ListApplicationsDeps,
   ListApplicationsOutcome,
+  AmberQueueOutcome,
 } from './application/list-applications.service.js';
 export type {
   SubmitApplicationCommand,
@@ -179,6 +187,7 @@ export { PgApplicationReadRepository } from './adapters/application-read.pg-repo
 export type {
   ApplicationReadRepository,
   ApplicationSummary,
+  AmberQueueEntry,
   ListByAgencyInput,
 } from './ports/application-read-repository.js';
 export { loadApplicationConfig } from './config.js';
