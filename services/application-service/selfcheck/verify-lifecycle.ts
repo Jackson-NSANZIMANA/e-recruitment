@@ -165,6 +165,47 @@ check(
   deriveApplicationStatus('ADJUDICATION_REVIEW', ALL_PENDING) === 'ADJUDICATION_REVIEW',
 );
 
+console.log('\n── Walk-in lane (ADR-012): its own early/late fail geography ──');
+// WALK_IN_* ranks AFTER the digital ladder in APPLICATION_STATUSES (parallel
+// entry ramp, not a later stage). The projection must (a) never advance a
+// walk-in row along the digital ladder, (b) fail-close a still-registering
+// walk-in to the lane's OWN terminal, (c) route a late fail on a vetted
+// walk-in to the same human hold as the ladder, and (d) never leave
+// WALK_IN_REJECTED.
+check(
+  'WALK_IN_REGISTERED + hard fail → WALK_IN_REJECTED (lane-local fail-closed)',
+  deriveApplicationStatus('WALK_IN_REGISTERED', { ...ALL_PASS, ageStatus: 'INELIGIBLE' }) ===
+    'WALK_IN_REJECTED',
+);
+for (const vetted of ['WALK_IN_ON_SITE_VETTING', 'WALK_IN_PHYSICAL_TEST'] as const) {
+  check(
+    `${vetted} + late criminal flag → ADJUDICATION_REVIEW (human, not auto-reject)`,
+    deriveApplicationStatus(vetted, { ...ALL_PASS, criminalStatus: 'FLAGGED_CONVICTION' }) ===
+      'ADJUDICATION_REVIEW',
+  );
+}
+for (const walkIn of [
+  'WALK_IN_REGISTERED',
+  'WALK_IN_ON_SITE_VETTING',
+  'WALK_IN_PHYSICAL_TEST',
+] as const) {
+  const out = deriveApplicationStatus(walkIn, ALL_PASS);
+  check(
+    `${walkIn} + all-pass evidence → stays ${walkIn} (projection never proposes ladder statuses)`,
+    out === walkIn,
+    `got ${out}`,
+  );
+}
+check(
+  'WALK_IN_REJECTED + all-pass → stays WALK_IN_REJECTED (terminal)',
+  deriveApplicationStatus('WALK_IN_REJECTED', ALL_PASS) === 'WALK_IN_REJECTED',
+);
+check(
+  'WALK_IN_REJECTED + hard fail → stays WALK_IN_REJECTED (never re-routed to adjudication)',
+  deriveApplicationStatus('WALK_IN_REJECTED', { ...ALL_PASS, ageStatus: 'INELIGIBLE' }) ===
+    'WALK_IN_REJECTED',
+);
+
 console.log('\n── Idempotence & no-evidence no-op ──');
 check(
   'SUBMITTED + all pending → stays SUBMITTED',
@@ -178,7 +219,7 @@ check(
 console.log('\n── Every non-terminal status: all-pass never yields an EARLIER stage ──');
 // Exhaustive monotonicity sweep across the canonical ordering: for any current
 // status, the derived status is never ranked lower than the current one.
-const TERMINALS = new Set<ApplicationStatus>(['REJECTED', 'WITHDRAWN', 'ACCEPTED']);
+const TERMINALS = new Set<ApplicationStatus>(['REJECTED', 'WITHDRAWN', 'ACCEPTED', 'WALK_IN_REJECTED']);
 const rank = (s: ApplicationStatus): number => APPLICATION_STATUSES.indexOf(s);
 let regressions = 0;
 for (const status of APPLICATION_STATUSES) {

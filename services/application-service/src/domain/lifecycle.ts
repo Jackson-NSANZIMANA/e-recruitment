@@ -51,6 +51,7 @@ const TERMINAL: ReadonlySet<ApplicationStatus> = new Set<ApplicationStatus>([
   'REJECTED',
   'WITHDRAWN',
   'ACCEPTED',
+  'WALK_IN_REJECTED',
 ]);
 
 /** Criminal verdicts that are a hard, disqualifying fail (not a hold). */
@@ -117,6 +118,19 @@ export function deriveApplicationStatus(
   //     every in-flight stage, so redelivered evidence can never move the row
   //     out of the hold — only the officer path exits it.
   if (isHardFail(evidence)) {
+    // Walk-in lane (ADR-012): the same early-vs-late rule, but with the lane's
+    // own geography. WALK_IN_* ranks AFTER the digital ladder in the canonical
+    // order (a parallel entry ramp, not a later stage), so the SLOT_ASSIGNED
+    // rank test above would misread a freshly registered walk-in as "late".
+    // The walk-in eligibility terminal is the on-site vetting gate:
+    //   • at WALK_IN_REGISTERED (gates still running) → WALK_IN_REJECTED, the
+    //     lane's own autonomous fail-closed terminal;
+    //   • at/past WALK_IN_ON_SITE_VETTING (vetted on-site, testing or tested —
+    //     a LATE verdict) → ADJUDICATION_REVIEW, same human hold as the ladder.
+    if (current === 'WALK_IN_REGISTERED') return 'WALK_IN_REJECTED';
+    if (current === 'WALK_IN_ON_SITE_VETTING' || current === 'WALK_IN_PHYSICAL_TEST') {
+      return 'ADJUDICATION_REVIEW';
+    }
     return stageRank(current) >= stageRank('SLOT_ASSIGNED')
       ? 'ADJUDICATION_REVIEW'
       : 'REJECTED';
