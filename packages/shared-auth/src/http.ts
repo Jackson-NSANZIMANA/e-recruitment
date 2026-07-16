@@ -25,9 +25,12 @@ export type AuthedHandler = (
 /** Verifies request headers into a trusted Principal, or null to reject. */
 export type AuthVerifier = (headers: IncomingHttpHeaders) => Principal | null;
 
-/** What kind of principal a route requires. */
+/** What kind(s) of principal a route requires. A single kind is the common
+ *  case; a list means ANY of the listed kinds is acceptable (e.g. the identity
+ *  verify front door serves both the system-internal path and the walk-in
+ *  field officer's on-site NIDA lookup). */
 export interface PrincipalRequirement {
-  readonly kind: PrincipalKind;
+  readonly kind: PrincipalKind | readonly PrincipalKind[];
 }
 
 export interface AuthVerifierConfig {
@@ -81,8 +84,11 @@ export function withAuth(
     if (principal === null) {
       throw new HttpError(401, 'UNAUTHENTICATED', 'A valid bearer token is required.');
     }
-    if (principal.kind !== require.kind) {
-      throw new HttpError(403, 'FORBIDDEN', `This route requires a ${require.kind} principal.`);
+    const allowed: readonly PrincipalKind[] = Array.isArray(require.kind)
+      ? require.kind
+      : [require.kind as PrincipalKind];
+    if (!allowed.includes(principal.kind)) {
+      throw new HttpError(403, 'FORBIDDEN', `This route requires a ${allowed.join(' or ')} principal.`);
     }
     return handler(ctx, principal);
   };

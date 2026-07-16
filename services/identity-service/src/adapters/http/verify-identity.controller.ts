@@ -38,15 +38,20 @@ interface VerifyRequestBody {
 
 /**
  * Build the `POST /v1/identities/verify` route bound to the use case. The
- * front door is service-internal: it requires a valid SYSTEM bearer token
- * (withAuth → 401 unauthenticated, 403 for a non-system principal). Real
- * applicant-facing auth is a separate, later slice.
+ * front door serves two authenticated callers (withAuth → 401 unauthenticated,
+ * 403 for any other principal kind):
+ *   • SYSTEM — the service-internal path (pre-registered digital flow);
+ *   • OFFICER — the walk-in lane's on-site NIDA lookup (ADR-012): a field
+ *     officer at the exam venue establishes a walk-in candidate's identity
+ *     with the tablet online. Same two-hash contract, same PII handling —
+ *     the caller kind changes nothing below the edge.
+ * Real applicant-facing auth is a separate, later slice.
  */
 export function verifyIdentityRoute(service: VerifyIdentityService, verify: AuthVerifier): Route {
   return {
     method: 'POST',
     path: VERIFY_IDENTITY_PATH,
-    handler: withAuth(verify, { kind: 'system' }, async (ctx, _principal): Promise<HttpResult> => {
+    handler: withAuth(verify, { kind: ['system', 'officer'] }, async (ctx, _principal): Promise<HttpResult> => {
       const body = await ctx.json<VerifyRequestBody>();
 
       const rawNationalId = body.nationalId;

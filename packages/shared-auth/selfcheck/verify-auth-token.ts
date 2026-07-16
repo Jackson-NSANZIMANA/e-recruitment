@@ -192,6 +192,21 @@ async function main(): Promise<void> {
     'withAuth passes valid system',
     (await statusOf(() => systemOnly(fakeCtx({ authorization: `Bearer ${systemToken}` })))) === 201,
   );
+  // Multi-kind requirement (ADR-012): a route may accept ANY of a list of
+  // kinds (the identity verify front door serves system AND walk-in officer).
+  const eitherKind = withAuth(verify, { kind: ['system', 'officer'] }, () => ({ status: 200 }));
+  check(
+    'withAuth [system, officer] passes an officer',
+    (await statusOf(() => eitherKind(fakeCtx({ authorization: `Bearer ${officerToken}` })))) === 200,
+  );
+  check(
+    'withAuth [system, officer] passes a system principal',
+    (await statusOf(() => eitherKind(fakeCtx({ authorization: `Bearer ${systemToken}` })))) === 200,
+  );
+  check(
+    'withAuth [system, officer] still 401s a missing token',
+    (await statusOf(() => eitherKind(fakeCtx({})))) === 401,
+  );
 
   console.log('\n───────────────────────────────────────────────');
   if (failures === 0) console.log('AUTH TOKEN + ENFORCEMENT PROVEN (deterministic) ✓');

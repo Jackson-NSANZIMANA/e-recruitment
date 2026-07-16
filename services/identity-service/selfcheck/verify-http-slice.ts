@@ -197,11 +197,19 @@ async function main(): Promise<void> {
     });
     check('unauthenticated POST → 401', noAuth.status === 401, `got ${noAuth.status} ${noAuth.text}`);
     const officerToken = mintToken('officer');
-    const wrongKind = await call('POST', VERIFY_PATH, {
+    const officerCall = await call('POST', VERIFY_PATH, {
       headers: { 'content-type': 'application/json', authorization: `Bearer ${officerToken}` },
-      body: JSON.stringify({ nationalId: CITIZEN_NID, channel: 'WEB' }),
+      body: JSON.stringify({ nationalId: CITIZEN_NID, channel: 'WALK_IN' }),
     });
-    check('officer token on system route → 403', wrongKind.status === 403, `got ${wrongKind.status} ${wrongKind.text}`);
+    // ADR-012: the walk-in field officer's on-site NIDA lookup rides this same
+    // route — an officer principal is ACCEPTED (the citizen already verified
+    // above, so this resolves to the existing identity, proving idempotence
+    // across caller kinds too).
+    check(
+      'officer token on verify route → 200 ALREADY_EXISTS (walk-in on-site lookup, ADR-012)',
+      officerCall.status === 200 && asRecord(officerCall.json)['status'] === 'ALREADY_EXISTS',
+      `got ${officerCall.status} ${officerCall.text}`,
+    );
 
     console.log('\n── 5. Body / content-type handling ──────────────────────────');
     const wrongType = await call('POST', VERIFY_PATH, { headers: { ...JSON_HEADERS, 'content-type': 'text/plain' }, body: 'hello' });
