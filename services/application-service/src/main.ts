@@ -28,6 +28,7 @@ import { loadApplicationConfig } from './config.js';
 import { submitApplicationRoute } from './adapters/http/submit-application.controller.js';
 import { amberQueueRoute, listApplicationsRoute } from './adapters/http/list-applications.controller.js';
 import { officerTransitionRoutes } from './adapters/http/officer-transitions.controller.js';
+import { walkInRoutes } from './adapters/http/walk-in.controller.js';
 import { startVettingResultConsumer } from './adapters/events/vetting-result.consumer.js';
 import { startSlotAssignedConsumer } from './adapters/events/slot-assigned.consumer.js';
 import { startNotificationDeliveredConsumer } from './adapters/events/notification-delivered.consumer.js';
@@ -89,6 +90,8 @@ async function main(): Promise<void> {
       amberQueueRoute(service.list, verify), // officer review queue (ADR-011)
       // officer-token writes: medical-review / final-decision / accept / adjudicate
       ...officerTransitionRoutes(service.officerTransitions, verify),
+      // officer-token writes: exam-day walk-in register + on-site vet (RDF, ADR-012)
+      ...walkInRoutes(service.walkIn, verify),
     ],
     // Ready only when the database — the system-of-record — is reachable.
     readiness: async (): Promise<boolean> => {

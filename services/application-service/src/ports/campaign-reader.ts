@@ -25,4 +25,14 @@ export interface CampaignReader {
    * `category`. Returns null when none qualifies.
    */
   findOpenCampaign(agency: Agency, category: ApplicationCategory): Promise<OpenCampaign | null>;
+
+  /**
+   * Find the campaign a WALK-IN registration attaches to (ADR-012). Walk-in
+   * happens ON EXAM DAY, after registration closes — so the qualifying window
+   * is the EXAMINATION window (start/end dates contain today), the campaign
+   * must allow walk-ins (allows_walk_in), belong to `agency`, target
+   * `category`, and be in an active state (not DRAFT/COMPLETED/CANCELLED).
+   * Returns null when none qualifies (NO_WALK_IN_CAMPAIGN).
+   */
+  findWalkInCampaign(agency: Agency, category: ApplicationCategory): Promise<OpenCampaign | null>;
 }

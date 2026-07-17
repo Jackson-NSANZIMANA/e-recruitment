@@ -13,9 +13,11 @@ import { PgCampaignReader } from './adapters/campaign.pg-reader.js';
 import { PgApplicationRepository } from './adapters/application.pg-repository.js';
 import { PgApplicationReadRepository } from './adapters/application-read.pg-repository.js';
 import { PgOfficerTransitionRepository } from './adapters/officer-transition.pg-repository.js';
+import { PgWalkInRepository } from './adapters/walk-in.pg-repository.js';
 import { SubmitApplicationService } from './application/submit-application.service.js';
 import { ListApplicationsService } from './application/list-applications.service.js';
 import { OfficerTransitionsService } from './application/officer-transitions.service.js';
+import { WalkInService } from './application/walk-in.service.js';
 import { ProjectVettingResultService } from './application/project-vetting-result.service.js';
 import { ProjectSlotAssignmentService } from './application/project-slot-assignment.service.js';
 import { ProjectNotificationDeliveryService } from './application/project-notification-delivery.service.js';
@@ -31,6 +33,8 @@ export interface ApplicationService {
   readonly list: ListApplicationsService;
   /** HTTP officer writes — DRIVE the tail of the green lane (medical/final/accept). */
   readonly officerTransitions: OfficerTransitionsService;
+  /** HTTP officer writes — REGISTER + on-site-vet exam-day walk-ins (RDF, ADR-012). */
+  readonly walkIn: WalkInService;
   /** Event projector — ADVANCE an application from vetting verdicts. */
   readonly projector: ProjectVettingResultService;
   /** Event projector — STAMP the exam slot (DOCUMENT_REVIEW_GREEN → SLOT_ASSIGNED). */
@@ -72,6 +76,12 @@ export function createApplicationService(
       repository: officerTransitionRepository,
       eventBus,
     }),
+    walkIn: new WalkInService({
+      identityReader,
+      campaignReader,
+      repository: new PgWalkInRepository(),
+      eventBus,
+    }),
     projector: new ProjectVettingResultService({ repository, eventBus }),
     slotProjector: new ProjectSlotAssignmentService({ repository, eventBus }),
     notificationProjector: new ProjectNotificationDeliveryService({ repository, eventBus }),
@@ -98,9 +108,21 @@ export {
   ADJUDICATE_PATH,
   officerTransitionRoutes,
 } from './adapters/http/officer-transitions.controller.js';
+export {
+  WALK_IN_REGISTER_PATH,
+  WALK_IN_VET_PATH,
+  walkInRoutes,
+} from './adapters/http/walk-in.controller.js';
 export { SubmitApplicationService } from './application/submit-application.service.js';
 export { ListApplicationsService } from './application/list-applications.service.js';
 export { OfficerTransitionsService } from './application/officer-transitions.service.js';
+export { WalkInService } from './application/walk-in.service.js';
+export type {
+  RegisterWalkInCommand,
+  RegisterWalkInOutcome,
+  VetWalkInCommand,
+  VetWalkInOutcome,
+} from './application/walk-in.service.js';
 export type {
   MedicalReviewCommand,
   FinalDecisionCommand,

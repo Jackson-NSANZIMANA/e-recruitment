@@ -48,4 +48,38 @@ export class PgCampaignReader implements CampaignReader {
       throw new ApplicationReadError('Failed to resolve an open campaign', { cause });
     }
   }
+
+  async findWalkInCampaign(
+    agency: Agency,
+    category: ApplicationCategory,
+  ): Promise<OpenCampaign | null> {
+    try {
+      return await sql.begin(async (tx) => {
+        await tx`SET LOCAL ROLE ${sql(SYSTEM_ROLE)}`;
+        // Walk-in registration happens on EXAM DAY (ADR-012): the registration
+        // window has closed, so the qualifying window is the examination one.
+        // examination_*_date are ISO 'YYYY-MM-DD' varchars — lexical comparison
+        // against current_date::text is exact for that format. The campaign
+        // must explicitly allow walk-ins and be in an ACTIVE state (a campaign
+        // still open for registration whose exam window has started counts).
+        const rows = await tx<{ id: string; campaign_label: string }[]>`
+          SELECT id, campaign_label
+          FROM public_core.recruitment_campaigns
+          WHERE agency = ${agency}::public_core.agency
+            AND allows_walk_in = true
+            AND status IN ('REGISTRATION_OPEN', 'REGISTRATION_CLOSED', 'EXAMINATION_ACTIVE')
+            AND examination_start_date <= current_date::text
+            AND examination_end_date >= current_date::text
+            AND jsonb_exists(target_categories::jsonb, ${category})
+          ORDER BY examination_start_date DESC
+          LIMIT 1
+        `;
+        const row = rows[0];
+        if (!row) return null;
+        return { campaignId: row.id, campaignLabel: row.campaign_label };
+      });
+    } catch (cause) {
+      throw new ApplicationReadError('Failed to resolve a walk-in campaign', { cause });
+    }
+  }
 }
