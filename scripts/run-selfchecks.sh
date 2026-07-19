@@ -109,6 +109,7 @@ run_ts "field-sync-service: offline capture + CRDT merge + adjudication" service
 run_ts "audit-service: immutable trail"           services/audit-service/selfcheck/verify-audit-slice.ts
 run_ts "document-forensics: bounded-real analyzer (MinIO+ClamAV)" services/document-forensics-service/selfcheck/verify-forensics-slice.ts
 run_ts "application-service: amber routing + adjudication" services/application-service/selfcheck/verify-amber-adjudication-slice.ts
+run_ts "application-service: walk-in lane (register → vet → physical → merged funnel)" services/application-service/selfcheck/verify-walk-in-slice.ts
 # The whole spine composed: one real submission → all 3 gates → DOCUMENT_REVIEW_GREEN.
 # Runs last — it exercises the most services (eligibility + background-vetting + application).
 run_ts "pipeline: full chain → DOCUMENT_REVIEW_GREEN" services/application-service/selfcheck/verify-pipeline-e2e.ts
