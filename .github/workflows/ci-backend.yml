@@ -56,13 +56,25 @@ jobs:
         run: pnpm build
 
       # Bring up the SAME infrastructure a developer uses: tier1 (Postgres,
-      # Redis, MinIO, Kong, NIDA+NESA mocks) then tier2 (Kafka + topic init).
+      # MinIO, NIDA/NESA/RIB/HEC mocks) then tier2 (Kafka + topic init).
       # --wait blocks until healthchecks pass, so no arbitrary sleeps.
       - name: Start Tier 1 (data + G2G mocks)
         run: docker compose -f infrastructure/docker/docker-compose.tier1.yml up -d --build --wait
 
+      # Only what the proofs consume: kafka (backbone) + clamav (forensics).
+      # schema-registry/kafka-ui are dev tooling — no service or proof touches
+      # them (the local gate runs 28/28 green without them running at all).
+      # kafka-init is a ONE-SHOT (creates topics, exits 0) — `up --wait`
+      # counts any exited container as failure, so start it separately and
+      # assert its exit code explicitly. Stricter than dev boots, which never
+      # checked topic-init at all.
       - name: Start Tier 2 (Kafka backbone)
-        run: docker compose -f infrastructure/docker/docker-compose.tier2.yml up -d --wait
+        run: |
+          docker compose -f infrastructure/docker/docker-compose.tier2.yml up -d --wait kafka clamav
+          docker compose -f infrastructure/docker/docker-compose.tier2.yml up -d kafka-init
+          INIT_EXIT=$(docker wait usrp-kafka-init)
+          docker logs usrp-kafka-init | tail -20
+          test "$INIT_EXIT" = "0" || { echo "kafka-init failed (exit $INIT_EXIT)"; exit 1; }
 
       # Codified canonical bootstrap: db:migrate → rls/0001 → rls/0002.
       - name: Bootstrap database (schema + isolation + audit immutability)
