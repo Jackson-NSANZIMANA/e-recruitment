@@ -58,7 +58,7 @@ pnpm install
 success "Dependencies installed"
 
 # ── 4. Start Tier 1 Infrastructure ───────────────────────────────
-log "Starting Tier 1 infrastructure (PG, Redis, MinIO, Kong, Mocks)..."
+log "Starting Tier 1 infrastructure (PG, MinIO, G2G mocks)..."
 docker compose -f infrastructure/docker/docker-compose.tier1.yml up -d --build
 
 log "Waiting for PostgreSQL to be healthy..."
@@ -73,12 +73,6 @@ until docker exec usrp-postgres pg_isready -U "${POSTGRES_USER:-usrp_admin}" &>/
 done
 success "PostgreSQL is ready"
 
-log "Waiting for Redis..."
-until docker exec usrp-redis redis-cli --auth "${REDIS_PASSWORD:-usrp_redis_dev}" ping &>/dev/null; do
-  sleep 1
-done
-success "Redis is ready"
-
 # ── 5. Build Shared Packages ──────────────────────────────────────
 log "Building shared packages..."
 pnpm --filter @usrp/shared-types build
@@ -92,9 +86,7 @@ echo -e "${BOLD}═════════════════════�
 
 services=(
   "usrp-postgres:PostgreSQL:5432"
-  "usrp-redis:Redis:6379"
   "usrp-minio:MinIO:9000"
-  "usrp-kong:Kong Gateway:8000"
   "usrp-nida-mock:NIDA Mock:3100"
   "usrp-nesa-mock:NESA Mock:3101"
   "usrp-rib-mock:RIB Mock:3102"
@@ -112,7 +104,6 @@ done
 echo ""
 echo -e "${BOLD}  Management UIs${NC}"
 echo -e "  MinIO Console:  ${CYAN}http://localhost:9001${NC}"
-echo -e "  Kong Admin:     ${CYAN}http://localhost:8001${NC}"
 echo ""
 echo -e "${BOLD}  Tier 2 (Kafka) — start when needed:${NC}"
 echo -e "  ${CYAN}pnpm infra:up:tier2${NC}"

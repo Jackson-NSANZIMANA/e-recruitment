@@ -1,7 +1,10 @@
 # ══════════════════════════════════════════════════════════════════
 # USRP — TIER 1 INFRASTRUCTURE (Phase 1-2 Development)
 # RAM budget: ~1.5GB
-# Includes: PostgreSQL, Redis, MinIO, Kong, G2G Mocks (NIDA/NESA/RIB/HEC)
+# Includes: PostgreSQL, MinIO, G2G Mocks (NIDA/NESA/RIB/HEC)
+# Redis + Kong REMOVED 2026-07-19: zero consumers in any service, both
+# shipped broken (Kong crashloop, Redis bad healthcheck flag) and Kong
+# blocked the first real CI run. Re-add per-need with a working config.
 # Mock data files are VOLUME MOUNTED — update JSON without rebuilding
 # ══════════════════════════════════════════════════════════════════
 
@@ -16,8 +19,6 @@ networks:
 
 volumes:
   postgres-data:
-    driver: local
-  redis-data:
     driver: local
   minio-data:
     driver: local
@@ -55,34 +56,6 @@ services:
         limits:
           memory: 512M
 
-  # ── Redis 7.2 ───────────────────────────────────────────────────
-  redis:
-    image: redis:7.2-alpine
-    container_name: usrp-redis
-    restart: unless-stopped
-    command: >
-      redis-server
-      --requirepass ${REDIS_PASSWORD:-usrp_redis_dev}
-      --save 60 1
-      --loglevel warning
-      --maxmemory 128mb
-      --maxmemory-policy allkeys-lru
-    volumes:
-      - redis-data:/data
-    ports:
-      - "6379:6379"
-    networks:
-      - usrp-internal
-    healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a ${REDIS_PASSWORD:-usrp_redis_dev} ping | grep -q PONG"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    deploy:
-      resources:
-        limits:
-          memory: 192M
-
   # ── MinIO Object Store ──────────────────────────────────────────
   minio:
     image: minio/minio:latest
@@ -104,38 +77,6 @@ services:
       interval: 30s
       timeout: 20s
       retries: 3
-    deploy:
-      resources:
-        limits:
-          memory: 256M
-
-  # ── Kong API Gateway (DB-less mode) ─────────────────────────────
-  kong:
-    image: kong:3.7-ubuntu
-    container_name: usrp-kong
-    restart: unless-stopped
-    environment:
-      KONG_DATABASE: "off"
-      KONG_DECLARATIVE_CONFIG: /kong/declarative/kong.dev.yml
-      KONG_PROXY_ACCESS_LOG: /dev/stdout
-      KONG_ADMIN_ACCESS_LOG: /dev/stdout
-      KONG_PROXY_ERROR_LOG: /dev/stderr
-      KONG_ADMIN_ERROR_LOG: /dev/stderr
-      KONG_ADMIN_LISTEN: "0.0.0.0:8001"
-      KONG_PROXY_LISTEN: "0.0.0.0:8000"
-    volumes:
-      - ./kong/kong.dev.yml:/kong/declarative/kong.dev.yml:ro
-    ports:
-      - "8000:8000"
-      - "8001:8001"
-    networks:
-      - usrp-internal
-    healthcheck:
-      test: ["CMD", "kong", "health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
     deploy:
       resources:
         limits:
