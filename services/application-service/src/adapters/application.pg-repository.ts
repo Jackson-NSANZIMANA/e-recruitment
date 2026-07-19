@@ -386,8 +386,8 @@ export class PgApplicationRepository implements ApplicationRepository {
       return await sql.begin(async (tx): Promise<ApplyPhysicalTestOutcome> => {
         await tx`SET LOCAL ROLE ${sql(SYSTEM_ROLE)}`;
 
-        const rows = await tx<{ status: ApplicationStatus; applicant_id: string }[]>`
-          SELECT status, applicant_id
+        const rows = await tx<{ status: ApplicationStatus; applicant_id: string; is_walk_in: boolean }[]>`
+          SELECT status, applicant_id, is_walk_in
           FROM ${schema}.applications
           WHERE id = ${result.applicationId}
           FOR UPDATE
@@ -395,6 +395,72 @@ export class PgApplicationRepository implements ApplicationRepository {
         const current = rows[0];
         // 0 rows ⇒ not in THIS agency's schema (mis-route / unknown).
         if (!current) return { kind: 'NOT_FOUND' };
+
+        // ── Walk-in lane (ADR-012) — decided by the ROW's own is_walk_in, not
+        // the event's claim. Handled BEFORE the rank-based idempotency check:
+        // WALK_IN_* ranks after the whole digital ladder, so that check would
+        // misread every walk-in row as "already complete". The lane-local
+        // transition is WALK_IN_ON_SITE_VETTING → WALK_IN_PHYSICAL_TEST.
+        if (current.is_walk_in) {
+          if (current.status === 'WALK_IN_PHYSICAL_TEST') return { kind: 'NO_CHANGE' };
+          // Not yet vetted on-site, already merged into the main funnel
+          // (MEDICAL_REVIEW onward), rejected, or held — nothing to write.
+          if (current.status !== 'WALK_IN_ON_SITE_VETTING') {
+            return { kind: 'NOT_APPLICABLE', currentStatus: current.status };
+          }
+          // Same concurrent-capture HOLD as the digital lane (ADR-010 §3).
+          const walkInConflict = await tx<{ one: number }[]>`
+            SELECT 1 AS one
+            FROM ${schema}.physical_test_scores
+            WHERE application_id = ${result.applicationId} AND sync_conflict_detected = true
+            LIMIT 1
+          `;
+          if (walkInConflict[0]) return { kind: 'CONFLICT_HELD' };
+
+          // NO biometric precondition (ADR-012 waiver): the biometric gate
+          // verifies a signed slot-invitation QR that a walk-in cannot possess
+          // — their identity was NIDA-verified IN PERSON by the registering
+          // officer at this same venue. On-site biometric enrolment is a
+          // flagged follow-on, not silently assumed done.
+          const walkInScore = await tx<{ id: string }[]>`
+            SELECT id
+            FROM ${schema}.physical_test_scores
+            WHERE application_id = ${result.applicationId}
+              AND signed_payload_hash = ${result.signedPayloadHash}
+            ORDER BY captured_at DESC
+            LIMIT 1
+          `;
+          const walkInScoreId = walkInScore[0]?.id;
+          if (!walkInScoreId) return { kind: 'SCORE_NOT_FOUND' };
+
+          await tx`
+            UPDATE ${schema}.applications SET
+              physical_test_completed_at = now(),
+              physical_test_score_id = ${walkInScoreId},
+              status = 'WALK_IN_PHYSICAL_TEST'::${schema}.application_status,
+              updated_at = now()
+            WHERE id = ${result.applicationId}
+          `;
+          await tx`
+            INSERT INTO ${schema}.application_status_history
+              (application_id, from_status, to_status, reason, performed_by, correlation_id)
+            VALUES (
+              ${result.applicationId},
+              'WALK_IN_ON_SITE_VETTING'::${schema}.application_status,
+              'WALK_IN_PHYSICAL_TEST'::${schema}.application_status,
+              'Walk-in physical-test score captured',
+              'application-service',
+              ${result.correlationId}
+            )
+          `;
+          return {
+            kind: 'APPLIED',
+            fromStatus: 'WALK_IN_ON_SITE_VETTING',
+            toStatus: 'WALK_IN_PHYSICAL_TEST',
+            applicantId: current.applicant_id,
+            physicalTestScoreId: walkInScoreId,
+          };
+        }
 
         // Idempotent: already complete (or beyond) — write nothing.
         if (APPLICATION_STATUSES.indexOf(current.status) >= completeRank) {

@@ -50,7 +50,14 @@ const ADJUDICABLE: ReadonlySet<ApplicationStatus> = new Set<ApplicationStatus>([
 export class PgOfficerTransitionRepository implements OfficerTransitionRepository {
   async medicalReview(input: MedicalReviewInput): Promise<OfficerTransitionOutcome> {
     const { actor, applicationId, fitnessStatus } = input;
-    const requiredFrom: ApplicationStatus = 'PHYSICAL_TEST_COMPLETE';
+    // THE LANE-MERGE POINT (ADR-012): medical review accepts the digital
+    // lane's completed physical test AND the walk-in lane's — from here on
+    // there is ONE funnel (medical → final → accept), so the future
+    // cross-agency accept-lock covers walk-ins with no extra machinery.
+    const requiredFrom: readonly ApplicationStatus[] = [
+      'PHYSICAL_TEST_COMPLETE',
+      'WALK_IN_PHYSICAL_TEST',
+    ];
     const target: ApplicationStatus = fitnessStatus === 'FIT' ? 'MEDICAL_REVIEW' : 'REJECTED';
     const schema = sql(schemaForAgency(actor.agency)); // quoted identifier fragment
     try {
@@ -77,7 +84,7 @@ export class PgOfficerTransitionRepository implements OfficerTransitionRepositor
             (application_id, from_status, to_status, reason, performed_by, correlation_id)
           VALUES (
             ${applicationId},
-            ${requiredFrom}::${schema}.application_status,
+            ${decision.fromStatus}::${schema}.application_status,
             ${target}::${schema}.application_status,
             ${`Medical review: ${fitnessStatus}`},
             ${actor.officerId},
@@ -301,20 +308,27 @@ interface AdjudicableRow {
 /**
  * Pure transition guard. Given the row's current status (or undefined when the
  * row is absent from the officer's schema), decide the outcome:
- *   • absent                   → NOT_FOUND (cross-agency guard / unknown app)
- *   • current === target       → NO_CHANGE (idempotent re-apply)
- *   • current !== requiredFrom  → NOT_APPLICABLE (out of order / already past)
- *   • otherwise                → APPLIED (requiredFrom → target)
+ *   • absent                     → NOT_FOUND (cross-agency guard / unknown app)
+ *   • current === target         → NO_CHANGE (idempotent re-apply)
+ *   • current ∉ requiredFrom     → NOT_APPLICABLE (out of order / already past)
+ *   • otherwise                  → APPLIED (current → target)
+ * `requiredFrom` may be a single status (the common case) or a list — the
+ * medical review is the lane-merge point (ADR-012): it accepts the digital
+ * lane's PHYSICAL_TEST_COMPLETE and the walk-in lane's WALK_IN_PHYSICAL_TEST.
+ * APPLIED reports the ACTUAL from-status so history records the true edge.
  */
 function decide(
   current: ApplicationStatus | undefined,
-  requiredFrom: ApplicationStatus,
+  requiredFrom: ApplicationStatus | readonly ApplicationStatus[],
   target: ApplicationStatus,
 ): OfficerTransitionOutcome {
   if (current === undefined) return { kind: 'NOT_FOUND' };
   if (current === target) return { kind: 'NO_CHANGE', currentStatus: current };
-  if (current !== requiredFrom) return { kind: 'NOT_APPLICABLE', currentStatus: current };
-  return { kind: 'APPLIED', fromStatus: requiredFrom, toStatus: target };
+  const allowed: readonly ApplicationStatus[] = Array.isArray(requiredFrom)
+    ? requiredFrom
+    : [requiredFrom as ApplicationStatus];
+  if (!allowed.includes(current)) return { kind: 'NOT_APPLICABLE', currentStatus: current };
+  return { kind: 'APPLIED', fromStatus: current, toStatus: target };
 }
 
 /** Wrap any non-domain fault as ApplicationPersistenceError (idempotent). */

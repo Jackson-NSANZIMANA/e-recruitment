@@ -183,12 +183,16 @@ export interface PhysicalTestCompleteResult {
   readonly correlationId: string;
 }
 
-/** Outcome of projecting a captured field score onto an application row. */
+/** Outcome of projecting a captured field score onto an application row.
+ *  Two lanes share the projection (the row's own is_walk_in decides):
+ *  scheduled digital rows complete PHYSICAL_TEST_SCHEDULED → COMPLETE;
+ *  walk-in rows advance WALK_IN_ON_SITE_VETTING → WALK_IN_PHYSICAL_TEST
+ *  (ADR-012). */
 export type ApplyPhysicalTestOutcome =
   | {
       readonly kind: 'APPLIED';
-      readonly fromStatus: 'PHYSICAL_TEST_SCHEDULED';
-      readonly toStatus: 'PHYSICAL_TEST_COMPLETE';
+      readonly fromStatus: 'PHYSICAL_TEST_SCHEDULED' | 'WALK_IN_ON_SITE_VETTING';
+      readonly toStatus: 'PHYSICAL_TEST_COMPLETE' | 'WALK_IN_PHYSICAL_TEST';
       readonly applicantId: string;
       readonly physicalTestScoreId: string;
     }
