@@ -34,11 +34,39 @@ export interface OfficerActor {
   readonly correlationId: string;
 }
 
-export interface MedicalReviewInput {
+/**
+ * Medical review is the one transition the three agencies genuinely do
+ * differently (ADR-013), so the input is a union discriminated by mode:
+ *   • BOARD (RDF) — an in-house medical board records a fitness verdict;
+ *     stamps medical_reviewed_by_id/_at + medical_fitness_status (rdf_ops-only
+ *     columns).
+ *   • CERTIFICATE (RNP, RCS) — an officer verifies a government-physician
+ *     certificate brought by the applicant; CERT_VERIFIED stamps
+ *     medical_cert_verified/_verified_at/_physician_name (mirrored on both
+ *     schemas by rls/0012). CERT_REJECTED stamps nothing — the REJECTED
+ *     status + append-only history row ARE the record of the decision, and
+ *     `medical_cert_verified=false` stays honest ("never verified", not
+ *     "verified false at time T").
+ * The MODE is derived from the verified principal's agency by the use case —
+ * never from the request body.
+ */
+export interface MedicalReviewBoardInput {
   readonly actor: OfficerActor;
   readonly applicationId: string;
+  readonly mode: 'BOARD';
   readonly fitnessStatus: 'FIT' | 'UNFIT';
 }
+
+export interface MedicalReviewCertificateInput {
+  readonly actor: OfficerActor;
+  readonly applicationId: string;
+  readonly mode: 'CERTIFICATE';
+  readonly certVerdict: 'CERT_VERIFIED' | 'CERT_REJECTED';
+  /** Required (non-empty, ≤200 chars) when CERT_VERIFIED; null when rejected. */
+  readonly physicianName: string | null;
+}
+
+export type MedicalReviewInput = MedicalReviewBoardInput | MedicalReviewCertificateInput;
 
 export interface FinalDecisionInput {
   readonly actor: OfficerActor;

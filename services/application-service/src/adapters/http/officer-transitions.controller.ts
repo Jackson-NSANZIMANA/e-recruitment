@@ -35,6 +35,7 @@ export const ADJUDICATE_PATH = '/v1/applications/adjudicate';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FITNESS = new Set(['FIT', 'UNFIT']);
+const CERT_VERDICTS = new Set(['CERT_VERIFIED', 'CERT_REJECTED']);
 const DECISIONS = new Set(['SHORTLIST', 'REJECT']);
 const ADJUDICATIONS = new Set(['CLEAR', 'REJECT']);
 const MAX_NOTES = 1000; // final_decision_notes is varchar(1000); history reason is varchar(200) — service truncates
@@ -42,6 +43,8 @@ const MAX_NOTES = 1000; // final_decision_notes is varchar(1000); history reason
 interface TransitionBody {
   readonly applicationId?: unknown;
   readonly fitnessStatus?: unknown;
+  readonly certVerdict?: unknown;
+  readonly physicianName?: unknown;
   readonly decision?: unknown;
   readonly notes?: unknown;
 }
@@ -58,14 +61,32 @@ export function officerTransitionRoutes(
       handler: withAuth(verify, { kind: 'officer' }, async (ctx, principal): Promise<HttpResult> => {
         const body = await ctx.json<TransitionBody>();
         const applicationId = requireApplicationId(body.applicationId);
-        const fitnessStatus = body.fitnessStatus;
-        if (typeof fitnessStatus !== 'string' || !FITNESS.has(fitnessStatus)) {
+        // Two agency MODES (ADR-013): BOARD (RDF) sends fitnessStatus;
+        // CERTIFICATE (RNP/RCS) sends certVerdict (+ physicianName when
+        // verified). Shape is validated here; WHICH mode the caller may use
+        // is the use case's call (derived from the verified principal) —
+        // a mismatch surfaces as 422 INVALID_MEDICAL_INPUT below.
+        if (body.fitnessStatus !== undefined && typeof body.fitnessStatus !== 'string') {
           throw new HttpError(400, 'INVALID_FITNESS_STATUS', 'Field "fitnessStatus" must be "FIT" or "UNFIT".');
+        }
+        if (typeof body.fitnessStatus === 'string' && !FITNESS.has(body.fitnessStatus)) {
+          throw new HttpError(400, 'INVALID_FITNESS_STATUS', 'Field "fitnessStatus" must be "FIT" or "UNFIT".');
+        }
+        if (body.certVerdict !== undefined && (typeof body.certVerdict !== 'string' || !CERT_VERDICTS.has(body.certVerdict))) {
+          throw new HttpError(400, 'INVALID_CERT_VERDICT', 'Field "certVerdict" must be "CERT_VERIFIED" or "CERT_REJECTED".');
+        }
+        if (body.physicianName !== undefined && typeof body.physicianName !== 'string') {
+          throw new HttpError(400, 'INVALID_PHYSICIAN_NAME', 'Field "physicianName" must be a string when present.');
+        }
+        if (body.fitnessStatus === undefined && body.certVerdict === undefined) {
+          throw new HttpError(400, 'MISSING_MEDICAL_VERDICT', 'Send "fitnessStatus" (RDF board) or "certVerdict" (RNP/RCS certificate).');
         }
         const command: MedicalReviewCommand = {
           actor: principal,
           applicationId,
-          fitnessStatus: fitnessStatus as 'FIT' | 'UNFIT',
+          ...(body.fitnessStatus !== undefined ? { fitnessStatus: body.fitnessStatus as 'FIT' | 'UNFIT' } : {}),
+          ...(body.certVerdict !== undefined ? { certVerdict: body.certVerdict as 'CERT_VERIFIED' | 'CERT_REJECTED' } : {}),
+          ...(body.physicianName !== undefined ? { physicianName: body.physicianName } : {}),
           context: { correlationId: ctx.correlationId, causationId: ctx.correlationId },
         };
         return runTransition(() => service.medicalReview(command));
@@ -193,10 +214,12 @@ function mapOutcome(outcome: OfficerCommandOutcome): HttpResult {
       return { status: 404, body: { status: 'NOT_FOUND' } };
     case 'FORBIDDEN':
       return { status: 403, body: { error: 'FORBIDDEN' } };
-    case 'UNSUPPORTED_AGENCY':
-      // The transition is not modelled for this agency yet (e.g. medical review
-      // is RDF-only pending tri-agency medical modelling). Honest 501, not a 500.
-      return { status: 501, body: { status: 'UNSUPPORTED_AGENCY', agency: outcome.agency } };
+    case 'INVALID_MEDICAL_INPUT':
+      // The body doesn't match the caller's agency mode (ADR-013): board
+      // fields to a certificate agency, or vice versa, or CERT_VERIFIED
+      // without the signing physician. Caller error — 422, and the reason
+      // says exactly which mode the agency uses. (Retires the Slice-4 501.)
+      return { status: 422, body: { status: 'INVALID_MEDICAL_INPUT', reason: outcome.reason } };
     default:
       return assertNever(outcome);
   }

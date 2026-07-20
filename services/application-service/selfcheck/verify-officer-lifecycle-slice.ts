@@ -296,12 +296,13 @@ async function main(): Promise<void> {
     const crossBack = await post(ACCEPT_PATH, { applicationId: APP_HAPPY }, mint('officer', { agency: 'RNP', sub: RNP_OFFICER_ID }));
     check('RNP officer acting on an RDF app → 404 NOT_FOUND', crossBack.status === 404 && crossBack.json['status'] === 'NOT_FOUND', crossBack.text);
 
-    // Medical review is RDF-only (RNP has no medical columns, RCS uses a
-    // physician certificate) — honest 501, not a raw DB error. Its own RNP app
-    // stays untouched, proving the guard fires before any write.
+    // Medical review is mode-split (ADR-013): RNP/RCS verify a physician
+    // CERTIFICATE, so a board-mode body (fitnessStatus) from an RNP officer
+    // is a caller error — 422, and the app stays untouched, proving the mode
+    // guard fires before any write. (Retires the Slice-4 501.)
     const rnpMed = await post(MEDICAL_REVIEW_PATH, { applicationId: RNP_APP, fitnessStatus: 'FIT' }, mint('officer', { agency: 'RNP', sub: RNP_OFFICER_ID }));
-    check('RNP officer medical-review → 501 UNSUPPORTED_AGENCY', rnpMed.status === 501 && rnpMed.json['status'] === 'UNSUPPORTED_AGENCY', rnpMed.text);
-    check('  RNP app untouched by the unsupported transition', (await statusOf('rnp_ops', RNP_APP)) === 'PHYSICAL_TEST_COMPLETE');
+    check('RNP officer sending board-mode body → 422 INVALID_MEDICAL_INPUT', rnpMed.status === 422 && rnpMed.json['status'] === 'INVALID_MEDICAL_INPUT', rnpMed.text);
+    check('  RNP app untouched by the invalid-mode call', (await statusOf('rnp_ops', RNP_APP)) === 'PHYSICAL_TEST_COMPLETE');
 
     // ── 6. AuthN / AuthZ ──
     console.log('\n── 6. Auth gate ──');

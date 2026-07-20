@@ -33,26 +33,36 @@ import type {
 
 /**
  * An officer transition outcome plus two use-case guards:
- *   • FORBIDDEN         — the caller is not an officer (defence-in-depth).
- *   • UNSUPPORTED_AGENCY — the transition is not modelled for the caller's agency.
- *     Medical review currently models RDF's in-house fitness test only: RNP has
- *     no medical columns on `applications` and RCS uses a government-physician
- *     certificate (`medical_cert_*`) — genuinely DIFFERENT per agency. Rather
- *     than a raw DB error, this returns a clean, flagged outcome pending the
- *     tri-agency medical-modelling decision (owner/agency call).
+ *   • FORBIDDEN — the caller is not an officer (defence-in-depth).
+ *   • INVALID_MEDICAL_INPUT — the medical-review body does not match the
+ *     caller's agency MODE (ADR-013): RDF runs an in-house medical BOARD
+ *     (fitnessStatus), RNP/RCS verify a government-physician CERTIFICATE
+ *     (certVerdict + physicianName). The mode is derived from the VERIFIED
+ *     principal's agency — a body carrying the other mode's fields (or a
+ *     CERT_VERIFIED without a physician name) is a caller error, not a hold.
+ *     (This retires the Slice-4 UNSUPPORTED_AGENCY 501: all three agencies
+ *     are modelled now.)
  */
 export type OfficerCommandOutcome =
   | OfficerTransitionOutcome
   | { readonly kind: 'FORBIDDEN' }
-  | { readonly kind: 'UNSUPPORTED_AGENCY'; readonly agency: Agency };
+  | { readonly kind: 'INVALID_MEDICAL_INPUT'; readonly reason: string };
 
-/** Agencies for which the in-house medical-review transition is modelled today. */
-const MEDICAL_REVIEW_AGENCIES: ReadonlySet<Agency> = new Set<Agency>(['RDF']);
+/** Agencies on the government-physician CERTIFICATE mode (ADR-013). */
+const CERTIFICATE_AGENCIES: ReadonlySet<Agency> = new Set<Agency>(['RNP', 'RCS']);
+
+/** medical_cert_physician_name is varchar(200) on both cert schemas. */
+const MAX_PHYSICIAN_NAME = 200;
 
 export interface MedicalReviewCommand {
   readonly actor: Principal;
   readonly applicationId: string;
-  readonly fitnessStatus: 'FIT' | 'UNFIT';
+  /** BOARD mode (RDF): the medical board's fitness verdict. */
+  readonly fitnessStatus?: 'FIT' | 'UNFIT';
+  /** CERTIFICATE mode (RNP/RCS): the certificate-verification verdict. */
+  readonly certVerdict?: 'CERT_VERIFIED' | 'CERT_REJECTED';
+  /** CERTIFICATE mode: the signing government physician (required on CERT_VERIFIED). */
+  readonly physicianName?: string;
   readonly context: EventContext;
 }
 
@@ -97,16 +107,62 @@ export class OfficerTransitionsService {
 
   async medicalReview(command: MedicalReviewCommand): Promise<OfficerCommandOutcome> {
     if (command.actor.kind !== 'officer') return { kind: 'FORBIDDEN' };
-    if (!MEDICAL_REVIEW_AGENCIES.has(command.actor.agency)) {
-      return { kind: 'UNSUPPORTED_AGENCY', agency: command.actor.agency };
-    }
     const actor = toActor(command.actor, command.context);
+
+    if (CERTIFICATE_AGENCIES.has(command.actor.agency)) {
+      // CERTIFICATE mode (RNP/RCS, ADR-013). Mode comes from the verified
+      // agency; a board-mode body against a cert agency is a caller error.
+      if (command.certVerdict === undefined || command.fitnessStatus !== undefined) {
+        return {
+          kind: 'INVALID_MEDICAL_INPUT',
+          reason: `${command.actor.agency} medical review verifies a government-physician certificate: send certVerdict (and physicianName when verified), not fitnessStatus`,
+        };
+      }
+      const physicianName = command.physicianName?.trim() ?? '';
+      if (command.certVerdict === 'CERT_VERIFIED') {
+        if (physicianName.length === 0 || physicianName.length > MAX_PHYSICIAN_NAME) {
+          return {
+            kind: 'INVALID_MEDICAL_INPUT',
+            reason: `CERT_VERIFIED requires physicianName (1-${MAX_PHYSICIAN_NAME} chars) — the signing government physician is the audit substance`,
+          };
+        }
+      } else if (physicianName.length > 0) {
+        return {
+          kind: 'INVALID_MEDICAL_INPUT',
+          reason: 'physicianName only accompanies CERT_VERIFIED',
+        };
+      }
+      const outcome = await this.#repository.medicalReview({
+        actor,
+        applicationId: command.applicationId,
+        mode: 'CERTIFICATE',
+        certVerdict: command.certVerdict,
+        physicianName: command.certVerdict === 'CERT_VERIFIED' ? physicianName : null,
+      });
+      // Audit carries the verdict only — the physician name lives in the DB
+      // column, not on the event backbone.
+      await this.#audit(outcome, command.actor, command.context, command.applicationId, 'MEDICAL_REVIEW', {
+        mode: 'CERTIFICATE',
+        certVerdict: command.certVerdict,
+      });
+      return outcome;
+    }
+
+    // BOARD mode (RDF): the in-house medical board's fitness verdict.
+    if (command.fitnessStatus === undefined || command.certVerdict !== undefined || command.physicianName !== undefined) {
+      return {
+        kind: 'INVALID_MEDICAL_INPUT',
+        reason: 'RDF medical review records the in-house board fitness verdict: send fitnessStatus, not certVerdict/physicianName',
+      };
+    }
     const outcome = await this.#repository.medicalReview({
       actor,
       applicationId: command.applicationId,
+      mode: 'BOARD',
       fitnessStatus: command.fitnessStatus,
     });
     await this.#audit(outcome, command.actor, command.context, command.applicationId, 'MEDICAL_REVIEW', {
+      mode: 'BOARD',
       fitnessStatus: command.fitnessStatus,
     });
     return outcome;

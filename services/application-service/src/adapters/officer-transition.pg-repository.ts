@@ -49,16 +49,24 @@ const ADJUDICABLE: ReadonlySet<ApplicationStatus> = new Set<ApplicationStatus>([
 
 export class PgOfficerTransitionRepository implements OfficerTransitionRepository {
   async medicalReview(input: MedicalReviewInput): Promise<OfficerTransitionOutcome> {
-    const { actor, applicationId, fitnessStatus } = input;
+    const { actor, applicationId } = input;
     // THE LANE-MERGE POINT (ADR-012): medical review accepts the digital
     // lane's completed physical test AND the walk-in lane's — from here on
     // there is ONE funnel (medical → final → accept), so the future
     // cross-agency accept-lock covers walk-ins with no extra machinery.
+    // (WALK_IN_PHYSICAL_TEST rows are RDF-only by construction — rnp/rcs lack
+    // the enum values — so a CERTIFICATE-mode row can never be a walk-in.)
     const requiredFrom: readonly ApplicationStatus[] = [
       'PHYSICAL_TEST_COMPLETE',
       'WALK_IN_PHYSICAL_TEST',
     ];
-    const target: ApplicationStatus = fitnessStatus === 'FIT' ? 'MEDICAL_REVIEW' : 'REJECTED';
+    const positive = input.mode === 'BOARD'
+      ? input.fitnessStatus === 'FIT'
+      : input.certVerdict === 'CERT_VERIFIED';
+    const target: ApplicationStatus = positive ? 'MEDICAL_REVIEW' : 'REJECTED';
+    const reason = input.mode === 'BOARD'
+      ? `Medical review: ${input.fitnessStatus}`
+      : `Medical certificate: ${input.certVerdict}`;
     const schema = sql(schemaForAgency(actor.agency)); // quoted identifier fragment
     try {
       return await sql.begin(async (tx) => {
@@ -70,15 +78,38 @@ export class PgOfficerTransitionRepository implements OfficerTransitionRepositor
         const decision = decide(rows[0]?.status, requiredFrom, target);
         if (decision.kind !== 'APPLIED') return decision;
 
-        await tx`
-          UPDATE ${schema}.applications SET
-            medical_reviewed_by_id = ${actor.officerId},
-            medical_reviewed_at = now(),
-            medical_fitness_status = ${fitnessStatus},
-            status = ${target}::${schema}.application_status,
-            updated_at = now()
-          WHERE id = ${applicationId}
-        `;
+        if (input.mode === 'BOARD') {
+          await tx`
+            UPDATE ${schema}.applications SET
+              medical_reviewed_by_id = ${actor.officerId},
+              medical_reviewed_at = now(),
+              medical_fitness_status = ${input.fitnessStatus},
+              status = ${target}::${schema}.application_status,
+              updated_at = now()
+            WHERE id = ${applicationId}
+          `;
+        } else if (input.certVerdict === 'CERT_VERIFIED') {
+          await tx`
+            UPDATE ${schema}.applications SET
+              medical_cert_verified = true,
+              medical_cert_verified_at = now(),
+              medical_cert_physician_name = ${input.physicianName},
+              status = ${target}::${schema}.application_status,
+              updated_at = now()
+            WHERE id = ${applicationId}
+          `;
+        } else {
+          // CERT_REJECTED: the REJECTED status + history row carry the
+          // decision; medical_cert_verified stays false (never verified) —
+          // see the port doc. The verifying officer lives in history
+          // performed_by (cert columns have no *_by_id — RCS parity).
+          await tx`
+            UPDATE ${schema}.applications SET
+              status = ${target}::${schema}.application_status,
+              updated_at = now()
+            WHERE id = ${applicationId}
+          `;
+        }
         await tx`
           INSERT INTO ${schema}.application_status_history
             (application_id, from_status, to_status, reason, performed_by, correlation_id)
@@ -86,7 +117,7 @@ export class PgOfficerTransitionRepository implements OfficerTransitionRepositor
             ${applicationId},
             ${decision.fromStatus}::${schema}.application_status,
             ${target}::${schema}.application_status,
-            ${`Medical review: ${fitnessStatus}`},
+            ${reason},
             ${actor.officerId},
             ${actor.correlationId}
           )
