@@ -127,6 +127,15 @@ export const rnpApplications = rnpOps.table(
     documentReviewedAt: timestamp('document_reviewed_at', { withTimezone: true }),
     documentReviewDecision: varchar('document_review_decision', { length: 10 }),
 
+    // ── Medical certificate (rls/0012, ADR-013) ───────────────────
+    // RNP uses the government-physician CERTIFICATE model, mirroring
+    // rcs_ops exactly (announcement: "Medical certificate approved by a
+    // recognized government doctor"). RDF alone runs an in-house board
+    // (medical_reviewed_* — rdf_ops only).
+    medicalCertVerified: boolean('medical_cert_verified').default(false),
+    medicalCertVerifiedAt: timestamp('medical_cert_verified_at', { withTimezone: true }),
+    medicalCertPhysicianName: varchar('medical_cert_physician_name', { length: 200 }),
+
     // ── Scheduling ────────────────────────────────────────────────
     // RNP: Registration at DPU of residence — venue assigned by district
     registrationDpuDistrict: varchar('registration_dpu_district', { length: 30 }),

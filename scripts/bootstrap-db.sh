@@ -97,10 +97,15 @@ apply_sql "${RLS_DIR}/0010_officer_accounts.sql" "rls/0010 (officer account stor
 #     BEFORE 'REJECTED' on all three ops application_status enums.
 apply_sql "${RLS_DIR}/0011_adjudication_review_status.sql" "rls/0011 (ADJUDICATION_REVIEW status)"
 
-printf '\n'
-ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status in place"
+# 13. RNP medical-certificate columns (ADR-013): RNP mirrors the RCS
+#     government-physician certificate model so medicalReview can serve all
+#     three agencies (RDF keeps its in-house-board columns; the 501 retires).
+apply_sql "${RLS_DIR}/0012_rnp_medical_cert_columns.sql" "rls/0012 (RNP medical-cert columns)"
 
-# 13. Dev officer accounts (one per agency). A CONVENIENCE seed so the officer
+printf '\n'
+ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns in place"
+
+# 14. Dev officer accounts (one per agency). A CONVENIENCE seed so the officer
 #     console / manual login smoke tests have real credentials to drive —
 #     dev-only, idempotent. Best-effort: it needs the workspace built (tsx
 #     resolves @usrp/* runtime dist), so a failure here NEVER blocks the
