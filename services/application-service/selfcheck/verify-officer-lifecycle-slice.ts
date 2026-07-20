@@ -59,15 +59,20 @@ const APPLICANT_ID = '4d000000-0000-4000-8000-000000000001';
 const NID_HASH = '4d4d4d4d'.repeat(8); // 64 hex
 const RDF_CAMPAIGN = '4d000000-0000-4000-8000-0000000000c1';
 const RNP_CAMPAIGN = '4d000000-0000-4000-8000-0000000000c2';
+const RCS_CAMPAIGN = '4d000000-0000-4000-8000-0000000000c3';
 const RDF_OFFICER_ID = '4d000000-0000-4000-8000-00000000ff01';
 const RNP_OFFICER_ID = '4d000000-0000-4000-8000-00000000ff02';
+const RCS_OFFICER_ID = '4d000000-0000-4000-8000-00000000ff03';
 
-// One RDF app per scenario, plus one RNP app for the cross-agency probe.
+// One RDF app per scenario, plus RNP/RCS apps for the cross-agency probe and
+// the CERTIFICATE-mode lanes (ADR-013).
 const APP_HAPPY = '4d000000-0000-4000-8000-00000000a001'; // full path → ACCEPTED
 const APP_UNFIT = '4d000000-0000-4000-8000-00000000a002'; // UNFIT → REJECTED
 const APP_FINAL = '4d000000-0000-4000-8000-00000000a003'; // seeded at MEDICAL_REVIEW; final REJECT
 const APP_HOLD = '4d000000-0000-4000-8000-00000000a004'; // accept out of order → hold
-const RNP_APP = '4d000000-0000-4000-8000-00000000b001'; // cross-agency target
+const RNP_APP = '4d000000-0000-4000-8000-00000000b001'; // cross-agency probe, then cert lane → ACCEPTED
+const RCS_APP = '4d000000-0000-4000-8000-00000000b002'; // cert lane → ACCEPTED
+const RCS_APP_REJ = '4d000000-0000-4000-8000-00000000b003'; // CERT_REJECTED → REJECTED
 
 let failures = 0;
 function check(label: string, condition: boolean, detail = ''): void {
@@ -100,13 +105,13 @@ function mint(
 async function cleanup(): Promise<void> {
   await admin.begin(async (tx) => {
     await tx`SET LOCAL session_replication_role = replica`;
-    for (const schema of ['rdf_ops', 'rnp_ops'] as const) {
+    for (const schema of ['rdf_ops', 'rnp_ops', 'rcs_ops'] as const) {
       await tx`
         DELETE FROM ${tx(schema)}.application_status_history
         WHERE application_id IN (SELECT id FROM ${tx(schema)}.applications WHERE applicant_id = ${APPLICANT_ID})`;
       await tx`DELETE FROM ${tx(schema)}.applications WHERE applicant_id = ${APPLICANT_ID}`;
     }
-    await tx`DELETE FROM public_core.recruitment_campaigns WHERE id IN ${tx([RDF_CAMPAIGN, RNP_CAMPAIGN])}`;
+    await tx`DELETE FROM public_core.recruitment_campaigns WHERE id IN ${tx([RDF_CAMPAIGN, RNP_CAMPAIGN, RCS_CAMPAIGN])}`;
     await tx`DELETE FROM public_core.applicant_identities WHERE id = ${APPLICANT_ID}`;
   });
 }
@@ -128,6 +133,8 @@ async function seed(): Promise<void> {
       (${RDF_CAMPAIGN}, 'Officer-lifecycle RDF', 'RDF', 'REGISTRATION_OPEN', '["GENERAL_ENLISTMENT"]',
        now() - interval '1 day', now() + interval '30 days', '2026-09-01', '2026-09-15', 7),
       (${RNP_CAMPAIGN}, 'Officer-lifecycle RNP', 'RNP', 'REGISTRATION_OPEN', '["CADET_OFFICER"]',
+       now() - interval '1 day', now() + interval '30 days', '2026-09-01', '2026-09-15', 7),
+      (${RCS_CAMPAIGN}, 'Officer-lifecycle RCS', 'RCS', 'REGISTRATION_OPEN', '["GENERAL_ENLISTEE"]',
        now() - interval '1 day', now() + interval '30 days', '2026-09-01', '2026-09-15', 7)`;
 
   // Seed each RDF scenario app at its starting status; the RNP app mirrors the
@@ -149,6 +156,17 @@ async function seed(): Promise<void> {
     INSERT INTO rnp_ops.applications (id, processing_code, applicant_id, campaign_id, category, status)
     VALUES (${RNP_APP}, 'RNP-96001', ${APPLICANT_ID}, ${RNP_CAMPAIGN}, 'CADET_OFFICER',
             'PHYSICAL_TEST_COMPLETE'::rnp_ops.application_status)`;
+  // CERTIFICATE-mode lanes (ADR-013): both RCS apps start where medical fires.
+  const rcs: ReadonlyArray<[string, string]> = [
+    [RCS_APP, 'RCS-96001'],
+    [RCS_APP_REJ, 'RCS-96002'],
+  ];
+  for (const [id, code] of rcs) {
+    await admin`
+      INSERT INTO rcs_ops.applications (id, processing_code, applicant_id, campaign_id, category, status)
+      VALUES (${id}, ${code}, ${APPLICANT_ID}, ${RCS_CAMPAIGN}, 'GENERAL_ENLISTEE',
+              'PHYSICAL_TEST_COMPLETE'::rcs_ops.application_status)`;
+  }
 }
 
 /** Read one application row (as superuser — sees all agencies) for assertions. */
@@ -160,14 +178,22 @@ async function appRow(schema: 'rdf_ops' | 'rnp_ops', id: string): Promise<Record
   return rows[0] ?? {};
 }
 
-/** Status-only read — safe for any ops schema (medical columns are RDF-only). */
-async function statusOf(schema: 'rdf_ops' | 'rnp_ops', id: string): Promise<string> {
+/** Status-only read — safe for any ops schema (board columns are RDF-only). */
+async function statusOf(schema: 'rdf_ops' | 'rnp_ops' | 'rcs_ops', id: string): Promise<string> {
   const rows = await admin<{ status: string }[]>`
     SELECT status FROM ${admin(schema)}.applications WHERE id = ${id}`;
   return rows[0]?.status ?? '(absent)';
 }
 
-async function historyCount(schema: 'rdf_ops' | 'rnp_ops'): Promise<number> {
+/** Certificate-mode read (rnp_ops + rcs_ops carry the mirrored cert columns). */
+async function certRow(schema: 'rnp_ops' | 'rcs_ops', id: string): Promise<Record<string, unknown>> {
+  const rows = await admin<Record<string, unknown>[]>`
+    SELECT status, medical_cert_verified, medical_cert_verified_at, medical_cert_physician_name
+    FROM ${admin(schema)}.applications WHERE id = ${id}`;
+  return rows[0] ?? {};
+}
+
+async function historyCount(schema: 'rdf_ops' | 'rnp_ops' | 'rcs_ops'): Promise<number> {
   const rows = await admin<{ n: number }[]>`
     SELECT count(*)::int AS n FROM ${admin(schema)}.application_status_history
     WHERE application_id IN (SELECT id FROM ${admin(schema)}.applications WHERE applicant_id = ${APPLICANT_ID})`;
@@ -329,6 +355,64 @@ async function main(): Promise<void> {
     console.log('\n── 8. No PII in responses ──');
     const allResponses = [med, fin, acc, again, unfit, finRej, hold, cross].map((r) => r.text).join('|');
     check('no national_id_hash in any response body', !allResponses.includes(NID_HASH));
+
+    // ── 9. CERTIFICATE mode (ADR-013): RNP + RCS travel the full funnel ──
+    console.log('\n── 9. Certificate mode: RNP + RCS reach ACCEPTED ──');
+    const rnpOfficer = mint('officer', { agency: 'RNP', sub: RNP_OFFICER_ID });
+    const rcsOfficer = mint('officer', { agency: 'RCS', sub: RCS_OFFICER_ID });
+
+    // Input guards fire BEFORE any write (app still at PHYSICAL_TEST_COMPLETE).
+    const noName = await post(MEDICAL_REVIEW_PATH, { applicationId: RNP_APP, certVerdict: 'CERT_VERIFIED' }, rnpOfficer);
+    check('CERT_VERIFIED without physicianName → 422', noName.status === 422 && noName.json['status'] === 'INVALID_MEDICAL_INPUT', noName.text);
+    const nameOnReject = await post(MEDICAL_REVIEW_PATH, { applicationId: RNP_APP, certVerdict: 'CERT_REJECTED', physicianName: 'Dr X' }, rnpOfficer);
+    check('physicianName alongside CERT_REJECTED → 422', nameOnReject.status === 422, nameOnReject.text);
+    check('  RNP app untouched by the invalid inputs', (await statusOf('rnp_ops', RNP_APP)) === 'PHYSICAL_TEST_COMPLETE');
+
+    // RNP: cert-verify → MEDICAL_REVIEW → SHORTLIST → ACCEPTED (as RNP officer role).
+    const PHYSICIAN = 'Dr. Mukamana Chantal — Kacyiru Hospital';
+    const rnpVerify = await post(MEDICAL_REVIEW_PATH, { applicationId: RNP_APP, certVerdict: 'CERT_VERIFIED', physicianName: PHYSICIAN }, rnpOfficer);
+    check('RNP cert-verify APPLIED → MEDICAL_REVIEW', rnpVerify.status === 200 && rnpVerify.json['toStatus'] === 'MEDICAL_REVIEW', rnpVerify.text);
+    const rnpRow = await certRow('rnp_ops', RNP_APP);
+    check('  rnp_ops cert columns stamped (0012 landing)',
+      rnpRow['medical_cert_verified'] === true && rnpRow['medical_cert_verified_at'] !== null && rnpRow['medical_cert_physician_name'] === PHYSICIAN);
+    const rnpFin = await post(FINAL_DECISION_PATH, { applicationId: RNP_APP, decision: 'SHORTLIST' }, rnpOfficer);
+    const rnpAcc = await post(ACCEPT_PATH, { applicationId: RNP_APP }, rnpOfficer);
+    check('RNP reaches ACCEPTED (the 501 dead-end is retired)',
+      rnpFin.status === 200 && rnpAcc.status === 200 && (await statusOf('rnp_ops', RNP_APP)) === 'ACCEPTED');
+
+    // RCS: same certificate lane, plus idempotent re-apply before advancing.
+    const rcsVerify = await post(MEDICAL_REVIEW_PATH, { applicationId: RCS_APP, certVerdict: 'CERT_VERIFIED', physicianName: 'Dr. Nkurunziza J.' }, rcsOfficer);
+    check('RCS cert-verify APPLIED → MEDICAL_REVIEW', rcsVerify.status === 200 && rcsVerify.json['toStatus'] === 'MEDICAL_REVIEW', rcsVerify.text);
+    const rcsAgain = await post(MEDICAL_REVIEW_PATH, { applicationId: RCS_APP, certVerdict: 'CERT_VERIFIED', physicianName: 'Dr. Nkurunziza J.' }, rcsOfficer);
+    check('RCS cert-verify re-apply → NO_CHANGE (idempotent)', rcsAgain.status === 200 && rcsAgain.json['status'] === 'NO_CHANGE', rcsAgain.text);
+    const rcsFin = await post(FINAL_DECISION_PATH, { applicationId: RCS_APP, decision: 'SHORTLIST' }, rcsOfficer);
+    const rcsAcc = await post(ACCEPT_PATH, { applicationId: RCS_APP }, rcsOfficer);
+    check('RCS reaches ACCEPTED', rcsFin.status === 200 && rcsAcc.status === 200 && (await statusOf('rcs_ops', RCS_APP)) === 'ACCEPTED');
+
+    // CERT_REJECTED: REJECTED + history are the record; cert columns stay honest.
+    const rcsRej = await post(MEDICAL_REVIEW_PATH, { applicationId: RCS_APP_REJ, certVerdict: 'CERT_REJECTED' }, rcsOfficer);
+    check('CERT_REJECTED → REJECTED', rcsRej.status === 200 && rcsRej.json['toStatus'] === 'REJECTED', rcsRej.text);
+    const rejRow = await certRow('rcs_ops', RCS_APP_REJ);
+    check('  cert columns untouched on rejection (false / null / null)',
+      rejRow['medical_cert_verified'] === false && rejRow['medical_cert_verified_at'] === null && rejRow['medical_cert_physician_name'] === null);
+
+    // Accounting: RNP 3 transitions; RCS 3 + 1 rejection. History performed_by
+    // carries the verifying officer (cert columns have no *_by_id — RCS parity).
+    check('3 history rows in rnp_ops', (await historyCount('rnp_ops')) === 3, String(await historyCount('rnp_ops')));
+    check('4 history rows in rcs_ops', (await historyCount('rcs_ops')) === 4, String(await historyCount('rcs_ops')));
+    const rnpHistory = await admin<{ performed_by: string }[]>`
+      SELECT performed_by FROM rnp_ops.application_status_history
+      WHERE application_id = ${RNP_APP} ORDER BY performed_at`;
+    check('rnp history performed_by = RNP officer UUID', rnpHistory.every((r) => r.performed_by === RNP_OFFICER_ID));
+
+    // The physician name reaches the DB column and NOWHERE else: not in the
+    // audit stream, not in any HTTP response.
+    const certAudits = auditEntries().filter((e) => asRecord(e['metadata'])['mode'] === 'CERTIFICATE');
+    check('certificate audits emitted for each genuine transition', certAudits.length === 3, String(certAudits.length));
+    check('physician name never on the event bus', !JSON.stringify(bus.published).includes('Mukamana'));
+    const certResponses = [noName, nameOnReject, rnpVerify, rnpFin, rnpAcc, rcsVerify, rcsAgain, rcsFin, rcsAcc, rcsRej].map((r) => r.text).join('|');
+    check('no national_id_hash in certificate-mode responses', !certResponses.includes(NID_HASH));
+    check('physician name not echoed in responses', !certResponses.includes('Mukamana'));
   } finally {
     await cleanup();
     await server.stop();
