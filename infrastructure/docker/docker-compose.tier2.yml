@@ -154,7 +154,11 @@ services:
       interval: 60s
       timeout: 30s
       retries: 3
-      start_period: 300s
+      # Grace period only (failures don't count until it lapses; a healthy
+      # container passes as soon as clamd answers). 600s covers a COLD
+      # first boot — the virus-DB download on a CI runner can exceed the
+      # old 300s and fail `up --wait` before clamd ever listens.
+      start_period: 600s
     deploy:
       resources:
         limits:

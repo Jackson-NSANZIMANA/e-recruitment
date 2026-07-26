@@ -37,7 +37,11 @@ services:
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      - ./init-scripts/01-create-schemas.sql:/docker-entrypoint-initdb.d/01-schemas.sql:ro
+      # NO schema init here: drizzle migration 0000 OWNS schema creation
+      # (CREATE SCHEMA without IF NOT EXISTS). Pre-creating schemas at
+      # initdb made every COLD bootstrap fail ("schema audit_log already
+      # exists") — invisible on warm dev volumes whose drizzle journal
+      # predated the init script, fatal on every CI runner.
       - ./init-scripts/02-create-roles.sql:/docker-entrypoint-initdb.d/02-roles.sql:ro
       - ./init-scripts/03-rls-policies.sql:/docker-entrypoint-initdb.d/03-rls.sql:ro
       - ./init-scripts/04-create-extensions.sql:/docker-entrypoint-initdb.d/04-extensions.sql:ro
