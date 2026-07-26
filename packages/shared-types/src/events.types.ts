@@ -137,6 +137,23 @@ export interface ApplicationEligibilityClearedEvent extends BaseEvent {
   readonly category: ApplicationCategory;
 }
 
+// ── Topic: application.accepted ───────────────────────────────────
+// Emitted by application-service when an officer ACCEPT lands (the accept-lock
+// won, the row is ACCEPTED — the positive terminal, ADR-014). The enlistment
+// signal on the backbone: its first consumer is the auto-withdrawal projector
+// (ADR-017), which retires the applicant's other in-flight applications.
+// PII-free: opaque ids and enums only.
+
+export interface ApplicationAcceptedEvent extends BaseEvent {
+  readonly eventType: 'APPLICATION_ACCEPTED';
+  readonly applicationId: string;
+  readonly applicantId: string;
+  /** The accepting (winning) agency — matches the accept-lock holder. */
+  readonly agency: Agency;
+  readonly campaignId: string;
+  readonly category: ApplicationCategory;
+}
+
 // ── Topic: biometric.result ───────────────────────────────────────
 
 export interface BiometricVerificationCompletedEvent extends BaseEvent {
@@ -283,6 +300,7 @@ export type USRPEvent =
   | RIBVettingCompletedEvent
   | AgeEligibilityCompletedEvent
   | ApplicationEligibilityClearedEvent
+  | ApplicationAcceptedEvent
   | BiometricVerificationCompletedEvent
   | SlotAssignedEvent
   | FieldScoreCapturedEvent
@@ -300,6 +318,7 @@ export const KAFKA_TOPICS = {
   VETTING_RIB: 'vetting.rib',
   VETTING_AGE: 'vetting.age',           // NEW — age gate result (positive-terminal composition)
   APPLICATION_CLEARED: 'application.cleared', // NEW — eligibility passed → triggers scheduling
+  APPLICATION_ACCEPTED: 'application.accepted', // NEW — officer accept landed → auto-withdrawal (ADR-017)
   BIOMETRIC_RESULT: 'biometric.result',
   SLOT_ASSIGNED: 'slot.assigned',
   FIELD_SCORE_CAPTURED: 'field.score.captured',
