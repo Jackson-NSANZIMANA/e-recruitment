@@ -16,9 +16,10 @@ import { InMemoryEventBus, KafkaEventBus, type EventBus } from '@usrp/shared-eve
 import { loadKafkaConfig } from '@usrp/shared-config';
 import { makeAuthVerifier } from '@usrp/shared-auth';
 import { startHttpServer } from '@usrp/shared-http';
-import { createIdentityService, createBiometricResultProjector } from './index.js';
+import { createIdentityService, createBiometricResultProjector, createEraseIdentityService } from './index.js';
 import { loadIdentityConfig } from './config.js';
 import { verifyIdentityRoute } from './adapters/http/verify-identity.controller.js';
+import { erasureRoute } from './adapters/http/erasure.controller.js';
 import { startBiometricResultConsumer } from './adapters/events/biometric-result.consumer.js';
 
 function createEventBus(serviceName: string): EventBus {
@@ -60,7 +61,10 @@ async function main(): Promise<void> {
   const server = await startHttpServer({
     serviceName: config.runtime.serviceName,
     port: config.runtime.port,
-    routes: [verifyIdentityRoute(service, verify)],
+    routes: [
+      verifyIdentityRoute(service, verify),
+      erasureRoute(createEraseIdentityService(config, bus), verify),
+    ],
     // Ready only when the database — the system-of-record — is reachable.
     readiness: async (): Promise<boolean> => {
       try {

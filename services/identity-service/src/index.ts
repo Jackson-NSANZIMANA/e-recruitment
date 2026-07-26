@@ -11,7 +11,9 @@
 import type { EventBus } from '@usrp/shared-events';
 import { NidaHttpGateway } from './adapters/nida.http-gateway.js';
 import { PgIdentityRepository } from './adapters/identity.pg-repository.js';
+import { PgErasureRepository } from './adapters/erasure.pg-repository.js';
 import { VerifyIdentityService } from './application/verify-identity.service.js';
+import { EraseIdentityService } from './application/erase-identity.service.js';
 import { ProjectBiometricResultService } from './application/project-biometric-result.service.js';
 import type { IdentityServiceConfig } from './config.js';
 
@@ -50,11 +52,27 @@ export function createBiometricResultProjector(
   });
 }
 
+/**
+ * Assemble the right-to-erasure use case (ADR-015). identity-service owns
+ * applicant_identities, so it executes erasure; the repository gate (all
+ * applications terminal, not accept-locked) decides lawfulness.
+ */
+export function createEraseIdentityService(
+  _config: IdentityServiceConfig,
+  eventBus: EventBus,
+): EraseIdentityService {
+  return new EraseIdentityService({
+    repository: new PgErasureRepository(),
+    eventBus,
+  });
+}
+
 // ── Re-exports ────────────────────────────────────────────────────
 export {
   VERIFY_IDENTITY_PATH,
   verifyIdentityRoute,
 } from './adapters/http/verify-identity.controller.js';
+export { ERASURE_PATH, erasureRoute } from './adapters/http/erasure.controller.js';
 export { VerifyIdentityService } from './application/verify-identity.service.js';
 export type {
   VerifyIdentityCommand,
@@ -64,6 +82,10 @@ export type {
 export { NidaHttpGateway } from './adapters/nida.http-gateway.js';
 export type { NidaHttpGatewayOptions } from './adapters/nida.http-gateway.js';
 export { PgIdentityRepository } from './adapters/identity.pg-repository.js';
+export { PgErasureRepository } from './adapters/erasure.pg-repository.js';
+export { EraseIdentityService } from './application/erase-identity.service.js';
+export type { EraseIdentityCommand, EraseIdentityDeps } from './application/erase-identity.service.js';
+export type { EraseIdentityOutcome, ErasureRepository } from './ports/erasure-repository.js';
 export { ProjectBiometricResultService } from './application/project-biometric-result.service.js';
 export type {
   ProjectBiometricResultCommand,
