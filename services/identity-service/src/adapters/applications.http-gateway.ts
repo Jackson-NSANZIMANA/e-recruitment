@@ -10,7 +10,11 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { UpstreamUnavailableError } from '../domain/identity.errors.js';
-import type { ApplicantApplication, ApplicationsGateway } from '../ports/applications-gateway.js';
+import type {
+  ApplicantApplication,
+  ApplicationsGateway,
+  WithdrawApplicationResult,
+} from '../ports/applications-gateway.js';
 
 export interface HttpApplicationsGatewayOptions {
   /** iam-service base URL (token endpoint host). */
@@ -69,6 +73,46 @@ export class HttpApplicationsGateway implements ApplicationsGateway {
     }
     const body = (await res.json()) as { applications?: ApplicantApplication[] };
     return body.applications ?? [];
+  }
+
+  async withdrawApplication(
+    applicantId: string,
+    applicationId: string,
+  ): Promise<WithdrawApplicationResult> {
+    const token = await this.#systemToken();
+    let res: Response;
+    try {
+      res = await this.#fetch(`${this.#opts.applicationBaseUrl}/v1/applications/withdraw-own`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ applicantId, applicationId }),
+        signal: AbortSignal.timeout(this.#timeoutMs),
+      });
+    } catch (cause) {
+      throw new UpstreamUnavailableError('application-service unreachable', { cause });
+    }
+    if (res.status === 401) {
+      this.#cached = null; // same expiry-race posture as the read path
+    }
+    if (res.status === 404) {
+      return { kind: 'NOT_FOUND' };
+    }
+    const body = (await res.json().catch(() => ({}))) as {
+      status?: string;
+      agency?: string;
+      fromStatus?: string;
+      currentStatus?: string;
+    };
+    if (res.status === 200 && body.status === 'WITHDRAWN' && body.agency && body.fromStatus) {
+      return { kind: 'WITHDRAWN', agency: body.agency, fromStatus: body.fromStatus };
+    }
+    if (res.status === 200 && body.status === 'NO_CHANGE' && body.agency) {
+      return { kind: 'NO_CHANGE', agency: body.agency };
+    }
+    if (res.status === 409 && body.status === 'NOT_APPLICABLE' && body.agency && body.currentStatus) {
+      return { kind: 'NOT_APPLICABLE', agency: body.agency, currentStatus: body.currentStatus };
+    }
+    throw new UpstreamUnavailableError(`application-service withdraw-own responded ${res.status}`);
   }
 
   /** The cached system token, minting a fresh one when absent/near expiry. */

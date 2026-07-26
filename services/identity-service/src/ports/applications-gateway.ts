@@ -18,7 +18,19 @@ export interface ApplicantApplication {
   readonly submittedAt: string | null;
 }
 
+/**
+ * Upstream outcome of a voluntary withdrawal (ADR-020) — a passthrough of
+ * application-service's withdraw-own contract, PII-free by construction.
+ */
+export type WithdrawApplicationResult =
+  | { readonly kind: 'WITHDRAWN'; readonly agency: string; readonly fromStatus: string }
+  | { readonly kind: 'NO_CHANGE'; readonly agency: string }
+  | { readonly kind: 'NOT_APPLICABLE'; readonly agency: string; readonly currentStatus: string }
+  | { readonly kind: 'NOT_FOUND' };
+
 export interface ApplicationsGateway {
   /** All of one applicant's applications, cross-agency. */
   listForApplicant(applicantId: string): Promise<readonly ApplicantApplication[]>;
+  /** Withdraw the citizen's OWN application (ADR-020) — ownership enforced upstream. */
+  withdrawApplication(applicantId: string, applicationId: string): Promise<WithdrawApplicationResult>;
 }

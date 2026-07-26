@@ -136,7 +136,11 @@ export { LogSmsChannel } from './adapters/log-sms.channel.js';
 export type { OutboundSms, SmsChannel, SmsDeliveryOutcome } from './ports/sms-channel.js';
 export { HttpApplicationsGateway } from './adapters/applications.http-gateway.js';
 export type { HttpApplicationsGatewayOptions } from './adapters/applications.http-gateway.js';
-export type { ApplicantApplication, ApplicationsGateway } from './ports/applications-gateway.js';
+export type {
+  ApplicantApplication,
+  ApplicationsGateway,
+  WithdrawApplicationResult,
+} from './ports/applications-gateway.js';
 export { RetentionSweepService } from './application/retention-sweep.service.js';
 export type {
   RetentionPolicy,
