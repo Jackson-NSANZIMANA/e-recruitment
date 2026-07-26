@@ -24,6 +24,13 @@ import {
  */
 export const OFFICER_TOKEN_TTL_SECONDS = 60 * 60;
 
+/**
+ * System bearer-token lifetime. 15 min (owner D3, 2026-07-26): machine
+ * clients re-fetch silently, so shorter is free and bounds a stolen-token
+ * window far tighter than the human 1h.
+ */
+export const SYSTEM_TOKEN_TTL_SECONDS = 15 * 60;
+
 export interface IamServiceConfig {
   readonly runtime: RuntimeConfig;
   readonly database: DatabaseConfig;

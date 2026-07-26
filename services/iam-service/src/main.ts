@@ -18,6 +18,7 @@ import { loadKafkaConfig } from '@usrp/shared-config';
 import { startHttpServer } from '@usrp/shared-http';
 import { createIamService, loadIamConfig } from './index.js';
 import { officerLoginRoutes } from './adapters/http/officer-login.controller.js';
+import { serviceTokenRoutes } from './adapters/http/service-token.controller.js';
 
 function createEventBus(serviceName: string): EventBus {
   if (process.env['KAFKA_BROKERS']) {
@@ -44,7 +45,7 @@ async function main(): Promise<void> {
   const server = await startHttpServer({
     serviceName: config.runtime.serviceName,
     port: config.runtime.port,
-    routes: officerLoginRoutes(service.login),
+    routes: [...officerLoginRoutes(service.login), ...serviceTokenRoutes(service.serviceToken)],
     // Ready only when the credential store — the login path's home — is reachable.
     readiness: async (): Promise<boolean> => {
       try {

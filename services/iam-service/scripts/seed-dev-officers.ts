@@ -21,6 +21,16 @@ import type { Agency } from '@usrp/shared-types';
 /** The dev password for every seeded officer. DEV ONLY — never a real secret. */
 const DEV_PASSWORD = 'DevOfficer#2026';
 
+/** The dev client secret for the seeded service account. DEV ONLY. */
+const DEV_CLIENT_SECRET = 'DevService#2026';
+
+/** One generic machine client for the tier1 pipeline (ADR-016). */
+const DEV_SERVICE_CLIENT = {
+  serviceId: '44444444-4444-4444-8444-444444444444', // fixed UUID → stable across runs
+  clientId: 'dev.pipeline',
+  description: 'Dev tier1 pipeline client (seed-dev-officers)',
+} as const;
+
 interface DevOfficer {
   readonly officerId: string; // fixed UUID → stable across runs
   readonly loginHandle: string;
@@ -61,6 +71,26 @@ async function main(): Promise<void> {
       }),
     );
   }
+  // The dev service client (same idempotent shape as the officers).
+  const serviceCredential = hashPassword(DEV_CLIENT_SECRET);
+  const clientInserted = await sql.begin(async (tx) => {
+    await tx`SET LOCAL ROLE ${sql('usrp_iam_service')}`;
+    const rows = await tx<{ service_id: string }[]>`
+      INSERT INTO public_core.service_accounts (service_id, client_id, credential, description)
+      VALUES (${DEV_SERVICE_CLIENT.serviceId}, ${DEV_SERVICE_CLIENT.clientId},
+              ${serviceCredential}, ${DEV_SERVICE_CLIENT.description})
+      ON CONFLICT (client_id) DO NOTHING
+      RETURNING service_id
+    `;
+    return rows.length > 0;
+  });
+  console.log(
+    JSON.stringify({
+      msg: clientInserted ? 'service_client_seeded' : 'service_client_exists',
+      clientId: DEV_SERVICE_CLIENT.clientId,
+    }),
+  );
+
   console.log(
     JSON.stringify({ msg: 'seed_complete', inserted: seeded, total: DEV_OFFICERS.length, devPassword: DEV_PASSWORD }),
   );
