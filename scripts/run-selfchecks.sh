@@ -97,6 +97,7 @@ run_ts "application-service: officer lifecycle (medical→final→accept)" servi
 run_ts "application-service: auto-withdrawal on accept (ADR-017)" services/application-service/selfcheck/verify-auto-withdrawal-slice.ts
 run_ts "iam-service: token issuer (mint → officer endpoint accepts)" services/iam-service/selfcheck/verify-iam-issuer-slice.ts
 run_ts "iam-service: service tokens (client-credentials → system route accepts)" services/iam-service/selfcheck/verify-service-token-slice.ts
+run_ts "identity-service: applicant auth (OTP → session → own applications)" services/identity-service/selfcheck/verify-applicant-auth-slice.ts
 run_ts "application-service: lifecycle monotonicity" services/application-service/selfcheck/verify-lifecycle.ts
 run_ts "application-service: vetting projection"   services/application-service/selfcheck/verify-vetting-projection.ts
 run_ts "application-service: history immutability" services/application-service/selfcheck/verify-history-immutability.ts
