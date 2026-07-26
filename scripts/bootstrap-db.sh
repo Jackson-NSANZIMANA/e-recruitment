@@ -102,10 +102,16 @@ apply_sql "${RLS_DIR}/0011_adjudication_review_status.sql" "rls/0011 (ADJUDICATI
 #     three agencies (RDF keeps its in-house-board columns; the 501 retires).
 apply_sql "${RLS_DIR}/0012_rnp_medical_cert_columns.sql" "rls/0012 (RNP medical-cert columns)"
 
-printf '\n'
-ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns in place"
+# 14. Cross-agency accept-lock backstop (ADR-014): CHECK that the three
+#     cross_agency_lock* columns are stamped all-or-nothing. The lock itself is
+#     a compare-and-set in the officer accept transaction; this is the engine's
+#     refusal of a half-stamped lock (silent app-logic regression).
+apply_sql "${RLS_DIR}/0013_cross_agency_accept_lock.sql" "rls/0013 (cross-agency accept-lock backstop)"
 
-# 14. Dev officer accounts (one per agency). A CONVENIENCE seed so the officer
+printf '\n'
+ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop in place"
+
+# 15. Dev officer accounts (one per agency). A CONVENIENCE seed so the officer
 #     console / manual login smoke tests have real credentials to drive —
 #     dev-only, idempotent. Best-effort: it needs the workspace built (tsx
 #     resolves @usrp/* runtime dist), so a failure here NEVER blocks the
