@@ -94,6 +94,7 @@ run_ts "identity-service: right-to-erasure (gate → tombstone → freeze)" serv
 run_ts "application-service: front-door submit"   services/application-service/selfcheck/verify-submit-http-slice.ts
 run_ts "application-service: officer auth + RLS"  services/application-service/selfcheck/verify-auth-slice.ts
 run_ts "application-service: officer lifecycle (medical→final→accept)" services/application-service/selfcheck/verify-officer-lifecycle-slice.ts
+run_ts "application-service: auto-withdrawal on accept (ADR-017)" services/application-service/selfcheck/verify-auto-withdrawal-slice.ts
 run_ts "iam-service: token issuer (mint → officer endpoint accepts)" services/iam-service/selfcheck/verify-iam-issuer-slice.ts
 run_ts "iam-service: service tokens (client-credentials → system route accepts)" services/iam-service/selfcheck/verify-service-token-slice.ts
 run_ts "application-service: lifecycle monotonicity" services/application-service/selfcheck/verify-lifecycle.ts
