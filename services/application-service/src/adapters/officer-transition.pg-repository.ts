@@ -11,7 +11,11 @@
 //   2. SELECT the row FOR UPDATE from the officer's own agency schema. Absent
 //      → NOT_FOUND (the cross-agency guard: another agency's app is invisible).
 //   3. A pure guard decides APPLY / NO_CHANGE / NOT_APPLICABLE (see `decide`).
-//   4. On APPLY: UPDATE the status + stamp the reviewer/decider columns, then
+//   4. accept() additionally takes the cross-agency accept-lock (ADR-014): a
+//      FOR UPDATE + compare-and-set on the citizen's shared identity row in
+//      public_core — one citizen, one acceptance, platform-wide. Already
+//      locked (any agency) → CROSS_AGENCY_LOCKED, whole tx rolls back.
+//   5. On APPLY: UPDATE the status + stamp the reviewer/decider columns, then
 //      append an application_status_history row (append-only per rls/0007).
 //
 // The audit entry is emitted by the use case, not here — this adapter owns
@@ -24,6 +28,7 @@ import { sql } from '@usrp/shared-database';
 import type {
   AcademicEligibilityStatus,
   AgeEligibilityStatus,
+  Agency,
   ApplicationCategory,
   ApplicationStatus,
   CriminalClearanceStatus,
@@ -183,11 +188,47 @@ export class PgOfficerTransitionRepository implements OfficerTransitionRepositor
       return await sql.begin(async (tx) => {
         await tx`SET LOCAL ROLE ${sql(actor.dbRole)}`;
 
-        const rows = await tx<{ status: ApplicationStatus }[]>`
-          SELECT status FROM ${schema}.applications WHERE id = ${applicationId} FOR UPDATE
+        const rows = await tx<{ status: ApplicationStatus; applicant_id: string }[]>`
+          SELECT status, applicant_id FROM ${schema}.applications
+          WHERE id = ${applicationId} FOR UPDATE
         `;
-        const outcome = decide(rows[0]?.status, requiredFrom, target);
-        if (outcome.kind !== 'APPLIED') return outcome;
+        const current = rows[0];
+        const outcome = decide(current?.status, requiredFrom, target);
+        if (outcome.kind !== 'APPLIED' || current === undefined) return outcome;
+
+        // ── Cross-agency accept-lock (ADR-014) ──────────────────────
+        // ONE citizen, ONE acceptance, platform-wide. The shared identity
+        // row (unique per citizen) is the lock cell: FOR UPDATE serializes
+        // concurrent accepts across ALL agencies (their application rows
+        // live in different schemas, but they contend on this one row),
+        // then a compare-and-set stamps the winner. The officer's own role
+        // can read/update the row because the accepted citizen has an
+        // application in this agency — exactly the pc_ai_<agency> RLS
+        // predicate. A lost race or an existing lock (any agency, own
+        // included — a second application of the same person) refuses the
+        // acceptance and rolls the whole transaction back.
+        const lock = await tx<{ cross_agency_locked_by_agency: Agency | null }[]>`
+          SELECT cross_agency_locked_by_agency
+          FROM public_core.applicant_identities
+          WHERE id = ${current.applicant_id} FOR UPDATE
+        `;
+        const holder = lock[0]?.cross_agency_locked_by_agency;
+        if (holder) return { kind: 'CROSS_AGENCY_LOCKED', lockedByAgency: holder };
+
+        const stamped = await tx`
+          UPDATE public_core.applicant_identities SET
+            cross_agency_locked_at = now(),
+            cross_agency_locked_by_agency = ${actor.agency},
+            cross_agency_lock_reason = 'ACCEPTED'
+          WHERE id = ${current.applicant_id} AND cross_agency_locked_at IS NULL
+        `;
+        if (stamped.count !== 1) {
+          // Unreachable under the FOR UPDATE above (the row is ours until
+          // commit) — kept as a fail-closed guard, mirroring the DB-side
+          // all-or-nothing CHECK (rls/0013). Never accept on a suspect lock.
+          return { kind: 'CROSS_AGENCY_LOCKED', lockedByAgency: actor.agency };
+        }
+        // ────────────────────────────────────────────────────────────
 
         await tx`
           UPDATE ${schema}.applications SET

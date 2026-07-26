@@ -220,6 +220,14 @@ function mapOutcome(outcome: OfficerCommandOutcome): HttpResult {
       // without the signing physician. Caller error — 422, and the reason
       // says exactly which mode the agency uses. (Retires the Slice-4 501.)
       return { status: 422, body: { status: 'INVALID_MEDICAL_INPUT', reason: outcome.reason } };
+    case 'CROSS_AGENCY_LOCKED':
+      // One citizen, one acceptance (ADR-014): this person is already
+      // accepted — by the named agency (possibly the officer's own, via a
+      // second application). Conflict with current platform state — 409.
+      return {
+        status: 409,
+        body: { status: 'CROSS_AGENCY_LOCKED', lockedByAgency: outcome.lockedByAgency },
+      };
     default:
       return assertNever(outcome);
   }

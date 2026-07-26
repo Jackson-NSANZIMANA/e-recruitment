@@ -96,13 +96,20 @@ export interface AdjudicateInput {
  *   • NOT_FOUND      — the application is absent from the officer's OWN agency
  *                      schema; the cross-agency guard (an RDF officer acting on
  *                      an RNP application sees nothing).
- * All three non-APPLIED results are no-ops (no write, no audit).
+ *   • CROSS_AGENCY_LOCKED — accept refused because this citizen is already
+ *                      accepted (ADR-014): the shared identity row carries a
+ *                      cross_agency_lock stamped by `lockedByAgency` — which
+ *                      may be a sibling agency OR the officer's own (a second
+ *                      application of the same person). The transaction rolls
+ *                      back whole: no ACCEPTED write, no history row.
+ * All non-APPLIED results are no-ops (no write, no audit).
  */
 export type OfficerTransitionOutcome =
   | { readonly kind: 'APPLIED'; readonly fromStatus: ApplicationStatus; readonly toStatus: ApplicationStatus }
   | { readonly kind: 'NO_CHANGE'; readonly currentStatus: ApplicationStatus }
   | { readonly kind: 'NOT_APPLICABLE'; readonly currentStatus: ApplicationStatus }
-  | { readonly kind: 'NOT_FOUND' };
+  | { readonly kind: 'NOT_FOUND' }
+  | { readonly kind: 'CROSS_AGENCY_LOCKED'; readonly lockedByAgency: Agency };
 
 /**
  * Outcome of an officer adjudication (ADR-011). Extends the transition shape:
