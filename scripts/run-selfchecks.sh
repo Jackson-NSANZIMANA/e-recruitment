@@ -90,6 +90,7 @@ run_ts "shared-auth: signed bearer token + enforcement" packages/shared-auth/sel
 run_ts "shared-events: Kafka round-trip"          packages/shared-events/selfcheck/verify-kafka-roundtrip.ts
 run_ts "identity-service: core slice"             services/identity-service/selfcheck/verify-slice.ts
 run_ts "identity-service: HTTP slice"             services/identity-service/selfcheck/verify-http-slice.ts
+run_ts "identity-service: right-to-erasure (gate → tombstone → freeze)" services/identity-service/selfcheck/verify-erasure-slice.ts
 run_ts "application-service: front-door submit"   services/application-service/selfcheck/verify-submit-http-slice.ts
 run_ts "application-service: officer auth + RLS"  services/application-service/selfcheck/verify-auth-slice.ts
 run_ts "application-service: officer lifecycle (medical→final→accept)" services/application-service/selfcheck/verify-officer-lifecycle-slice.ts
