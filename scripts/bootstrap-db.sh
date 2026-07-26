@@ -108,10 +108,16 @@ apply_sql "${RLS_DIR}/0012_rnp_medical_cert_columns.sql" "rls/0012 (RNP medical-
 #     refusal of a half-stamped lock (silent app-logic regression).
 apply_sql "${RLS_DIR}/0013_cross_agency_accept_lock.sql" "rls/0013 (cross-agency accept-lock backstop)"
 
-printf '\n'
-ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop in place"
+# 15. Erasure freeze (ADR-015): erased identity rows (deleted_at set) are
+#     frozen by trigger — right-to-erasure is irreversible; no un-erasure,
+#     no PII rewrite. Also grants system_service SELECT, DELETE on
+#     applicant_sessions (session rows are personal data erasure must clear).
+apply_sql "${RLS_DIR}/0014_erasure_freeze.sql" "rls/0014 (erasure freeze)"
 
-# 15. Dev officer accounts (one per agency). A CONVENIENCE seed so the officer
+printf '\n'
+ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze in place"
+
+# 16. Dev officer accounts (one per agency). A CONVENIENCE seed so the officer
 #     console / manual login smoke tests have real credentials to drive —
 #     dev-only, idempotent. Best-effort: it needs the workspace built (tsx
 #     resolves @usrp/* runtime dist), so a failure here NEVER blocks the
