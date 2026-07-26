@@ -13,6 +13,8 @@ import { NidaHttpGateway } from './adapters/nida.http-gateway.js';
 import { PgIdentityRepository } from './adapters/identity.pg-repository.js';
 import { PgErasureRepository } from './adapters/erasure.pg-repository.js';
 import { PgApplicantAuthRepository } from './adapters/applicant-auth.pg-repository.js';
+import { PgErasureRequestRepository } from './adapters/erasure-request.pg-repository.js';
+import { ErasureRequestService } from './application/erasure-request.service.js';
 import { VerifyIdentityService } from './application/verify-identity.service.js';
 import { EraseIdentityService } from './application/erase-identity.service.js';
 import { ProjectBiometricResultService } from './application/project-biometric-result.service.js';
@@ -100,6 +102,22 @@ export function createEraseIdentityService(
   return new EraseIdentityService({
     repository: new PgErasureRepository(),
     eventBus,
+    // ADR-020: an executed erasure stamps the citizen's pending intake row.
+    requests: new PgErasureRequestRepository(),
+  });
+}
+
+/**
+ * Assemble the erasure request intake use case (ADR-020, owner D10): the
+ * citizen files, the DPO queue answers; execution stays on the ADR-015 road.
+ */
+export function createErasureRequestService(
+  _config: IdentityServiceConfig,
+  eventBus: EventBus,
+): ErasureRequestService {
+  return new ErasureRequestService({
+    repository: new PgErasureRequestRepository(),
+    eventBus,
   });
 }
 
@@ -109,6 +127,26 @@ export {
   verifyIdentityRoute,
 } from './adapters/http/verify-identity.controller.js';
 export { ERASURE_PATH, erasureRoute } from './adapters/http/erasure.controller.js';
+export {
+  ME_ERASURE_REQUEST_PATH,
+  ERASURE_REQUESTS_QUEUE_PATH,
+  ERASURE_REQUEST_DECLINE_PATH,
+  erasureRequestRoutes,
+} from './adapters/http/erasure-request.controller.js';
+export { ErasureRequestService } from './application/erasure-request.service.js';
+export type {
+  FileErasureRequestCommand,
+  DeclineErasureRequestCommand,
+  ErasureRequestDeps,
+} from './application/erasure-request.service.js';
+export { PgErasureRequestRepository } from './adapters/erasure-request.pg-repository.js';
+export type {
+  ErasureRequestRepository,
+  ErasureRequestRecord,
+  FileRequestOutcome,
+  DeclineRequestOutcome,
+  DeclineRequestInput,
+} from './ports/erasure-request.repository.js';
 export {
   OTP_REQUEST_PATH,
   OTP_VERIFY_PATH,

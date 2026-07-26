@@ -124,10 +124,15 @@ apply_sql "${RLS_DIR}/0015_service_accounts.sql" "rls/0015 (service accounts)"
 #     applicant_sessions so identity-service can issue/touch citizen sessions.
 apply_sql "${RLS_DIR}/0016_applicant_auth.sql" "rls/0016 (applicant auth)"
 
-printf '\n'
-ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts + applicant auth in place"
+# 18. Erasure request intake (ADR-020, owner D10): citizen-filed erasure
+#     requests pending officer/DPO decision — PII-free rows that survive
+#     the erasure they ask for. One live PENDING per citizen.
+apply_sql "${RLS_DIR}/0017_erasure_requests.sql" "rls/0017 (erasure requests)"
 
-# 18. Dev officer accounts (one per agency). A CONVENIENCE seed so the officer
+printf '\n'
+ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts + applicant auth + erasure requests in place"
+
+# 19. Dev officer accounts (one per agency). A CONVENIENCE seed so the officer
 #     console / manual login smoke tests have real credentials to drive —
 #     dev-only, idempotent. Best-effort: it needs the workspace built (tsx
 #     resolves @usrp/* runtime dist), so a failure here NEVER blocks the

@@ -14,6 +14,7 @@ import type { Principal } from '@usrp/shared-auth';
 import { newCorrelationContext, newEnvelope, type EventBus, type EventContext } from '@usrp/shared-events';
 import type { AuditEvent } from '@usrp/shared-types';
 import type { EraseIdentityOutcome, ErasureRepository } from '../ports/erasure-repository.js';
+import type { ErasureRequestRepository } from '../ports/erasure-request.repository.js';
 
 export interface EraseIdentityCommand {
   readonly applicantId: string;
@@ -23,6 +24,12 @@ export interface EraseIdentityCommand {
 export interface EraseIdentityDeps {
   readonly repository: ErasureRepository;
   readonly eventBus: EventBus;
+  /**
+   * ADR-020 intake integration: when the erasure actually executed, the
+   * citizen's PENDING request (if any) is stamped EXECUTED. Optional so
+   * the pre-intake wiring keeps working; absence just leaves stamping off.
+   */
+  readonly requests?: ErasureRequestRepository;
 }
 
 export class EraseIdentityService {
@@ -45,6 +52,17 @@ export class EraseIdentityService {
     if (outcome.kind === 'NOT_FOUND') return outcome;
 
     const executed = outcome.kind === 'ERASED' || outcome.kind === 'ALREADY_ERASED';
+    if (executed && this.deps.requests) {
+      // Close the intake loop (ADR-020). The erasure itself is already done
+      // and audited; a fault stamping the request must not mask that, so
+      // this is best-effort — a missed stamp leaves a PENDING row a DPO
+      // will find already-erased and can decline with that ground.
+      try {
+        await this.deps.requests.markExecuted(command.applicantId, officer.subjectId);
+      } catch {
+        // Deliberately swallowed — see above.
+      }
+    }
     const event: AuditEvent = {
       ...newEnvelope(context),
       eventType: 'AUDIT_ENTRY',

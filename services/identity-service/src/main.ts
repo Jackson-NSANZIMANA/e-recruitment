@@ -21,11 +21,13 @@ import {
   createBiometricResultProjector,
   createEraseIdentityService,
   createApplicantAuthService,
+  createErasureRequestService,
 } from './index.js';
 import { loadApplicantPortalConfig, loadIdentityConfig } from './config.js';
 import { verifyIdentityRoute } from './adapters/http/verify-identity.controller.js';
 import { erasureRoute } from './adapters/http/erasure.controller.js';
 import { applicantAuthRoutes } from './adapters/http/applicant-auth.controller.js';
+import { erasureRequestRoutes } from './adapters/http/erasure-request.controller.js';
 import { LogSmsChannel } from './adapters/log-sms.channel.js';
 import { HttpApplicationsGateway } from './adapters/applications.http-gateway.js';
 import { startBiometricResultConsumer } from './adapters/events/biometric-result.consumer.js';
@@ -86,6 +88,8 @@ async function main(): Promise<void> {
       verifyIdentityRoute(service, verify),
       erasureRoute(createEraseIdentityService(config, bus), verify),
       ...applicantAuthRoutes(applicantAuth, applicationsGateway),
+      // ADR-020: citizen erasure-request intake + officer/DPO queue routes
+      ...erasureRequestRoutes(createErasureRequestService(config, bus), applicantAuth, verify),
     ],
     // Ready only when the database — the system-of-record — is reachable.
     readiness: async (): Promise<boolean> => {
