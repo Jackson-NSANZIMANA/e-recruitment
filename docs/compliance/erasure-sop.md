@@ -16,7 +16,19 @@ N° 058/2021, right to erasure.
   representative). Verify the requester's identity in person or via an
   approved channel **before** anything else — never execute erasure on an
   unverified request.
-- Record the request date. **[LEGAL: statutory response deadline — TBD]**
+- **Self-service intake (ADR-020, owner D10):** a citizen authenticated at
+  the portal (OTP session, ADR-018) may file the demand themselves —
+  `POST /v1/applicants/me/erasure-request`. The demand lands in the DPO
+  queue (`GET /v1/identities/erasure-requests`), timestamped and audited;
+  the portal session IS the identity verification for the *demand*. The
+  officer reviewing the queue proceeds from step 3 (the applicant UUID is
+  on the queue entry), and either executes or **declines with a recorded
+  ground** (`POST /v1/identities/erasure-requests/decline`) — the citizen
+  sees the decision and its ground in their portal view, and may re-file.
+- Walk-in demands continue below; both roads converge on the same
+  execution and the same gate.
+- Record the request date (self-service: recorded automatically).
+  **[LEGAL: statutory response deadline — TBD; surface it on the queue]**
 
 ### 2. Resolve the applicant record
 
@@ -40,7 +52,7 @@ officer is personally accountable; system tokens are rejected):
 |---|---|---|
 | `200 ERASED` | PII destroyed, sessions deleted, tombstone frozen | Confirm to the citizen in writing. **[LEGAL: notification template TBD]** |
 | `200 ALREADY_ERASED` | A prior request already erased this record | Confirm as above |
-| `409 REFUSED_ACTIVE_APPLICATION` (names agency + status) | The citizen has an application still in progress | Inform the citizen: erasure is available once the application concludes; they may withdraw it (withdrawal channel: **not yet built** — until it exists, the application must run to a terminal state) |
+| `409 REFUSED_ACTIVE_APPLICATION` (names agency + status) | The citizen has an application still in progress | Inform the citizen: erasure is available once the application concludes; they may **withdraw it themselves in the portal** (ADR-020 voluntary withdrawal) and then the gate opens |
 | `409 REFUSED_ACCEPT_LOCKED` (names agency) | The citizen is enlisted — retention obligation | Inform the citizen of the legal ground; escalate to the holding agency's DPO if contested |
 | `404 NOT_FOUND` | No record exists for that UUID | Confirm to the citizen that no data is held |
 

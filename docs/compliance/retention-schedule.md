@@ -31,6 +31,7 @@ Companion to ADR-015, ADR-019 and `dpia.md`.
 | Sessions (token, IP, UA) + OTP challenges | `applicant_sessions`, `applicant_otp_challenges` | **expiry/termination + 30 days (owner D7)** | Hard DELETE on erasure (built) + sweep purge (ADR-019) | **Built + proven (gate #33)** |
 | Applications + status history | ops schemas | **7 years (owner D7)** — public-recruitment record | None (engine-immutable); PII-free after subject's tombstone | Enforced; no destruction mechanism by design within USRP |
 | Audit log | `audit_log.audit_entries` | **10 years (owner D7)** | None (engine-immutable, PII-free) | Enforced; as above |
+| Erasure request records | `public_core.erasure_requests` (ADR-020) | **Align with audit log (10 years) — DRAFT, DPO to confirm** | None (PII-free: opaque UUIDs, status, ground; survives the erasure it asks for — it is the controller's evidence the demand was handled) | Built (rls/0017); period pending sign-off |
 | Physical test scores | ops schemas | Same as applications | Same | Enforced |
 | Uploaded documents | MinIO (no upload path exists yet) | **TBD — must be decided BEFORE the upload slice ships** | MUST be wired into erasure when built (ADR-015 follow-on #2) | Not built — blocking note |
 | Kafka event payloads | brokers | **≤ 30 days (owner D7)** | Broker retention config | Config not yet pinned in infra — flagged in ADR-019 |

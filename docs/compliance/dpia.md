@@ -47,7 +47,8 @@ and `audit_log` (opaque UUIDs, statuses, scores only).
 | 3 | PII disclosure at rest | pgcrypto encryption, single platform key from env | **Single key = single point; DEK upgrade mandated before backups (ADR-015)** |
 | 4 | Unlawful retention after purpose ends | Right-to-erasure endpoint + terminal-only gate (ADR-015); retention schedule (draft) | Retention sweep not yet automated (follow-on) |
 | 5 | Erasure that isn't real | Tombstone overwrite destroys the only ciphertext copy (no backups in this tier); rls/0014 freezes the tombstone irreversibly; proven live by gate #29 | WAL retention window; superuser trigger bypass |
-| 6 | Unaccountable erasure decisions | EVERY attempt audited (executed AND refused, with legal ground) into engine-immutable audit log | — |
+| 6 | Unaccountable erasure decisions | EVERY attempt audited (executed AND refused, with legal ground) into engine-immutable audit log; citizen demands land in a DPO intake queue (ADR-020, owner D10) — filing and declines audited with grounds; execution stays an officer act | — |
+| 6b | Irreversible destruction triggered by a hijacked citizen session | Owner D10: self-service erasure is REQUEST-intake, not execution — the OTP-strength session can demand, only an accountable officer can destroy | Officer judgment; DPO role not yet distinct from officer (ADR-020 follow-on) |
 | 7 | Tampering with processing history | REVOKE + unconditional RAISE triggers on audit/history tables (rls/0002/0007) | Superuser bypass |
 | 8 | G2G credential misuse | **Mocks only today. Real G2G BLOCKED on government authorization** — see prerequisites doc | n/a until authorized |
 | 9 | Officer over-collection | Officers see only their agency's rows (RLS EXISTS predicates); no PII decrypt grant to officer roles | — |
@@ -68,4 +69,5 @@ and `audit_log` (opaque UUIDs, statuses, scores only).
 3. Retention periods (see `retention-schedule.md` — all TBD).
 4. Whether this DPIA must be filed with the supervisory authority before
    production processing, and by whom.
-5. DPO appointment and the citizen-facing erasure request channel.
+5. DPO appointment. (The citizen-facing erasure request channel is now
+   BUILT — ADR-020 intake queue; the open question is who staffs it.)
