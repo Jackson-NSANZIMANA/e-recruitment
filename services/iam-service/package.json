@@ -20,7 +20,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/**/*.ts",
     "seed:dev": "tsx scripts/seed-dev-officers.ts",
-    "selfcheck": "tsx selfcheck/verify-iam-issuer-slice.ts"
+    "selfcheck": "tsx selfcheck/verify-iam-issuer-slice.ts",
+    "selfcheck:service-token": "tsx selfcheck/verify-service-token-slice.ts"
   },
   "dependencies": {
     "@usrp/shared-auth": "workspace:*",
