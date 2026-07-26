@@ -10,25 +10,31 @@ name: USRP Backend CI
 
 on:
   push:
-    branches: [main, develop]
+    # feat/** is where slices land first (D0 cadence) — gate them BEFORE main.
+    branches: [main, develop, 'feat/**']
   pull_request:
     branches: [main, develop]
 
+# A superseded push's run is dead weight — cancel it, keep the newest.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   NODE_VERSION: '24'
-  PNPM_VERSION: '9.15.0'
 
 jobs:
 
   typecheck:
     name: TypeScript Type Check
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # pnpm version comes from package.json "packageManager" (single source of
-      # truth) — passing `version:` too makes action-setup@v4 hard-fail.
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      # truth) — passing `version:` too makes action-setup hard-fail.
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'pnpm'
@@ -40,11 +46,14 @@ jobs:
   verify:
     name: Proofs (RLS isolation + service selfchecks)
     runs-on: ubuntu-latest
+    # Full stack + 33 live proofs; ClamAV's first-boot virus-DB download is
+    # the slowest single step on a cold runner.
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # pnpm version from package.json "packageManager" (see typecheck job).
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'pnpm'
@@ -91,11 +100,14 @@ jobs:
       - name: Dump infra logs on failure
         if: failure()
         run: |
+          echo '── containers ──';  docker ps -a || true
           echo '── kafka ──';       docker logs usrp-kafka --tail 100 || true
           echo '── kafka-init ──';  docker logs usrp-kafka-init --tail 50 || true
           echo '── postgres ──';    docker logs usrp-postgres --tail 50 || true
           echo '── nida-mock ──';   docker logs usrp-nida-mock --tail 30 || true
           echo '── nesa-mock ──';   docker logs usrp-nesa-mock --tail 30 || true
+          echo '── clamav ──';      docker logs usrp-clamav --tail 50 || true
+          echo '── minio ──';       docker logs usrp-minio --tail 30 || true
 
       - name: Tear down
         if: always()
@@ -106,10 +118,12 @@ jobs:
   security-scan:
     name: Security Scan
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+      # Pinned to a release — @master is an unpinned supply-chain dependency.
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: 'fs'
           scan-ref: '.'
