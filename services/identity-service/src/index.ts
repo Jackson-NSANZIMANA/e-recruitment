@@ -137,6 +137,15 @@ export type { OutboundSms, SmsChannel, SmsDeliveryOutcome } from './ports/sms-ch
 export { HttpApplicationsGateway } from './adapters/applications.http-gateway.js';
 export type { HttpApplicationsGatewayOptions } from './adapters/applications.http-gateway.js';
 export type { ApplicantApplication, ApplicationsGateway } from './ports/applications-gateway.js';
+export { RetentionSweepService } from './application/retention-sweep.service.js';
+export type {
+  RetentionPolicy,
+  RetentionSweepDeps,
+  SweepReport,
+  SweepResult,
+} from './application/retention-sweep.service.js';
+export { PgRetentionRepository } from './adapters/retention.pg-repository.js';
+export type { RetentionRepository } from './ports/retention-repository.js';
 export { VerifyIdentityService } from './application/verify-identity.service.js';
 export type {
   VerifyIdentityCommand,
@@ -166,6 +175,9 @@ export {
   OTP_TTL_SECONDS,
   OTP_MAX_ATTEMPTS,
   APPLICANT_SESSION_TTL_SECONDS,
+  RETENTION_NEVER_APPLIED_MONTHS,
+  RETENTION_NEGATIVE_TERMINAL_MONTHS,
+  RETENTION_PURGE_GRACE_DAYS,
 } from './config.js';
 export type { IdentityServiceConfig, ApplicantPortalConfig } from './config.js';
 export type { NidaGateway } from './ports/nida.gateway.js';

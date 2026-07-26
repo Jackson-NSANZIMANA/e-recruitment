@@ -46,6 +46,17 @@ export const OTP_MAX_ATTEMPTS = 5;
  * token, and the DB row makes revocation immediate anyway. */
 export const APPLICANT_SESSION_TTL_SECONDS = 30 * 60;
 
+// ── Retention policy (ADR-019, owner D7 2026-07-26) ────────────────
+// Owner-adopted operational values; the retention-schedule document stays
+// DRAFT pending agency/DPO sign-off. Changing a period is an owner act:
+// change it HERE and in docs/compliance/retention-schedule.md together.
+/** Identity PII of a citizen who never applied: tombstone after 12 months. */
+export const RETENTION_NEVER_APPLIED_MONTHS = 12;
+/** All applications negative-terminal: tombstone after 24 months (appeal window). */
+export const RETENTION_NEGATIVE_TERMINAL_MONTHS = 24;
+/** Dead sessions / OTP challenges: hard-delete after expiry + 30 days. */
+export const RETENTION_PURGE_GRACE_DAYS = 30;
+
 /**
  * The applicant portal's machine identity (ADR-016 client credentials) and
  * the sibling-service endpoints the me-routes call. Loaded ONLY by main.ts —

@@ -22,7 +22,10 @@
     "selfcheck": "tsx selfcheck/verify-slice.ts",
     "selfcheck:http": "tsx selfcheck/verify-http-slice.ts",
     "selfcheck:erasure": "tsx selfcheck/verify-erasure-slice.ts",
-    "selfcheck:applicant-auth": "tsx selfcheck/verify-applicant-auth-slice.ts"
+    "selfcheck:applicant-auth": "tsx selfcheck/verify-applicant-auth-slice.ts",
+    "selfcheck:retention": "tsx selfcheck/verify-retention-sweep-slice.ts",
+    "retention:report": "tsx scripts/retention-sweep.ts",
+    "retention:execute": "tsx scripts/retention-sweep.ts --execute"
   },
   "dependencies": {
     "@usrp/shared-auth": "workspace:*",
