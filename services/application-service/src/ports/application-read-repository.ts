@@ -45,6 +45,11 @@ export interface AmberQueueEntry {
   readonly queuedAt: string | null;
 }
 
+/** An applicant-facing summary row — the agency joins the non-PII summary. */
+export interface ApplicantApplicationSummary extends ApplicationSummary {
+  readonly agency: Agency;
+}
+
 export interface ApplicationReadRepository {
   /** List an agency's applications, executed under the officer's DB role. */
   listByAgency(input: ListByAgencyInput): Promise<readonly ApplicationSummary[]>;
@@ -54,4 +59,12 @@ export interface ApplicationReadRepository {
    * plus applications at ADJUDICATION_REVIEW. Officer DB role; non-PII.
    */
   listAmberQueue(input: ListByAgencyInput): Promise<readonly AmberQueueEntry[]>;
+  /**
+   * ALL of one applicant's applications across the three ops schemas, as
+   * usrp_system_service — the cross-agency self-service read behind the
+   * applicant portal's "my applications" (ADR-018). The caller has already
+   * authenticated the citizen and supplies THEIR OWN applicantId; nothing
+   * here is officer-scoped. Non-PII columns only.
+   */
+  listByApplicant(applicantId: string): Promise<readonly ApplicantApplicationSummary[]>;
 }

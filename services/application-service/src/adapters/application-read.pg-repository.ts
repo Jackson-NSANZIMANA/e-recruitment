@@ -17,8 +17,10 @@
 
 import { sql } from '@usrp/shared-database';
 import type { ApplicationCategory, ApplicationStatus } from '@usrp/shared-types';
+import { AGENCIES, type Agency } from '@usrp/shared-types';
 import type {
   AmberQueueEntry,
+  ApplicantApplicationSummary,
   ApplicationReadRepository,
   ApplicationSummary,
   ListByAgencyInput,
@@ -82,6 +84,30 @@ export class PgApplicationReadRepository implements ApplicationReadRepository {
       throw new ApplicationReadError('Could not list the review queue for the agency.', { cause: err });
     }
   }
+
+  async listByApplicant(applicantId: string): Promise<readonly ApplicantApplicationSummary[]> {
+    try {
+      return await sql.begin(async (tx) => {
+        // System role: the ONLY role that can see all three ops schemas —
+        // this is the citizen's own cross-agency view, not an officer's.
+        await tx`SET LOCAL ROLE ${sql('usrp_system_service')}`;
+        const all: ApplicantApplicationSummary[] = [];
+        for (const agency of AGENCIES) {
+          const schema = sql(schemaForAgency(agency));
+          const rows = await tx<ApplicationSummaryRow[]>`
+            SELECT id, processing_code, category, status, submitted_at
+            FROM ${schema}.applications
+            WHERE applicant_id = ${applicantId}
+            ORDER BY submitted_at DESC NULLS LAST
+          `;
+          all.push(...rows.map((row) => toApplicantSummary(row, agency)));
+        }
+        return all;
+      });
+    } catch (err) {
+      throw new ApplicationReadError('Could not list the applicant’s applications.', { cause: err });
+    }
+  }
 }
 
 /** The non-PII review-queue columns (document fields null for late holds). */
@@ -119,4 +145,8 @@ function toSummary(row: ApplicationSummaryRow): ApplicationSummary {
     status: row.status,
     submittedAt: row.submitted_at === null ? null : row.submitted_at.toISOString(),
   };
+}
+
+function toApplicantSummary(row: ApplicationSummaryRow, agency: Agency): ApplicantApplicationSummary {
+  return { ...toSummary(row), agency };
 }

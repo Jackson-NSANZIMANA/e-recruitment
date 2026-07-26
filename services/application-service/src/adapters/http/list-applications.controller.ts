@@ -18,10 +18,16 @@ import type {
   AmberQueueOutcome,
   ListApplicationsOutcome,
   ListApplicationsService,
+  ListByApplicantOutcome,
 } from '../../application/list-applications.service.js';
 
 export const LIST_APPLICATIONS_PATH = '/v1/applications';
 export const AMBER_QUEUE_PATH = '/v1/applications/amber-queue';
+export const BY_APPLICANT_PATH = '/v1/applications/by-applicant';
+
+// Same shape validation as the submit route — a malformed id must be a 400,
+// not a 5xx dressed up as a server fault at the uuid column.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Build the `GET /v1/applications` officer route bound to the use case. */
 export function listApplicationsRoute(
@@ -63,6 +69,41 @@ export function amberQueueRoute(service: ListApplicationsService, verify: AuthVe
       switch (outcome.kind) {
         case 'OK':
           return { status: 200, body: { agency: outcome.agency, queue: outcome.queue } };
+        case 'FORBIDDEN':
+          return { status: 403, body: { error: 'FORBIDDEN' } };
+        default:
+          return assertNever(outcome);
+      }
+    }),
+  };
+}
+
+/**
+ * Build the `GET /v1/applications/by-applicant?applicantId=…` route — the
+ * cross-agency self-service read behind the applicant portal (ADR-018). It
+ * requires a SYSTEM token: the caller is the portal backend
+ * (identity-service), which has already authenticated the citizen's session
+ * and asks on their behalf. An officer token is refused (403) — the citizen
+ * door must never widen an officer's agency-scoped view.
+ */
+export function byApplicantRoute(service: ListApplicationsService, verify: AuthVerifier): Route {
+  return {
+    method: 'GET',
+    path: BY_APPLICANT_PATH,
+    handler: withAuth(verify, { kind: 'system' }, async (ctx, principal): Promise<HttpResult> => {
+      const applicantId = ctx.query.get('applicantId')?.trim() ?? '';
+      if (!UUID_RE.test(applicantId)) {
+        throw new HttpError(400, 'INVALID_APPLICANT_ID', 'Query "applicantId" must be a UUID.');
+      }
+      let outcome: ListByApplicantOutcome;
+      try {
+        outcome = await service.listByApplicant({ actor: principal, applicantId });
+      } catch (err) {
+        throw mapDomainError(err);
+      }
+      switch (outcome.kind) {
+        case 'OK':
+          return { status: 200, body: { applications: outcome.applications } };
         case 'FORBIDDEN':
           return { status: 403, body: { error: 'FORBIDDEN' } };
         default:

@@ -13,6 +13,7 @@ import type { Agency } from '@usrp/shared-types';
 import { dbRoleForPrincipal, type Principal } from '@usrp/shared-auth';
 import type {
   AmberQueueEntry,
+  ApplicantApplicationSummary,
   ApplicationReadRepository,
   ApplicationSummary,
 } from '../ports/application-read-repository.js';
@@ -29,6 +30,15 @@ export type ListApplicationsOutcome =
 
 export type AmberQueueOutcome =
   | { readonly kind: 'OK'; readonly agency: Agency; readonly queue: readonly AmberQueueEntry[] }
+  | { readonly kind: 'FORBIDDEN' };
+
+export interface ListByApplicantCommand {
+  readonly actor: Principal;
+  readonly applicantId: string;
+}
+
+export type ListByApplicantOutcome =
+  | { readonly kind: 'OK'; readonly applications: readonly ApplicantApplicationSummary[] }
   | { readonly kind: 'FORBIDDEN' };
 
 export interface ListApplicationsDeps {
@@ -56,6 +66,21 @@ export class ListApplicationsService {
       limit: this.#maxResults,
     });
     return { kind: 'OK', agency: actor.agency, applications };
+  }
+
+  /**
+   * ALL of one applicant's applications, cross-agency (ADR-018). The caller
+   * is a SYSTEM principal — the applicant portal's backend, which has already
+   * authenticated the citizen session and asks on their behalf. Officers use
+   * the agency-scoped list above; they are refused here (an officer must not
+   * gain a cross-agency view through the citizen door).
+   */
+  async listByApplicant(command: ListByApplicantCommand): Promise<ListByApplicantOutcome> {
+    if (command.actor.kind !== 'system') {
+      return { kind: 'FORBIDDEN' };
+    }
+    const applications = await this.#reader.listByApplicant(command.applicantId);
+    return { kind: 'OK', applications };
   }
 
   /** The officer's agency review queue (amber + adjudication holds, ADR-011). */

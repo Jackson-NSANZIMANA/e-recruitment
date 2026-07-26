@@ -106,8 +106,10 @@ export {
 export {
   LIST_APPLICATIONS_PATH,
   AMBER_QUEUE_PATH,
+  BY_APPLICANT_PATH,
   listApplicationsRoute,
   amberQueueRoute,
+  byApplicantRoute,
 } from './adapters/http/list-applications.controller.js';
 export {
   MEDICAL_REVIEW_PATH,
@@ -233,6 +235,7 @@ export { PgApplicationReadRepository } from './adapters/application-read.pg-repo
 export type {
   ApplicationReadRepository,
   ApplicationSummary,
+  ApplicantApplicationSummary,
   AmberQueueEntry,
   ListByAgencyInput,
 } from './ports/application-read-repository.js';

@@ -26,7 +26,7 @@ import { startHttpServer } from '@usrp/shared-http';
 import { createApplicationService } from './index.js';
 import { loadApplicationConfig } from './config.js';
 import { submitApplicationRoute } from './adapters/http/submit-application.controller.js';
-import { amberQueueRoute, listApplicationsRoute } from './adapters/http/list-applications.controller.js';
+import { amberQueueRoute, byApplicantRoute, listApplicationsRoute } from './adapters/http/list-applications.controller.js';
 import { officerTransitionRoutes } from './adapters/http/officer-transitions.controller.js';
 import { walkInRoutes } from './adapters/http/walk-in.controller.js';
 import { startVettingResultConsumer } from './adapters/events/vetting-result.consumer.js';
@@ -90,6 +90,7 @@ async function main(): Promise<void> {
       submitApplicationRoute(service.submit, verify), // system-token required
       listApplicationsRoute(service.list, verify), // officer-token required
       amberQueueRoute(service.list, verify), // officer review queue (ADR-011)
+      byApplicantRoute(service.list, verify), // system-token: applicant portal's cross-agency self read (ADR-018)
       // officer-token writes: medical-review / final-decision / accept / adjudicate
       ...officerTransitionRoutes(service.officerTransitions, verify),
       // officer-token writes: exam-day walk-in register + on-site vet (RDF, ADR-012)
