@@ -25,6 +25,8 @@ import { ProjectPhysicalTestCompleteService } from './application/project-physic
 import { ProjectForensicsResultService } from './application/project-forensics-result.service.js';
 import { ProjectApplicationAcceptedService } from './application/project-application-accepted.service.js';
 import { PgWithdrawalRepository } from './adapters/withdrawal.pg-repository.js';
+import { SelfWithdrawalService } from './application/self-withdrawal.service.js';
+import { PgSelfWithdrawalRepository } from './adapters/self-withdrawal.pg-repository.js';
 import type { ApplicationServiceConfig } from './config.js';
 
 /** The application aggregate's adapters over one repository. */
@@ -49,6 +51,8 @@ export interface ApplicationService {
   readonly forensicsProjector: ProjectForensicsResultService;
   /** Event projector — AUTO-WITHDRAW the accepted citizen's other in-flight applications (ADR-017). */
   readonly withdrawalProjector: ProjectApplicationAcceptedService;
+  /** HTTP system-token write — the citizen's OWN voluntary withdrawal (ADR-020). */
+  readonly selfWithdrawal: SelfWithdrawalService;
 }
 
 /**
@@ -93,6 +97,10 @@ export function createApplicationService(
     forensicsProjector: new ProjectForensicsResultService({ repository, eventBus }),
     withdrawalProjector: new ProjectApplicationAcceptedService({
       repository: new PgWithdrawalRepository(),
+      eventBus,
+    }),
+    selfWithdrawal: new SelfWithdrawalService({
+      repository: new PgSelfWithdrawalRepository(),
       eventBus,
     }),
   };
@@ -225,6 +233,22 @@ export type {
   WithdrawnApplication,
   WithdrawSiblingsInput,
 } from './ports/withdrawal-repository.js';
+export {
+  WITHDRAW_OWN_PATH,
+  withdrawOwnRoute,
+} from './adapters/http/self-withdrawal.controller.js';
+export { SelfWithdrawalService } from './application/self-withdrawal.service.js';
+export type {
+  WithdrawOwnCommand,
+  SelfWithdrawalOutcome,
+  SelfWithdrawalDeps,
+} from './application/self-withdrawal.service.js';
+export { PgSelfWithdrawalRepository } from './adapters/self-withdrawal.pg-repository.js';
+export type {
+  SelfWithdrawalRepository,
+  WithdrawOwnInput,
+  WithdrawOwnOutcome,
+} from './ports/self-withdrawal-repository.js';
 export { deriveApplicationStatus } from './domain/lifecycle.js';
 export type { VettingEvidence } from './domain/lifecycle.js';
 export { AGENCY_TARGET, schemaForAgency } from './domain/agency-schema.js';
