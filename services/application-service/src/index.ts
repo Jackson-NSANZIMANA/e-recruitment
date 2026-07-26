@@ -23,6 +23,8 @@ import { ProjectSlotAssignmentService } from './application/project-slot-assignm
 import { ProjectNotificationDeliveryService } from './application/project-notification-delivery.service.js';
 import { ProjectPhysicalTestCompleteService } from './application/project-physical-test-complete.service.js';
 import { ProjectForensicsResultService } from './application/project-forensics-result.service.js';
+import { ProjectApplicationAcceptedService } from './application/project-application-accepted.service.js';
+import { PgWithdrawalRepository } from './adapters/withdrawal.pg-repository.js';
 import type { ApplicationServiceConfig } from './config.js';
 
 /** The application aggregate's adapters over one repository. */
@@ -45,6 +47,8 @@ export interface ApplicationService {
   readonly physicalTestProjector: ProjectPhysicalTestCompleteService;
   /** Event projector — ROUTE a document forensics lane (AMBER hold / RED reject-or-adjudicate). */
   readonly forensicsProjector: ProjectForensicsResultService;
+  /** Event projector — AUTO-WITHDRAW the accepted citizen's other in-flight applications (ADR-017). */
+  readonly withdrawalProjector: ProjectApplicationAcceptedService;
 }
 
 /**
@@ -87,6 +91,10 @@ export function createApplicationService(
     notificationProjector: new ProjectNotificationDeliveryService({ repository, eventBus }),
     physicalTestProjector: new ProjectPhysicalTestCompleteService({ repository, eventBus }),
     forensicsProjector: new ProjectForensicsResultService({ repository, eventBus }),
+    withdrawalProjector: new ProjectApplicationAcceptedService({
+      repository: new PgWithdrawalRepository(),
+      eventBus,
+    }),
   };
 }
 
@@ -136,6 +144,7 @@ export { PgOfficerTransitionRepository } from './adapters/officer-transition.pg-
 export type {
   OfficerTransitionRepository,
   OfficerTransitionOutcome,
+  AcceptOutcome,
   AdjudicateOutcome,
   OfficerActor,
   MedicalReviewInput,
@@ -199,6 +208,21 @@ export type {
   ProjectSlotAssignmentCommand,
   ProjectSlotAssignmentDeps,
 } from './application/project-slot-assignment.service.js';
+export { ProjectApplicationAcceptedService } from './application/project-application-accepted.service.js';
+export type {
+  ProjectApplicationAcceptedCommand,
+  ProjectApplicationAcceptedDeps,
+} from './application/project-application-accepted.service.js';
+export {
+  APPLICATION_WITHDRAWAL_PROJECTION_GROUP,
+  startApplicationAcceptedConsumer,
+} from './adapters/events/application-accepted.consumer.js';
+export { PgWithdrawalRepository } from './adapters/withdrawal.pg-repository.js';
+export type {
+  WithdrawalRepository,
+  WithdrawnApplication,
+  WithdrawSiblingsInput,
+} from './ports/withdrawal-repository.js';
 export { deriveApplicationStatus } from './domain/lifecycle.js';
 export type { VettingEvidence } from './domain/lifecycle.js';
 export { AGENCY_TARGET, schemaForAgency } from './domain/agency-schema.js';
