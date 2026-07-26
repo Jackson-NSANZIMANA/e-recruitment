@@ -114,10 +114,15 @@ apply_sql "${RLS_DIR}/0013_cross_agency_accept_lock.sql" "rls/0013 (cross-agency
 #     applicant_sessions (session rows are personal data erasure must clear).
 apply_sql "${RLS_DIR}/0014_erasure_freeze.sql" "rls/0014 (erasure freeze)"
 
-printf '\n'
-ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze in place"
+# 16. Service account store (ADR-016): client-credentials store for machine
+#     callers — iam-service verifies { clientId, clientSecret } against it
+#     and mints short-lived kind:'system' tokens. iam-only grants, FORCE RLS.
+apply_sql "${RLS_DIR}/0015_service_accounts.sql" "rls/0015 (service accounts)"
 
-# 16. Dev officer accounts (one per agency). A CONVENIENCE seed so the officer
+printf '\n'
+ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts in place"
+
+# 17. Dev officer accounts (one per agency). A CONVENIENCE seed so the officer
 #     console / manual login smoke tests have real credentials to drive —
 #     dev-only, idempotent. Best-effort: it needs the workspace built (tsx
 #     resolves @usrp/* runtime dist), so a failure here NEVER blocks the
