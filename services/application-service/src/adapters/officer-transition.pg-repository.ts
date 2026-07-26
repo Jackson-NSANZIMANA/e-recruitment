@@ -35,6 +35,7 @@ import type {
 } from '@usrp/shared-types';
 import type {
   AcceptInput,
+  AcceptOutcome,
   AdjudicateInput,
   AdjudicateOutcome,
   FinalDecisionInput,
@@ -179,22 +180,30 @@ export class PgOfficerTransitionRepository implements OfficerTransitionRepositor
     }
   }
 
-  async accept(input: AcceptInput): Promise<OfficerTransitionOutcome> {
+  async accept(input: AcceptInput): Promise<AcceptOutcome> {
     const { actor, applicationId } = input;
     const requiredFrom: ApplicationStatus = 'FINAL_SHORTLIST';
     const target: ApplicationStatus = 'ACCEPTED';
     const schema = sql(schemaForAgency(actor.agency));
     try {
-      return await sql.begin(async (tx) => {
+      return await sql.begin(async (tx): Promise<AcceptOutcome> => {
         await tx`SET LOCAL ROLE ${sql(actor.dbRole)}`;
 
-        const rows = await tx<{ status: ApplicationStatus; applicant_id: string }[]>`
-          SELECT status, applicant_id FROM ${schema}.applications
+        const rows = await tx<
+          {
+            status: ApplicationStatus;
+            applicant_id: string;
+            campaign_id: string;
+            category: ApplicationCategory;
+          }[]
+        >`
+          SELECT status, applicant_id, campaign_id, category FROM ${schema}.applications
           WHERE id = ${applicationId} FOR UPDATE
         `;
         const current = rows[0];
         const outcome = decide(current?.status, requiredFrom, target);
-        if (outcome.kind !== 'APPLIED' || current === undefined) return outcome;
+        if (outcome.kind !== 'APPLIED') return outcome;
+        if (current === undefined) return { kind: 'NOT_FOUND' }; // unreachable: decide() maps a missing row to NOT_FOUND
 
         // ── Cross-agency accept-lock (ADR-014) ──────────────────────
         // ONE citizen, ONE acceptance, platform-wide. The shared identity
@@ -249,7 +258,14 @@ export class PgOfficerTransitionRepository implements OfficerTransitionRepositor
           )
         `;
 
-        return outcome;
+        // The identifiers APPLICATION_ACCEPTED needs (ADR-017) — read under
+        // the same FOR UPDATE, so they describe exactly the accepted row.
+        return {
+          ...outcome,
+          applicantId: current.applicant_id,
+          campaignId: current.campaign_id,
+          category: current.category,
+        };
       });
     } catch (cause) {
       throw wrap(cause, 'Failed to apply acceptance');

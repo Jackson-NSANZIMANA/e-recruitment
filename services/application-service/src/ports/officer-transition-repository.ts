@@ -112,6 +112,26 @@ export type OfficerTransitionOutcome =
   | { readonly kind: 'CROSS_AGENCY_LOCKED'; readonly lockedByAgency: Agency };
 
 /**
+ * Outcome of an officer acceptance. Same shape as the generic transition, but
+ * APPLIED additionally carries the row-read identifiers the use case needs to
+ * publish APPLICATION_ACCEPTED (ADR-017's auto-withdrawal trigger) — mirroring
+ * how AdjudicateOutcome feeds application.cleared.
+ */
+export type AcceptOutcome =
+  | {
+      readonly kind: 'APPLIED';
+      readonly fromStatus: ApplicationStatus;
+      readonly toStatus: ApplicationStatus;
+      readonly applicantId: string;
+      readonly campaignId: string;
+      readonly category: ApplicationCategory;
+    }
+  | { readonly kind: 'NO_CHANGE'; readonly currentStatus: ApplicationStatus }
+  | { readonly kind: 'NOT_APPLICABLE'; readonly currentStatus: ApplicationStatus }
+  | { readonly kind: 'NOT_FOUND' }
+  | { readonly kind: 'CROSS_AGENCY_LOCKED'; readonly lockedByAgency: Agency };
+
+/**
  * Outcome of an officer adjudication (ADR-011). Extends the transition shape:
  * a CLEAR that re-derives to DOCUMENT_REVIEW_GREEN must let the use case emit
  * application.cleared (the slot lane's trigger), so APPLIED carries the
@@ -135,7 +155,7 @@ export type AdjudicateOutcome =
 export interface OfficerTransitionRepository {
   medicalReview(input: MedicalReviewInput): Promise<OfficerTransitionOutcome>;
   finalDecision(input: FinalDecisionInput): Promise<OfficerTransitionOutcome>;
-  accept(input: AcceptInput): Promise<OfficerTransitionOutcome>;
+  accept(input: AcceptInput): Promise<AcceptOutcome>;
   /**
    * Adjudicate an application held at DOCUMENT_REVIEW_AMBER (routine document
    * review) or ADJUDICATION_REVIEW (late-disqualification hold), as the

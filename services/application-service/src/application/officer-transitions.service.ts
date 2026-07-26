@@ -20,6 +20,7 @@
 import { newEnvelope, type EventBus, type EventContext } from '@usrp/shared-events';
 import type {
   Agency,
+  ApplicationAcceptedEvent,
   ApplicationEligibilityClearedEvent,
   AuditEvent,
 } from '@usrp/shared-types';
@@ -188,6 +189,23 @@ export class OfficerTransitionsService {
     const actor = toActor(command.actor, command.context);
     const outcome = await this.#repository.accept({ actor, applicationId: command.applicationId });
     await this.#audit(outcome, command.actor, command.context, command.applicationId, 'ACCEPT', {});
+
+    // The enlistment signal (ADR-017): a genuine acceptance announces itself
+    // so the auto-withdrawal projector can retire the applicant's other
+    // in-flight applications. Emitted ONLY on APPLIED — a refused, idempotent,
+    // or cross-agency-locked accept moves nothing and announces nothing.
+    if (outcome.kind === 'APPLIED') {
+      const accepted: ApplicationAcceptedEvent = {
+        ...newEnvelope(command.context),
+        eventType: 'APPLICATION_ACCEPTED',
+        applicationId: command.applicationId,
+        applicantId: outcome.applicantId,
+        agency: command.actor.agency,
+        campaignId: outcome.campaignId,
+        category: outcome.category,
+      };
+      await this.#eventBus.publish(accepted);
+    }
     return outcome;
   }
 
