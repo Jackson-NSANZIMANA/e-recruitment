@@ -119,10 +119,15 @@ apply_sql "${RLS_DIR}/0014_erasure_freeze.sql" "rls/0014 (erasure freeze)"
 #     and mints short-lived kind:'system' tokens. iam-only grants, FORCE RLS.
 apply_sql "${RLS_DIR}/0015_service_accounts.sql" "rls/0015 (service accounts)"
 
-printf '\n'
-ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts in place"
+# 17. Applicant auth store (ADR-018): OTP challenge table (scrypt digests of
+#     short-lived 6-digit codes; no raw phone anywhere) + INSERT/UPDATE on
+#     applicant_sessions so identity-service can issue/touch citizen sessions.
+apply_sql "${RLS_DIR}/0016_applicant_auth.sql" "rls/0016 (applicant auth)"
 
-# 17. Dev officer accounts (one per agency). A CONVENIENCE seed so the officer
+printf '\n'
+ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts + applicant auth in place"
+
+# 18. Dev officer accounts (one per agency). A CONVENIENCE seed so the officer
 #     console / manual login smoke tests have real credentials to drive —
 #     dev-only, idempotent. Best-effort: it needs the workspace built (tsx
 #     resolves @usrp/* runtime dist), so a failure here NEVER blocks the
