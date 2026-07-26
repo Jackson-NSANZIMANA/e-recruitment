@@ -32,3 +32,15 @@ export class IdentityPersistenceError extends Error {
     this.name = 'IdentityPersistenceError';
   }
 }
+
+/**
+ * A sibling USRP service (iam-service token mint, application-service read)
+ * was unreachable or answered outside its contract. Infrastructure fault —
+ * the edge maps it to 502. Never carries credentials or tokens.
+ */
+export class UpstreamUnavailableError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = 'UpstreamUnavailableError';
+  }
+}

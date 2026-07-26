@@ -137,8 +137,12 @@ export class PgErasureRepository implements ErasureRepository {
           throw new IdentityPersistenceError('Erasure UPDATE affected no row');
         }
 
-        // 4. Session rows are personal data — hard-delete them.
+        // 4. Session rows are personal data — hard-delete them. OTP
+        //    challenges (ADR-018) go with them: only scrypt digests of dead
+        //    5-minute codes, but they FK the identity and serve no purpose
+        //    after erasure.
         await tx`DELETE FROM public_core.applicant_sessions WHERE applicant_id = ${applicantId}`;
+        await tx`DELETE FROM public_core.applicant_otp_challenges WHERE applicant_id = ${applicantId}`;
 
         return { kind: 'ERASED' };
       });

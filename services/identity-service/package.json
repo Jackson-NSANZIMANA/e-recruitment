@@ -21,7 +21,8 @@
     "lint": "eslint src/**/*.ts",
     "selfcheck": "tsx selfcheck/verify-slice.ts",
     "selfcheck:http": "tsx selfcheck/verify-http-slice.ts",
-    "selfcheck:erasure": "tsx selfcheck/verify-erasure-slice.ts"
+    "selfcheck:erasure": "tsx selfcheck/verify-erasure-slice.ts",
+    "selfcheck:applicant-auth": "tsx selfcheck/verify-applicant-auth-slice.ts"
   },
   "dependencies": {
     "@usrp/shared-auth": "workspace:*",
@@ -34,6 +35,8 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@usrp/application-service": "workspace:*",
+    "@usrp/iam-service": "workspace:*",
     "postgres": "^3.4.5",
     "tsx": "^4.21.0",
     "typescript": "^5.8.3"

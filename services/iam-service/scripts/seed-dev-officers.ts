@@ -24,12 +24,20 @@ const DEV_PASSWORD = 'DevOfficer#2026';
 /** The dev client secret for the seeded service account. DEV ONLY. */
 const DEV_CLIENT_SECRET = 'DevService#2026';
 
-/** One generic machine client for the tier1 pipeline (ADR-016). */
-const DEV_SERVICE_CLIENT = {
-  serviceId: '44444444-4444-4444-8444-444444444444', // fixed UUID → stable across runs
-  clientId: 'dev.pipeline',
-  description: 'Dev tier1 pipeline client (seed-dev-officers)',
-} as const;
+/** Machine clients (ADR-016): the tier1 pipeline + the applicant portal
+ * backend (identity-service's me-routes, ADR-018). Fixed UUIDs → stable. */
+const DEV_SERVICE_CLIENTS = [
+  {
+    serviceId: '44444444-4444-4444-8444-444444444444',
+    clientId: 'dev.pipeline',
+    description: 'Dev tier1 pipeline client (seed-dev-officers)',
+  },
+  {
+    serviceId: '55555555-5555-4555-8555-555555555555',
+    clientId: 'dev.identity-portal',
+    description: 'Dev applicant-portal backend client (identity-service, ADR-018)',
+  },
+] as const;
 
 interface DevOfficer {
   readonly officerId: string; // fixed UUID → stable across runs
@@ -71,25 +79,26 @@ async function main(): Promise<void> {
       }),
     );
   }
-  // The dev service client (same idempotent shape as the officers).
-  const serviceCredential = hashPassword(DEV_CLIENT_SECRET);
-  const clientInserted = await sql.begin(async (tx) => {
-    await tx`SET LOCAL ROLE ${sql('usrp_iam_service')}`;
-    const rows = await tx<{ service_id: string }[]>`
-      INSERT INTO public_core.service_accounts (service_id, client_id, credential, description)
-      VALUES (${DEV_SERVICE_CLIENT.serviceId}, ${DEV_SERVICE_CLIENT.clientId},
-              ${serviceCredential}, ${DEV_SERVICE_CLIENT.description})
-      ON CONFLICT (client_id) DO NOTHING
-      RETURNING service_id
-    `;
-    return rows.length > 0;
-  });
-  console.log(
-    JSON.stringify({
-      msg: clientInserted ? 'service_client_seeded' : 'service_client_exists',
-      clientId: DEV_SERVICE_CLIENT.clientId,
-    }),
-  );
+  // The dev service clients (same idempotent shape as the officers).
+  for (const client of DEV_SERVICE_CLIENTS) {
+    const serviceCredential = hashPassword(DEV_CLIENT_SECRET);
+    const clientInserted = await sql.begin(async (tx) => {
+      await tx`SET LOCAL ROLE ${sql('usrp_iam_service')}`;
+      const rows = await tx<{ service_id: string }[]>`
+        INSERT INTO public_core.service_accounts (service_id, client_id, credential, description)
+        VALUES (${client.serviceId}, ${client.clientId}, ${serviceCredential}, ${client.description})
+        ON CONFLICT (client_id) DO NOTHING
+        RETURNING service_id
+      `;
+      return rows.length > 0;
+    });
+    console.log(
+      JSON.stringify({
+        msg: clientInserted ? 'service_client_seeded' : 'service_client_exists',
+        clientId: client.clientId,
+      }),
+    );
+  }
 
   console.log(
     JSON.stringify({ msg: 'seed_complete', inserted: seeded, total: DEV_OFFICERS.length, devPassword: DEV_PASSWORD }),

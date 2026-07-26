@@ -35,6 +35,47 @@ export interface IdentityServiceConfig {
   readonly auth: AuthVerifyConfig;
 }
 
+// ── Applicant auth policy (ADR-018) ────────────────────────────────
+/** OTP lifetime: 5 minutes — long enough for an SMS round trip, short
+ * enough that an intercepted code is nearly worthless. */
+export const OTP_TTL_SECONDS = 5 * 60;
+/** Failed guesses before a challenge locks (a fresh request is the reset). */
+export const OTP_MAX_ATTEMPTS = 5;
+/** Applicant session lifetime: 30 minutes sliding — citizens check status
+ * briefly; a shorter window than the officer hour bounds a stolen opaque
+ * token, and the DB row makes revocation immediate anyway. */
+export const APPLICANT_SESSION_TTL_SECONDS = 30 * 60;
+
+/**
+ * The applicant portal's machine identity (ADR-016 client credentials) and
+ * the sibling-service endpoints the me-routes call. Loaded ONLY by main.ts —
+ * proofs inject gateways directly, so the core never demands these vars.
+ */
+export interface ApplicantPortalConfig {
+  readonly iamBaseUrl: string;
+  readonly applicationBaseUrl: string;
+  readonly clientId: string;
+  readonly clientSecret: string;
+}
+
+export function loadApplicantPortalConfig(source: EnvSource = process.env): ApplicantPortalConfig {
+  const env = loadEnv(
+    {
+      IAM_BASE_URL: url({ protocols: ['http', 'https'] }),
+      APPLICATION_SERVICE_BASE_URL: url({ protocols: ['http', 'https'] }),
+      IDENTITY_CLIENT_ID: string({ minLength: 1 }),
+      IDENTITY_CLIENT_SECRET: string({ minLength: 8, secret: true }),
+    },
+    source,
+  );
+  return {
+    iamBaseUrl: env.IAM_BASE_URL,
+    applicationBaseUrl: env.APPLICATION_SERVICE_BASE_URL,
+    clientId: env.IDENTITY_CLIENT_ID,
+    clientSecret: env.IDENTITY_CLIENT_SECRET,
+  };
+}
+
 /** Load just the NIDA endpoint config (base URL, HMAC secret, timeout). */
 export function loadNidaConfig(source: EnvSource = process.env): G2GEndpointConfig {
   const env = loadEnv(
