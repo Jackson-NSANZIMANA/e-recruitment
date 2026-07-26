@@ -16,6 +16,11 @@
 //     (UNFIT / final REJECT → REJECTED), 401 unauthenticated, 403 system token.
 //   • every genuine transition emits exactly one AUDIT_ENTRY (performedBy =
 //     officer subjectId); no-ops emit nothing; responses carry no PII.
+//   • accept stamps the platform-wide accept-lock on the citizen's shared
+//     identity row (ADR-014, as the officer's own DB role); a sibling agency's
+//     accept of the same citizen → 409 CROSS_AGENCY_LOCKED naming the holder,
+//     nothing written, no audit — and raced concurrent accepts serialize on
+//     the identity row so exactly ONE agency wins.
 //
 //   Run (repo root), with the live Tier-1 stack up + DB bootstrapped:
 //   DATABASE_URL='postgresql://usrp_app:app_pw@localhost:5432/usrp_db' \
@@ -55,8 +60,20 @@ const admin = postgres(ADMIN_URL, { onnotice: () => {} });
 // Deterministic fixtures. Officer subjects are UUIDs — they land in the
 // medical_reviewed_by_id / final_decision_by_id UUID columns (aligns with the
 // future token issuer, which will mint officer ids as UUIDs).
+// Applicant A travels the RDF lanes AND holds the accept-lock scenario; the
+// certificate-mode lanes (RNP/RCS) get their OWN citizens — under ADR-014 one
+// citizen can only ever be accepted once platform-wide, so each lane that ends
+// in ACCEPTED needs a distinct identity. Applicant D exists only for the
+// concurrent-accept race.
 const APPLICANT_ID = '4d000000-0000-4000-8000-000000000001';
+const APPLICANT_B = '4d000000-0000-4000-8000-000000000002'; // RNP cert lane
+const APPLICANT_C = '4d000000-0000-4000-8000-000000000003'; // RCS cert lanes
+const APPLICANT_D = '4d000000-0000-4000-8000-000000000004'; // accept race
+const ALL_APPLICANTS = [APPLICANT_ID, APPLICANT_B, APPLICANT_C, APPLICANT_D];
 const NID_HASH = '4d4d4d4d'.repeat(8); // 64 hex
+const NID_HASH_B = '4e4e4e4e'.repeat(8);
+const NID_HASH_C = '4f4f4f4f'.repeat(8);
+const NID_HASH_D = '5a5a5a5a'.repeat(8);
 const RDF_CAMPAIGN = '4d000000-0000-4000-8000-0000000000c1';
 const RNP_CAMPAIGN = '4d000000-0000-4000-8000-0000000000c2';
 const RCS_CAMPAIGN = '4d000000-0000-4000-8000-0000000000c3';
@@ -65,7 +82,9 @@ const RNP_OFFICER_ID = '4d000000-0000-4000-8000-00000000ff02';
 const RCS_OFFICER_ID = '4d000000-0000-4000-8000-00000000ff03';
 
 // One RDF app per scenario, plus RNP/RCS apps for the cross-agency probe and
-// the CERTIFICATE-mode lanes (ADR-013).
+// the CERTIFICATE-mode lanes (ADR-013). Lock-slice apps (ADR-014): a second
+// RNP application for the already-accepted applicant A, and a matched pair
+// for applicant D raced from two agencies at once.
 const APP_HAPPY = '4d000000-0000-4000-8000-00000000a001'; // full path → ACCEPTED
 const APP_UNFIT = '4d000000-0000-4000-8000-00000000a002'; // UNFIT → REJECTED
 const APP_FINAL = '4d000000-0000-4000-8000-00000000a003'; // seeded at MEDICAL_REVIEW; final REJECT
@@ -73,6 +92,9 @@ const APP_HOLD = '4d000000-0000-4000-8000-00000000a004'; // accept out of order 
 const RNP_APP = '4d000000-0000-4000-8000-00000000b001'; // cross-agency probe, then cert lane → ACCEPTED
 const RCS_APP = '4d000000-0000-4000-8000-00000000b002'; // cert lane → ACCEPTED
 const RCS_APP_REJ = '4d000000-0000-4000-8000-00000000b003'; // CERT_REJECTED → REJECTED
+const RNP_LOCK_APP = '4d000000-0000-4000-8000-00000000d001'; // applicant A in RNP → 409 locked
+const RACE_RNP_APP = '4d000000-0000-4000-8000-00000000d002'; // applicant D, raced
+const RACE_RCS_APP = '4d000000-0000-4000-8000-00000000d003'; // applicant D, raced
 
 let failures = 0;
 function check(label: string, condition: boolean, detail = ''): void {
@@ -108,22 +130,33 @@ async function cleanup(): Promise<void> {
     for (const schema of ['rdf_ops', 'rnp_ops', 'rcs_ops'] as const) {
       await tx`
         DELETE FROM ${tx(schema)}.application_status_history
-        WHERE application_id IN (SELECT id FROM ${tx(schema)}.applications WHERE applicant_id = ${APPLICANT_ID})`;
-      await tx`DELETE FROM ${tx(schema)}.applications WHERE applicant_id = ${APPLICANT_ID}`;
+        WHERE application_id IN (SELECT id FROM ${tx(schema)}.applications WHERE applicant_id IN ${tx(ALL_APPLICANTS)})`;
+      await tx`DELETE FROM ${tx(schema)}.applications WHERE applicant_id IN ${tx(ALL_APPLICANTS)}`;
     }
     await tx`DELETE FROM public_core.recruitment_campaigns WHERE id IN ${tx([RDF_CAMPAIGN, RNP_CAMPAIGN, RCS_CAMPAIGN])}`;
-    await tx`DELETE FROM public_core.applicant_identities WHERE id = ${APPLICANT_ID}`;
+    // Deleting the identity rows also clears any accept-lock stamped this run.
+    await tx`DELETE FROM public_core.applicant_identities WHERE id IN ${tx(ALL_APPLICANTS)}`;
   });
 }
 
 async function seed(): Promise<void> {
-  await admin`
-    INSERT INTO public_core.applicant_identities
-      (id, national_id_hash, encrypted_full_name, encrypted_date_of_birth,
-       encrypted_home_district, encrypted_home_province, gender,
-       registration_channel, identity_status)
-    VALUES (${APPLICANT_ID}, ${NID_HASH}, 'x', 'x', 'x', 'x', 'MALE', 'WEB',
-            'VERIFIED'::public_core.identity_verification_status)`;
+  // Four citizens (ADR-014: one acceptance per citizen platform-wide, so every
+  // lane that ends in ACCEPTED needs its own identity row).
+  const identities: ReadonlyArray<[string, string]> = [
+    [APPLICANT_ID, NID_HASH],
+    [APPLICANT_B, NID_HASH_B],
+    [APPLICANT_C, NID_HASH_C],
+    [APPLICANT_D, NID_HASH_D],
+  ];
+  for (const [id, hash] of identities) {
+    await admin`
+      INSERT INTO public_core.applicant_identities
+        (id, national_id_hash, encrypted_full_name, encrypted_date_of_birth,
+         encrypted_home_district, encrypted_home_province, gender,
+         registration_channel, identity_status)
+      VALUES (${id}, ${hash}, 'x', 'x', 'x', 'x', 'MALE', 'WEB',
+              'VERIFIED'::public_core.identity_verification_status)`;
+  }
   await admin`
     INSERT INTO public_core.recruitment_campaigns
       (id, campaign_label, agency, status, target_categories,
@@ -154,7 +187,7 @@ async function seed(): Promise<void> {
   }
   await admin`
     INSERT INTO rnp_ops.applications (id, processing_code, applicant_id, campaign_id, category, status)
-    VALUES (${RNP_APP}, 'RNP-96001', ${APPLICANT_ID}, ${RNP_CAMPAIGN}, 'CADET_OFFICER',
+    VALUES (${RNP_APP}, 'RNP-96001', ${APPLICANT_B}, ${RNP_CAMPAIGN}, 'CADET_OFFICER',
             'PHYSICAL_TEST_COMPLETE'::rnp_ops.application_status)`;
   // CERTIFICATE-mode lanes (ADR-013): both RCS apps start where medical fires.
   const rcs: ReadonlyArray<[string, string]> = [
@@ -164,9 +197,25 @@ async function seed(): Promise<void> {
   for (const [id, code] of rcs) {
     await admin`
       INSERT INTO rcs_ops.applications (id, processing_code, applicant_id, campaign_id, category, status)
-      VALUES (${id}, ${code}, ${APPLICANT_ID}, ${RCS_CAMPAIGN}, 'GENERAL_ENLISTEE',
+      VALUES (${id}, ${code}, ${APPLICANT_C}, ${RCS_CAMPAIGN}, 'GENERAL_ENLISTEE',
               'PHYSICAL_TEST_COMPLETE'::rcs_ops.application_status)`;
   }
+
+  // Accept-lock lanes (ADR-014), all seeded at FINAL_SHORTLIST — shortlisting
+  // the same citizen twice is legitimate; only ACCEPT contends for the lock.
+  // Applicant A will already be RDF-accepted when RNP tries; applicant D is
+  // shortlisted by RNP and RCS and raced.
+  await admin`
+    INSERT INTO rnp_ops.applications (id, processing_code, applicant_id, campaign_id, category, status)
+    VALUES
+      (${RNP_LOCK_APP}, 'RNP-96002', ${APPLICANT_ID}, ${RNP_CAMPAIGN}, 'CADET_OFFICER',
+       'FINAL_SHORTLIST'::rnp_ops.application_status),
+      (${RACE_RNP_APP}, 'RNP-96003', ${APPLICANT_D}, ${RNP_CAMPAIGN}, 'CADET_OFFICER',
+       'FINAL_SHORTLIST'::rnp_ops.application_status)`;
+  await admin`
+    INSERT INTO rcs_ops.applications (id, processing_code, applicant_id, campaign_id, category, status)
+    VALUES (${RACE_RCS_APP}, 'RCS-96003', ${APPLICANT_D}, ${RCS_CAMPAIGN}, 'GENERAL_ENLISTEE',
+            'FINAL_SHORTLIST'::rcs_ops.application_status)`;
 }
 
 /** Read one application row (as superuser — sees all agencies) for assertions. */
@@ -196,8 +245,16 @@ async function certRow(schema: 'rnp_ops' | 'rcs_ops', id: string): Promise<Recor
 async function historyCount(schema: 'rdf_ops' | 'rnp_ops' | 'rcs_ops'): Promise<number> {
   const rows = await admin<{ n: number }[]>`
     SELECT count(*)::int AS n FROM ${admin(schema)}.application_status_history
-    WHERE application_id IN (SELECT id FROM ${admin(schema)}.applications WHERE applicant_id = ${APPLICANT_ID})`;
+    WHERE application_id IN (SELECT id FROM ${admin(schema)}.applications WHERE applicant_id IN ${admin(ALL_APPLICANTS)})`;
   return rows[0]?.n ?? -1;
+}
+
+/** Accept-lock columns on the shared identity row (ADR-014). */
+async function lockOf(applicantId: string): Promise<Record<string, unknown>> {
+  const rows = await admin<Record<string, unknown>[]>`
+    SELECT cross_agency_locked_at, cross_agency_locked_by_agency, cross_agency_lock_reason
+    FROM public_core.applicant_identities WHERE id = ${applicantId}`;
+  return rows[0] ?? {};
 }
 
 async function main(): Promise<void> {
@@ -413,6 +470,62 @@ async function main(): Promise<void> {
     const certResponses = [noName, nameOnReject, rnpVerify, rnpFin, rnpAcc, rcsVerify, rcsAgain, rcsFin, rcsAcc, rcsRej].map((r) => r.text).join('|');
     check('no national_id_hash in certificate-mode responses', !certResponses.includes(NID_HASH));
     check('physician name not echoed in responses', !certResponses.includes('Mukamana'));
+
+    // ── 10. Cross-agency accept-lock (ADR-014): one citizen, one acceptance ──
+    console.log('\n── 10. Accept-lock: one acceptance per citizen, platform-wide ──');
+    // Every accept above stamped the citizen's shared identity row — as the
+    // accepting officer's OWN DB role (no system escalation).
+    const lockA = await lockOf(APPLICANT_ID);
+    check('RDF accept stamped the lock on applicant A',
+      lockA['cross_agency_locked_by_agency'] === 'RDF' && lockA['cross_agency_locked_at'] !== null && lockA['cross_agency_lock_reason'] === 'ACCEPTED',
+      JSON.stringify(lockA));
+    check('RNP accept stamped applicant B', (await lockOf(APPLICANT_B))['cross_agency_locked_by_agency'] === 'RNP');
+    check('RCS accept stamped applicant C', (await lockOf(APPLICANT_C))['cross_agency_locked_by_agency'] === 'RCS');
+
+    // Applicant A is already RDF-accepted; RNP legitimately shortlisted the
+    // same citizen (shortlist never contends) — but the ACCEPT must refuse,
+    // name the holder, and write nothing.
+    const rnpHistBefore = await historyCount('rnp_ops');
+    const auditBeforeLock = auditEntries().length;
+    const blocked = await post(ACCEPT_PATH, { applicationId: RNP_LOCK_APP }, rnpOfficer);
+    check('RNP accept of RDF-accepted citizen → 409 CROSS_AGENCY_LOCKED',
+      blocked.status === 409 && blocked.json['status'] === 'CROSS_AGENCY_LOCKED', blocked.text);
+    check('  response names the holding agency (RDF)', blocked.json['lockedByAgency'] === 'RDF', blocked.text);
+    check('  RNP app untouched (still FINAL_SHORTLIST)', (await statusOf('rnp_ops', RNP_LOCK_APP)) === 'FINAL_SHORTLIST');
+    check('  no history appended by the blocked accept', (await historyCount('rnp_ops')) === rnpHistBefore);
+    check('  no audit emitted by the blocked accept', auditEntries().length === auditBeforeLock);
+    check('  lock holder unchanged (still RDF)', (await lockOf(APPLICANT_ID))['cross_agency_locked_by_agency'] === 'RDF');
+
+    // Idempotent re-accept by the HOLDING agency still returns NO_CHANGE —
+    // the status guard fires before the lock check ever runs.
+    const holderAgain = await post(ACCEPT_PATH, { applicationId: APP_HAPPY }, rdfOfficer);
+    check('holder re-accept → 200 NO_CHANGE (status guard precedes lock)',
+      holderAgain.status === 200 && holderAgain.json['status'] === 'NO_CHANGE', holderAgain.text);
+
+    // Race: applicant D is FINAL_SHORTLISTed by RNP and RCS; both accept at
+    // once. FOR UPDATE on the shared identity row serializes them — exactly
+    // ONE 200 APPLIED, exactly one 409, and the lock names the winner.
+    const [raceRnp, raceRcs] = await Promise.all([
+      post(ACCEPT_PATH, { applicationId: RACE_RNP_APP }, rnpOfficer),
+      post(ACCEPT_PATH, { applicationId: RACE_RCS_APP }, rcsOfficer),
+    ]);
+    const outcomes = [raceRnp, raceRcs].map((r) => r.json['status']);
+    check('raced accepts → exactly one APPLIED and one CROSS_AGENCY_LOCKED',
+      outcomes.filter((s) => s === 'APPLIED').length === 1 &&
+        outcomes.filter((s) => s === 'CROSS_AGENCY_LOCKED').length === 1,
+      `${raceRnp.status}:${raceRnp.text} | ${raceRcs.status}:${raceRcs.text}`);
+    const rnpWon = raceRnp.json['status'] === 'APPLIED';
+    const lockD = await lockOf(APPLICANT_D);
+    check('  lock names the race winner', lockD['cross_agency_locked_by_agency'] === (rnpWon ? 'RNP' : 'RCS'), JSON.stringify(lockD));
+    check('  winner app ACCEPTED, loser still FINAL_SHORTLIST',
+      (await statusOf('rnp_ops', RACE_RNP_APP)) === (rnpWon ? 'ACCEPTED' : 'FINAL_SHORTLIST') &&
+        (await statusOf('rcs_ops', RACE_RCS_APP)) === (rnpWon ? 'FINAL_SHORTLIST' : 'ACCEPTED'));
+    check('  loser 409 names the winner', [raceRnp, raceRcs].find((r) => r.json['status'] === 'CROSS_AGENCY_LOCKED')?.json['lockedByAgency'] === (rnpWon ? 'RNP' : 'RCS'));
+
+    // Lock responses carry no PII — status + agency code only.
+    const lockResponses = [blocked, holderAgain, raceRnp, raceRcs].map((r) => r.text).join('|');
+    check('no national_id_hash in lock responses',
+      !lockResponses.includes(NID_HASH) && !lockResponses.includes(NID_HASH_D));
   } finally {
     await cleanup();
     await server.stop();
