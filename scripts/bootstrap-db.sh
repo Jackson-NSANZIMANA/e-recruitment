@@ -129,10 +129,15 @@ apply_sql "${RLS_DIR}/0016_applicant_auth.sql" "rls/0016 (applicant auth)"
 #     the erasure they ask for. One live PENDING per citizen.
 apply_sql "${RLS_DIR}/0017_erasure_requests.sql" "rls/0017 (erasure requests)"
 
-printf '\n'
-ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts + applicant auth + erasure requests in place"
+# 19. Stored contact for invitation delivery (ADR-021, owner D13): the
+#     NIDA-registered phone captured at OTP verification, pgcrypto-encrypted
+#     at rest, so notification-service can deliver for real. NULLed on erasure.
+apply_sql "${RLS_DIR}/0018_stored_contact.sql" "rls/0018 (stored contact column)"
 
-# 19. Dev officer accounts (one per agency). A CONVENIENCE seed so the officer
+printf '\n'
+ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts + applicant auth + erasure requests + stored contact in place"
+
+# 20. Dev officer accounts (one per agency). A CONVENIENCE seed so the officer
 #     console / manual login smoke tests have real credentials to drive —
 #     dev-only, idempotent. Best-effort: it needs the workspace built (tsx
 #     resolves @usrp/* runtime dist), so a failure here NEVER blocks the

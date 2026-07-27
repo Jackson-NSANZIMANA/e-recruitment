@@ -95,9 +95,12 @@ export const applicantIdentities = publicCore.table(
     // Registration channel
     registrationChannel: applicationChannelEnum('registration_channel').notNull(),
 
-    // Phone — hashed for lookup, not stored plaintext
+    // Phone — HMAC for lookup + pgcrypto ciphertext for delivery (ADR-021).
+    // The ciphertext is captured at OTP verification (rls/0018), decrypted only
+    // by notification-service's PgContactResolver, and NULLed on erasure.
     phoneNumberHash: varchar('phone_number_hash', { length: 64 }),
     phoneVerifiedAt: timestamp('phone_verified_at', { withTimezone: true }),
+    encryptedPhoneNumber: text('encrypted_phone_number'),
 
     // Biometric session metadata (no biometric data stored)
     biometricSessionId: varchar('biometric_session_id', { length: 128 }),
