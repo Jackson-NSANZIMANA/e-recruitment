@@ -63,8 +63,9 @@ not re-try refused requests hoping for a different answer; state changes
 ### 5. What the citizen should be told about scope
 
 - **Destroyed:** name, date of birth, home district/province, NIDA linkage,
-  phone hash, biometric linkage, all session records. The record cannot be
-  reconstructed — the platform enforces this at the database engine.
+  phone hash AND the stored contact phone (ADR-021), biometric linkage, all
+  session records. The record cannot be reconstructed — the platform
+  enforces this at the database engine.
 - **Retained (legal obligation, pseudonymous):** the fact that applications
   existed and their statuses/scores, and the audit trail — none of which can
   identify the citizen after erasure.

@@ -101,10 +101,13 @@ Green ≥2×.
 2. **Session-token hash-at-rest** — the opaque token is currently stored
    verbatim; hashing it (like credentials) shrinks the DB-read blast radius.
 3. **Real SMS adapter** (MTN/Airtel) behind the SmsChannel port; shared
-   with notification-service.
+   with notification-service. *(The shared port now exists —
+   `@usrp/shared-sms`, ADR-021; the real adapter remains blocked on a
+   telecom contract.)*
 4. **USSD flow** — the state columns exist; the menu machine does not.
-5. **Encrypted contact capture** for notification delivery (the resolver
-   still returns null — delivery stays PENDING_NO_CONTACT).
+5. **Encrypted contact capture** for notification delivery — ✅ **DONE,
+   ADR-021** (`encrypted_phone_number`, rls/0018; PgContactResolver;
+   delivery records DELIVERED).
 6. **Voluntary withdrawal + erasure self-service** — the citizen can now
    authenticate; letting them withdraw an application (WITHDRAWN's second
    writer) or demand erasure without an officer are natural next doors.

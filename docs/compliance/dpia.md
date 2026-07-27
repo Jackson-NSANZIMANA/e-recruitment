@@ -16,7 +16,7 @@ recruitment campaigns in Rwanda.
 |---|---|
 | Controller | The recruiting agencies (RDF / RNP / RCS) jointly, via the platform owner. **[OWNER: confirm controller/processor allocation]** |
 | Data subjects | Rwandan citizens applying (or attempting to apply) for recruitment; officers operating the platform |
-| Purpose | Verify applicant identity against NIDA; run each agency's recruitment funnel (academic, criminal, document, physical, medical, final decision); maintain an accountable processing record |
+| Purpose | Verify applicant identity against NIDA; run each agency's recruitment funnel (academic, criminal, document, physical, medical, final decision); notify the applicant of statutory process events (exam-slot invitation; erasure decisions) via the NIDA-registered phone (ADR-021); maintain an accountable processing record |
 | Legal basis | Public-interest / legal-obligation recruitment mandate of the agencies **[LEGAL: confirm precise basis per Law N° 058/2021 art. references]**; citizen's own application act |
 | Recipients | The recruiting agency processing the application (cross-agency access engine-blocked); NIDA/NESA/RIB/HEC via G2G (mocks only today — see `g2g-authorization-prerequisites.md`) |
 | Transfers | None outside Rwanda. No cloud processing of PII. |
@@ -30,7 +30,7 @@ recruitment campaigns in Rwanda.
 | Full name, date of birth, home district/province | `encrypted_*` (4) | pgcrypto `pgp_sym_encrypt`, key never stored in DB, set transaction-locally |
 | NIDA G2G lookup hash | `encrypted_nida_lookup_hash` | encrypted as above; NULLed on erasure |
 | National ID (raw) | **never stored, never logged, never in events or responses** — platform invariant, proven by selfchecks | HMAC hash only (`national_id_hash`), key separate from NIDA lookup hash (two-hash contract) |
-| Phone number | `phone_number_hash` only (hash, no raw) | hashed |
+| Phone number | `phone_number_hash` (lookup digest) + `encrypted_phone_number` (deliverable value, ADR-021 — captured at OTP verification from the live NIDA lookup) | HMAC + pgcrypto as above; ciphertext NULLed on erasure; decrypted only by notification-service per delivery, transaction-locally. **Legal basis: necessity** — statutory notification duty in the recruitment process the citizen initiated (owner D13b, 2026-07-27); no separate consent step **[LEGAL: confirm basis]** |
 | Biometric linkage | `biometric_session_id` + result flags — no biometric templates stored | session pointer only |
 
 **Personal data adjacent:** `applicant_sessions` (session token, IP,
@@ -56,7 +56,10 @@ and `audit_log` (opaque UUIDs, statuses, scores only).
 ## 4. Necessity & proportionality
 
 - Data minimisation: the PII set is the minimum to identify one citizen
-  uniquely and run the funnel; scores/statuses are pseudonymous.
+  uniquely, run the funnel, and notify them of its statutory events; the
+  stored contact is captured only after the citizen authenticates (OTP),
+  is SMS-only (owner D13a — no email collected), and dies with the record
+  (erasure + retention sweep). Scores/statuses are pseudonymous.
 - Storage limitation: erasure mechanism live; retention schedule drafted,
   **periods require owner/agency sign-off**.
 - Accuracy: identity data comes from NIDA at verification time, not from
