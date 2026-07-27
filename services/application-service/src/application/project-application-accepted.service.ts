@@ -17,7 +17,7 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { newEnvelope, type EventBus, type EventContext } from '@usrp/shared-events';
-import type { Agency, AuditEvent } from '@usrp/shared-types';
+import type { Agency, ApplicationWithdrawnEvent, AuditEvent } from '@usrp/shared-types';
 import type { WithdrawalRepository, WithdrawnApplication } from '../ports/withdrawal-repository.js';
 
 export interface ProjectApplicationAcceptedCommand {
@@ -65,6 +65,22 @@ export class ProjectApplicationAcceptedService {
         },
       };
       await this.deps.eventBus.publish(event);
+    }
+
+    // ONE summary event per acceptance (ADR-022, owner D14b) — the citizen
+    // notice's trigger. Emitted only when something was genuinely retired:
+    // a redelivered acceptance withdraws nothing → no event → the notice
+    // downstream cannot duplicate.
+    if (withdrawn.length > 0) {
+      const summary: ApplicationWithdrawnEvent = {
+        ...newEnvelope(command.context),
+        eventType: 'APPLICATION_WITHDRAWN',
+        applicantId: command.applicantId,
+        acceptedApplicationId: command.acceptedApplicationId,
+        acceptedByAgency: command.acceptedByAgency,
+        withdrawn: withdrawn.map((app) => ({ applicationId: app.applicationId, agency: app.agency })),
+      };
+      await this.deps.eventBus.publish(summary);
     }
 
     return withdrawn;

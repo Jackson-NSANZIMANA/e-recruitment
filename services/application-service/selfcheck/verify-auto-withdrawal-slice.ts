@@ -35,7 +35,7 @@ import { sql } from '@usrp/shared-database';
 import { startHttpServer } from '@usrp/shared-http';
 import { generateDeviceKeyPair } from '@usrp/shared-security';
 import { makeAuthVerifier, signAuthToken, type AuthTokenClaims } from '@usrp/shared-auth';
-import type { ApplicationAcceptedEvent, ApplicationStatus, AuditEvent } from '@usrp/shared-types';
+import type { ApplicationAcceptedEvent, ApplicationStatus, ApplicationWithdrawnEvent, AuditEvent } from '@usrp/shared-types';
 import {
   createApplicationService,
   loadApplicationConfig,
@@ -259,12 +259,31 @@ async function main(): Promise<void> {
     }
     check('NO event carries the national_id_hash', !JSON.stringify(bus.published).includes(NID_HASH));
 
+    console.log('\n── 5b. Summary event: ONE APPLICATION_WITHDRAWN per acceptance (ADR-022) ──');
+    const summaries = bus.published.filter(
+      (e): e is ApplicationWithdrawnEvent => e.eventType === 'APPLICATION_WITHDRAWN',
+    );
+    check('exactly ONE summary event', summaries.length === 1, `got ${summaries.length}`);
+    const summary = summaries[0];
+    check('summary names citizen + winner', summary?.applicantId === APPLICANT_W && summary?.acceptedApplicationId === RDF_WIN && summary?.acceptedByAgency === 'RDF');
+    check('summary lists all 3 retired applications with their agencies',
+      summary?.withdrawn.length === 3 &&
+        WITHDRAWN_SET.every(([id, schema]) => {
+          const agency = schema === 'rdf_ops' ? 'RDF' : schema === 'rnp_ops' ? 'RNP' : 'RCS';
+          return summary.withdrawn.some((w) => w.applicationId === id && w.agency === agency);
+        }),
+      JSON.stringify(summary?.withdrawn ?? []));
+
     console.log('\n── 6. Redelivery is a no-op (offset-redelivery safety) ──');
     if (accepted) await bus.publish(accepted); // second delivery of the SAME acceptance
     const auditsAfter = bus.published.filter(
       (e) => e.eventType === 'AUDIT_ENTRY' && (e as AuditEvent).action === 'APPLICATION_WITHDRAWN',
     );
     check('no new withdrawal audits on redelivery', auditsAfter.length === 3, `got ${auditsAfter.length}`);
+    check(
+      'no second summary event on redelivery (notice cannot duplicate)',
+      bus.published.filter((e) => e.eventType === 'APPLICATION_WITHDRAWN').length === 1,
+    );
     let historyTotal = 0;
     for (const [id, schema] of WITHDRAWN_SET) historyTotal += await historyCount(schema, id);
     check('no new history rows on redelivery (still 3 total)', historyTotal === 3, `got ${historyTotal}`);
