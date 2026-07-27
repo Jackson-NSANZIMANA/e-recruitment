@@ -115,6 +115,15 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
+  packages/shared-sms:
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.2
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
   packages/shared-types:
     devDependencies:
       typescript:
@@ -440,6 +449,9 @@ importers:
       '@usrp/shared-security':
         specifier: workspace:*
         version: link:../../packages/shared-security
+      '@usrp/shared-sms':
+        specifier: workspace:*
+        version: link:../../packages/shared-sms
       '@usrp/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
@@ -477,6 +489,9 @@ importers:
       '@usrp/shared-http':
         specifier: workspace:*
         version: link:../../packages/shared-http
+      '@usrp/shared-sms':
+        specifier: workspace:*
+        version: link:../../packages/shared-sms
       '@usrp/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types

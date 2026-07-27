@@ -9,9 +9,9 @@
 // ══════════════════════════════════════════════════════════════════
 
 import type { EventBus } from '@usrp/shared-events';
+import { LogSmsChannel } from '@usrp/shared-sms';
 import { DeliverInvitationService } from './application/deliver-invitation.service.js';
 import { NoStoredContactResolver } from './adapters/no-stored-contact.resolver.js';
-import { LogChannel } from './adapters/log-channel.js';
 import type { NotificationServiceConfig } from './config.js';
 
 export interface NotificationService {
@@ -25,7 +25,7 @@ export function createNotificationService(
   return {
     deliver: new DeliverInvitationService({
       resolver: new NoStoredContactResolver(),
-      channel: new LogChannel(),
+      channel: new LogSmsChannel(),
       eventBus,
     }),
   };
@@ -44,10 +44,10 @@ export {
   startSlotAssignedConsumer,
 } from './adapters/events/slot-assigned.consumer.js';
 export { NoStoredContactResolver } from './adapters/no-stored-contact.resolver.js';
-export { LogChannel } from './adapters/log-channel.js';
+export { LogSmsChannel } from '@usrp/shared-sms';
+export type { OutboundSms, SmsChannel, SmsDeliveryOutcome } from '@usrp/shared-sms';
 export { buildInvitationBody } from './domain/notification.js';
 export type { SlotInvitationContent } from './domain/notification.js';
 export { loadNotificationConfig } from './config.js';
 export type { NotificationServiceConfig } from './config.js';
 export type { ContactResolver, ResolvedContact } from './ports/contact-resolver.js';
-export type { NotificationChannel, OutboundMessage, DeliveryOutcome } from './ports/notification-channel.js';

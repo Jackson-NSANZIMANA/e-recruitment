@@ -1,14 +1,14 @@
 // ══════════════════════════════════════════════════════════════════
-// identity-service — LogSmsChannel adapter (dev/proof SMS channel)
+// shared-sms — LogSmsChannel adapter (dev/proof SMS channel)
 //
 // The dev-tier SmsChannel: no telecom integration exists yet, so this
-// records each message in-process (the selfcheck reads `sent` to close
-// the OTP loop without a phone) and logs ONE masked line — last two
-// digits of the destination, never the body (the body contains the code).
+// records each message in-process (selfchecks read `sent` to close their
+// loops without a phone) and logs ONE masked line — last two digits of
+// the destination, never the body (OTP bodies contain the code).
 // Production swaps in a real MTN/Airtel adapter behind the same port.
 // ══════════════════════════════════════════════════════════════════
 
-import type { OutboundSms, SmsChannel, SmsDeliveryOutcome } from '../ports/sms-channel.js';
+import type { OutboundSms, SmsChannel, SmsDeliveryOutcome } from './sms-channel.js';
 
 export class LogSmsChannel implements SmsChannel {
   /** Messages "sent" this process — for dev inspection and proofs only. */
@@ -25,6 +25,6 @@ export class LogSmsChannel implements SmsChannel {
         bodyLength: message.body.length,
       }),
     );
-    return 'SENT';
+    return 'ACCEPTED';
   }
 }

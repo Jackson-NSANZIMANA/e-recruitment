@@ -1,0 +1,24 @@
+{
+  "name": "@usrp/shared-sms",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Zero-dependency SMS channel port shared by identity-service (OTP) and notification-service (invitations): OutboundSms, SmsChannel, and the dev LogSmsChannel adapter",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/**/*.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.3"
+  }
+}

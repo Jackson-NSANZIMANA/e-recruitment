@@ -3,7 +3,7 @@
 //
 // Proves the invitation loop end-to-end against live PG (InMemoryEventBus so we
 // can inspect emitted events, then a wired application-service projection):
-//   • a resolvable contact → LogChannel delivers, NOTIFICATION_DELIVERED emitted
+//   • a resolvable contact → LogSmsChannel delivers, NOTIFICATION_DELIVERED emitted
 //     with deliveryStatus DELIVERED, body carries the signed QR, no PII leak;
 //   • the production NoStoredContactResolver → PENDING_NO_CONTACT (no send);
 //   • application-service consumes NOTIFICATION_DELIVERED and advances
@@ -20,7 +20,7 @@ import { sql } from '@usrp/shared-database';
 import type { SlotAssignedEvent } from '@usrp/shared-types';
 import {
   DeliverInvitationService,
-  LogChannel,
+  LogSmsChannel,
   buildInvitationBody,
   type ContactResolver,
   type ResolvedContact,
@@ -126,7 +126,7 @@ async function statusOf(): Promise<string> {
 async function main(): Promise<void> {
   console.log('\n── 1. Delivery with a resolvable contact → DELIVERED ─────────');
   const bus = new InMemoryEventBus();
-  const channel = new LogChannel();
+  const channel = new LogSmsChannel();
   const deliver = new DeliverInvitationService({
     resolver: new StaticContactResolver({ channel: 'SMS', destination: '+250780000000' }),
     channel,
@@ -156,7 +156,7 @@ async function main(): Promise<void> {
   const bus2 = new InMemoryEventBus();
   const deliver2 = new DeliverInvitationService({
     resolver: new StaticContactResolver(null),
-    channel: new LogChannel(),
+    channel: new LogSmsChannel(),
     eventBus: bus2,
   });
   const out2 = await deliver2.deliver({

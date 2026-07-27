@@ -34,6 +34,7 @@
     "@usrp/shared-events": "workspace:*",
     "@usrp/shared-http": "workspace:*",
     "@usrp/shared-security": "workspace:*",
+    "@usrp/shared-sms": "workspace:*",
     "@usrp/shared-types": "workspace:*"
   },
   "devDependencies": {

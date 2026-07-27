@@ -28,7 +28,7 @@ import { verifyIdentityRoute } from './adapters/http/verify-identity.controller.
 import { erasureRoute } from './adapters/http/erasure.controller.js';
 import { applicantAuthRoutes } from './adapters/http/applicant-auth.controller.js';
 import { erasureRequestRoutes } from './adapters/http/erasure-request.controller.js';
-import { LogSmsChannel } from './adapters/log-sms.channel.js';
+import { LogSmsChannel } from '@usrp/shared-sms';
 import { HttpApplicationsGateway } from './adapters/applications.http-gateway.js';
 import { startBiometricResultConsumer } from './adapters/events/biometric-result.consumer.js';
 

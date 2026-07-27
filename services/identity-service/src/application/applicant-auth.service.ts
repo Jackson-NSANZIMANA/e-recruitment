@@ -26,7 +26,7 @@ import { newCorrelationContext, newEnvelope, type EventBus, type EventContext } 
 import type { ApplicationChannel, AuditEvent } from '@usrp/shared-types';
 import type { NidaGateway } from '../ports/nida.gateway.js';
 import type { ApplicantAuthRepository } from '../ports/applicant-auth.repository.js';
-import type { SmsChannel } from '../ports/sms-channel.js';
+import type { SmsChannel } from '@usrp/shared-sms';
 
 export interface RequestOtpCommand {
   readonly rawNationalId: string;

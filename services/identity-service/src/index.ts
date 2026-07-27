@@ -19,7 +19,7 @@ import { VerifyIdentityService } from './application/verify-identity.service.js'
 import { EraseIdentityService } from './application/erase-identity.service.js';
 import { ProjectBiometricResultService } from './application/project-biometric-result.service.js';
 import { ApplicantAuthService } from './application/applicant-auth.service.js';
-import type { SmsChannel } from './ports/sms-channel.js';
+import type { SmsChannel } from '@usrp/shared-sms';
 import {
   APPLICANT_SESSION_TTL_SECONDS,
   OTP_MAX_ATTEMPTS,
@@ -170,8 +170,8 @@ export type {
   CreateSessionInput,
   OtpChallengeRecord,
 } from './ports/applicant-auth.repository.js';
-export { LogSmsChannel } from './adapters/log-sms.channel.js';
-export type { OutboundSms, SmsChannel, SmsDeliveryOutcome } from './ports/sms-channel.js';
+export { LogSmsChannel } from '@usrp/shared-sms';
+export type { OutboundSms, SmsChannel, SmsDeliveryOutcome } from '@usrp/shared-sms';
 export { HttpApplicationsGateway } from './adapters/applications.http-gateway.js';
 export type { HttpApplicationsGatewayOptions } from './adapters/applications.http-gateway.js';
 export type {

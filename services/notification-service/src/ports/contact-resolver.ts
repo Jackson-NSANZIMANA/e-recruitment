@@ -1,21 +1,19 @@
 // ══════════════════════════════════════════════════════════════════
 // notification-service — ContactResolver port
 //
-// Resolves an applicant to a DELIVERABLE contact (phone/email). The
-// destination is PII — it is never logged, never placed on an event; it is
-// used only to hand a message to a channel adapter and then discarded.
+// Resolves an applicant to a DELIVERABLE contact. The destination is PII —
+// it is never logged, never placed on an event; it is used only to hand a
+// message to the channel adapter and then discarded.
 //
-// IMPORTANT (flagged follow-on): today the system stores contact only as a
-// one-way `phone_number_hash` (PII-minimisation — no plaintext), so the
-// production resolver returns null for every applicant. Delivering a real
-// invitation requires a dedicated "contact capture" slice that stores an
-// encrypted-at-rest phone/email (consistent with the existing encrypted PII
-// columns) — a compliance-relevant data-model decision left to the owner.
+// Since ADR-021 the production resolver (PgContactResolver) decrypts the
+// encrypted_phone_number captured at OTP verification. SMS is the only
+// deliverable channel — no email source exists (owner D13a); an EMAIL
+// channel would return here with its own port and resolver change.
 // ══════════════════════════════════════════════════════════════════
 
 export interface ResolvedContact {
-  readonly channel: 'SMS' | 'EMAIL';
-  /** The phone number or email address. PII — never log or emit. */
+  readonly channel: 'SMS';
+  /** The phone number. PII — never log or emit. */
   readonly destination: string;
 }
 

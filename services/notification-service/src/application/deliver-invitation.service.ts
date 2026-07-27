@@ -14,9 +14,9 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { newEnvelope, type EventBus, type EventContext } from '@usrp/shared-events';
+import type { SmsChannel } from '@usrp/shared-sms';
 import type { Agency, AuditEvent, NotificationDeliveredEvent } from '@usrp/shared-types';
 import type { ContactResolver } from '../ports/contact-resolver.js';
-import type { NotificationChannel } from '../ports/notification-channel.js';
 import { buildInvitationBody, type SlotInvitationContent } from '../domain/notification.js';
 
 /** The PII-free slot facts needed to deliver an invitation. */
@@ -37,7 +37,7 @@ export interface DeliverInvitationOutcome {
 
 export interface DeliverInvitationDeps {
   readonly resolver: ContactResolver;
-  readonly channel: NotificationChannel;
+  readonly channel: SmsChannel;
   readonly eventBus: EventBus;
 }
 
@@ -55,11 +55,13 @@ export class DeliverInvitationService {
     } else {
       channel = contact.channel;
       const outcome = await this.deps.channel.send({
-        channel: contact.channel,
         destination: contact.destination,
         body: buildInvitationBody(command.content),
       });
-      deliveryStatus = outcome === 'DELIVERED' ? 'DELIVERED' : 'FAILED';
+      // ACCEPTED = the transport took the message; that is all this layer can
+      // know, and it is what the recorded/event literal DELIVERED has always
+      // meant here. True handset receipts are a provider follow-on (ADR-021).
+      deliveryStatus = outcome === 'ACCEPTED' ? 'DELIVERED' : 'FAILED';
     }
 
     const delivered: NotificationDeliveredEvent = {
