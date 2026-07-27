@@ -12,11 +12,13 @@
 import type { EventBus } from '@usrp/shared-events';
 import type { SmsChannel } from '@usrp/shared-sms';
 import { DeliverInvitationService } from './application/deliver-invitation.service.js';
+import { DeliverWithdrawalNoticeService } from './application/deliver-withdrawal-notice.service.js';
 import type { ContactResolver } from './ports/contact-resolver.js';
 import type { NotificationServiceConfig } from './config.js';
 
 export interface NotificationService {
   readonly deliver: DeliverInvitationService;
+  readonly withdrawalNotice: DeliverWithdrawalNoticeService;
 }
 
 export interface NotificationAdapters {
@@ -31,6 +33,11 @@ export function createNotificationService(
 ): NotificationService {
   return {
     deliver: new DeliverInvitationService({
+      resolver: adapters.resolver,
+      channel: adapters.sms,
+      eventBus,
+    }),
+    withdrawalNotice: new DeliverWithdrawalNoticeService({
       resolver: adapters.resolver,
       channel: adapters.sms,
       eventBus,
@@ -50,6 +57,17 @@ export {
   NOTIFICATION_CONSUMER_GROUP,
   startSlotAssignedConsumer,
 } from './adapters/events/slot-assigned.consumer.js';
+export { DeliverWithdrawalNoticeService } from './application/deliver-withdrawal-notice.service.js';
+export type {
+  DeliverWithdrawalNoticeCommand,
+  DeliverWithdrawalNoticeDeps,
+} from './application/deliver-withdrawal-notice.service.js';
+export {
+  WITHDRAWAL_NOTICE_CONSUMER_GROUP,
+  startApplicationWithdrawnConsumer,
+} from './adapters/events/application-withdrawn.consumer.js';
+export { buildWithdrawalNoticeBody } from './domain/notification.js';
+export type { WithdrawalNoticeContent } from './domain/notification.js';
 export { PgContactResolver } from './adapters/contact.pg-resolver.js';
 export { LogSmsChannel } from '@usrp/shared-sms';
 export type { OutboundSms, SmsChannel, SmsDeliveryOutcome } from '@usrp/shared-sms';

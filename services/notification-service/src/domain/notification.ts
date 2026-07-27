@@ -25,3 +25,24 @@ export function buildInvitationBody(content: SlotInvitationContent): string {
     content.qrSignedToken,
   ].join('\n');
 }
+
+/** The PII-free facts of an auto-withdrawal a notice is rendered from (ADR-022). */
+export interface WithdrawalNoticeContent {
+  readonly acceptedByAgency: string;
+  /** Agencies of the retired applications, in event order (may repeat). */
+  readonly withdrawnAgencies: readonly string[];
+}
+
+/**
+ * Render the withdrawal notice body. Agency names and a count only — no
+ * application ids (opaque UUIDs are useless on a handset), no name/NID/phone.
+ */
+export function buildWithdrawalNoticeBody(content: WithdrawalNoticeContent): string {
+  const n = content.withdrawnAgencies.length;
+  const plural = n === 1 ? 'application' : 'applications';
+  return [
+    `USRP recruitment: congratulations — you have been accepted by ${content.acceptedByAgency}.`,
+    `As a result, your ${n} other in-flight ${plural} (${content.withdrawnAgencies.join(', ')}) ${n === 1 ? 'has' : 'have'} been withdrawn.`,
+    'Details are available in the applicant portal.',
+  ].join('\n');
+}

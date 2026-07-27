@@ -18,6 +18,7 @@ import { createNotificationService } from './index.js';
 import { PgContactResolver } from './adapters/contact.pg-resolver.js';
 import { loadNotificationConfig } from './config.js';
 import { startSlotAssignedConsumer } from './adapters/events/slot-assigned.consumer.js';
+import { startApplicationWithdrawnConsumer } from './adapters/events/application-withdrawn.consumer.js';
 
 function createEventBus(serviceName: string): EventBus {
   if (process.env['KAFKA_BROKERS']) {
@@ -47,6 +48,7 @@ async function main(): Promise<void> {
   // Subscribe BEFORE serving so a "ready" signal implies we are consuming.
   if (process.env['KAFKA_BROKERS']) {
     await startSlotAssignedConsumer(bus, service.deliver);
+    await startApplicationWithdrawnConsumer(bus, service.withdrawalNotice);
   }
 
   const server = await startHttpServer({
@@ -75,7 +77,7 @@ async function main(): Promise<void> {
       service: config.runtime.serviceName,
       url: server.url,
       env: config.runtime.nodeEnv,
-      consuming: process.env['KAFKA_BROKERS'] ? 'slot.assigned' : 'none (in-memory bus)',
+      consuming: process.env['KAFKA_BROKERS'] ? 'slot.assigned, application.withdrawn' : 'none (in-memory bus)',
     }),
   );
 }
