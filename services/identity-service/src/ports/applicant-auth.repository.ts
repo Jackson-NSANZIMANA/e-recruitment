@@ -4,8 +4,10 @@
 // The persistence seam of citizen authentication: OTP challenges
 // (public_core.applicant_otp_challenges, rls/0016) and opaque DB sessions
 // (public_core.applicant_sessions — owner D5: revocable rows, not JWTs).
-// All methods run as usrp_system_service. Nothing here ever touches a raw
-// phone number or a plaintext code — the caller hashes both.
+// All methods run as usrp_system_service. Plaintext codes never cross this
+// port (the caller hashes them). The raw phone crosses it exactly once —
+// stampPhoneVerified — to be pgcrypto-encrypted in-transaction for
+// invitation delivery (ADR-021); it is never logged and never returned.
 // ══════════════════════════════════════════════════════════════════
 
 import type { ApplicationChannel } from '@usrp/shared-types';
@@ -59,6 +61,14 @@ export interface ApplicantAuthRepository {
   /** Revoke a session (logout / administrative kill). Idempotent. */
   terminateSession(sessionToken: string): Promise<void>;
 
-  /** Stamp phone_number_hash + phone_verified_at after a successful OTP. */
-  stampPhoneVerified(applicantId: string, phoneNumberHash: string): Promise<void>;
+  /**
+   * Stamp phone_number_hash + phone_verified_at + the encrypted stored
+   * contact (ADR-021) after a successful OTP. Re-stamping overwrites, so a
+   * changed NIDA phone is absorbed on the next login.
+   */
+  stampPhoneVerified(
+    applicantId: string,
+    phoneNumberHash: string,
+    rawPhoneNumber: string,
+  ): Promise<void>;
 }

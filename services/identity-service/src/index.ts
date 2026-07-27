@@ -73,7 +73,7 @@ export function createApplicantAuthService(
   sms: SmsChannel,
 ): ApplicantAuthService {
   return new ApplicantAuthService({
-    repository: new PgApplicantAuthRepository(),
+    repository: new PgApplicantAuthRepository(config.security.encryptionKey),
     nida: new NidaHttpGateway({
       baseUrl: config.nida.baseUrl,
       hmacSecret: config.nida.hmacSecret,

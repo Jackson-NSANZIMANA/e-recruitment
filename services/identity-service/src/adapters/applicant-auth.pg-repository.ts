@@ -3,9 +3,10 @@
 //
 // Runs as usrp_system_service (rls/0016 grants + FORCE'd RLS). Storage
 // discipline:
-//   • only DIGESTS land here — the scrypt otp_hash and the HMAC
-//     phone_number_hash; the plaintext code and raw phone never reach
-//     this adapter;
+//   • the plaintext code never reaches this adapter (scrypt otp_hash only);
+//     the raw phone reaches exactly ONE method — stampPhoneVerified — and
+//     is pgp_sym_encrypted in-transaction (ADR-021 stored contact), never
+//     logged, never returned;
 //   • the session token is stored verbatim (it IS the opaque credential,
 //     server-side; a hash-at-rest upgrade is an ADR-018 follow-on) but is
 //     never logged and never leaves via any method other than the
@@ -24,8 +25,16 @@ import type {
 } from '../ports/applicant-auth.repository.js';
 
 const SYSTEM_ROLE = 'usrp_system_service';
+const ENCRYPTION_KEY_SETTING = 'app.encryption_key';
 
 export class PgApplicantAuthRepository implements ApplicantAuthRepository {
+  /**
+   * @param encryptionKey pgcrypto symmetric key, set per-transaction as
+   * `app.encryption_key` (same discipline as PgIdentityRepository). Sourced
+   * from SecurityConfig (HSM/KMS in prod).
+   */
+  constructor(private readonly encryptionKey: string) {}
+
   async findVerifiedApplicantByNidHash(nationalIdHash: string): Promise<string | null> {
     try {
       return await sql.begin(async (tx) => {
@@ -170,13 +179,21 @@ export class PgApplicantAuthRepository implements ApplicantAuthRepository {
     }
   }
 
-  async stampPhoneVerified(applicantId: string, phoneNumberHash: string): Promise<void> {
+  async stampPhoneVerified(
+    applicantId: string,
+    phoneNumberHash: string,
+    rawPhoneNumber: string,
+  ): Promise<void> {
     try {
       await sql.begin(async (tx) => {
         await tx`SET LOCAL ROLE ${sql(SYSTEM_ROLE)}`;
+        // Transaction-local (is_local = true) — key is scoped to this tx only.
+        await tx`SELECT set_config(${ENCRYPTION_KEY_SETTING}, ${this.encryptionKey}, true)`;
         await tx`
           UPDATE public_core.applicant_identities
-          SET phone_number_hash = ${phoneNumberHash}, phone_verified_at = now()
+          SET phone_number_hash = ${phoneNumberHash},
+              phone_verified_at = now(),
+              encrypted_phone_number = pgp_sym_encrypt(${rawPhoneNumber}, current_setting(${ENCRYPTION_KEY_SETTING}))
           WHERE id = ${applicantId}
         `;
       });

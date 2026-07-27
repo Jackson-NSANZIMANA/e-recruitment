@@ -138,15 +138,18 @@ export class ApplicantAuthService {
     });
 
     // Best-effort bookkeeping: re-resolve the NIDA phone to stamp its HMAC +
-    // phone_verified_at. The session is already earned — a NIDA hiccup here
-    // must not fail the login, so faults are swallowed (the stamp lands on
-    // the next successful login instead).
+    // phone_verified_at + the encrypted stored contact (ADR-021 — what
+    // notification-service delivers to). The session is already earned — a
+    // NIDA hiccup here must not fail the login, so faults are swallowed (the
+    // stamp lands on the next successful login instead; re-stamping
+    // overwrites, absorbing a changed NIDA phone).
     try {
       const lookup = await this.deps.nida.lookupCitizen(command.rawNationalId);
       if (lookup.status === 'FOUND' && lookup.citizen.registeredPhoneNumber !== null) {
         await this.deps.repository.stampPhoneVerified(
           applicantId,
           hashPhoneNumber(lookup.citizen.registeredPhoneNumber, this.deps.nationalIdHmacKey),
+          lookup.citizen.registeredPhoneNumber,
         );
       }
     } catch {

@@ -344,6 +344,18 @@ async function main(): Promise<void> {
       'phone_number_hash + phone_verified_at stamped (digest only — 64 hex)',
       /^[0-9a-f]{64}$/.test(stamped[0]?.phone_number_hash ?? '') && stamped[0]?.phone_verified_at !== null,
     );
+    const contact = await admin<{ ciphertext: string | null; phone: string | null }[]>`
+      SELECT encrypted_phone_number AS ciphertext,
+             pgp_sym_decrypt(encrypted_phone_number::bytea, ${idConfig.security.encryptionKey}) AS phone
+      FROM public_core.applicant_identities WHERE id = ${applicantId}`;
+    check(
+      'encrypted_phone_number captured (ADR-021); decrypts to the NIDA phone',
+      (contact[0]?.phone ?? '').includes(MOCK_PHONE_FRAGMENT),
+    );
+    check(
+      'stored contact is ciphertext, not plaintext',
+      contact[0]?.ciphertext !== null && !(contact[0]?.ciphertext ?? '').includes(MOCK_PHONE_FRAGMENT),
+    );
 
     console.log('\n── 4. THE LOOP: me/applications via a REAL iam-minted system token ──');
     const mine = await me(session);
