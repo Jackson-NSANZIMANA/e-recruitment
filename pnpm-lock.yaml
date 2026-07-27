@@ -502,6 +502,12 @@ importers:
       '@usrp/application-service':
         specifier: workspace:*
         version: link:../application-service
+      '@usrp/identity-service':
+        specifier: workspace:*
+        version: link:../identity-service
+      '@usrp/shared-security':
+        specifier: workspace:*
+        version: link:../../packages/shared-security
       postgres:
         specifier: ^3.4.5
         version: 3.4.9

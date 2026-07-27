@@ -110,6 +110,7 @@ run_ts "eligibility-service: event-driven age+academic" services/eligibility-ser
 run_ts "background-vetting: RIB criminal gate"    services/background-vetting-service/selfcheck/verify-vetting-slice.ts
 run_ts "scheduling-service: slot assignment"      services/scheduling-service/selfcheck/verify-slot-assignment.ts
 run_ts "notification-service: invitation delivery + lifecycle advance" services/notification-service/selfcheck/verify-notification-slice.ts
+run_ts "notification-service: contact capture → real delivery (ADR-021)" services/notification-service/selfcheck/verify-contact-delivery-slice.ts
 run_ts "biometric-service: check-in gate + persistence" services/biometric-service/selfcheck/verify-biometric-slice.ts
 run_ts "field-sync-service: offline capture + CRDT merge + adjudication" services/field-sync-service/selfcheck/verify-field-sync-slice.ts
 run_ts "audit-service: immutable trail"           services/audit-service/selfcheck/verify-audit-slice.ts
