@@ -100,7 +100,7 @@ services:
       - |
         set -e
         echo 'Creating USRP Kafka topics...'
-        for spec in applicant.submitted:12 vetting.nida:6 vetting.nesa:6 vetting.hec:6 vetting.rib:6 vetting.age:6 application.cleared:6 biometric.result:6 slot.assigned:6 field.score.captured:6 notification.delivered:6 document.forensics:6; do
+        for spec in applicant.submitted:12 vetting.nida:6 vetting.nesa:6 vetting.hec:6 vetting.rib:6 vetting.age:6 application.cleared:6 application.accepted:6 application.withdrawn:6 biometric.result:6 slot.assigned:6 field.score.captured:6 notification.delivered:6 document.forensics:6; do
           topic=$${spec%%:*}; parts=$${spec##*:}
           kafka-topics --create --if-not-exists --topic $$topic --partitions $$parts --replication-factor 1 --config retention.ms=604800000 --bootstrap-server kafka:9092
         done

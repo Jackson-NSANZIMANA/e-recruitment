@@ -154,6 +154,30 @@ export interface ApplicationAcceptedEvent extends BaseEvent {
   readonly category: ApplicationCategory;
 }
 
+// ── Topic: application.withdrawn ──────────────────────────────────
+// Emitted by the auto-withdrawal projector (ADR-017) AFTER it retires the
+// applicant's sibling applications — ONE summary event per acceptance, and
+// only when something was actually withdrawn (an idempotent redelivery of
+// the acceptance withdraws nothing → emits nothing → downstream notices
+// cannot duplicate). First consumer: notification-service's withdrawal
+// notice (ADR-022). PII-free: opaque ids and enums only.
+
+/** One retired application as carried on the withdrawal summary event. */
+export interface WithdrawnApplicationRef {
+  readonly applicationId: string;
+  readonly agency: Agency;
+}
+
+export interface ApplicationWithdrawnEvent extends BaseEvent {
+  readonly eventType: 'APPLICATION_WITHDRAWN';
+  readonly applicantId: string;
+  /** The winning application whose acceptance caused the withdrawals. */
+  readonly acceptedApplicationId: string;
+  readonly acceptedByAgency: Agency;
+  /** Every application retired by this acceptance — never empty. */
+  readonly withdrawn: readonly WithdrawnApplicationRef[];
+}
+
 // ── Topic: biometric.result ───────────────────────────────────────
 
 export interface BiometricVerificationCompletedEvent extends BaseEvent {
@@ -301,6 +325,7 @@ export type USRPEvent =
   | AgeEligibilityCompletedEvent
   | ApplicationEligibilityClearedEvent
   | ApplicationAcceptedEvent
+  | ApplicationWithdrawnEvent
   | BiometricVerificationCompletedEvent
   | SlotAssignedEvent
   | FieldScoreCapturedEvent
@@ -319,6 +344,7 @@ export const KAFKA_TOPICS = {
   VETTING_AGE: 'vetting.age',           // NEW — age gate result (positive-terminal composition)
   APPLICATION_CLEARED: 'application.cleared', // NEW — eligibility passed → triggers scheduling
   APPLICATION_ACCEPTED: 'application.accepted', // NEW — officer accept landed → auto-withdrawal (ADR-017)
+  APPLICATION_WITHDRAWN: 'application.withdrawn', // NEW — withdrawal summary → citizen notice (ADR-022)
   BIOMETRIC_RESULT: 'biometric.result',
   SLOT_ASSIGNED: 'slot.assigned',
   FIELD_SCORE_CAPTURED: 'field.score.captured',
