@@ -5,12 +5,15 @@
 // can inspect emitted events, then a wired application-service projection):
 //   • a resolvable contact → LogSmsChannel delivers, NOTIFICATION_DELIVERED emitted
 //     with deliveryStatus DELIVERED, body carries the signed QR, no PII leak;
-//   • the production NoStoredContactResolver → PENDING_NO_CONTACT (no send);
+//   • a null-resolving contact → PENDING_NO_CONTACT (no send);
 //   • application-service consumes NOTIFICATION_DELIVERED and advances
 //     SLOT_ASSIGNED → PHYSICAL_TEST_SCHEDULED (append-only history), idempotent
-//     on redelivery, and refuses to advance a row that is not SLOT_ASSIGNED.
+//     on redelivery, and refuses to advance a row that is not SLOT_ASSIGNED;
+//   • the production PgContactResolver (ADR-021) decrypts a stored contact
+//     from live PG, and returns null for unknown / contact-less / erased rows.
 //
 //   DATABASE_URL='postgresql://usrp_app:app_pw@localhost:5432/usrp_db' \
+//   PII_ENCRYPTION_KEY='dev_pii_encryption_key_min_32_chars_ok!!' \
 //   npx tsx services/notification-service/selfcheck/verify-notification-slice.ts
 // ══════════════════════════════════════════════════════════════════
 
@@ -21,6 +24,7 @@ import type { SlotAssignedEvent } from '@usrp/shared-types';
 import {
   DeliverInvitationService,
   LogSmsChannel,
+  PgContactResolver,
   buildInvitationBody,
   type ContactResolver,
   type ResolvedContact,
@@ -208,6 +212,31 @@ async function main(): Promise<void> {
   console.log('\n── 5. Rendering is PII-free ─────────────────────────────────');
   const body = buildInvitationBody({ venueName: ev.venueName, examDate: ev.examDate, reportingTimeHour: ev.reportingTimeHour, qrSignedToken: ev.qrSignedToken });
   check('body has venue/date + QR, no applicant id', body.includes('ULK Stadium') && body.includes(QR_TOKEN) && !body.includes(APPLICANT_ID));
+
+  console.log('\n── 6. PgContactResolver against live PG (ADR-021) ───────────');
+  const encryptionKey =
+    process.env['PII_ENCRYPTION_KEY'] ?? 'dev_pii_encryption_key_min_32_chars_ok!!';
+  const resolver = new PgContactResolver(encryptionKey);
+  const STORED_PHONE = '072-000-X555';
+  await admin`
+    UPDATE public_core.applicant_identities
+    SET encrypted_phone_number = pgp_sym_encrypt(${STORED_PHONE}, ${encryptionKey})
+    WHERE id = ${APPLICANT_ID}`;
+  const resolved = await resolver.resolve(APPLICANT_ID);
+  check('stored contact resolves as SMS', resolved?.channel === 'SMS');
+  check('decrypted destination matches what was stored', resolved?.destination === STORED_PHONE);
+  const unknown = await resolver.resolve('8b8b8b8b-0000-4000-8000-00000000dead');
+  check('unknown applicant → null (no throw)', unknown === null);
+  await admin`
+    UPDATE public_core.applicant_identities
+    SET encrypted_phone_number = NULL WHERE id = ${APPLICANT_ID}`;
+  check('no stored contact → null', (await resolver.resolve(APPLICANT_ID)) === null);
+  // First tombstoning UPDATE passes the rls/0014 freeze (OLD.deleted_at IS NULL).
+  await admin`
+    UPDATE public_core.applicant_identities
+    SET encrypted_phone_number = pgp_sym_encrypt(${STORED_PHONE}, ${encryptionKey}), deleted_at = now()
+    WHERE id = ${APPLICANT_ID}`;
+  check('erased row → null even with residual ciphertext', (await resolver.resolve(APPLICANT_ID)) === null);
 
   await cleanup();
   console.log('\n───────────────────────────────────────────────');

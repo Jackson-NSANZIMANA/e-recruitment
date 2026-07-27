@@ -1,31 +1,38 @@
 // ══════════════════════════════════════════════════════════════════
 // @usrp/notification-service — Public API & composition root
 //
-// Wires the delivery use case to its adapters (contact resolver + channel).
-// The caller supplies the EventBus (InMemory in tests, Kafka in prod). Today
-// the production contact resolver has no deliverable contact on file, so
-// delivery is recorded PENDING_NO_CONTACT and the lifecycle still advances
-// (see NoStoredContactResolver). Swap that adapter when contact capture lands.
+// Wires the delivery use case to its adapters. The caller supplies the
+// EventBus (InMemory in tests, Kafka in prod) AND the adapters — the
+// identity-service pattern — so main.ts wires the real PgContactResolver
+// (decrypts the ADR-021 stored contact) + LogSmsChannel, while proofs
+// inject statics. An applicant with no captured contact still resolves
+// null → delivery records PENDING_NO_CONTACT and the lifecycle advances.
 // ══════════════════════════════════════════════════════════════════
 
 import type { EventBus } from '@usrp/shared-events';
-import { LogSmsChannel } from '@usrp/shared-sms';
+import type { SmsChannel } from '@usrp/shared-sms';
 import { DeliverInvitationService } from './application/deliver-invitation.service.js';
-import { NoStoredContactResolver } from './adapters/no-stored-contact.resolver.js';
+import type { ContactResolver } from './ports/contact-resolver.js';
 import type { NotificationServiceConfig } from './config.js';
 
 export interface NotificationService {
   readonly deliver: DeliverInvitationService;
 }
 
+export interface NotificationAdapters {
+  readonly resolver: ContactResolver;
+  readonly sms: SmsChannel;
+}
+
 export function createNotificationService(
   _config: NotificationServiceConfig,
   eventBus: EventBus,
+  adapters: NotificationAdapters,
 ): NotificationService {
   return {
     deliver: new DeliverInvitationService({
-      resolver: new NoStoredContactResolver(),
-      channel: new LogSmsChannel(),
+      resolver: adapters.resolver,
+      channel: adapters.sms,
       eventBus,
     }),
   };
@@ -43,7 +50,7 @@ export {
   NOTIFICATION_CONSUMER_GROUP,
   startSlotAssignedConsumer,
 } from './adapters/events/slot-assigned.consumer.js';
-export { NoStoredContactResolver } from './adapters/no-stored-contact.resolver.js';
+export { PgContactResolver } from './adapters/contact.pg-resolver.js';
 export { LogSmsChannel } from '@usrp/shared-sms';
 export type { OutboundSms, SmsChannel, SmsDeliveryOutcome } from '@usrp/shared-sms';
 export { buildInvitationBody } from './domain/notification.js';

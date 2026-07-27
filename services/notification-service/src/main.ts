@@ -13,7 +13,9 @@ import { sql } from '@usrp/shared-database';
 import { InMemoryEventBus, KafkaEventBus, type EventBus } from '@usrp/shared-events';
 import { loadKafkaConfig } from '@usrp/shared-config';
 import { startHttpServer } from '@usrp/shared-http';
+import { LogSmsChannel } from '@usrp/shared-sms';
 import { createNotificationService } from './index.js';
+import { PgContactResolver } from './adapters/contact.pg-resolver.js';
 import { loadNotificationConfig } from './config.js';
 import { startSlotAssignedConsumer } from './adapters/events/slot-assigned.consumer.js';
 
@@ -37,7 +39,10 @@ async function main(): Promise<void> {
   const bus = createEventBus(config.runtime.serviceName);
   await bus.connect();
 
-  const service = createNotificationService(config, bus);
+  const service = createNotificationService(config, bus, {
+    resolver: new PgContactResolver(config.security.encryptionKey),
+    sms: new LogSmsChannel(),
+  });
 
   // Subscribe BEFORE serving so a "ready" signal implies we are consuming.
   if (process.env['KAFKA_BROKERS']) {
