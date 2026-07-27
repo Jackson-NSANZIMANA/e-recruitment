@@ -25,7 +25,19 @@ import type { Agency } from '@usrp/shared-types';
  * • NOT_FOUND — no identity row.
  */
 export type EraseIdentityOutcome =
-  | { readonly kind: 'ERASED' }
+  | {
+      readonly kind: 'ERASED';
+      /**
+       * The citizen's stored phone, decrypted INSIDE the erasure transaction
+       * BEFORE the tombstone destroyed it (ADR-022, owner D14a) — the only
+       * moment it can still be read. MEMORY-ONLY: exists solely so the
+       * post-commit execution notice can be sent; never logged, never
+       * persisted, never placed on an event. Null when nothing was on file
+       * or when the adapter was built without the decryption key (flows
+       * that send no notice, e.g. the retention sweep).
+       */
+      readonly noticeContact: string | null;
+    }
   | { readonly kind: 'ALREADY_ERASED' }
   | {
       readonly kind: 'REFUSED_ACTIVE_APPLICATION';

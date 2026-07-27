@@ -63,7 +63,17 @@ function rotatedHash(): string {
 
 const TOMBSTONE = 'ERASED';
 
+const ENCRYPTION_KEY_SETTING = 'app.encryption_key';
+
 export class PgErasureRepository implements ErasureRepository {
+  /**
+   * @param encryptionKey pgcrypto key — provide it to capture the stored
+   *   contact for the post-erasure execution notice (ADR-022, D14a); omit in
+   *   flows that send no notice (retention sweep). Set transaction-local,
+   *   the resolver idiom.
+   */
+  constructor(private readonly encryptionKey?: string) {}
+
   async eraseIdentity(applicantId: string): Promise<EraseIdentityOutcome> {
     try {
       return await sql.begin(async (tx): Promise<EraseIdentityOutcome> => {
@@ -108,6 +118,23 @@ export class PgErasureRepository implements ErasureRepository {
           }
         }
 
+        // 2c. The execution notice's ONLY chance (ADR-022, D14a): decrypt
+        // the stored contact NOW, inside this transaction, before the
+        // tombstone destroys it. The FOR UPDATE above serializes against a
+        // concurrent erasure, so the read-then-overwrite is atomic. The
+        // value is returned memory-only; the caller sends AFTER commit.
+        let noticeContact: string | null = null;
+        if (this.encryptionKey !== undefined) {
+          await tx`SELECT set_config(${ENCRYPTION_KEY_SETTING}, ${this.encryptionKey}, true)`;
+          const contact = await tx<{ phone: string | null }[]>`
+            SELECT CASE WHEN encrypted_phone_number IS NULL THEN NULL
+                        ELSE pgp_sym_decrypt(encrypted_phone_number::bytea, current_setting(${ENCRYPTION_KEY_SETTING}))
+                   END AS phone
+            FROM public_core.applicant_identities WHERE id = ${applicantId}
+          `;
+          noticeContact = contact[0]?.phone ?? null;
+        }
+
         // 3. The overwrite. One UPDATE: after it commits, rls/0014 freezes
         // the row against every further mutation.
         const erased = await tx`
@@ -145,7 +172,7 @@ export class PgErasureRepository implements ErasureRepository {
         await tx`DELETE FROM public_core.applicant_sessions WHERE applicant_id = ${applicantId}`;
         await tx`DELETE FROM public_core.applicant_otp_challenges WHERE applicant_id = ${applicantId}`;
 
-        return { kind: 'ERASED' };
+        return { kind: 'ERASED', noticeContact };
       });
     } catch (cause) {
       if (cause instanceof IdentityPersistenceError) throw cause;

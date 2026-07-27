@@ -43,6 +43,7 @@ import {
   loadIdentityConfig,
   erasureRoute,
   ERASURE_PATH,
+  LogSmsChannel,
 } from '../src/index.js';
 
 // In-test issuer key BEFORE loading config.
@@ -199,7 +200,8 @@ async function identityRow(id: string): Promise<Record<string, unknown>> {
 async function main(): Promise<void> {
   const config = loadIdentityConfig();
   const bus = new InMemoryEventBus();
-  const service = createEraseIdentityService(config, bus);
+  const noticeSms = new LogSmsChannel();
+  const service = createEraseIdentityService(config, bus, noticeSms);
   const verify = makeAuthVerifier({
     publicKeyPem: config.auth.authPublicKeyPem,
     issuer: config.auth.jwtIssuer,
@@ -289,12 +291,30 @@ async function main(): Promise<void> {
     check('  audit is APPLICANT-scoped, performedBy officer',
       executed[0]?.['entityType'] === 'APPLICANT' && executed[0]?.['performedBy'] === OFFICER_ID);
 
+    // Execution notice (ADR-022, D14a): the contact was captured INSIDE the
+    // erasure tx BEFORE the tombstone — the SMS goes to the now-destroyed
+    // phone, proving the read-then-overwrite ordering.
+    console.log('\n── 1b. Execution notice: captured pre-tombstone, sent post-commit ──');
+    check('  ONE SMS sent to the (now destroyed) stored phone',
+      noticeSms.sent.length === 1 && noticeSms.sent[0]?.destination === '078-000-X000',
+      JSON.stringify(noticeSms.sent.map((s) => s.destination)));
+    check('  body is the fixed executed text (no PII, no ground)',
+      (noticeSms.sent[0]?.body ?? '').includes('has been executed') &&
+        !(noticeSms.sent[0]?.body ?? '').includes('078-000-X000'));
+    const noticeAudits = audits().filter((a) => a['action'] === 'ERASURE_DECISION_NOTIFIED');
+    check('  ERASURE_DECISION_NOTIFIED audit: EXECUTED + DELIVERED',
+      noticeAudits.length === 1 &&
+        asRecord(noticeAudits[0]?.['metadata'])['decision'] === 'EXECUTED' &&
+        asRecord(noticeAudits[0]?.['metadata'])['deliveryStatus'] === 'DELIVERED',
+      JSON.stringify(noticeAudits));
+
     // ── 2. Idempotent re-erase ──
     console.log('\n── 2. Re-erase → ALREADY_ERASED ──');
     const again = await post({ applicantId: E1 }, officer);
     check('re-erase → 200 ALREADY_ERASED', again.status === 200 && again.json['status'] === 'ALREADY_ERASED', again.text);
     const afterAgain = await identityRow(E1);
     check('  row not mutated again (hash unchanged)', afterAgain['national_id_hash'] === after['national_id_hash']);
+    check('  NO second notice on re-erase (nothing on file)', noticeSms.sent.length === 1);
 
     // ── 3. In-flight application defers erasure ──
     console.log('\n── 3. Active application → 409 REFUSED_ACTIVE_APPLICATION ──');
@@ -318,6 +338,7 @@ async function main(): Promise<void> {
     check('  refusal names the holding agency', refusedLocked.json['lockedByAgency'] === 'RNP');
     check('  ERASURE_REFUSED audit (ground: ACCEPT_LOCKED)',
       audits().filter((a) => asRecord(a['metadata'])['ground'] === 'ACCEPT_LOCKED').length === 1);
+    check('  refusals sent NO notice (still exactly one SMS)', noticeSms.sent.length === 1);
 
     // ── 5. Irreversibility at the engine (rls/0014) ──
     console.log('\n── 5. Erased row is frozen — even for system_service ──');
@@ -369,6 +390,8 @@ async function main(): Promise<void> {
     const busDump = JSON.stringify(bus.published);
     check('no citizen name on the event bus', !busDump.includes('Uwase'));
     check('no NID hash on the event bus', !busDump.includes(HASH_E1) && !busDump.includes(HASH_E2));
+    check('no raw phone on the event bus (notice contact stayed memory-only)',
+      !busDump.includes('078-000-X000'));
   } finally {
     await cleanup();
     await server.stop();

@@ -14,7 +14,9 @@
 
 import type { Principal } from '@usrp/shared-auth';
 import { newEnvelope, type EventBus, type EventContext } from '@usrp/shared-events';
+import type { SmsChannel } from '@usrp/shared-sms';
 import type { AuditEvent } from '@usrp/shared-types';
+import { buildErasureDeclinedBody } from '../domain/erasure-notice.js';
 import type {
   DeclineRequestOutcome,
   ErasureRequestRecord,
@@ -37,6 +39,13 @@ export interface DeclineErasureRequestCommand {
 export interface ErasureRequestDeps {
   readonly repository: ErasureRequestRepository;
   readonly eventBus: EventBus;
+  /**
+   * ADR-022 decline notice (owner D14c): when present, a genuine decline
+   * sends one FIXED-BODY SMS — never the officer's free-text ground, which
+   * stays behind the authenticated portal. Optional — absence turns the
+   * notice off.
+   */
+  readonly sms?: SmsChannel;
 }
 
 export class ErasureRequestService {
@@ -89,6 +98,37 @@ export class ErasureRequestService {
         metadata: { requestId: command.requestId, ground: command.note },
       };
       await this.deps.eventBus.publish(event);
+
+      // Decline notice (ADR-022, D14c): best-effort, fixed body — a channel
+      // fault must not fail the decline (already recorded + audited above);
+      // the outcome is recorded truthfully in the notice's own audit entry.
+      if (this.deps.sms) {
+        let deliveryStatus: 'DELIVERED' | 'PENDING_NO_CONTACT' | 'FAILED';
+        if (outcome.noticeContact === null) {
+          deliveryStatus = 'PENDING_NO_CONTACT';
+        } else {
+          try {
+            const sent = await this.deps.sms.send({
+              destination: outcome.noticeContact,
+              body: buildErasureDeclinedBody(),
+            });
+            deliveryStatus = sent === 'ACCEPTED' ? 'DELIVERED' : 'FAILED';
+          } catch {
+            deliveryStatus = 'FAILED';
+          }
+        }
+        const noticeAudit: AuditEvent = {
+          ...newEnvelope(command.context),
+          eventType: 'AUDIT_ENTRY',
+          entityType: 'APPLICANT',
+          entityId: outcome.applicantId,
+          action: 'ERASURE_DECISION_NOTIFIED',
+          performedBy: 'identity-service',
+          agency: officer.agency,
+          metadata: { decision: 'DECLINED', channel: 'SMS', deliveryStatus },
+        };
+        await this.deps.eventBus.publish(noticeAudit);
+      }
     }
     return outcome;
   }

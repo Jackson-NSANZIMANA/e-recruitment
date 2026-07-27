@@ -23,7 +23,17 @@ export type FileRequestOutcome =
   | { readonly kind: 'ALREADY_PENDING'; readonly requestId: string };
 
 export type DeclineRequestOutcome =
-  | { readonly kind: 'DECLINED'; readonly applicantId: string }
+  | {
+      readonly kind: 'DECLINED';
+      readonly applicantId: string;
+      /**
+       * The citizen's stored phone, decrypted in the decline transaction
+       * (ADR-022) so the decision notice can be sent. MEMORY-ONLY — never
+       * logged, persisted, or evented. Null when nothing is on file or the
+       * adapter was built without the decryption key.
+       */
+      readonly noticeContact: string | null;
+    }
   /** Already decided — nothing written; the earlier decision stands. */
   | { readonly kind: 'NOT_PENDING'; readonly status: 'EXECUTED' | 'DECLINED' }
   | { readonly kind: 'NOT_FOUND' };

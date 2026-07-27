@@ -12,7 +12,9 @@
 
 import type { Principal } from '@usrp/shared-auth';
 import { newCorrelationContext, newEnvelope, type EventBus, type EventContext } from '@usrp/shared-events';
+import type { SmsChannel } from '@usrp/shared-sms';
 import type { AuditEvent } from '@usrp/shared-types';
+import { buildErasureExecutedBody } from '../domain/erasure-notice.js';
 import type { EraseIdentityOutcome, ErasureRepository } from '../ports/erasure-repository.js';
 import type { ErasureRequestRepository } from '../ports/erasure-request.repository.js';
 
@@ -30,6 +32,13 @@ export interface EraseIdentityDeps {
    * the pre-intake wiring keeps working; absence just leaves stamping off.
    */
   readonly requests?: ErasureRequestRepository;
+  /**
+   * ADR-022 execution notice (owner D14a): when present, a fresh erasure
+   * sends one fixed-body SMS to the contact the repository captured
+   * BEFORE the tombstone. Optional — absence turns the notice off (the
+   * retention sweep and pre-notice wirings).
+   */
+  readonly sms?: SmsChannel;
 }
 
 export class EraseIdentityService {
@@ -74,6 +83,40 @@ export class EraseIdentityService {
       metadata: this.metadataFor(outcome),
     };
     await this.deps.eventBus.publish(event);
+
+    // Execution notice (ADR-022, D14a): only a FRESH erasure — the contact
+    // was captured inside the erasure transaction, before the tombstone;
+    // ALREADY_ERASED has nothing on file. Best-effort: the erasure is done
+    // and audited, a channel fault must not mask that — it is recorded
+    // truthfully in the notice's own audit entry instead.
+    if (outcome.kind === 'ERASED' && this.deps.sms) {
+      let deliveryStatus: 'DELIVERED' | 'PENDING_NO_CONTACT' | 'FAILED';
+      if (outcome.noticeContact === null) {
+        deliveryStatus = 'PENDING_NO_CONTACT';
+      } else {
+        try {
+          const sent = await this.deps.sms.send({
+            destination: outcome.noticeContact,
+            body: buildErasureExecutedBody(),
+          });
+          deliveryStatus = sent === 'ACCEPTED' ? 'DELIVERED' : 'FAILED';
+        } catch {
+          deliveryStatus = 'FAILED';
+        }
+      }
+      const noticeAudit: AuditEvent = {
+        ...newEnvelope(context),
+        eventType: 'AUDIT_ENTRY',
+        entityType: 'APPLICANT',
+        entityId: command.applicantId,
+        action: 'ERASURE_DECISION_NOTIFIED',
+        performedBy: 'identity-service',
+        agency: officer.agency,
+        metadata: { decision: 'EXECUTED', channel: 'SMS', deliveryStatus },
+      };
+      await this.deps.eventBus.publish(noticeAudit);
+    }
+
     return outcome;
   }
 

@@ -22,6 +22,7 @@ import type {
 } from '../ports/erasure-request.repository.js';
 
 const SYSTEM_ROLE = 'usrp_system_service';
+const ENCRYPTION_KEY_SETTING = 'app.encryption_key';
 
 interface RequestRow {
   readonly id: string;
@@ -33,6 +34,13 @@ interface RequestRow {
 }
 
 export class PgErasureRequestRepository implements ErasureRequestRepository {
+  /**
+   * @param encryptionKey pgcrypto key — provide it so decline can resolve
+   *   the stored contact for the decision notice (ADR-022); omit where no
+   *   notice is sent (the erasure road's markExecuted-only wiring).
+   */
+  constructor(private readonly encryptionKey?: string) {}
+
   async fileRequest(applicantId: string): Promise<FileRequestOutcome> {
     try {
       return await sql.begin(async (tx): Promise<FileRequestOutcome> => {
@@ -115,7 +123,23 @@ export class PgErasureRequestRepository implements ErasureRequestRepository {
             decision_note = ${input.note}
           WHERE id = ${input.requestId}
         `;
-        return { kind: 'DECLINED', applicantId: row.applicant_id };
+
+        // Resolve the stored contact for the decision notice (ADR-022) in
+        // the SAME transaction — memory-only, the caller sends after commit.
+        let noticeContact: string | null = null;
+        if (this.encryptionKey !== undefined) {
+          await tx`SELECT set_config(${ENCRYPTION_KEY_SETTING}, ${this.encryptionKey}, true)`;
+          const contact = await tx<{ phone: string | null }[]>`
+            SELECT CASE WHEN encrypted_phone_number IS NULL THEN NULL
+                        ELSE pgp_sym_decrypt(encrypted_phone_number::bytea, current_setting(${ENCRYPTION_KEY_SETTING}))
+                   END AS phone
+            FROM public_core.applicant_identities
+            WHERE id = ${row.applicant_id} AND deleted_at IS NULL
+          `;
+          noticeContact = contact[0]?.phone ?? null;
+        }
+
+        return { kind: 'DECLINED', applicantId: row.applicant_id, noticeContact };
       });
     } catch (cause) {
       throw new IdentityPersistenceError('Failed to decline erasure request', { cause });

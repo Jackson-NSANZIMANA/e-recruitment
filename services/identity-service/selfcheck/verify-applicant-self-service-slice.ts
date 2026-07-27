@@ -77,6 +77,7 @@ const MOCK_PHONE_FRAGMENT = '980-X901'; // distinctive tail of that phone
 
 const CTRL_APPLICANT = 'ad200000-0000-4000-8000-000000000002'; // owns the foreign application
 const CTRL_NID_HASH = 'ad20ad20'.repeat(8);
+const CTRL_PHONE = '072-CTRL-X202'; // stored contact — the decline notice's destination (ADR-022)
 const RDF_CAMPAIGN = 'ad200000-0000-4000-8000-0000000000c1';
 const RNP_CAMPAIGN = 'ad200000-0000-4000-8000-0000000000c2';
 const RCS_CAMPAIGN = 'ad200000-0000-4000-8000-0000000000c3';
@@ -155,14 +156,15 @@ async function cleanup(): Promise<void> {
   });
 }
 
-async function seed(applicantId: string): Promise<void> {
+async function seed(applicantId: string, encryptionKey: string): Promise<void> {
   await admin`
     INSERT INTO public_core.applicant_identities
       (id, national_id_hash, encrypted_full_name, encrypted_date_of_birth,
        encrypted_home_district, encrypted_home_province, gender,
-       registration_channel, identity_status)
+       registration_channel, identity_status, encrypted_phone_number)
     VALUES (${CTRL_APPLICANT}, ${CTRL_NID_HASH}, 'x', 'x', 'x', 'x', 'FEMALE', 'WEB',
-            'VERIFIED'::public_core.identity_verification_status)`;
+            'VERIFIED'::public_core.identity_verification_status,
+            pgp_sym_encrypt(${CTRL_PHONE}, ${encryptionKey}))`;
   await admin`
     INSERT INTO public_core.recruitment_campaigns
       (id, campaign_label, agency, status, target_categories,
@@ -233,7 +235,10 @@ async function main(): Promise<void> {
   const verifyService = createIdentityService(idConfig, idBus);
   const sms = new LogSmsChannel();
   const applicantAuth = createApplicantAuthService(idConfig, idBus, sms);
-  const erasureRequests = createErasureRequestService(idConfig, idBus);
+  // Dedicated channel for the decline notice (ADR-022) so its sends are
+  // assertable apart from the OTP traffic.
+  const declineSms = new LogSmsChannel();
+  const erasureRequests = createErasureRequestService(idConfig, idBus, declineSms);
   const gateway = new HttpApplicationsGateway({
     iamBaseUrl: iamServer.url,
     applicationBaseUrl: appServer.url,
@@ -263,7 +268,7 @@ async function main(): Promise<void> {
     throw new Error(`could not establish the citizen identity: ${created.kind}`);
   }
   const applicantId = created.applicantId;
-  await seed(applicantId);
+  await seed(applicantId, idConfig.security.encryptionKey);
 
   async function idFetch(
     method: 'GET' | 'POST',
@@ -394,12 +399,31 @@ async function main(): Promise<void> {
       body: { requestId: ctrlRequestId, note: 'Application still under active adjudication' },
     });
     check('decline with a ground → 200 DECLINED', declined.status === 200 && declined.json['status'] === 'DECLINED', declined.text);
+
+    // Decline notice (ADR-022, D14c): one fixed-body SMS to the stored
+    // contact; the officer's free-text ground NEVER reaches the handset.
+    check('decline notice: ONE SMS to the stored contact',
+      declineSms.sent.length === 1 && declineSms.sent[0]?.destination === CTRL_PHONE,
+      JSON.stringify(declineSms.sent.map((s) => s.destination)));
+    check('decline notice body is generic — no ground text, no PII',
+      (declineSms.sent[0]?.body ?? '').includes('has been declined') &&
+        !(declineSms.sent[0]?.body ?? '').includes('adjudication') &&
+        !(declineSms.sent[0]?.body ?? '').includes(CTRL_PHONE));
+    const declineNoticeAudits = idBus.published
+      .filter((e) => JSON.stringify(e).includes('ERASURE_DECISION_NOTIFIED'))
+      .map((e) => e as { metadata?: Record<string, unknown> });
+    check('ERASURE_DECISION_NOTIFIED audit: DECLINED + DELIVERED',
+      declineNoticeAudits.length === 1 &&
+        declineNoticeAudits[0]?.metadata?.['decision'] === 'DECLINED' &&
+        declineNoticeAudits[0]?.metadata?.['deliveryStatus'] === 'DELIVERED',
+      JSON.stringify(declineNoticeAudits));
     const declinedRow = await admin<{ status: string; decision_note: string | null }[]>`
       SELECT status, decision_note FROM public_core.erasure_requests WHERE id = ${ctrlRequestId}`;
     check('the row records DECLINED + the ground', declinedRow[0]?.status === 'DECLINED' && (declinedRow[0]?.decision_note ?? '').includes('adjudication'));
     check('ERASURE_REQUEST_DECLINED audited', JSON.stringify(idBus.published).includes('ERASURE_REQUEST_DECLINED'));
     const reDecline = await idFetch('POST', '/v1/identities/erasure-requests/decline', { token: officer, body: { requestId: ctrlRequestId, note: 'again' } });
     check('re-decline → 409 NOT_PENDING (the earlier decision stands)', reDecline.status === 409 && reDecline.json['currentStatus'] === 'DECLINED', reDecline.text);
+    check('re-decline sent NO second notice', declineSms.sent.length === 1);
     check('unknown requestId → 404', (await idFetch('POST', '/v1/identities/erasure-requests/decline', { token: officer, body: { requestId: 'ad200000-dead-4000-8000-000000000000', note: 'x' } })).status === 404);
     const refileAfterDecline = await erasureRequests.file({
       applicantId: CTRL_APPLICANT,
@@ -412,6 +436,8 @@ async function main(): Promise<void> {
     check('no NID hash and no phone fragment in ANY response', !allResponses.includes(CITIZEN_NID_HASH) && !allResponses.includes(MOCK_PHONE_FRAGMENT));
     const allBuses = JSON.stringify(idBus.published) + JSON.stringify(appBus.published);
     check('no phone and no session token on ANY bus', !allBuses.includes(MOCK_PHONE_FRAGMENT) && !allBuses.includes(session));
+    check('decline-notice contact stayed memory-only (not on bus, not in responses)',
+      !allBuses.includes(CTRL_PHONE) && !allResponses.includes(CTRL_PHONE));
   } finally {
     await cleanup();
     await Promise.all([idServer.stop(), appServer.stop(), iamServer.stop()]);

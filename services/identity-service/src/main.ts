@@ -73,7 +73,10 @@ async function main(): Promise<void> {
   // credentials) and the dev SMS channel; production swaps a real telecom
   // adapter behind the same port.
   const portal = loadApplicantPortalConfig();
-  const applicantAuth = createApplicantAuthService(config, bus, new LogSmsChannel());
+  // ONE channel instance serves OTP delivery AND the erasure decision
+  // notices (ADR-022) — the real telecom adapter lands exactly once.
+  const smsChannel = new LogSmsChannel();
+  const applicantAuth = createApplicantAuthService(config, bus, smsChannel);
   const applicationsGateway = new HttpApplicationsGateway({
     iamBaseUrl: portal.iamBaseUrl,
     applicationBaseUrl: portal.applicationBaseUrl,
@@ -86,10 +89,10 @@ async function main(): Promise<void> {
     port: config.runtime.port,
     routes: [
       verifyIdentityRoute(service, verify),
-      erasureRoute(createEraseIdentityService(config, bus), verify),
+      erasureRoute(createEraseIdentityService(config, bus, smsChannel), verify),
       ...applicantAuthRoutes(applicantAuth, applicationsGateway),
       // ADR-020: citizen erasure-request intake + officer/DPO queue routes
-      ...erasureRequestRoutes(createErasureRequestService(config, bus), applicantAuth, verify),
+      ...erasureRequestRoutes(createErasureRequestService(config, bus, smsChannel), applicantAuth, verify),
     ],
     // Ready only when the database — the system-of-record — is reachable.
     readiness: async (): Promise<boolean> => {

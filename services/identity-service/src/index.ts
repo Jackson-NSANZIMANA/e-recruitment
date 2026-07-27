@@ -96,14 +96,18 @@ export function createApplicantAuthService(
  * applications terminal, not accept-locked) decides lawfulness.
  */
 export function createEraseIdentityService(
-  _config: IdentityServiceConfig,
+  config: IdentityServiceConfig,
   eventBus: EventBus,
+  sms?: SmsChannel,
 ): EraseIdentityService {
   return new EraseIdentityService({
-    repository: new PgErasureRepository(),
+    // The key lets the repository capture the contact BEFORE the tombstone —
+    // the execution notice's only chance (ADR-022, D14a).
+    repository: new PgErasureRepository(config.security.encryptionKey),
     eventBus,
     // ADR-020: an executed erasure stamps the citizen's pending intake row.
     requests: new PgErasureRequestRepository(),
+    ...(sms ? { sms } : {}),
   });
 }
 
@@ -112,12 +116,15 @@ export function createEraseIdentityService(
  * citizen files, the DPO queue answers; execution stays on the ADR-015 road.
  */
 export function createErasureRequestService(
-  _config: IdentityServiceConfig,
+  config: IdentityServiceConfig,
   eventBus: EventBus,
+  sms?: SmsChannel,
 ): ErasureRequestService {
   return new ErasureRequestService({
-    repository: new PgErasureRequestRepository(),
+    // The key lets decline resolve the stored contact for the notice (ADR-022).
+    repository: new PgErasureRequestRepository(config.security.encryptionKey),
     eventBus,
+    ...(sms ? { sms } : {}),
   });
 }
 
