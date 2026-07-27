@@ -125,14 +125,16 @@ async function seed(encryptionKey: string): Promise<void> {
         (id, national_id_hash, encrypted_full_name, encrypted_date_of_birth,
          encrypted_home_district, encrypted_home_province, gender,
          registration_channel, identity_status, phone_number_hash,
-         biometric_session_id, nida_verification_request_id)
+         encrypted_phone_number, biometric_session_id, nida_verification_request_id)
       VALUES (${id}, ${hash},
               pgp_sym_encrypt(${FULL_NAME}, ${encryptionKey}),
               pgp_sym_encrypt('1999-01-01', ${encryptionKey}),
               pgp_sym_encrypt('GASABO', ${encryptionKey}),
               pgp_sym_encrypt('KIGALI', ${encryptionKey}),
               'FEMALE', 'WEB', 'VERIFIED'::public_core.identity_verification_status,
-              ${'ph'.repeat(32)}, 'bio-session-43', 'nida-req-43')`;
+              ${'ph'.repeat(32)},
+              pgp_sym_encrypt('078-000-X000', ${encryptionKey}),
+              'bio-session-43', 'nida-req-43')`;
   }
   // E3 is enlisted: accept-locked by RNP (ADR-014).
   await admin`
@@ -188,8 +190,8 @@ async function seed(encryptionKey: string): Promise<void> {
 async function identityRow(id: string): Promise<Record<string, unknown>> {
   const rows = await admin<Record<string, unknown>[]>`
     SELECT national_id_hash, encrypted_full_name, encrypted_nida_lookup_hash,
-           phone_number_hash, biometric_session_id, biometric_passed_liveness,
-           nida_verification_request_id, deleted_at
+           encrypted_phone_number, phone_number_hash, biometric_session_id,
+           biometric_passed_liveness, nida_verification_request_id, deleted_at
     FROM public_core.applicant_identities WHERE id = ${id}`;
   return rows[0] ?? {};
 }
@@ -265,6 +267,8 @@ async function main(): Promise<void> {
     check('  phone/biometric/nida columns cleared',
       after['phone_number_hash'] === null && after['biometric_session_id'] === null &&
         after['biometric_passed_liveness'] === false && after['nida_verification_request_id'] === null);
+    check('  stored contact destroyed (encrypted_phone_number NULL, ADR-021)',
+      after['encrypted_phone_number'] === null);
 
     // pgcrypto can no longer produce the plaintext from what is stored.
     let decryptFails = false;

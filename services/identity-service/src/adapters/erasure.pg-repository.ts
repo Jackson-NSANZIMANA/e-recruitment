@@ -117,6 +117,7 @@ export class PgErasureRepository implements ErasureRepository {
             encrypted_home_district = ${TOMBSTONE},
             encrypted_home_province = ${TOMBSTONE},
             encrypted_nida_lookup_hash = NULL,
+            encrypted_phone_number = NULL,
             national_id_hash = ${rotatedHash()},
             phone_number_hash = NULL,
             phone_verified_at = NULL,
