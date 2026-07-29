@@ -50,8 +50,8 @@ officer is personally accountable; system tokens are rejected):
 
 | Response | Meaning | Officer action |
 |---|---|---|
-| `200 ERASED` | PII destroyed, sessions deleted, tombstone frozen | Confirm to the citizen in writing. **[LEGAL: notification template TBD]** |
-| `200 ALREADY_ERASED` | A prior request already erased this record | Confirm as above |
+| `200 ERASED` | PII destroyed, sessions deleted, tombstone frozen | An automatic SMS confirmation is sent to the stored contact (ADR-022; fixed wording, resolved before destruction — its delivery status is in the `ERASURE_DECISION_NOTIFIED` audit entry). Confirm additionally in writing where required. **[LEGAL: written-notification wording TBD]** |
+| `200 ALREADY_ERASED` | A prior request already erased this record | No automatic SMS is possible (no contact on file) — confirm in writing |
 | `409 REFUSED_ACTIVE_APPLICATION` (names agency + status) | The citizen has an application still in progress | Inform the citizen: erasure is available once the application concludes; they may **withdraw it themselves in the portal** (ADR-020 voluntary withdrawal) and then the gate opens |
 | `409 REFUSED_ACCEPT_LOCKED` (names agency) | The citizen is enlisted — retention obligation | Inform the citizen of the legal ground; escalate to the holding agency's DPO if contested |
 | `404 NOT_FOUND` | No record exists for that UUID | Confirm to the citizen that no data is held |
