@@ -76,6 +76,20 @@ record; running `drizzle-kit generate` is prohibited until the snapshot is
 reconciled as its own deliberate slice** (hand-edited idempotent catch-up,
 proven warm AND cold). The schema .ts files remain the readable mirror.
 
+> **Disposition (owner D15, 2026-07-31): the prohibition is RETIRED; the
+> first half stands.** Re-measured after rls/0018 the drift was **27
+> statements across 7 files** (the +1 being `encrypted_phone_number` itself,
+> uncounted above). It was reconciled **snapshot-only** — `meta/0000_snapshot.json`
+> rewritten to describe the post-bootstrap state (0000 + rls/), with **no new
+> SQL migration** and `_journal.json` untouched, so no database warm or cold
+> executes anything new. No catch-up migration was authored: a drizzle-only
+> database has no grants and no RLS, so it is never valid, and duplicating
+> DDL that rls/ already owns would have bought nothing. `rls/` hand-SQL
+> remains the system of record. Enforcement moved from memory to the gate —
+> `packages/shared-database/selfcheck/verify-schema-drift.ts` fails on any
+> divergence between the .ts mirror, the snapshot and the live DB. Procedure:
+> `docs/architecture/schema-evolution.md`.
+
 ## Mechanics
 
 - **Capture** — the verifyOtp stamp block passes the raw phone as a third
