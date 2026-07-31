@@ -46,6 +46,11 @@ logs/
 junit.xml
 test-results/
 
+# Schema-drift proof scratch (verify-schema-drift.ts cleans up after itself;
+# this catches leftovers from an aborted run). Kept inside the repo on
+# purpose — /tmp is aggressively cleaned on dev boxes mid-run.
+packages/shared-database/.drift-check/
+
 # HSM / Certificate artifacts (never commit)
 *.pem
 *.key

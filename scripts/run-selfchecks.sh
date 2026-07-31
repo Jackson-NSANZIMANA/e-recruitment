@@ -82,6 +82,11 @@ else
   bad "RLS cross-agency isolation"
 fi
 
+# ── 1b. Schema drift — the .ts mirror, the drizzle snapshot and the live
+# database must agree. Runs early: every proof below asserts behaviour ON
+# this schema, so a silent divergence here would undermine all of them.
+run_ts "shared-database: schema drift (.ts ↔ snapshot ↔ live DB)" packages/shared-database/selfcheck/verify-schema-drift.ts
+
 # ── 2. The service & backbone selfchecks, in dependency order ──────
 # Deterministic crypto proofs first — no infra, fastest signal.
 run_ts "shared-security: signed slot invitation"  packages/shared-security/selfcheck/verify-slot-invitation.ts
