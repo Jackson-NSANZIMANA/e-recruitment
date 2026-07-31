@@ -269,6 +269,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "encrypted_nida_lookup_hash": {
+          "name": "encrypted_nida_lookup_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "gender": {
           "name": "gender",
           "type": "gender",
@@ -318,6 +324,12 @@
         "phone_verified_at": {
           "name": "phone_verified_at",
           "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "encrypted_phone_number": {
+          "name": "encrypted_phone_number",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -471,6 +483,101 @@
           ]
         }
       },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public_core.applicant_otp_challenges": {
+      "name": "applicant_otp_challenges",
+      "schema": "public_core",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "applicant_id": {
+          "name": "applicant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "otp_hash": {
+          "name": "otp_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "consumed_at": {
+          "name": "consumed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "idx_pc_otp_applicant": {
+          "name": "idx_pc_otp_applicant",
+          "columns": [
+            {
+              "expression": "applicant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "applicant_otp_challenges_applicant_id_applicant_identities_id_fk": {
+          "name": "applicant_otp_challenges_applicant_id_applicant_identities_id_fk",
+          "tableFrom": "applicant_otp_challenges",
+          "tableTo": "applicant_identities",
+          "schemaTo": "public_core",
+          "columnsFrom": [
+            "applicant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -784,6 +891,268 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public_core.erasure_requests": {
+      "name": "erasure_requests",
+      "schema": "public_core",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "applicant_id": {
+          "name": "applicant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(10)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'PENDING'"
+        },
+        "requested_at": {
+          "name": "requested_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "decided_by": {
+          "name": "decided_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "decided_at": {
+          "name": "decided_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "decision_note": {
+          "name": "decision_note",
+          "type": "varchar(200)",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "idx_pc_erasure_request_pending": {
+          "name": "idx_pc_erasure_request_pending",
+          "columns": [
+            {
+              "expression": "applicant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "status = 'PENDING'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_pc_erasure_request_applicant": {
+          "name": "idx_pc_erasure_request_applicant",
+          "columns": [
+            {
+              "expression": "applicant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "requested_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "erasure_requests_applicant_id_applicant_identities_id_fk": {
+          "name": "erasure_requests_applicant_id_applicant_identities_id_fk",
+          "tableFrom": "erasure_requests",
+          "tableTo": "applicant_identities",
+          "schemaTo": "public_core",
+          "columnsFrom": [
+            "applicant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public_core.field_devices": {
+      "name": "field_devices",
+      "schema": "public_core",
+      "columns": {
+        "device_id": {
+          "name": "device_id",
+          "type": "varchar(64)",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "public_key_pem": {
+          "name": "public_key_pem",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "agency": {
+          "name": "agency",
+          "type": "agency",
+          "typeSchema": "public_core",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "enrolled_by": {
+          "name": "enrolled_by",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "enrolled_at": {
+          "name": "enrolled_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "idx_pc_field_devices_agency": {
+          "name": "idx_pc_field_devices_agency",
+          "columns": [
+            {
+              "expression": "agency",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public_core.officer_accounts": {
+      "name": "officer_accounts",
+      "schema": "public_core",
+      "columns": {
+        "officer_id": {
+          "name": "officer_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "login_handle": {
+          "name": "login_handle",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "credential": {
+          "name": "credential",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "agency": {
+          "name": "agency",
+          "type": "agency",
+          "typeSchema": "public_core",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "roles": {
+          "name": "roles",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'"
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'active'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "idx_pc_officer_accounts_handle": {
+          "name": "idx_pc_officer_accounts_handle",
+          "columns": [
+            {
+              "expression": "login_handle",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "officer_accounts_login_handle_unique": {
+          "name": "officer_accounts_login_handle_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "login_handle"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public_core.recruitment_campaigns": {
       "name": "recruitment_campaigns",
       "schema": "public_core",
@@ -959,6 +1328,82 @@
           "nullsNotDistinct": false,
           "columns": [
             "campaign_label"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public_core.service_accounts": {
+      "name": "service_accounts",
+      "schema": "public_core",
+      "columns": {
+        "service_id": {
+          "name": "service_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "client_id": {
+          "name": "client_id",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "credential": {
+          "name": "credential",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "varchar(200)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'active'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "idx_pc_service_accounts_client": {
+          "name": "idx_pc_service_accounts_client",
+          "columns": [
+            {
+              "expression": "client_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "service_accounts_client_id_unique": {
+          "name": "service_accounts_client_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "client_id"
           ]
         }
       },
@@ -1171,6 +1616,26 @@
         },
         "academic_eligibility_detail": {
           "name": "academic_eligibility_detail",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "age_eligibility_status": {
+          "name": "age_eligibility_status",
+          "type": "age_eligibility_status",
+          "typeSchema": "rcs_ops",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'PENDING'"
+        },
+        "age_verified_at": {
+          "name": "age_verified_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "age_eligibility_detail": {
+          "name": "age_eligibility_detail",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false
@@ -1464,6 +1929,21 @@
           "columns": [
             {
               "expression": "academic_status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_rcs_age_status": {
+          "name": "idx_rcs_age_status",
+          "columns": [
+            {
+              "expression": "age_eligibility_status",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -2122,6 +2602,26 @@
           "primaryKey": false,
           "notNull": false
         },
+        "age_eligibility_status": {
+          "name": "age_eligibility_status",
+          "type": "age_eligibility_status",
+          "typeSchema": "rdf_ops",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'PENDING'"
+        },
+        "age_verified_at": {
+          "name": "age_verified_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "age_eligibility_detail": {
+          "name": "age_eligibility_detail",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
         "rib_request_id": {
           "name": "rib_request_id",
           "type": "varchar(128)",
@@ -2390,6 +2890,21 @@
           "columns": [
             {
               "expression": "academic_status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_rdf_age_status": {
+          "name": "idx_rdf_age_status",
+          "columns": [
+            {
+              "expression": "age_eligibility_status",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -3086,6 +3601,26 @@
           "primaryKey": false,
           "notNull": false
         },
+        "age_eligibility_status": {
+          "name": "age_eligibility_status",
+          "type": "age_eligibility_status",
+          "typeSchema": "rnp_ops",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'PENDING'"
+        },
+        "age_verified_at": {
+          "name": "age_verified_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "age_eligibility_detail": {
+          "name": "age_eligibility_detail",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
         "rib_request_id": {
           "name": "rib_request_id",
           "type": "varchar(128)",
@@ -3146,6 +3681,25 @@
         "document_review_decision": {
           "name": "document_review_decision",
           "type": "varchar(10)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "medical_cert_verified": {
+          "name": "medical_cert_verified",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false,
+          "default": false
+        },
+        "medical_cert_verified_at": {
+          "name": "medical_cert_verified_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "medical_cert_physician_name": {
+          "name": "medical_cert_physician_name",
+          "type": "varchar(200)",
           "primaryKey": false,
           "notNull": false
         },
@@ -3329,6 +3883,21 @@
           "columns": [
             {
               "expression": "academic_status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_rnp_age_status": {
+          "name": "idx_rnp_age_status",
+          "columns": [
+            {
+              "expression": "age_eligibility_status",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -3831,6 +4400,15 @@
         "INELIGIBLE"
       ]
     },
+    "rcs_ops.age_eligibility_status": {
+      "name": "age_eligibility_status",
+      "schema": "rcs_ops",
+      "values": [
+        "PENDING",
+        "ELIGIBLE",
+        "INELIGIBLE"
+      ]
+    },
     "rcs_ops.application_status": {
       "name": "application_status",
       "schema": "rcs_ops",
@@ -3847,6 +4425,7 @@
         "MEDICAL_REVIEW",
         "FINAL_SHORTLIST",
         "ACCEPTED",
+        "ADJUDICATION_REVIEW",
         "REJECTED",
         "WITHDRAWN"
       ]
@@ -3916,6 +4495,15 @@
         "INELIGIBLE"
       ]
     },
+    "rdf_ops.age_eligibility_status": {
+      "name": "age_eligibility_status",
+      "schema": "rdf_ops",
+      "values": [
+        "PENDING",
+        "ELIGIBLE",
+        "INELIGIBLE"
+      ]
+    },
     "rdf_ops.application_status": {
       "name": "application_status",
       "schema": "rdf_ops",
@@ -3932,6 +4520,7 @@
         "MEDICAL_REVIEW",
         "FINAL_SHORTLIST",
         "ACCEPTED",
+        "ADJUDICATION_REVIEW",
         "REJECTED",
         "WITHDRAWN",
         "WALK_IN_REGISTERED",
@@ -3991,6 +4580,15 @@
         "INELIGIBLE"
       ]
     },
+    "rnp_ops.age_eligibility_status": {
+      "name": "age_eligibility_status",
+      "schema": "rnp_ops",
+      "values": [
+        "PENDING",
+        "ELIGIBLE",
+        "INELIGIBLE"
+      ]
+    },
     "rnp_ops.application_status": {
       "name": "application_status",
       "schema": "rnp_ops",
@@ -4007,6 +4605,7 @@
         "MEDICAL_REVIEW",
         "FINAL_SHORTLIST",
         "ACCEPTED",
+        "ADJUDICATION_REVIEW",
         "REJECTED",
         "WITHDRAWN"
       ]

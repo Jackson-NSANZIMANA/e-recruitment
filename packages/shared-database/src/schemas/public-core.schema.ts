@@ -5,6 +5,7 @@
 // Decryption requires the app.encryption_key session variable
 // ══════════════════════════════════════════════════════════════════
 
+import { sql } from 'drizzle-orm';
 import {
   pgSchema,
   uuid,
@@ -300,4 +301,93 @@ export const officerAccounts = publicCore.table(
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [uniqueIndex('idx_pc_officer_accounts_handle').on(t.loginHandle)],
+);
+
+// ── service_accounts ──────────────────────────────────────────────
+// The MACHINE mirror of officer_accounts (ADR-016). A service client presents
+// { clientId, clientSecret } to iam-service's client-credentials grant; the
+// secret is verified against the scrypt digest stored here and a short-lived
+// (15 min) Ed25519 kind:'system' token is minted with service_id as its `sub`.
+// Read and written by usrp_iam_service ALONE — deliberately NOT granted to
+// usrp_system_service, so a compromised worker cannot harvest the credentials
+// that mint its own kind of token. Actual DDL + FORCE'd RLS live in rls/0015
+// (this mirrors it as the readable schema source of truth).
+
+export const serviceAccounts = publicCore.table(
+  'service_accounts',
+  {
+    // = the minted token's `sub` claim.
+    serviceId: uuid('service_id').defaultRandom().primaryKey(),
+    clientId: varchar('client_id', { length: 128 }).notNull().unique(),
+    // scrypt$N$r$p$saltB64$hashB64 (shared-security hashPassword) — NEVER plaintext.
+    credential: text('credential').notNull(),
+    description: varchar('description', { length: 200 }),
+    // 'active' | 'disabled' — CHECK constraint enforced in rls/0015.
+    status: varchar('status', { length: 16 }).notNull().default('active'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex('idx_pc_service_accounts_client').on(t.clientId)],
+);
+
+// ── applicant_otp_challenges ──────────────────────────────────────
+// The citizen login challenge (ADR-018). An OTP is sent to the phone NIDA has
+// on file (fetched live, never stored raw) and only its scrypt digest is kept
+// here — the code itself is never persisted. Single-use (consumed_at), 5-minute
+// TTL (expires_at), 5-attempt lockout (attempts). Erasure deletes a citizen's
+// challenges outright. Actual DDL + grants live in rls/0016 (this mirrors it as
+// the readable schema source of truth).
+
+export const applicantOtpChallenges = publicCore.table(
+  'applicant_otp_challenges',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    applicantId: uuid('applicant_id')
+      .references(() => applicantIdentities.id)
+      .notNull(),
+    // scrypt digest of the 6-digit code — NEVER plaintext.
+    otpHash: text('otp_hash').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    attempts: integer('attempts').notNull().default(0),
+    // NULL = still redeemable; set = spent (single-use).
+    consumedAt: timestamp('consumed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  // The verify path looks up the newest live challenge for an applicant.
+  (t) => [index('idx_pc_otp_applicant').on(t.applicantId, t.createdAt.desc())],
+);
+
+// ── erasure_requests ──────────────────────────────────────────────
+// The DPO intake queue (ADR-020, owner D10). A citizen's erasure demand is
+// QUEUED here rather than executed directly — an OTP session is too weak an
+// authority for irreversible destruction. An officer later executes it (the
+// ADR-015 road, which stamps this row EXECUTED) or declines it with a ground.
+// Rows deliberately SURVIVE the erasure they record: the request is a
+// PII-free legal-obligation record, not applicant data. Actual DDL + the two
+// CHECK constraints (status domain; all-or-nothing decision stamp) live in
+// rls/0017 (this mirrors it as the readable schema source of truth).
+
+export const erasureRequests = publicCore.table(
+  'erasure_requests',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    applicantId: uuid('applicant_id')
+      .references(() => applicantIdentities.id)
+      .notNull(),
+    // 'PENDING' | 'EXECUTED' | 'DECLINED' — CHECK constraint enforced in rls/0017.
+    status: varchar('status', { length: 10 }).notNull().default('PENDING'),
+    requestedAt: timestamp('requested_at', { withTimezone: true }).defaultNow().notNull(),
+    // Officer UUID (token `sub`) for EXECUTED / DECLINED; NULL while PENDING.
+    decidedBy: uuid('decided_by'),
+    decidedAt: timestamp('decided_at', { withTimezone: true }),
+    // Decline ground; NULL for EXECUTED is fine.
+    decisionNote: varchar('decision_note', { length: 200 }),
+  },
+  (t) => [
+    // At most ONE open request per citizen (partial unique — PENDING only).
+    uniqueIndex('idx_pc_erasure_request_pending')
+      .on(t.applicantId)
+      .where(sql`status = 'PENDING'`),
+    // The DPO queue reads oldest-first; the citizen reads their own newest.
+    index('idx_pc_erasure_request_applicant').on(t.applicantId, t.requestedAt.desc()),
+  ],
 );
