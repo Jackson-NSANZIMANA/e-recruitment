@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ══════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════
 # run-selfchecks.sh — run EVERY proof in the repo, in dependency order,
 # against live infrastructure. This is the project's real quality gate:
 # "prove it, don't assert it" made repeatable and enforceable (CI runs
@@ -15,9 +15,13 @@
 # Dev secrets are the well-known non-production values used across all
 # selfcheck docs; centralised here so every proof runs with one env.
 #
+# NOTE: this inline environment is exactly why .env.example was able to rot
+# for ~30 slices — no proof read it. The final section closes that seam by
+# booting the platform from the committed template instead of from here.
+#
 # Usage:  bash scripts/run-selfchecks.sh
 # Exit:   0 iff every proof passes; first failure aborts (fail-fast).
-# ══════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -124,10 +128,28 @@ run_ts "document-forensics: bounded-real analyzer (MinIO+ClamAV)" services/docum
 run_ts "application-service: amber routing + adjudication" services/application-service/selfcheck/verify-amber-adjudication-slice.ts
 run_ts "application-service: walk-in lane (register → vet → physical → merged funnel)" services/application-service/selfcheck/verify-walk-in-slice.ts
 # The whole spine composed: one real submission → all 3 gates → DOCUMENT_REVIEW_GREEN.
-# Runs last — it exercises the most services (eligibility + background-vetting + application).
+# Runs late — it exercises the most services (eligibility + background-vetting + application).
 run_ts "pipeline: full chain → DOCUMENT_REVIEW_GREEN" services/application-service/selfcheck/verify-pipeline-e2e.ts
 
-# ── Summary ────────────────────────────────────────────────────────
+# ── 3. The developer entrypoint itself ─────────────────────────────
+# Boots ALL ELEVEN services from .env.example — the committed template, NOT
+# the inline environment above. That distinction is the whole point: every
+# proof before this one is driven by this script's own exports, so the file a
+# fresh clone actually starts from was the one surface no proof touched, and
+# it drifted out of agreement with the code for ~30 slices.
+#
+# Runs LAST for two reasons: it is the broadest and most infra-heavy proof
+# (the same reason pipeline-e2e runs late), and booting eleven services joins
+# and leaves real consumer groups — which must not perturb the behavioural
+# proofs above it.
+hdr "dev boot: all 11 services from .env.example"
+if bash scripts/verify-dev-boot.sh; then
+  ok "dev boot: all 11 services from .env.example"
+else
+  bad "dev boot: all 11 services from .env.example"
+fi
+
+# ── Summary ────────────────────────────────────────────────────
 printf '\n\033[1m─────────────────────────────────────────────\033[0m\n'
 printf 'Proofs: \033[0;32m%d passed\033[0m, ' "$pass"
 if [[ $fail -eq 0 ]]; then
