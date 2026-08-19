@@ -4,8 +4,12 @@
 // Each loader validates only the variables it owns and returns a typed,
 // frozen section. Services compose the sections they need. Cross-cutting
 // infra (db/redis/kafka) is standardised here so every service reads the
-// same variable names — the exact names Turbo already passes through
-// (see turbo.json `env`) and docker-compose defines.
+// same variable names — the exact names Turbo passes through (see turbo.json
+// `env`) and docker-compose defines.
+//
+// This file is the NAME CANON. `.env.example` follows it, never the reverse,
+// and scripts/verify-dev-boot.sh boots the platform from that template on
+// every gate run so the two cannot drift apart again.
 // ══════════════════════════════════════════════════════════════════
 
 import { createPrivateKey, createPublicKey } from 'node:crypto';
@@ -23,7 +27,7 @@ import {
   type EnvSource,
 } from './env.js';
 
-// ── Runtime ───────────────────────────────────────────────────────
+// ── Runtime ─────────────────────────────────────────────────
 
 export const NODE_ENVS = ['development', 'test', 'staging', 'production'] as const;
 export type NodeEnv = (typeof NODE_ENVS)[number];
@@ -39,14 +43,40 @@ export interface RuntimeConfig {
   readonly logLevel: LogLevel;
 }
 
+/**
+ * The service-scoped PORT variable name, derived from the service name:
+ * `identity-service` -> `PORT_IDENTITY_SERVICE`.
+ *
+ * Exported so tooling (scripts/verify-dev-boot.sh, docs) derives the same
+ * names from the same rule instead of keeping a parallel list that can rot.
+ */
+export function portVarName(serviceName: string): string {
+  return `PORT_${serviceName.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}`;
+}
+
+/**
+ * Runtime section: service identity, environment, listen port, log level.
+ *
+ * PORT RESOLUTION — `PORT_<SERVICE_NAME>` then `PORT` then 3000.
+ *
+ * The scoped variable exists because `turbo run dev --parallel` hands every
+ * service the SAME environment. With a bare PORT, all eleven services resolve
+ * the same port, the first binds and the rest die on EADDRINUSE. A scoped name
+ * lets one shared .env drive the whole platform, while a container that sets a
+ * plain PORT (or nothing at all) keeps working untouched.
+ */
 export function loadRuntimeConfig(serviceName: string, source: EnvSource = process.env): RuntimeConfig {
+  const scoped = source[portVarName(serviceName)];
+  const effective: EnvSource =
+    scoped === undefined || scoped === '' ? source : { ...source, PORT: scoped };
+
   const env = loadEnv(
     {
       NODE_ENV: withDefault(oneOf(NODE_ENVS), 'development'),
       PORT: withDefault(port(), 3000),
       LOG_LEVEL: withDefault(oneOf(LOG_LEVELS), 'info'),
     },
-    source,
+    effective,
   );
   return deepFreeze({
     serviceName,
@@ -57,7 +87,7 @@ export function loadRuntimeConfig(serviceName: string, source: EnvSource = proce
   });
 }
 
-// ── Database (PostgreSQL) ─────────────────────────────────────────
+// ── Database (PostgreSQL) ──────────────────────────────────────
 
 export interface DatabaseConfig {
   readonly url: string;
@@ -75,7 +105,7 @@ export function loadDatabaseConfig(source: EnvSource = process.env): DatabaseCon
   return deepFreeze({ url: env.DATABASE_URL, maxConnections: env.DATABASE_MAX_CONNECTIONS });
 }
 
-// ── Redis ─────────────────────────────────────────────────────────
+// ── Redis ──────────────────────────────────────────────────
 
 export interface RedisConfig {
   readonly url: string;
@@ -89,7 +119,7 @@ export function loadRedisConfig(source: EnvSource = process.env): RedisConfig {
   return deepFreeze({ url: env.REDIS_URL });
 }
 
-// ── Kafka ─────────────────────────────────────────────────────────
+// ── Kafka ─────────────────────────────────────────────────
 
 export interface KafkaConfig {
   readonly brokers: readonly string[];
@@ -108,8 +138,9 @@ export function loadKafkaConfig(clientId: string, source: EnvSource = process.en
   return deepFreeze({ brokers: env.KAFKA_BROKERS, clientId, ssl: env.KAFKA_SSL });
 }
 
-// ── G2G integrations (NIDA / NESA / HEC / RIB) ────────────────────
+// ── G2G integrations (NIDA / NESA / HEC / RIB) ─────────────────────
 // HMAC secrets are dev-length in the mocks; production values are longer.
+// NOTE the names: <AGENCY>_BASE_URL, not <AGENCY>_API_BASE_URL.
 
 export interface G2GEndpointConfig {
   readonly baseUrl: string;
@@ -152,7 +183,7 @@ export function loadG2GConfig(source: EnvSource = process.env): G2GConfig {
   });
 }
 
-// ── Security ──────────────────────────────────────────────────────
+// ── Security ───────────────────────────────────────────────
 // Master keys MUST be strong. We refuse to boot with weak keys — a bad
 // key here means every hashed National ID and encrypted PII column is
 // weak. 32 chars is the enforced floor for dev; production uses HSM/KMS.
@@ -221,7 +252,7 @@ export function loadAuthVerifyConfig(source: EnvSource = process.env): AuthVerif
   });
 }
 
-// ── Auth issuer (PRIVATE key) ─────────────────────────────────────
+// ── Auth issuer (PRIVATE key) ─────────────────────────────────
 // The mirror of loadAuthVerifyConfig for the ONE service that MINTS tokens
 // (iam-service). It holds the Ed25519 PRIVATE key; every other service only
 // ever verifies with the public key — the whole point of the asymmetric design.
@@ -260,7 +291,7 @@ export function loadAuthIssuerConfig(source: EnvSource = process.env): AuthIssue
   });
 }
 
-// ── Composite service config ──────────────────────────────────────
+// ── Composite service config ───────────────────────────────────
 
 export interface ServiceConfig {
   readonly runtime: RuntimeConfig;
