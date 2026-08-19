@@ -15,7 +15,6 @@
     "dev": {
       "cache": false,
       "persistent": true,
-      "//": "Turbo 2.x runs in STRICT env mode by default: a task's child process only receives variables enumerated here. Without this list every service starts with an empty environment and dies at config load. scripts/dev.sh puts the values in the shell; this declares which may cross the boundary. Strict mode is kept on purpose - a missing PII_ENCRYPTION_KEY must fail loudly, so --env-mode=loose is the wrong trade for this system.",
       "env": [
         "NODE_ENV",
         "LOG_LEVEL",
