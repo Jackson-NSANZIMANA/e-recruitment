@@ -63,8 +63,11 @@ cd "$REPO_ROOT"
 # Deliberately the TEMPLATE, not .env. Override only to debug a local file.
 ENV_FILE="${USRP_ENV_FILE:-.env.example}"
 # Eleven tsx processes + turbo on a CI runner where Postgres, Kafka, MinIO,
-# four G2G mocks and ClamAV are already resident. 90s was optimistic.
-BOOT_TIMEOUT_S="${BOOT_TIMEOUT_S:-180}"
+# four G2G mocks and ClamAV are already resident. 90s was optimistic, and
+# 180s still wasn't enough (job failed on `Run all proofs` at ~7m40s).
+# CI now pins this explicitly to 600s (see ci-backend.yml); 600s is the
+# default here too, so a bare local run under load is covered as well.
+BOOT_TIMEOUT_S="${BOOT_TIMEOUT_S:-600}"
 # Repo-relative ON PURPOSE. The first version wrote to `mktemp -d` and told the
 # reader "logs kept in $LOG_DIR" — a directory the CI runner then discarded,
 # which is exactly why the first red run of this proof was undiagnosable from
