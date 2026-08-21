@@ -10,7 +10,7 @@
 // growing duplicate rows.
 // ══════════════════════════════════════════════════════════════════
 
-import { sql } from '@usrp/shared-database';
+import { sql, asJsonb } from '@usrp/shared-database';
 import type { Agency } from '@usrp/shared-types';
 import type {
   DocumentRecordStore,
@@ -51,7 +51,6 @@ export class PgDocumentRecordStore implements DocumentRecordStore {
           FOR UPDATE
         `;
 
-        const flagsJson = `${JSON.stringify(verdict.flags)}`;
         const existingRow = existing[0];
         if (existingRow) {
           await tx`
@@ -63,7 +62,7 @@ export class PgDocumentRecordStore implements DocumentRecordStore {
               virus_scan_at = now(),
               forensics_score = ${verdict.score},
               forensics_lane = ${verdict.lane}::${schema}.document_lane,
-              forensics_flags = ${flagsJson}::jsonb,
+              forensics_flags = ${tx.json(asJsonb(verdict.flags))},
               forensics_completed_at = now()
             WHERE id = ${existingRow.id}
           `;
@@ -85,7 +84,7 @@ export class PgDocumentRecordStore implements DocumentRecordStore {
             now(),
             ${verdict.score},
             ${verdict.lane}::${schema}.document_lane,
-            ${flagsJson}::jsonb,
+            ${tx.json(asJsonb(verdict.flags))},
             now()
           )
           RETURNING id

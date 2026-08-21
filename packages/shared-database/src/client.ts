@@ -50,6 +50,33 @@ export type Database = PostgresJsDatabase<DatabaseSchema>;
 /** The postgres.js client type, taken from the factory so it cannot drift. */
 type SqlClient = ReturnType<typeof postgres>;
 
+/**
+ * The type postgres.js's `sql.json(value)` / `tx.json(value)` accepts.
+ *
+ * Use `sql.json(value)` (or `tx.json(value)` inside a transaction) for every
+ * jsonb/json column write — never `JSON.stringify(value)` interpolated next
+ * to a `::jsonb` cast. postgres.js already serializes the value you hand it;
+ * pre-stringifying it yourself hands the driver a STRING, which it then
+ * serializes AGAIN, so `col::jsonb` casts a JSON-encoded string literal
+ * instead of a JSON document. The column ends up holding valid jsonb whose
+ * entire root is a string — `jsonb_typeof(col)` reports `'string'`, not
+ * `'object'`/`'array'`, and every reader downstream (this driver included)
+ * correctly hands the caller back a string instead of the object they wrote.
+ * That silent double-encoding was the root cause behind four separate CI
+ * proof failures (audit metadata, age/academic eligibility detail, field-sync
+ * vector clocks, forensics flags) — see git history on this file's siblings
+ * for the incident. Application code passes its own domain types (`unknown`,
+ * branded records, etc.); this alias is the one sanctioned cast between "the
+ * domain knows this is JSON-safe" and "the driver requires proof of it" —
+ * services should not redeclare their own.
+ */
+export type JsonbValue = postgres.JSONValue;
+
+/** Assert a value is JSON-safe for `sql.json()`/`tx.json()`. See {@link JsonbValue}. */
+export function asJsonb(value: unknown): JsonbValue {
+  return value as JsonbValue;
+}
+
 export interface DatabaseClientOptions {
   /** Connection string. Normally `config.database.url`, already validated. */
   readonly url: string;

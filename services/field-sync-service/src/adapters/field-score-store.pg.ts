@@ -17,7 +17,7 @@
 // The cross-agency guard is the application lookup: absent here ⇒ NOT_FOUND.
 // ══════════════════════════════════════════════════════════════════
 
-import { sql } from '@usrp/shared-database';
+import { sql, asJsonb } from '@usrp/shared-database';
 import { decideMerge } from '../domain/merge.js';
 import type { VectorClock } from '../domain/vector-clock.js';
 import { OPS_SCHEMA } from '../domain/agency-schema.js';
@@ -88,7 +88,7 @@ export class PgFieldScoreStore implements FieldScoreStore {
              capturing_officer_id, captured_at, synced_at, sync_conflict_detected)
           VALUES (
             ${input.applicationId},
-            ${JSON.stringify(input.vectorClock)}::jsonb,
+            ${tx.json(asJsonb(input.vectorClock))},
             ${input.deviceId},
             ${input.metrics.heightCm},
             ${input.metrics.weightKg},

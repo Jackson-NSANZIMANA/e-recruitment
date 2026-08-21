@@ -19,7 +19,7 @@
 // opening history row.
 // ══════════════════════════════════════════════════════════════════
 
-import { sql } from '@usrp/shared-database';
+import { sql, asJsonb } from '@usrp/shared-database';
 import { APPLICATION_STATUSES, type ApplicationStatus } from '@usrp/shared-types';
 import type {
   ApplicationRepository,
@@ -162,7 +162,7 @@ export class PgApplicationRepository implements ApplicationRepository {
             UPDATE ${schema}.applications SET
               age_eligibility_status = ${newAge}::${schema}.age_eligibility_status,
               age_verified_at = now(),
-              age_eligibility_detail = ${JSON.stringify(result.detail)}::jsonb,
+              age_eligibility_detail = ${tx.json(asJsonb(result.detail))},
               status = ${toStatus}::${schema}.application_status,
               updated_at = now()
             WHERE id = ${result.applicationId}
@@ -179,7 +179,7 @@ export class PgApplicationRepository implements ApplicationRepository {
               academic_status = ${newAcademic}::${schema}.academic_eligibility_status,
               ${verifiedAtCol} = now(),
               ${requestIdCol} = ${result.requestId},
-              academic_eligibility_detail = ${JSON.stringify(result.detail)}::jsonb,
+              academic_eligibility_detail = ${tx.json(asJsonb(result.detail))},
               status = ${toStatus}::${schema}.application_status,
               updated_at = now()
             WHERE id = ${result.applicationId}
