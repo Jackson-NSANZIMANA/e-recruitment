@@ -3,19 +3,21 @@
 //
 // Each loader validates only the variables it owns and returns a typed,
 // frozen section. Services compose the sections they need. Cross-cutting
-// infra (db/redis/kafka) is standardised here so every service reads the
-// same variable names — the exact names Turbo already passes through
+// infra (db/kafka) is standardised here so every service reads the same
+// variable names — the exact names Turbo already passes through
 // (see turbo.json `env`) and docker-compose defines.
 // ══════════════════════════════════════════════════════════════════
 
 import { createPrivateKey, createPublicKey } from 'node:crypto';
 import {
+  EnvValidationError,
   boolean,
   deepFreeze,
   integer,
   list,
   loadEnv,
   oneOf,
+  optional,
   port,
   string,
   url,
@@ -23,13 +25,33 @@ import {
   type EnvSource,
 } from './env.js';
 
-// ── Runtime ───────────────────────────────────────────────────────
+// ── Runtime ─────────────────────────────────────────────────
 
 export const NODE_ENVS = ['development', 'test', 'staging', 'production'] as const;
 export type NodeEnv = (typeof NODE_ENVS)[number];
 
 export const LOG_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace'] as const;
 export type LogLevel = (typeof LOG_LEVELS)[number];
+
+/** Last-resort port when neither the specific nor the generic variable is set. */
+const FALLBACK_PORT = 3000;
+
+/**
+ * The per-service port variable name, DERIVED from the service name:
+ *
+ *   'identity-service'  → 'PORT_IDENTITY_SERVICE'
+ *   'agency-bff'        → 'PORT_AGENCY_BFF'
+ *
+ * A mechanical rule rather than a lookup table, because a lookup table is a
+ * second source of truth and this one already drifted: .env.example carried
+ * PORT_ROUTING_SERVICE for a service that does not exist, carried no variable
+ * for application-service, and carried none at all for iam-service — the
+ * token issuer. Rename a service and you rename its variable; nothing else
+ * can silently disagree.
+ */
+export function portEnvVarFor(serviceName: string): string {
+  return `PORT_${serviceName.toUpperCase().replace(/-/g, '_')}`;
+}
 
 export interface RuntimeConfig {
   readonly serviceName: string;
@@ -39,25 +61,43 @@ export interface RuntimeConfig {
   readonly logLevel: LogLevel;
 }
 
+/**
+ * Runtime section. The port resolves MOST-SPECIFIC-FIRST:
+ *
+ *   PORT_<SERVICE_NAME>  →  PORT  →  3000
+ *
+ * Before this, only the generic `PORT` was read and .env.example never set
+ * it — so every PORT_* line in that file was decoration and all eleven
+ * services defaulted to 3000 and fought over the socket. The specific
+ * variable wins because it is the one that can express a whole topology in
+ * a single shared .env, which is exactly how the dev stack is run.
+ */
 export function loadRuntimeConfig(serviceName: string, source: EnvSource = process.env): RuntimeConfig {
   const env = loadEnv(
     {
       NODE_ENV: withDefault(oneOf(NODE_ENVS), 'development'),
-      PORT: withDefault(port(), 3000),
+      PORT: withDefault(port(), FALLBACK_PORT),
       LOG_LEVEL: withDefault(oneOf(LOG_LEVELS), 'info'),
     },
     source,
   );
+
+  // Validated with the same `port()` spec as the generic variable, so a typo
+  // in PORT_IDENTITY_SERVICE fails loudly at boot instead of being ignored.
+  const specificVar = portEnvVarFor(serviceName);
+  const parsed = optional(port()).parse(specificVar, source[specificVar]);
+  if (!parsed.ok) throw new EnvValidationError([parsed.error]);
+
   return deepFreeze({
     serviceName,
     nodeEnv: env.NODE_ENV,
     isProduction: env.NODE_ENV === 'production',
-    port: env.PORT,
+    port: parsed.value ?? env.PORT,
     logLevel: env.LOG_LEVEL,
   });
 }
 
-// ── Database (PostgreSQL) ─────────────────────────────────────────
+// ── Database (PostgreSQL) ──────────────────────────────────────
 
 export interface DatabaseConfig {
   readonly url: string;
@@ -75,7 +115,10 @@ export function loadDatabaseConfig(source: EnvSource = process.env): DatabaseCon
   return deepFreeze({ url: env.DATABASE_URL, maxConnections: env.DATABASE_MAX_CONNECTIONS });
 }
 
-// ── Redis ─────────────────────────────────────────────────────────
+// ── Redis ───────────────────────────────────────────────────
+// Redis was removed from the stack on 2026-07-19 and REDIS_URL no longer
+// exists in .env.example. This loader is kept for the day a real consumer
+// appears (it is deliberately NOT part of loadServiceConfig — see below).
 
 export interface RedisConfig {
   readonly url: string;
@@ -89,7 +132,7 @@ export function loadRedisConfig(source: EnvSource = process.env): RedisConfig {
   return deepFreeze({ url: env.REDIS_URL });
 }
 
-// ── Kafka ─────────────────────────────────────────────────────────
+// ── Kafka ───────────────────────────────────────────────────
 
 export interface KafkaConfig {
   readonly brokers: readonly string[];
@@ -152,7 +195,7 @@ export function loadG2GConfig(source: EnvSource = process.env): G2GConfig {
   });
 }
 
-// ── Security ──────────────────────────────────────────────────────
+// ── Security ────────────────────────────────────────────────
 // Master keys MUST be strong. We refuse to boot with weak keys — a bad
 // key here means every hashed National ID and encrypted PII column is
 // weak. 32 chars is the enforced floor for dev; production uses HSM/KMS.
@@ -221,7 +264,7 @@ export function loadAuthVerifyConfig(source: EnvSource = process.env): AuthVerif
   });
 }
 
-// ── Auth issuer (PRIVATE key) ─────────────────────────────────────
+// ── Auth issuer (PRIVATE key) ─────────────────────────────────
 // The mirror of loadAuthVerifyConfig for the ONE service that MINTS tokens
 // (iam-service). It holds the Ed25519 PRIVATE key; every other service only
 // ever verifies with the public key — the whole point of the asymmetric design.
@@ -260,25 +303,129 @@ export function loadAuthIssuerConfig(source: EnvSource = process.env): AuthIssue
   });
 }
 
-// ── Composite service config ──────────────────────────────────────
+// ── CORS (edge tier only) ──────────────────────────────────────
+// CORS_ORIGINS has existed in .env.example from the beginning with nothing
+// reading it. It becomes load-bearing the moment a browser talks to a BFF,
+// so it gets a real loader. Internal microservices must NOT call this: a
+// service no browser reaches should emit no CORS headers at all.
+
+export interface CorsConfig {
+  /** Exact-match allow-list. Never a pattern — see shared-http/cors.ts. */
+  readonly origins: readonly string[];
+}
+
+export function loadCorsConfig(source: EnvSource = process.env): CorsConfig {
+  const env = loadEnv(
+    {
+      CORS_ORIGINS: withDefault(list({ minItems: 1 }), [
+        'http://localhost:3000',
+        'http://localhost:3001',
+        'http://localhost:3002',
+      ]),
+    },
+    source,
+  );
+  return deepFreeze({ origins: env.CORS_ORIGINS });
+}
+
+// ── Edge session (BFF cookie tier) ───────────────────────────────
+// The browser holds an opaque HANDLE; the upstream credential (officer Ed25519
+// JWT or citizen opaque session token) stays server-side in the edge session
+// store. Two TTLs, not one:
+//
+//   idle     — sliding, refreshed on activity (30 min, matching ADR-018).
+//   absolute — a hard ceiling no amount of activity extends, so a stolen
+//              handle cannot be kept alive forever by the thief's own traffic.
+//              A sliding TTL alone is an immortal session.
+//
+// EDGE_SESSION_HMAC_KEY keys the hash of the stored handle. A KEYED hash, not
+// a bare digest: a leaked database dump is then not a set of replayable
+// session handles, because the key lives in the process/HSM and not the table.
+// Mirrors the NATIONAL_ID_HMAC_KEY posture exactly.
+
+export interface EdgeSessionConfig {
+  /** Keys the stored session-handle hash. SECRET. */
+  readonly handleHmacKey: string;
+  /** Sliding inactivity window, seconds. */
+  readonly idleTtlSeconds: number;
+  /** Hard ceiling on total session lifetime, seconds. */
+  readonly absoluteTtlSeconds: number;
+  /**
+   * Emit cookies with `Secure`. MUST be true in production — and the
+   * __Host- prefix requires it, so shared-http will refuse to serialize
+   * the session cookie at all when this is false.
+   */
+  readonly secureCookies: boolean;
+}
+
+export function loadEdgeSessionConfig(source: EnvSource = process.env): EdgeSessionConfig {
+  const env = loadEnv(
+    {
+      EDGE_SESSION_HMAC_KEY: string({ minLength: 32, secret: true }),
+      EDGE_SESSION_IDLE_TTL_SECONDS: withDefault(integer({ min: 60, max: 86_400 }), 1_800),
+      EDGE_SESSION_ABSOLUTE_TTL_SECONDS: withDefault(integer({ min: 300, max: 604_800 }), 43_200),
+      EDGE_COOKIE_SECURE: withDefault(boolean(), true),
+    },
+    source,
+  );
+
+  // Cross-field: an absolute ceiling below the sliding window is a silent
+  // contradiction that would expire sessions mid-activity for no stated reason.
+  if (env.EDGE_SESSION_ABSOLUTE_TTL_SECONDS < env.EDGE_SESSION_IDLE_TTL_SECONDS) {
+    throw new EnvValidationError([
+      'EDGE_SESSION_ABSOLUTE_TTL_SECONDS must be >= EDGE_SESSION_IDLE_TTL_SECONDS ' +
+        '(an absolute ceiling below the sliding window expires active sessions).',
+    ]);
+  }
+
+  return deepFreeze({
+    handleHmacKey: env.EDGE_SESSION_HMAC_KEY,
+    idleTtlSeconds: env.EDGE_SESSION_IDLE_TTL_SECONDS,
+    absoluteTtlSeconds: env.EDGE_SESSION_ABSOLUTE_TTL_SECONDS,
+    secureCookies: env.EDGE_COOKIE_SECURE,
+  });
+}
+
+// ── Agency deployment selector ──────────────────────────────────
+// The whole mechanism behind "ONE agency-bff codebase, THREE deployments".
+// Three codebases would be three places to forget the same security fix; the
+// officer token already carries the agency claim and the DB roles do the real
+// enforcement, so the deployment only needs to know which agency it fronts.
+
+export const AGENCIES = ['RDF', 'RNP', 'RCS'] as const;
+export type AgencyCode = (typeof AGENCIES)[number];
+
+export interface AgencyDeploymentConfig {
+  readonly agency: AgencyCode;
+}
+
+export function loadAgencyDeploymentConfig(source: EnvSource = process.env): AgencyDeploymentConfig {
+  const env = loadEnv({ AGENCY: oneOf(AGENCIES) }, source);
+  return deepFreeze({ agency: env.AGENCY });
+}
+
+// ── Composite service config ───────────────────────────────────
 
 export interface ServiceConfig {
   readonly runtime: RuntimeConfig;
   readonly database: DatabaseConfig;
-  readonly redis: RedisConfig;
   readonly kafka: KafkaConfig;
 }
 
 /**
  * Standard bootstrap config for a typical USRP microservice
- * (runtime + database + redis + kafka). Services layer on the extra
- * sections they need (e.g. G2G, security) explicitly.
+ * (runtime + database + kafka). Services layer on the extra sections they
+ * need (e.g. G2G, security) explicitly.
+ *
+ * REDIS IS DELIBERATELY ABSENT. It used to be a required member, which meant
+ * this function demanded REDIS_URL — a variable deleted from .env.example on
+ * 2026-07-19 along with Redis itself. Any caller would have failed to boot on
+ * a validation error no operator could satisfy.
  */
 export function loadServiceConfig(serviceName: string, source: EnvSource = process.env): ServiceConfig {
   return deepFreeze({
     runtime: loadRuntimeConfig(serviceName, source),
     database: loadDatabaseConfig(source),
-    redis: loadRedisConfig(source),
     kafka: loadKafkaConfig(serviceName, source),
   });
 }
