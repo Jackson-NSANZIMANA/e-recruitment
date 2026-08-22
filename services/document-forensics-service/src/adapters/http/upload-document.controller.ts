@@ -27,12 +27,12 @@
 // Route.maxBodyBytes = file cap + multipart framing budget bounds what the
 // SOCKET may spend (P0 made the cap opt-in per route for precisely this one, so
 // no other endpoint inherits a 10 MB DoS budget). The separate file-length
-// check enforces the CONTRACT: without it a caller could spend the whole budget
-// on framing plus legal-looking junk parts and never send an oversized file.
+// check enforces the CONTRACT: without it a caller could spend the whole body
+// budget on framing plus legal-looking junk parts and never send an oversized file.
 //
 // The client's filename is validated and then IGNORED. The object key is
 // derived from closed-set inputs (domain/object-key.ts) — a filename-derived
-// key is a path traversal and a write-into-another-application primitive.
+// key is a path traversal and a write-into-someone-else's-record primitive.
 // ══════════════════════════════════════════════════════════════════
 
 import {
@@ -163,22 +163,14 @@ export function uploadDocumentRoute(
   };
 }
 
-/**
- * documentType is passed in rather than carried on the outcome: it is
- * request-scoped data the use case was GIVEN, not something it decided, and
- * putting it on the outcome invites a caller to read it as a derived value.
- */
 function mapOutcome(outcome: UploadDocumentOutcome, documentType: DocumentType): HttpResult {
   switch (outcome.kind) {
     case 'UPLOADED':
-      // NO lane, NO score, NO flags — see the header. The uploader learns only
-      // that the document was received and under which id.
       return {
         status: 201,
         body: { status: 'UPLOADED', documentId: outcome.documentId, documentType },
       };
     case 'APPLICATION_NOT_FOUND':
-      // Identical to "belongs to another citizen" — not an existence oracle.
       return { status: 404, body: { error: 'APPLICATION_NOT_FOUND' } };
     case 'NOT_ACCEPTING_DOCUMENTS':
       return {
@@ -195,8 +187,6 @@ function mapOutcome(outcome: UploadDocumentOutcome, documentType: DocumentType):
         body: { error: 'CONTENT_TYPE_MISMATCH', declared: outcome.declared },
       };
     case 'MALWARE_DETECTED':
-      // Reported plainly: nothing was stored, and the citizen must know to
-      // upload a different file.
       return { status: 422, body: { error: 'DOCUMENT_REJECTED_MALWARE' } };
     case 'SCANNER_UNAVAILABLE':
       return { status: 503, body: { error: 'SCANNER_UNAVAILABLE' } };
@@ -221,7 +211,6 @@ function mapDomainError(err: unknown): HttpError {
     });
   }
   if (err instanceof DocumentEnvelopeError) {
-    // A key/config fault, never the caller's problem — and never detailed to them.
     return new HttpError(500, 'DOCUMENT_ENCRYPTION_ERROR', 'failed to seal the document', {
       cause: err,
     });
