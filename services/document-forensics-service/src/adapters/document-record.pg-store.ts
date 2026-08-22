@@ -2,16 +2,22 @@
 // document-forensics-service — DocumentRecordStore adapter (PostgreSQL)
 //
 // First writer of the document_records tables (modeled since baseline, dead
-// until now). One transaction as usrp_system_service into the OWNING agency
-// schema: the application lookup is the cross-agency guard (document_records
-// has no RLS — agency = schema, exactly like the applications projections).
-// Idempotent re-analysis: one row per (application, object key) — a repeat
-// analyze of the same object UPDATEs the verdict in place rather than
-// growing duplicate rows.
+// until the forensics slice). One transaction as usrp_system_service into the
+// OWNING agency schema: the application lookup is the cross-agency guard
+// (document_records has no RLS — agency = schema, exactly like the
+// applications projections). The agency→schema mapping is imported from
+// domain/agency-schema.ts rather than declared here: it is a security control,
+// and one copy means one place to get a fourth agency right.
+//
+// Idempotent by (application, object key): a repeat verdict on the same object
+// UPDATEs in place instead of growing duplicate rows. That is what makes the
+// upload ingress's DERIVED, STABLE object key safe — re-uploading a corrected
+// certificate overwrites the object and refreshes this row, rather than
+// leaving an un-analyzed orphan behind (see domain/object-key.ts).
 // ══════════════════════════════════════════════════════════════════
 
 import { sql } from '@usrp/shared-database';
-import type { Agency } from '@usrp/shared-types';
+import { SYSTEM_ROLE, schemaForAgency } from '../domain/agency-schema.js';
 import type {
   DocumentRecordStore,
   RecordVerdictInput,
@@ -19,17 +25,9 @@ import type {
 } from '../ports/document-record-store.js';
 import { ForensicsPersistenceError } from '../domain/forensics.errors.js';
 
-const SYSTEM_ROLE = 'usrp_system_service';
-
-const AGENCY_SCHEMA: Readonly<Record<Agency, 'rdf_ops' | 'rnp_ops' | 'rcs_ops'>> = {
-  RDF: 'rdf_ops',
-  RNP: 'rnp_ops',
-  RCS: 'rcs_ops',
-};
-
 export class PgDocumentRecordStore implements DocumentRecordStore {
   async recordVerdict(input: RecordVerdictInput): Promise<RecordVerdictOutcome> {
-    const schema = sql(AGENCY_SCHEMA[input.agency]);
+    const schema = sql(schemaForAgency(input.agency));
     const { verdict } = input;
     try {
       return await sql.begin(async (tx): Promise<RecordVerdictOutcome> => {
