@@ -10,25 +10,29 @@
 // growing duplicate rows.
 // ══════════════════════════════════════════════════════════════════
 
-import { sql, asJsonb } from '@usrp/shared-database';
-import type { Agency } from '@usrp/shared-types';
+import { sql, asJsonb } from "@usrp/shared-database";
+import type { Agency } from "@usrp/shared-types";
 import type {
   DocumentRecordStore,
   RecordVerdictInput,
   RecordVerdictOutcome,
-} from '../ports/document-record-store.js';
-import { ForensicsPersistenceError } from '../domain/forensics.errors.js';
+} from "../ports/document-record-store.js";
+import { ForensicsPersistenceError } from "../domain/forensics.errors.js";
 
-const SYSTEM_ROLE = 'usrp_system_service';
+const SYSTEM_ROLE = "usrp_system_service";
 
-const AGENCY_SCHEMA: Readonly<Record<Agency, 'rdf_ops' | 'rnp_ops' | 'rcs_ops'>> = {
-  RDF: 'rdf_ops',
-  RNP: 'rnp_ops',
-  RCS: 'rcs_ops',
+const AGENCY_SCHEMA: Readonly<
+  Record<Agency, "rdf_ops" | "rnp_ops" | "rcs_ops">
+> = {
+  RDF: "rdf_ops",
+  RNP: "rnp_ops",
+  RCS: "rcs_ops",
 };
 
 export class PgDocumentRecordStore implements DocumentRecordStore {
-  async recordVerdict(input: RecordVerdictInput): Promise<RecordVerdictOutcome> {
+  async recordVerdict(
+    input: RecordVerdictInput,
+  ): Promise<RecordVerdictOutcome> {
     const schema = sql(AGENCY_SCHEMA[input.agency]);
     const { verdict } = input;
     try {
@@ -40,7 +44,7 @@ export class PgDocumentRecordStore implements DocumentRecordStore {
         const apps = await tx<{ id: string }[]>`
           SELECT id FROM ${schema}.applications WHERE id = ${input.applicationId}
         `;
-        if (apps.length === 0) return { kind: 'APPLICATION_NOT_FOUND' };
+        if (apps.length === 0) return { kind: "APPLICATION_NOT_FOUND" };
 
         // One row per (application, object key); FOR UPDATE so a concurrent
         // re-analysis of the same object serializes instead of racing.
@@ -66,7 +70,7 @@ export class PgDocumentRecordStore implements DocumentRecordStore {
               forensics_completed_at = now()
             WHERE id = ${existingRow.id}
           `;
-          return { kind: 'RECORDED', documentId: existingRow.id };
+          return { kind: "RECORDED", documentId: existingRow.id };
         }
 
         const inserted = await tx<{ id: string }[]>`
@@ -90,13 +94,15 @@ export class PgDocumentRecordStore implements DocumentRecordStore {
           RETURNING id
         `;
         const row = inserted[0];
-        if (!row) throw new ForensicsPersistenceError('INSERT returned no row');
-        return { kind: 'RECORDED', documentId: row.id };
+        if (!row) throw new ForensicsPersistenceError("INSERT returned no row");
+        return { kind: "RECORDED", documentId: row.id };
       });
     } catch (cause) {
       throw cause instanceof ForensicsPersistenceError
         ? cause
-        : new ForensicsPersistenceError('Failed to record forensics verdict', { cause });
+        : new ForensicsPersistenceError("Failed to record forensics verdict", {
+            cause,
+          });
     }
   }
 }
