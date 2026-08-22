@@ -2,17 +2,32 @@
 // @usrp/shared-http — Minimal HTTP server over node:http (ADR-005)
 //
 // A deliberately small, zero-dependency ingress substrate shared by every
-// USRP service. It gives a hexagonal adapter exactly what it needs —
-// typed routing, bounded JSON parsing, a uniform error shape,
+// USRP service. It gives a hexagonal adapter exactly what it needs — typed
+// routing, bounded body parsing, cookies, CORS, a uniform error shape,
 // health/readiness, correlation-id propagation, one structured access-log
-// line per request, and graceful shutdown — and nothing more. Business
-// logic lives in the service core; this only moves bytes at the edge.
+// line per request, and graceful shutdown — and nothing more. Business logic
+// lives in the service core; this only moves bytes at the edge.
+//
+// THREE THINGS CHANGED WHEN THE EDGE TIER ARRIVED:
+//
+//   • Set-Cookie is emitted as a header ARRAY, so a response can carry the
+//     session handle and the CSRF echo at once. Node's writeHead accepts
+//     string[] for exactly this reason; a Record<string, string> never could.
+//
+//   • The ROUTE IS RESOLVED BEFORE THE CONTEXT IS BUILT, so the matched
+//     route's body cap is what bounds the read. A cap negotiated after the
+//     fact would be no cap at all.
+//
+//   • CORS preflight is answered HERE, never by a route, so a new endpoint
+//     cannot ship without it.
 // ══════════════════════════════════════════════════════════════════
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { randomUUID } from 'node:crypto';
 import { HttpError } from './errors.js';
+import { parseCookieHeader, serializeSetCookie } from './cookies.js';
+import { corsPreflightHeaders, corsResponseHeaders, isAllowedOrigin } from './cors.js';
 import type {
   AccessLogRecord,
   AccessLogger,
@@ -26,6 +41,12 @@ import type {
 const DEFAULT_MAX_BODY_BYTES = 64 * 1024;
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 10_000;
 const JSON_CONTENT_TYPE = 'application/json; charset=utf-8';
+
+/** A matched route plus the byte cap that route is allowed to spend. */
+interface RouteEntry {
+  readonly handler: RouteHandler;
+  readonly maxBodyBytes: number;
+}
 
 function defaultAccessLogger(record: AccessLogRecord): void {
   const line = JSON.stringify({ msg: 'http_request', ...record });
@@ -62,6 +83,18 @@ function errorToResult(err: unknown): HttpResult {
   return { status: 500, body: { error: 'INTERNAL_ERROR' } };
 }
 
+/** Union two comma-separated header lists without duplicating entries. */
+function mergeVary(a: string | undefined, b: string | undefined): string | undefined {
+  if (a === undefined) return b;
+  if (b === undefined) return a;
+  const seen = new Set<string>();
+  for (const token of `${a},${b}`.split(',')) {
+    const trimmed = token.trim();
+    if (trimmed.length > 0) seen.add(trimmed);
+  }
+  return [...seen].join(', ');
+}
+
 /**
  * Start an HTTP server for a service. Resolves once the socket is listening.
  * Routes are matched exactly on method + path; `/health` and `/ready` are
@@ -79,41 +112,19 @@ export function startHttpServer(options: HttpServerOptions): Promise<HttpServer>
   } = options;
   const readiness = options.readiness;
   const onShutdown = options.onShutdown;
+  const cors = options.cors;
   const log = options.logger ?? defaultAccessLogger;
 
-  // path → (method → handler)
-  const table = new Map<string, Map<string, RouteHandler>>();
+  // path → (method → entry)
+  const table = new Map<string, Map<string, RouteEntry>>();
   for (const route of routes) {
     const method = route.method.toUpperCase();
-    const byMethod = table.get(route.path) ?? new Map<string, RouteHandler>();
-    byMethod.set(method, route.handler);
+    const byMethod = table.get(route.path) ?? new Map<string, RouteEntry>();
+    byMethod.set(method, {
+      handler: route.handler,
+      maxBodyBytes: route.maxBodyBytes ?? maxBodyBytes,
+    });
     table.set(route.path, byMethod);
-  }
-
-  async function dispatch(ctx: RequestContext): Promise<HttpResult> {
-    if (ctx.method === 'GET' && ctx.path === '/health') {
-      return { status: 200, body: { status: 'ok', service: serviceName } };
-    }
-    if (ctx.method === 'GET' && ctx.path === '/ready') {
-      const ready = readiness ? await readiness() : true;
-      return {
-        status: ready ? 200 : 503,
-        body: { status: ready ? 'ready' : 'not_ready', service: serviceName },
-      };
-    }
-    const byMethod = table.get(ctx.path);
-    if (byMethod === undefined) {
-      throw new HttpError(404, 'NOT_FOUND', `No route for ${ctx.method} ${ctx.path}.`);
-    }
-    const handler = byMethod.get(ctx.method);
-    if (handler === undefined) {
-      return {
-        status: 405,
-        headers: { allow: [...byMethod.keys()].sort().join(', ') },
-        body: { error: 'METHOD_NOT_ALLOWED', detail: `${ctx.method} is not allowed for ${ctx.path}.` },
-      };
-    }
-    return handler(ctx);
   }
 
   function buildContext(
@@ -122,48 +133,90 @@ export function startHttpServer(options: HttpServerOptions): Promise<HttpServer>
     method: string,
     requestId: string,
     correlationId: string,
+    routeMaxBodyBytes: number,
   ): RequestContext {
-    let cached: unknown;
-    let parsed = false;
+    const contentType = (firstHeader(req.headers['content-type']) ?? '').toLowerCase();
+    let rawCache: Buffer | undefined;
+    let jsonCache: unknown;
+    let jsonParsed = false;
+    let jar: ReadonlyMap<string, string> | undefined;
+
+    async function rawBody(): Promise<Buffer> {
+      if (rawCache === undefined) {
+        rawCache = await readBody(req, routeMaxBodyBytes);
+      }
+      return rawCache;
+    }
+
     async function json<T = unknown>(): Promise<T> {
-      if (!parsed) {
-        const contentType = (firstHeader(req.headers['content-type']) ?? '').toLowerCase();
+      if (!jsonParsed) {
         if (!contentType.includes('application/json')) {
           throw new HttpError(415, 'UNSUPPORTED_MEDIA_TYPE', 'Content-Type must be application/json.');
         }
-        const raw = await readBody(req, maxBodyBytes);
+        const raw = await rawBody();
         if (raw.length === 0) {
           throw new HttpError(400, 'EMPTY_BODY', 'A JSON request body is required.');
         }
         try {
-          cached = JSON.parse(raw.toString('utf8'));
+          jsonCache = JSON.parse(raw.toString('utf8'));
         } catch {
           throw new HttpError(400, 'MALFORMED_JSON', 'Request body is not valid JSON.');
         }
-        parsed = true;
+        jsonParsed = true;
       }
-      return cached as T;
+      return jsonCache as T;
     }
+
     return {
       method,
       path: url.pathname,
       query: url.searchParams,
       headers: req.headers,
+      contentType,
+      // Lazy: most requests never look at cookies, and internal
+      // service-to-service traffic carries none at all.
+      get cookies(): ReadonlyMap<string, string> {
+        if (jar === undefined) {
+          jar = parseCookieHeader(firstHeader(req.headers.cookie));
+        }
+        return jar;
+      },
       correlationId,
       requestId,
+      rawBody,
       json,
     };
   }
 
-  function send(res: ServerResponse, result: HttpResult, requestId: string, correlationId: string): void {
-    const headers: Record<string, string> = {
+  function send(
+    res: ServerResponse,
+    result: HttpResult,
+    requestId: string,
+    correlationId: string,
+    baseHeaders: Readonly<Record<string, string>>,
+  ): void {
+    const headers: Record<string, string | string[]> = {
       'content-type': JSON_CONTENT_TYPE,
       'x-content-type-options': 'nosniff',
       'cache-control': 'no-store',
       'x-request-id': requestId,
       'x-correlation-id': correlationId,
+      ...baseHeaders,
       ...(result.headers ?? {}),
     };
+
+    // `vary` is the one header both layers legitimately set: the CORS layer
+    // needs Origin, a handler may add its own. A blind spread would drop one.
+    const vary = mergeVary(baseHeaders['vary'], result.headers?.['vary']);
+    if (vary !== undefined) headers['vary'] = vary;
+
+    // Set-Cookie as an ARRAY — the whole reason cookies are a first-class
+    // field. Serialization throws on a cookie a browser would silently drop.
+    const cookies = result.cookies ?? [];
+    if (cookies.length > 0) {
+      headers['set-cookie'] = cookies.map(serializeSetCookie);
+    }
+
     const payload = result.body === undefined ? '' : JSON.stringify(result.body);
     res.writeHead(result.status, headers);
     res.end(payload);
@@ -175,12 +228,76 @@ export function startHttpServer(options: HttpServerOptions): Promise<HttpServer>
     const method = (req.method ?? 'GET').toUpperCase();
     const url = new URL(req.url ?? '/', `http://${host}`);
     const correlationId = firstHeader(req.headers['x-correlation-id'])?.trim() || requestId;
+    const origin = firstHeader(req.headers.origin);
     let status = 500;
+
+    // CORS headers ride on EVERY response once a policy is configured —
+    // including error responses, or the browser hides the real status behind
+    // an opaque network failure and every 4xx looks like a CORS bug.
+    let corsHeaders: Record<string, string> = {};
+    if (cors !== undefined) {
+      corsHeaders = isAllowedOrigin(cors, origin)
+        ? corsResponseHeaders(cors, origin as string)
+        : // Vary even on rejection: without it a shared cache can be poisoned
+          // into replaying one origin's ACAO to a different origin.
+          { vary: 'Origin' };
+    }
+
     try {
-      const ctx = buildContext(req, url, method, requestId, correlationId);
-      const result = await dispatch(ctx);
+      // ── CORS preflight: answered by the transport, never by a route ──
+      if (
+        cors !== undefined &&
+        method === 'OPTIONS' &&
+        firstHeader(req.headers['access-control-request-method']) !== undefined
+      ) {
+        const result: HttpResult = isAllowedOrigin(cors, origin)
+          ? { status: 204, headers: corsPreflightHeaders(cors, origin as string) }
+          : { status: 403, body: { error: 'ORIGIN_NOT_ALLOWED' } };
+        status = result.status;
+        send(res, result, requestId, correlationId, corsHeaders);
+        return;
+      }
+
+      // ── Reserved transport routes ──
+      if (method === 'GET' && url.pathname === '/health') {
+        const result: HttpResult = { status: 200, body: { status: 'ok', service: serviceName } };
+        status = result.status;
+        send(res, result, requestId, correlationId, corsHeaders);
+        return;
+      }
+      if (method === 'GET' && url.pathname === '/ready') {
+        const ready = readiness ? await readiness() : true;
+        const result: HttpResult = {
+          status: ready ? 200 : 503,
+          body: { status: ready ? 'ready' : 'not_ready', service: serviceName },
+        };
+        status = result.status;
+        send(res, result, requestId, correlationId, corsHeaders);
+        return;
+      }
+
+      // ── Route resolution BEFORE context construction, so the matched
+      //    route's byte cap is what actually bounds the body read. ──
+      const byMethod = table.get(url.pathname);
+      if (byMethod === undefined) {
+        throw new HttpError(404, 'NOT_FOUND', `No route for ${method} ${url.pathname}.`);
+      }
+      const entry = byMethod.get(method);
+      if (entry === undefined) {
+        const result: HttpResult = {
+          status: 405,
+          headers: { allow: [...byMethod.keys()].sort().join(', ') },
+          body: { error: 'METHOD_NOT_ALLOWED', detail: `${method} is not allowed for ${url.pathname}.` },
+        };
+        status = result.status;
+        send(res, result, requestId, correlationId, corsHeaders);
+        return;
+      }
+
+      const ctx = buildContext(req, url, method, requestId, correlationId, entry.maxBodyBytes);
+      const result = await entry.handler(ctx);
       status = result.status;
-      send(res, result, requestId, correlationId);
+      send(res, result, requestId, correlationId, corsHeaders);
     } catch (err) {
       const result = errorToResult(err);
       status = result.status;
@@ -188,7 +305,7 @@ export function startHttpServer(options: HttpServerOptions): Promise<HttpServer>
         // Server-side only — the client sees just the code (see errorToResult).
         console.error(JSON.stringify({ msg: 'request_error', requestId, correlationId }), err);
       }
-      send(res, result, requestId, correlationId);
+      send(res, result, requestId, correlationId, corsHeaders);
     } finally {
       const durationMs = Number(process.hrtime.bigint() - startNs) / 1e6;
       log({
