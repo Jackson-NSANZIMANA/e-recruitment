@@ -6,6 +6,9 @@
 //
 //   USRP config sections:
 //     import { loadServiceConfig, loadG2GConfig } from '@usrp/shared-config'
+//
+//   Edge (BFF) tier only:
+//     import { loadCorsConfig, loadEdgeSessionConfig } from '@usrp/shared-config'
 // ══════════════════════════════════════════════════════════════════
 
 export {
@@ -29,20 +32,29 @@ export {
 } from './env.js';
 
 export {
+  AGENCIES,
   LOG_LEVELS,
   NODE_ENVS,
+  loadAgencyDeploymentConfig,
   loadAuthIssuerConfig,
   loadAuthVerifyConfig,
+  loadCorsConfig,
   loadDatabaseConfig,
+  loadEdgeSessionConfig,
   loadG2GConfig,
   loadKafkaConfig,
   loadRedisConfig,
   loadRuntimeConfig,
   loadSecurityConfig,
   loadServiceConfig,
+  portEnvVarFor,
+  type AgencyCode,
+  type AgencyDeploymentConfig,
   type AuthIssuerConfig,
   type AuthVerifyConfig,
+  type CorsConfig,
   type DatabaseConfig,
+  type EdgeSessionConfig,
   type G2GConfig,
   type G2GEndpointConfig,
   type KafkaConfig,
