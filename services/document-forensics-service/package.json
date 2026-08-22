@@ -2,7 +2,7 @@
   "name": "@usrp/document-forensics-service",
   "version": "1.0.0",
   "private": true,
-  "description": "USRP Document Forensics Service — the amber-lane trigger: retrieves a referenced document's REAL bytes from the object store, runs the bounded-real analyzer tier (ClamAV virus scan + container/metadata parse + C2PA-manifest presence), records the verdict on document_records and emits document.forensics",
+  "description": "USRP Document Forensics Service — document ingress + the amber-lane trigger: ingests uploaded bytes from the citizen portal (ClamAV scan BEFORE store, AES-256-GCM sealed at rest, C2PA-manifest capture in path), analyzes referenced documents' REAL bytes, records verdicts on document_records and emits document.forensics",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -19,7 +19,8 @@
     "dev": "tsx watch src/main.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/**/*.ts",
-    "selfcheck": "tsx selfcheck/verify-forensics-slice.ts"
+    "selfcheck": "tsx selfcheck/verify-forensics-slice.ts",
+    "selfcheck:upload": "tsx selfcheck/verify-document-upload-slice.ts"
   },
   "dependencies": {
     "@usrp/shared-auth": "workspace:*",
