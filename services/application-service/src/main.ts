@@ -16,6 +16,15 @@
 // local-only — logged loudly so this is never mistaken for durable transport).
 // The projection consumer is only meaningful with a real broker, so it is wired
 // only when KAFKA_BROKERS is set.
+//
+// ROUTE TABLE NOTE (why the two single-record reads are safe to add here):
+// shared-http keys its table by EXACT path — there is no prefix matching and no
+// param syntax in this substrate. '/v1/applications/by-id' and
+// '/v1/applications/status-history' are therefore independent entries that
+// cannot shadow '/v1/applications' or each other, in any registration order.
+// That constraint is also WHY both take '?applicationId=' rather than a path
+// param (ADR-005, Invariant 1): restoring REST ergonomics for the browser is
+// the edge tier's job, not this service's.
 // ══════════════════════════════════════════════════════════════════
 
 import { sql } from '@usrp/shared-database';
@@ -26,7 +35,13 @@ import { startHttpServer } from '@usrp/shared-http';
 import { createApplicationService } from './index.js';
 import { loadApplicationConfig } from './config.js';
 import { submitApplicationRoute } from './adapters/http/submit-application.controller.js';
-import { amberQueueRoute, byApplicantRoute, listApplicationsRoute } from './adapters/http/list-applications.controller.js';
+import {
+  amberQueueRoute,
+  byApplicantRoute,
+  byIdRoute,
+  listApplicationsRoute,
+  statusHistoryRoute,
+} from './adapters/http/list-applications.controller.js';
 import { officerTransitionRoutes } from './adapters/http/officer-transitions.controller.js';
 import { withdrawOwnRoute } from './adapters/http/self-withdrawal.controller.js';
 import { walkInRoutes } from './adapters/http/walk-in.controller.js';
@@ -91,6 +106,11 @@ async function main(): Promise<void> {
       submitApplicationRoute(service.submit, verify), // system-token required
       listApplicationsRoute(service.list, verify), // officer-token required
       amberQueueRoute(service.list, verify), // officer review queue (ADR-011)
+      // officer-token single-record reads — the console's detail screen and its
+      // Procedural Justice timeline. Both were implemented and then never
+      // mounted here, which made them unreachable dead code.
+      byIdRoute(service.list, verify), // GET /v1/applications/by-id?applicationId=
+      statusHistoryRoute(service.list, verify), // GET /v1/applications/status-history?applicationId=
       byApplicantRoute(service.list, verify), // system-token: applicant portal's cross-agency self read (ADR-018)
       withdrawOwnRoute(service.selfWithdrawal, verify), // system-token: the citizen's own voluntary withdrawal (ADR-020)
       // officer-token writes: medical-review / final-decision / accept / adjudicate

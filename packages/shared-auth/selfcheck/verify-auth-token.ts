@@ -60,14 +60,20 @@ const SYSTEM_CLAIMS: AuthTokenClaims = {
   expiresAt: '2026-07-10T17:00:00.000Z',
 };
 
+// Mirrors the RequestContext contract from @usrp/shared-http. `cookies`,
+// `contentType` and `rawBody()` arrived with the edge tier (cookie sessions +
+// multipart upload); withAuth never touches them, but the shape must be honest.
 function fakeCtx(headers: IncomingHttpHeaders): RequestContext {
   return {
     method: 'GET',
     path: '/v1/applications',
     query: new URLSearchParams(),
     headers,
+    contentType: '',
+    cookies: new Map<string, string>(),
     correlationId: 'corr-1',
     requestId: 'req-1',
+    rawBody: async (): Promise<Buffer> => Buffer.alloc(0),
     json: async <T = unknown>(): Promise<T> => ({}) as T,
   };
 }
@@ -88,7 +94,7 @@ async function main(): Promise<void> {
   const officerToken = signAuthToken(keys.privateKeyPem, OFFICER_CLAIMS);
   const systemToken = signAuthToken(keys.privateKeyPem, SYSTEM_CLAIMS);
 
-  console.log('\n── 1. Round-trip → Principal ────────────────────────────────');
+  console.log('\n── 1. Round-trip → Principal ────────────────────────────');
   check('token is namespaced + versioned', officerToken.startsWith('USRP-AUTH.v1.'));
   check('token has 4 dot-segments', officerToken.split('.').length === 4);
   const officer = verifyAuthToken(keys.publicKeyPem, officerToken, OPTS);
@@ -108,7 +114,7 @@ async function main(): Promise<void> {
     JSON.stringify(system),
   );
 
-  console.log('\n── 2. Tamper + wrong-key rejection ──────────────────────────');
+  console.log('\n── 2. Tamper + wrong-key rejection ────────────────────────');
   const tamperedSig = `${officerToken.slice(0, -4)}${officerToken.slice(-4) === 'AAAA' ? 'BBBB' : 'AAAA'}`;
   check('tampered signature rejected', verifyAuthToken(keys.publicKeyPem, tamperedSig, OPTS) === null);
   const parts = officerToken.split('.');
@@ -143,7 +149,7 @@ async function main(): Promise<void> {
   const noAgencyToken = signAuthToken(keys.privateKeyPem, noAgency);
   check('officer claim without agency rejected', verifyAuthToken(keys.publicKeyPem, noAgencyToken, OPTS) === null);
 
-  console.log('\n── 5. dbRoleForPrincipal (pure policy) ──────────────────────');
+  console.log('\n── 5. dbRoleForPrincipal (pure policy) ─────────────────────');
   const p = (agency: 'RDF' | 'RNP' | 'RCS'): Principal => ({
     kind: 'officer',
     subjectId: 's',
@@ -208,7 +214,7 @@ async function main(): Promise<void> {
     (await statusOf(() => eitherKind(fakeCtx({})))) === 401,
   );
 
-  console.log('\n───────────────────────────────────────────────');
+  console.log('\n─────────────────────────────────────────────');
   if (failures === 0) console.log('AUTH TOKEN + ENFORCEMENT PROVEN (deterministic) ✓');
   else console.error(`${failures} ASSERTION(S) FAILED ✗`);
 }

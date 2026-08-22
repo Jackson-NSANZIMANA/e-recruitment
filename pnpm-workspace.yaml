@@ -1,4 +1,12 @@
 packages:
+  # 'services/*' covers every microservice AND the three edge processes
+  # (citizen-bff, agency-bff, admin-bff).
+  #
+  # There used to be a 'services/agency-bff/*' glob here, which pre-encoded the
+  # three-codebase mistake into the workspace itself: it only makes sense if
+  # agency-bff is a DIRECTORY OF PACKAGES (rdf-bff / rnp-bff / rcs-bff). It is
+  # one package with three deployments selected by the AGENCY variable — three
+  # copies of one service would be three places for a security fix to be
+  # forgotten in two of them.
   - 'services/*'
-  - 'services/agency-bff/*'
   - 'packages/*'

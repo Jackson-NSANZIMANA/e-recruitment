@@ -291,6 +291,107 @@ export function loadAuthIssuerConfig(source: EnvSource = process.env): AuthIssue
   });
 }
 
+// ── CORS (edge tier only) ──────────────────────────────────────
+// CORS_ORIGINS has existed in .env.example from the beginning with nothing
+// reading it. It becomes load-bearing the moment a browser talks to a BFF,
+// so it gets a real loader. Internal microservices must NOT call this: a
+// service no browser reaches should emit no CORS headers at all.
+
+export interface CorsConfig {
+  /** Exact-match allow-list. Never a pattern — see shared-http/cors.ts. */
+  readonly origins: readonly string[];
+}
+
+export function loadCorsConfig(source: EnvSource = process.env): CorsConfig {
+  const env = loadEnv(
+    {
+      CORS_ORIGINS: withDefault(list({ minItems: 1 }), [
+        'http://localhost:3000',
+        'http://localhost:3001',
+        'http://localhost:3002',
+      ]),
+    },
+    source,
+  );
+  return deepFreeze({ origins: env.CORS_ORIGINS });
+}
+
+// ── Edge session (BFF cookie tier) ───────────────────────────────
+// The browser holds an opaque HANDLE; the upstream credential (officer Ed25519
+// JWT or citizen opaque session token) stays server-side in the edge session
+// store. Two TTLs, not one:
+//
+//   idle     — sliding, refreshed on activity (30 min, matching ADR-018).
+//   absolute — a hard ceiling no amount of activity extends, so a stolen
+//              handle cannot be kept alive forever by the thief's own traffic.
+//              A sliding TTL alone is an immortal session.
+//
+// EDGE_SESSION_HMAC_KEY keys the hash of the stored handle. A KEYED hash, not
+// a bare digest: a leaked database dump is then not a set of replayable
+// session handles, because the key lives in the process/HSM and not the table.
+// Mirrors the NATIONAL_ID_HMAC_KEY posture exactly.
+
+export interface EdgeSessionConfig {
+  /** Keys the stored session-handle hash. SECRET. */
+  readonly handleHmacKey: string;
+  /** Sliding inactivity window, seconds. */
+  readonly idleTtlSeconds: number;
+  /** Hard ceiling on total session lifetime, seconds. */
+  readonly absoluteTtlSeconds: number;
+  /**
+   * Emit cookies with `Secure`. MUST be true in production — and the
+   * __Host- prefix requires it, so shared-http will refuse to serialize
+   * the session cookie at all when this is false.
+   */
+  readonly secureCookies: boolean;
+}
+
+export function loadEdgeSessionConfig(source: EnvSource = process.env): EdgeSessionConfig {
+  const env = loadEnv(
+    {
+      EDGE_SESSION_HMAC_KEY: string({ minLength: 32, secret: true }),
+      EDGE_SESSION_IDLE_TTL_SECONDS: withDefault(integer({ min: 60, max: 86_400 }), 1_800),
+      EDGE_SESSION_ABSOLUTE_TTL_SECONDS: withDefault(integer({ min: 300, max: 604_800 }), 43_200),
+      EDGE_COOKIE_SECURE: withDefault(boolean(), true),
+    },
+    source,
+  );
+
+  // Cross-field: an absolute ceiling below the sliding window is a silent
+  // contradiction that would expire sessions mid-activity for no stated reason.
+  if (env.EDGE_SESSION_ABSOLUTE_TTL_SECONDS < env.EDGE_SESSION_IDLE_TTL_SECONDS) {
+    throw new EnvValidationError([
+      'EDGE_SESSION_ABSOLUTE_TTL_SECONDS must be >= EDGE_SESSION_IDLE_TTL_SECONDS ' +
+        '(an absolute ceiling below the sliding window expires active sessions).',
+    ]);
+  }
+
+  return deepFreeze({
+    handleHmacKey: env.EDGE_SESSION_HMAC_KEY,
+    idleTtlSeconds: env.EDGE_SESSION_IDLE_TTL_SECONDS,
+    absoluteTtlSeconds: env.EDGE_SESSION_ABSOLUTE_TTL_SECONDS,
+    secureCookies: env.EDGE_COOKIE_SECURE,
+  });
+}
+
+// ── Agency deployment selector ──────────────────────────────────
+// The whole mechanism behind "ONE agency-bff codebase, THREE deployments".
+// Three codebases would be three places to forget the same security fix; the
+// officer token already carries the agency claim and the DB roles do the real
+// enforcement, so the deployment only needs to know which agency it fronts.
+
+export const AGENCIES = ['RDF', 'RNP', 'RCS'] as const;
+export type AgencyCode = (typeof AGENCIES)[number];
+
+export interface AgencyDeploymentConfig {
+  readonly agency: AgencyCode;
+}
+
+export function loadAgencyDeploymentConfig(source: EnvSource = process.env): AgencyDeploymentConfig {
+  const env = loadEnv({ AGENCY: oneOf(AGENCIES) }, source);
+  return deepFreeze({ agency: env.AGENCY });
+}
+
 // ── Composite service config ───────────────────────────────────
 
 export interface ServiceConfig {
