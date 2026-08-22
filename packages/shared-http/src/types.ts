@@ -3,10 +3,12 @@
 //
 // The contract a service adapter programs against. Handlers receive a
 // RequestContext and return an HttpResult (or throw an HttpError); the
-// server owns everything else — parsing, headers, logging, lifecycle.
+// server owns everything else — parsing, headers, cookies, CORS, logging,
+// lifecycle.
 // ══════════════════════════════════════════════════════════════════
 
 import type { IncomingHttpHeaders } from 'node:http';
+import type { SetCookie } from './cookies.js';
 
 /** What a route handler returns; the body is JSON-serialized by the server. */
 export interface HttpResult {
@@ -15,6 +17,15 @@ export interface HttpResult {
   readonly body?: unknown;
   /** Extra response headers, merged over the server defaults. */
   readonly headers?: Readonly<Record<string, string>>;
+  /**
+   * Cookies to emit, one `Set-Cookie` each.
+   *
+   * A FIRST-CLASS FIELD, not a header: `headers` is Record<string, string> and
+   * can therefore express exactly ONE Set-Cookie. The edge tier needs two per
+   * login (the httpOnly session handle plus the readable CSRF echo), so the
+   * header map cannot represent a correct response at all.
+   */
+  readonly cookies?: readonly SetCookie[];
 }
 
 /** Per-request handle passed to handlers. Body parsing is lazy and bounded. */
@@ -23,6 +34,14 @@ export interface RequestContext {
   readonly path: string;
   readonly query: URLSearchParams;
   readonly headers: IncomingHttpHeaders;
+  /** Lower-cased `content-type` (empty string when absent). */
+  readonly contentType: string;
+  /**
+   * Inbound cookies. Parsed lazily, first-occurrence-wins (a duplicate name
+   * is the cookie-shadowing trick; a deterministic jar is what makes the CSRF
+   * double-submit comparison meaningful).
+   */
+  readonly cookies: ReadonlyMap<string, string>;
   /**
    * Correlation id for the whole causal chain — taken from the inbound
    * `x-correlation-id` header, or a fresh id when absent. Seed it into the
@@ -31,6 +50,14 @@ export interface RequestContext {
   readonly correlationId: string;
   /** Unique id for THIS request (always fresh); echoed as `x-request-id`. */
   readonly requestId: string;
+  /**
+   * The raw request body, bounded by the route's byte cap (cached across
+   * calls). The PRIMITIVE — `json()` is layered on top and shares the same
+   * buffer, so a body can never be consumed twice. Reach for this only when
+   * the bytes are not JSON (multipart document upload); throws HttpError 413
+   * over the cap.
+   */
+  rawBody(): Promise<Buffer>;
   /**
    * Parse the JSON request body (cached across calls). Throws HttpError:
    * 415 on a non-JSON content-type, 413 over the size cap, 400 on empty or
@@ -46,6 +73,31 @@ export interface Route {
   readonly method: string;
   readonly path: string;
   readonly handler: RouteHandler;
+  /**
+   * Per-route body cap in bytes, overriding the server default.
+   *
+   * OPT-IN ON PURPOSE. Only a route that genuinely ingests files (document
+   * upload) may raise it. Lifting the server-wide default to suit one upload
+   * route would hand every other route the same large-payload DoS budget.
+   * Resolved BEFORE the request context is built, so the cap is bound to the
+   * matched route rather than negotiated by the caller.
+   */
+  readonly maxBodyBytes?: number;
+}
+
+/**
+ * Cross-origin policy. Supply it only on browser-facing processes (the edge
+ * tier); internal microservices leave it unset and emit no CORS headers.
+ */
+export interface CorsPolicy {
+  /** Exact-match allow-list. Never a pattern — see cors.ts. */
+  readonly origins: readonly string[];
+  /** Send `Allow-Credentials: true`. Required for cookie-based sessions. */
+  readonly credentials?: boolean;
+  readonly allowedMethods?: readonly string[];
+  readonly allowedHeaders?: readonly string[];
+  readonly exposedHeaders?: readonly string[];
+  readonly preflightMaxAgeSeconds?: number;
 }
 
 /** Readiness probe backing `GET /ready`; return false to report not-ready. */
@@ -70,7 +122,7 @@ export interface HttpServerOptions {
   readonly routes: readonly Route[];
   /** Bind address. Defaults to 0.0.0.0. Use 127.0.0.1 to bind loopback only. */
   readonly host?: string;
-  /** Max request body size in bytes (default 64 KiB). */
+  /** Default max request body size in bytes (default 64 KiB). */
   readonly maxBodyBytes?: number;
   /** Grace period before in-flight connections are force-closed (default 10s). */
   readonly shutdownTimeoutMs?: number;
@@ -82,6 +134,11 @@ export interface HttpServerOptions {
   readonly onShutdown?: () => Promise<void> | void;
   /** Install SIGTERM/SIGINT → graceful shutdown handlers (default true). */
   readonly handleSignals?: boolean;
+  /**
+   * Cross-origin policy. Omit on internal services — a microservice that is
+   * never called by a browser should emit no CORS headers at all.
+   */
+  readonly cors?: CorsPolicy;
 }
 
 /** A running server handle. */
