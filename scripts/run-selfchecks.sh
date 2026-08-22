@@ -8,8 +8,8 @@
 # turns this red.
 #
 # Prerequisites (the caller brings the infra up and bootstraps the DB):
-#   • tier1: Postgres + NIDA mock (:3100) + NESA mock (:3101)
-#   • tier2: Kafka (host listener :29092)
+#   • tier1: Postgres + NIDA mock (:3100) + NESA mock (:3101) + MinIO
+#   • tier2: Kafka (host listener :29092) + ClamAV
 #   • DB already bootstrapped (scripts/bootstrap-db.sh)
 #
 # Dev secrets are the well-known non-production values used across all
@@ -48,6 +48,13 @@ export MINIO_PORT="${MINIO_PORT:-9000}"
 export MINIO_USE_SSL="${MINIO_USE_SSL:-false}"
 export MINIO_ROOT_USER="${MINIO_ROOT_USER:-usrp_minio_admin}"
 export MINIO_ROOT_PASSWORD="${MINIO_ROOT_PASSWORD:-usrp_minio_dev_password}"
+export MINIO_BUCKET_DOCUMENTS="${MINIO_BUCKET_DOCUMENTS:-usrp-documents}"
+# Document-at-rest envelope (AES-256-GCM). NOT optional: MINIO_ENCRYPTION_KEY is
+# now REQUIRED to boot document-forensics-service — a store for scanned national
+# IDs that can start without its encryption key is a store that will run without
+# one. Committed DEV-ONLY value, same posture as the Ed25519 keypair above;
+# production keys come from HSM/KMS.
+export MINIO_ENCRYPTION_KEY="${MINIO_ENCRYPTION_KEY:-dev_document_envelope_key_min_32_chars!!}"
 export CLAMAV_HOST="${CLAMAV_HOST:-localhost}"
 export CLAMAV_PORT="${CLAMAV_PORT:-3310}"
 export CLAMAV_TIMEOUT_MS="${CLAMAV_TIMEOUT_MS:-30000}"
@@ -121,6 +128,12 @@ run_ts "biometric-service: check-in gate + persistence" services/biometric-servi
 run_ts "field-sync-service: offline capture + CRDT merge + adjudication" services/field-sync-service/selfcheck/verify-field-sync-slice.ts
 run_ts "audit-service: immutable trail"           services/audit-service/selfcheck/verify-audit-slice.ts
 run_ts "document-forensics: bounded-real analyzer (MinIO+ClamAV)" services/document-forensics-service/selfcheck/verify-forensics-slice.ts
+# The document INGRESS (P1 #3). Runs straight after the analyzer proof because it
+# depends on that route behaviourally: it uploads a file, then drives
+# /v1/forensics/analyze over the object it sealed itself, so a regression in
+# analyze/ should turn its OWN proof red first rather than surface as a
+# confusing failure in the middle of this one.
+run_ts "document-forensics: upload ingress (multipart → ClamAV → sealed MinIO → verdict)" services/document-forensics-service/selfcheck/verify-document-upload-slice.ts
 run_ts "application-service: amber routing + adjudication" services/application-service/selfcheck/verify-amber-adjudication-slice.ts
 run_ts "application-service: walk-in lane (register → vet → physical → merged funnel)" services/application-service/selfcheck/verify-walk-in-slice.ts
 # The whole spine composed: one real submission → all 3 gates → DOCUMENT_REVIEW_GREEN.
