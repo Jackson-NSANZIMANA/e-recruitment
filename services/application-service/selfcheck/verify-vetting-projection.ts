@@ -415,7 +415,7 @@ async function main(): Promise<void> {
     check('age_verified_at set', s?.age_verified_at != null);
     check('age-only does NOT advance status (stays SUBMITTED)', s?.status === 'SUBMITTED', s?.status);
     const detail = s?.age_eligibility_detail as Record<string, unknown> | null;
-    check('age detail is DOB-free (no dateOfBirth key)', detail != null && !('dateOfBirth' in detail));
+    check('age detail is DOB-free (no dateOfBirth key)', detail != null && typeof detail === 'object' && !('dateOfBirth' in detail));
   }
   // Then academic + criminal pass → the conjunction reaches the green lane.
   await producerBus.publish(nesaEvent(appGreen, 'RDF', 'GENERAL_ENLISTMENT', true));

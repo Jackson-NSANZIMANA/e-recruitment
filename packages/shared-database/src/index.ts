@@ -17,8 +17,8 @@
 import type { InferSelectModel, InferInsertModel } from 'drizzle-orm';
 
 // ── Database Client ───────────────────────────────────────────────
-export { db, sql } from './client.js';
-export type { Database } from './client.js';
+export { db, sql, asJsonb } from './client.js';
+export type { Database, JsonbValue } from './client.js';
 
 // ── Schema Objects (tables + enums) ──────────────────────────────
 // Re-exported so services can do:

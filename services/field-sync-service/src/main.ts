@@ -35,6 +35,25 @@ function createEventBus(serviceName: string): EventBus {
   return new InMemoryEventBus();
 }
 
+async function checkDatabaseReadiness(): Promise<boolean> {
+  const maxRetries = 3;
+  const baseDelayMs = 100;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      await sql`SELECT 1`;
+      return true;
+    } catch (err) {
+      if (attempt === maxRetries) {
+        return false;
+      }
+      const delayMs = baseDelayMs * Math.pow(2, attempt);
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  return false;
+}
+
 async function main(): Promise<void> {
   const config = loadFieldSyncConfig();
   const bus = createEventBus(config.runtime.serviceName);
@@ -56,14 +75,7 @@ async function main(): Promise<void> {
       resolveConflictRoute(service.resolveConflict, verify),
     ],
     // Ready only when the database — the system-of-record — is reachable.
-    readiness: async (): Promise<boolean> => {
-      try {
-        await sql`SELECT 1`;
-        return true;
-      } catch {
-        return false;
-      }
-    },
+    readiness: checkDatabaseReadiness,
     onShutdown: async (): Promise<void> => {
       console.log(JSON.stringify({ msg: 'service_stopping', service: config.runtime.serviceName }));
       await bus.disconnect();

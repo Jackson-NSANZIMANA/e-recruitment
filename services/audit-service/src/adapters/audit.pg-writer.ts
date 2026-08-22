@@ -13,7 +13,7 @@
 // be a mutation of the immutable trail (and the trigger would reject it).
 // ══════════════════════════════════════════════════════════════════
 
-import { sql } from '@usrp/shared-database';
+import { sql, asJsonb } from '@usrp/shared-database';
 import type { AppendOutcome, AuditRecord, AuditWriter } from '../ports/audit-writer.js';
 import { AuditWriteError } from '../domain/audit.errors.js';
 
@@ -41,7 +41,7 @@ export class PgAuditWriter implements AuditWriter {
             ${record.performedBy}, ${record.performedByRole},
             ${record.previousStatus}, ${record.newStatus},
             ${record.ipAddress}, ${record.userAgent},
-            ${record.metadata ? JSON.stringify(record.metadata) : null}::jsonb, ${record.occurredAt}
+            ${tx.json(asJsonb(record.metadata ?? null))}, ${record.occurredAt}
           )
           ON CONFLICT (kafka_event_id) DO NOTHING
           RETURNING id

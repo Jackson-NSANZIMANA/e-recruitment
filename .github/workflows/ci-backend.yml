@@ -93,8 +93,9 @@ jobs:
       # regression in isolation, PII, the backbone, or audit immutability
       # turns this red.
       - name: Run all proofs
+        env:
+          BOOT_TIMEOUT_S: 600
         run: pnpm verify
-
       # Surface broker/init logs when the proofs fail — Kafka setup is the
       # most common CI-only failure (see kafka-backbone-proof.md).
       - name: Dump infra logs on failure
