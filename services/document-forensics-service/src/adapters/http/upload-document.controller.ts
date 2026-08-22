@@ -70,8 +70,8 @@ const CONTROL_CHAR_RE = /[-\u001f\u007f]/;
 
 /**
  * Every document type any agency models — DERIVED from the per-agency sets, not
- * retyped. The per-agency check happens in the use case once the agency is
- * known from ownership; this is only the "is that a word at all" gate. A third
+ * retyped. The per-agency check happens in the use case once the agency is known
+ * from ownership; this is only the "is that a word at all" gate. A third
  * hand-maintained copy of this list is how one agency's enum silently drifts.
  */
 const KNOWN_DOCUMENT_TYPES: ReadonlySet<string> = new Set(
@@ -140,21 +140,22 @@ export function uploadDocumentRoute(
 
       const applicantId = requireUuid(form, 'applicantId');
       const applicationId = requireUuid(form, 'applicationId');
-      const documentType = form.fields.get('documentType');
-      if (documentType === undefined || !KNOWN_DOCUMENT_TYPES.has(documentType)) {
+      const rawDocumentType = form.fields.get('documentType');
+      if (rawDocumentType === undefined || !KNOWN_DOCUMENT_TYPES.has(rawDocumentType)) {
         throw new HttpError(400, 'INVALID_DOCUMENT_TYPE', 'documentType is missing or unknown.');
       }
+      const documentType = rawDocumentType as DocumentType;
 
       try {
         const outcome = await service.upload({
           applicantId,
           applicationId,
-          documentType: documentType as DocumentType,
+          documentType,
           declaredMediaType: file.contentType,
           bytes: file.bytes,
           context: { correlationId: ctx.correlationId, causationId: ctx.correlationId },
         });
-        return mapOutcome(outcome);
+        return mapOutcome(outcome, documentType);
       } catch (err) {
         throw mapDomainError(err);
       }
@@ -162,18 +163,19 @@ export function uploadDocumentRoute(
   };
 }
 
-function mapOutcome(outcome: UploadDocumentOutcome): HttpResult {
+/**
+ * documentType is passed in rather than carried on the outcome: it is
+ * request-scoped data the use case was GIVEN, not something it decided, and
+ * putting it on the outcome invites a caller to read it as a derived value.
+ */
+function mapOutcome(outcome: UploadDocumentOutcome, documentType: DocumentType): HttpResult {
   switch (outcome.kind) {
     case 'UPLOADED':
       // NO lane, NO score, NO flags — see the header. The uploader learns only
       // that the document was received and under which id.
       return {
         status: 201,
-        body: {
-          status: 'UPLOADED',
-          documentId: outcome.documentId,
-          documentType: outcome.verdict.flags.overallScore === undefined ? undefined : undefined,
-        },
+        body: { status: 'UPLOADED', documentId: outcome.documentId, documentType },
       };
     case 'APPLICATION_NOT_FOUND':
       // Identical to "belongs to another citizen" — not an existence oracle.

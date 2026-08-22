@@ -1,12 +1,22 @@
 // ══════════════════════════════════════════════════════════════════
 // document-forensics-service — Runtime entrypoint (composition + bootstrap)
 //
-// A DB-writing HTTP service that emits over the backbone: analyze a
-// referenced document's real bytes → record the verdict → emit
-// document.forensics + audit. Transport is env-selected: Kafka when
-// KAFKA_BROKERS is set, else in-memory (dev only — the emitted verdict then
-// reaches no routing projection, logged loudly). Ready = the database (the
-// verdict's durable home) is reachable.
+// A DB-writing HTTP service that emits over the backbone. TWO front doors:
+//
+//   POST /v1/forensics/analyze  — analyze a REFERENCED document's real bytes
+//   POST /v1/documents/upload   — INGEST bytes from the citizen portal: scan →
+//                                 seal (AES-256-GCM) → store → verdict → emit
+//
+// BOTH must be registered. shared-http keys its route table by EXACT path, so
+// /v1/forensics/analyze and /v1/documents/upload are independent entries and
+// neither can shadow the other — but a route that is BUILT and never PASSED to
+// startHttpServer is unreachable dead code that answers the transport's own 404,
+// which is exactly how P1's by-id and status-history sat finished-but-invisible
+// in the tree. Adding a use case is not the same as shipping an endpoint.
+//
+// Transport is env-selected: Kafka when KAFKA_BROKERS is set, else in-memory
+// (dev only — the emitted verdict then reaches no routing projection, logged
+// loudly). Ready = the database (the verdict's durable home) is reachable.
 // ══════════════════════════════════════════════════════════════════
 
 import { InMemoryEventBus, KafkaEventBus, type EventBus } from '@usrp/shared-events';
@@ -17,6 +27,7 @@ import { sql } from '@usrp/shared-database';
 import { createDocumentForensicsService } from './index.js';
 import { loadDocumentForensicsConfig } from './config.js';
 import { analyzeDocumentRoute } from './adapters/http/analyze-document.controller.js';
+import { uploadDocumentRoute } from './adapters/http/upload-document.controller.js';
 
 function createEventBus(serviceName: string): EventBus {
   if (process.env['KAFKA_BROKERS']) {
@@ -48,7 +59,16 @@ async function main(): Promise<void> {
   const server = await startHttpServer({
     serviceName: config.runtime.serviceName,
     port: config.runtime.port,
-    routes: [analyzeDocumentRoute(service.analyzeDocument, verify)],
+    routes: [
+      analyzeDocumentRoute(service.analyzeDocument, verify),
+      // The upload route carries its OWN body cap (file size + framing). The
+      // server-wide 64 KiB default is untouched, so no other endpoint inherits
+      // a multi-megabyte payload budget.
+      uploadDocumentRoute(service.uploadDocument, verify, {
+        maxFileSizeBytes: config.ingress.maxFileSizeBytes,
+        allowedMediaTypes: config.ingress.allowedMediaTypes,
+      }),
+    ],
     // Ready only when the verdict's durable home is reachable.
     readiness: async (): Promise<boolean> => {
       try {
@@ -72,6 +92,7 @@ async function main(): Promise<void> {
       service: config.runtime.serviceName,
       url: server.url,
       env: config.runtime.nodeEnv,
+      routes: ['/v1/forensics/analyze', '/v1/documents/upload'],
     }),
   );
 }
