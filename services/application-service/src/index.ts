@@ -33,7 +33,11 @@ import type { ApplicationServiceConfig } from './config.js';
 export interface ApplicationService {
   /** HTTP front door — CREATE an application (POST /v1/applications). */
   readonly submit: SubmitApplicationService;
-  /** HTTP officer read — LIST an agency's applications (GET /v1/applications). */
+  /**
+   * HTTP officer reads — LIST an agency's applications (GET /v1/applications),
+   * the review queue, ONE application (by-id) and its immutable status trail
+   * (status-history). All four are agency-scoped through the same seam.
+   */
   readonly list: ListApplicationsService;
   /** HTTP officer writes — DRIVE the tail of the green lane (medical/final/accept). */
   readonly officerTransitions: OfficerTransitionsService;
@@ -106,18 +110,26 @@ export function createApplicationService(
   };
 }
 
-// ── Re-exports ────────────────────────────────────────────────────
+// ── Re-exports ──────────────────────────────────────────────────
 export {
   SUBMIT_APPLICATION_PATH,
   submitApplicationRoute,
 } from './adapters/http/submit-application.controller.js';
+// The PATH CONSTANTS are part of the public surface on purpose: the edge tier
+// maps a REST-shaped browser route onto the real upstream path, and a
+// hard-coded string there is the same drift class that pointed the frontend doc
+// at :4001. Import the constant, never retype the path.
 export {
   LIST_APPLICATIONS_PATH,
   AMBER_QUEUE_PATH,
   BY_APPLICANT_PATH,
+  BY_ID_PATH,
+  STATUS_HISTORY_PATH,
   listApplicationsRoute,
   amberQueueRoute,
   byApplicantRoute,
+  byIdRoute,
+  statusHistoryRoute,
 } from './adapters/http/list-applications.controller.js';
 export {
   MEDICAL_REVIEW_PATH,
@@ -167,6 +179,15 @@ export type {
   ListApplicationsDeps,
   ListApplicationsOutcome,
   AmberQueueOutcome,
+  ListByApplicantCommand,
+  ListByApplicantOutcome,
+  // The two single-record reads. ReadApplicationCommand carries NO agency by
+  // design — it is derived from the verified actor, which is what makes the
+  // read un-widenable; and both outcomes carry NOT_FOUND as a business value
+  // rather than a thrown error, because a missing record is an answer.
+  ReadApplicationCommand,
+  FindApplicationOutcome,
+  StatusHistoryOutcome,
 } from './application/list-applications.service.js';
 export type {
   SubmitApplicationCommand,
@@ -262,6 +283,12 @@ export type {
   ApplicantApplicationSummary,
   AmberQueueEntry,
   ListByAgencyInput,
+  // ApplicationDetail is the THREE-SCHEMA INTERSECTION, and deliberately omits
+  // applicant_id and qr_invitation_code (a bearer credential). Consumers must
+  // import it rather than redeclare it, or the omissions get re-added by hand.
+  ApplicationDetail,
+  StatusHistoryEntry,
+  ReadOneInput,
 } from './ports/application-read-repository.js';
 export { loadApplicationConfig } from './config.js';
 export type { ApplicationServiceConfig } from './config.js';
