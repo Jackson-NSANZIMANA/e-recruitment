@@ -20,7 +20,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/**/*.ts",
     "selfcheck": "tsx selfcheck/verify-submit-http-slice.ts",
-    "selfcheck:pipeline": "tsx selfcheck/verify-pipeline-e2e.ts"
+    "selfcheck:pipeline": "tsx selfcheck/verify-pipeline-e2e.ts",
+    "selfcheck:detail-reads": "tsx selfcheck/verify-application-detail-reads.ts"
   },
   "dependencies": {
     "@usrp/shared-auth": "workspace:*",
