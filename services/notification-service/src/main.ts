@@ -26,6 +26,8 @@ import { loadNotificationConfig } from './config.js';
 import { startSlotAssignedConsumer } from './adapters/events/slot-assigned.consumer.js';
 import { startApplicationWithdrawnConsumer } from './adapters/events/application-withdrawn.consumer.js';
 
+const STARTUP_TIMEOUT_MS = 30_000;
+
 function createEventBus(serviceName: string, transport: EventTransport): EventBus {
   if (transport.kind === 'kafka') {
     const kafka = loadKafkaConfig(serviceName);
@@ -42,13 +44,33 @@ function createEventBus(serviceName: string, transport: EventTransport): EventBu
   return new InMemoryEventBus();
 }
 
+async function withStartupTimeout<T>(operation: Promise<T>, step: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`notification-service startup timed out while ${step} after ${STARTUP_TIMEOUT_MS}ms`));
+        }, STARTUP_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 async function main(): Promise<void> {
+  console.log(JSON.stringify({ msg: 'startup_begin', service: 'notification-service' }));
   assertProductionSecrets();
 
   const config = loadNotificationConfig();
   const transport = resolveEventTransport();
   const bus = createEventBus(config.runtime.serviceName, transport);
-  await bus.connect();
+
+  console.log(JSON.stringify({ msg: 'notification_event_bus_connecting', transport: transport.kind }));
+  await withStartupTimeout(bus.connect(), 'connecting to the event bus');
+  console.log(JSON.stringify({ msg: 'notification_event_bus_connected', transport: transport.kind }));
 
   const service = createNotificationService(config, bus, {
     resolver: new PgContactResolver(config.security.encryptionKey),
@@ -57,8 +79,19 @@ async function main(): Promise<void> {
 
   // Subscribe BEFORE serving so a "ready" signal implies we are consuming.
   if (transport.kind === 'kafka') {
-    await startSlotAssignedConsumer(bus, service.deliver);
-    await startApplicationWithdrawnConsumer(bus, service.withdrawalNotice);
+    console.log(JSON.stringify({ msg: 'notification_consumer_starting', topic: 'slot.assigned' }));
+    await withStartupTimeout(
+      startSlotAssignedConsumer(bus, service.deliver),
+      'starting the slot.assigned consumer',
+    );
+    console.log(JSON.stringify({ msg: 'notification_consumer_started', topic: 'slot.assigned' }));
+
+    console.log(JSON.stringify({ msg: 'notification_consumer_starting', topic: 'application.withdrawn' }));
+    await withStartupTimeout(
+      startApplicationWithdrawnConsumer(bus, service.withdrawalNotice),
+      'starting the application.withdrawn consumer',
+    );
+    console.log(JSON.stringify({ msg: 'notification_consumer_started', topic: 'application.withdrawn' }));
   }
 
   const server = await startHttpServer({
