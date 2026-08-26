@@ -58,10 +58,21 @@ if (( SERVICE_TASK_COUNT == 0 )); then
   exit 1
 fi
 
+# Turbo requires concurrency to be STRICTLY GREATER than the number of
+# persistent tasks. Equal values are rejected before any task starts, which
+# turns a valid service set into an all-or-nothing boot failure. Keep one slot
+# of headroom while deriving the count from the repository itself.
+SERVICE_TASK_CONCURRENCY=$((SERVICE_TASK_COUNT + 1))
+if (( SERVICE_TASK_CONCURRENCY <= SERVICE_TASK_COUNT )); then
+  printf '\033[0;31m✗ invalid Turbo concurrency: %s for %s persistent services.\033[0m\n' \
+    "$SERVICE_TASK_CONCURRENCY" "$SERVICE_TASK_COUNT" >&2
+  exit 1
+fi
+
 # Use a numeric count, not `100%`: Turbo percentage concurrency is relative to
 # available CPU capacity, so 100% on a small CI runner may still schedule only
-# two or four persistent tasks. Use the exact runnable-service count instead.
-# `--parallel` is deprecated in current Turbo and is unnecessary when the
-# concurrency is explicit.
-exec pnpm exec turbo run dev --concurrency="$SERVICE_TASK_COUNT" "$@"
+# two or four persistent tasks. Use the derived count plus Turbo's required
+# headroom instead. `--parallel` is deprecated in current Turbo and is
+# unnecessary when the concurrency is explicit.
+exec pnpm exec turbo run dev --concurrency="$SERVICE_TASK_CONCURRENCY" "$@"
 
