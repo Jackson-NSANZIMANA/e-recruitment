@@ -9,6 +9,10 @@
 //
 //   Edge (BFF) tier only:
 //     import { loadCorsConfig, loadEdgeSessionConfig } from '@usrp/shared-config'
+//
+//   Production boot guard — call assertProductionSecrets() as the FIRST
+//   statement in every service main(), before any other loader:
+//     import { assertProductionSecrets, resolveEventTransport } from '@usrp/shared-config'
 // ══════════════════════════════════════════════════════════════════
 
 export {
@@ -65,3 +69,10 @@ export {
   type SecurityConfig,
   type ServiceConfig,
 } from './config.js';
+
+export {
+  assertProductionSecrets,
+  isProduction,
+  resolveEventTransport,
+  type EventTransport,
+} from './production-guard.js';
