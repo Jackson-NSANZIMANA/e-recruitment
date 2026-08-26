@@ -4,31 +4,20 @@
 // ADR-001: Apache Kafka (KRaft). This is the production EventBus. All
 // other modules in this package are transport-agnostic; swapping brokers
 // or client library touches only this file.
+//
+// EVERY BLOCKING STARTUP CALL HERE IS BOUNDED (see ./startup.ts). kafkajs
+// retries broker discovery indefinitely by design — correct for a running
+// service, fatal for a booting one, because the process then never reaches
+// server.listen() and reports itself neither healthy nor failed. Bounding it
+// here rather than in each service means no service can forget to.
 // ══════════════════════════════════════════════════════════════════
 
 import { Kafka, logLevel, type Consumer, type Producer } from 'kafkajs';
 import type { KafkaTopic, USRPEvent } from '@usrp/shared-types';
 import { partitionKeyForEvent, topicForEvent } from './topics.js';
 import { JsonEventSerializer, type EventSerializer } from './serialization.js';
+import { withStartupTimeout } from './startup.js';
 import type { EventBus, EventHandler, EventMeta } from './bus.js';
-
-const KAFKA_STARTUP_TIMEOUT_MS = 30_000;
-
-async function withStartupTimeout<T>(operation: Promise<T>, step: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      operation,
-      new Promise<T>((_, reject) => {
-        timer = setTimeout(() => {
-          reject(new Error(`Kafka startup timed out while ${step} after ${KAFKA_STARTUP_TIMEOUT_MS}ms`));
-        }, KAFKA_STARTUP_TIMEOUT_MS);
-      }),
-    ]);
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-  }
-}
 
 export interface KafkaBusOptions {
   readonly brokers: readonly string[];
@@ -60,11 +49,12 @@ export class KafkaEventBus implements EventBus {
     if (this.producerConnected) return;
 
     try {
-      await withStartupTimeout(this.producer.connect(), 'connecting producer');
+      await withStartupTimeout(this.producer.connect(), 'connecting the Kafka producer');
       this.producerConnected = true;
     } catch (error) {
-      // A timed-out KafkaJS operation is not cancellable. Best-effort cleanup
-      // prevents a late connection from surviving a failed service bootstrap.
+      // Promise.race abandons the losing promise, it does not cancel it. Tear
+      // the client down so a connection that lands AFTER we gave up cannot
+      // keep the event loop — and therefore a half-booted process — alive.
       await this.producer.disconnect().catch(() => undefined);
       throw error;
     }
@@ -93,14 +83,20 @@ export class KafkaEventBus implements EventBus {
     handler: EventHandler,
   ): Promise<void> {
     const consumer = this.kafka.consumer({ groupId });
+
+    // Registered ONLY once every step below has succeeded. A consumer pushed
+    // onto this.consumers before it is running would be disconnected on
+    // shutdown as though it were live — the failure path is the one that must
+    // leave no residue.
     try {
-      await withStartupTimeout(consumer.connect(), `connecting consumer ${groupId}`);
+      await withStartupTimeout(consumer.connect(), `connecting consumer group '${groupId}'`);
       await withStartupTimeout(
         consumer.subscribe({ topics: [...topics], fromBeginning: false }),
-        `subscribing consumer ${groupId}`,
+        `subscribing consumer group '${groupId}' to ${topics.join(', ')}`,
       );
-      this.consumers.push(consumer);
 
+      // consumer.run() RESOLVES once the consumer loop is started; it does not
+      // wait for a rebalance to settle, so it is not the step that hangs.
       await consumer.run({
         eachMessage: async ({ topic, partition, message }): Promise<void> => {
           if (message.value === null) return;
@@ -114,6 +110,8 @@ export class KafkaEventBus implements EventBus {
           await handler(event, meta);
         },
       });
+
+      this.consumers.push(consumer);
     } catch (error) {
       await consumer.disconnect().catch(() => undefined);
       throw error;
