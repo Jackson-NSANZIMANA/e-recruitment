@@ -249,11 +249,12 @@ check('EDGE_COOKIE_SECURE=true passes', !trips(withProd({ EDGE_COOKIE_SECURE: 't
 console.log('\n── aggregation: fix every problem in one pass');
 // The realistic disaster: someone set NODE_ENV=production on the dev template.
 const everythingWrong = capture({ ...DEV_ENV, NODE_ENV: 'production' });
+const wrongCount = everythingWrong?.issues.length ?? 0;
 check('the dev template under NODE_ENV=production is refused', everythingWrong !== undefined);
 check(
   'it reports MANY issues at once, not just the first',
-  (everythingWrong?.issues.length ?? 0) >= 7,
-  `got ${everythingWrong?.issues.length ?? 0}`,
+  wrongCount >= 7,
+  `got ${wrongCount}`,
 );
 check(
   'the aggregated message still leaks NO secret value',
@@ -262,7 +263,7 @@ check(
 );
 check(
   'the issue count is reported in the message',
-  everythingWrong?.message.includes(`${everythingWrong.issues.length} issue`) === true,
+  everythingWrong?.message.includes(`${wrongCount} issue`) === true,
 );
 
 // ── 8. isProduction ──────────────────────────────────────────────
@@ -285,7 +286,10 @@ check(
   devNoBroker.kind === 'in-memory' && devNoBroker.reason.length > 0,
 );
 
-const prodWithBroker = resolveEventTransport({ NODE_ENV: 'production', KAFKA_BROKERS: 'kafka-0.usrp.internal:9093' });
+const prodWithBroker = resolveEventTransport({
+  NODE_ENV: 'production',
+  KAFKA_BROKERS: 'kafka-0.usrp.internal:9093',
+});
 check('prod + broker set → kafka', prodWithBroker.kind === 'kafka');
 
 let prodNoBrokerThrew: EnvValidationError | undefined;
@@ -300,12 +304,11 @@ check(
   'the refusal explains that healthchecks would stay green',
   prodNoBrokerThrew?.message.includes('healthcheck') === true,
 );
+
+const blankBroker = resolveEventTransport({ NODE_ENV: 'development', KAFKA_BROKERS: '   ' });
 check(
-  'an empty-string KAFKA_BROKERS is treated as unset, not as one empty broker',
-  (() => {
-    const t = resolveEventTransport({ NODE_ENV: 'development', KAFKA_BROKERS: '   ' });
-    return t.kind === 'in-memory';
-  })(),
+  'a whitespace-only KAFKA_BROKERS is treated as unset, not as one empty broker',
+  blankBroker.kind === 'in-memory',
 );
 
 // ── Summary ─────────────────────────────────────────────────────
