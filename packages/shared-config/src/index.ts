@@ -51,7 +51,7 @@ export {
   loadRuntimeConfig,
   loadSecurityConfig,
   loadServiceConfig,
-  portEnvVarFor,
+  portVarName,
   type AgencyCode,
   type AgencyDeploymentConfig,
   type AuthIssuerConfig,
