@@ -12,6 +12,8 @@ import { partitionKeyForEvent, topicForEvent } from './topics.js';
 import { JsonEventSerializer, type EventSerializer } from './serialization.js';
 import type { EventBus, EventHandler, EventMeta } from './bus.js';
 
+const KAFKA_STARTUP_TIMEOUT_MS = 30_000;
+
 export interface KafkaBusOptions {
   readonly brokers: readonly string[];
   readonly clientId: string;
@@ -39,9 +41,25 @@ export class KafkaEventBus implements EventBus {
   }
 
   async connect(): Promise<void> {
-    if (!this.producerConnected) {
-      await this.producer.connect();
+    if (this.producerConnected) return;
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        this.producer.connect(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            reject(
+              new Error(
+                `Kafka startup timed out while connecting producer after ${KAFKA_STARTUP_TIMEOUT_MS}ms`,
+              ),
+            );
+          }, KAFKA_STARTUP_TIMEOUT_MS);
+        }),
+      ]);
       this.producerConnected = true;
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
     }
   }
 
