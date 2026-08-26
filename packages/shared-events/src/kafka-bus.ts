@@ -14,6 +14,22 @@ import type { EventBus, EventHandler, EventMeta } from './bus.js';
 
 const KAFKA_STARTUP_TIMEOUT_MS = 30_000;
 
+async function withStartupTimeout<T>(operation: Promise<T>, step: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`Kafka startup timed out while ${step} after ${KAFKA_STARTUP_TIMEOUT_MS}ms`));
+        }, KAFKA_STARTUP_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 export interface KafkaBusOptions {
   readonly brokers: readonly string[];
   readonly clientId: string;
@@ -43,23 +59,14 @@ export class KafkaEventBus implements EventBus {
   async connect(): Promise<void> {
     if (this.producerConnected) return;
 
-    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      await Promise.race([
-        this.producer.connect(),
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(() => {
-            reject(
-              new Error(
-                `Kafka startup timed out while connecting producer after ${KAFKA_STARTUP_TIMEOUT_MS}ms`,
-              ),
-            );
-          }, KAFKA_STARTUP_TIMEOUT_MS);
-        }),
-      ]);
+      await withStartupTimeout(this.producer.connect(), 'connecting producer');
       this.producerConnected = true;
-    } finally {
-      if (timer !== undefined) clearTimeout(timer);
+    } catch (error) {
+      // A timed-out KafkaJS operation is not cancellable. Best-effort cleanup
+      // prevents a late connection from surviving a failed service bootstrap.
+      await this.producer.disconnect().catch(() => undefined);
+      throw error;
     }
   }
 
@@ -86,22 +93,30 @@ export class KafkaEventBus implements EventBus {
     handler: EventHandler,
   ): Promise<void> {
     const consumer = this.kafka.consumer({ groupId });
-    await consumer.connect();
-    await consumer.subscribe({ topics: [...topics], fromBeginning: false });
-    this.consumers.push(consumer);
+    try {
+      await withStartupTimeout(consumer.connect(), `connecting consumer ${groupId}`);
+      await withStartupTimeout(
+        consumer.subscribe({ topics: [...topics], fromBeginning: false }),
+        `subscribing consumer ${groupId}`,
+      );
+      this.consumers.push(consumer);
 
-    await consumer.run({
-      eachMessage: async ({ topic, partition, message }): Promise<void> => {
-        if (message.value === null) return;
-        const event = this.serializer.deserialize(message.value);
-        const meta: EventMeta = {
-          topic: topic as KafkaTopic,
-          key: message.key?.toString() ?? partitionKeyForEvent(event),
-          partition,
-          offset: message.offset,
-        };
-        await handler(event, meta);
-      },
-    });
+      await consumer.run({
+        eachMessage: async ({ topic, partition, message }): Promise<void> => {
+          if (message.value === null) return;
+          const event = this.serializer.deserialize(message.value);
+          const meta: EventMeta = {
+            topic: topic as KafkaTopic,
+            key: message.key?.toString() ?? partitionKeyForEvent(event),
+            partition,
+            offset: message.offset,
+          };
+          await handler(event, meta);
+        },
+      });
+    } catch (error) {
+      await consumer.disconnect().catch(() => undefined);
+      throw error;
+    }
   }
 }
