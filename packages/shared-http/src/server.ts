@@ -20,6 +20,9 @@
 //
 //   • CORS preflight is answered HERE, never by a route, so a new endpoint
 //     cannot ship without it.
+//
+// AND ONE THING CHANGED WHEN A GREEN PROBE ERASED A RED DIAGNOSIS: healthy
+// probe traffic is no longer access-logged. See SILENT_WHEN_HEALTHY below.
 // ══════════════════════════════════════════════════════════════════
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
@@ -41,6 +44,26 @@ import type {
 const DEFAULT_MAX_BODY_BYTES = 64 * 1024;
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 10_000;
 const JSON_CONTENT_TYPE = 'application/json; charset=utf-8';
+
+/**
+ * Reserved transport paths whose SUCCESSFUL responses are not access-logged.
+ *
+ * These are polled forever — every 2s by scripts/verify-dev-boot.sh, every
+ * few seconds by a Kubernetes probe for a pod's entire life. Logging each
+ * 200 buys nothing and costs two real things:
+ *
+ *   1. It buries genuine request traffic in retention and in `grep`.
+ *   2. It DESTROYS EVIDENCE. The dev-boot proof reports failure by tailing
+ *      200 lines of a shared log. Ten healthy services probed for the full
+ *      600s deadline emit thousands of 200s, which pushed the hanging
+ *      service's startup error out of that window entirely and turned a
+ *      specific fault into 'never answered /ready or /health on :4003'.
+ *
+ * A NON-2xx probe is NOT silenced — a 503 from a readiness callback means the
+ * process is up and declaring itself unfit, which is exactly the state an
+ * operator must see. Silencing by path alone would have hidden that too.
+ */
+const SILENT_WHEN_HEALTHY: ReadonlySet<string> = new Set(['/health', '/ready']);
 
 /** A matched route plus the byte cap that route is allowed to spend. */
 interface RouteEntry {
@@ -307,16 +330,23 @@ export function startHttpServer(options: HttpServerOptions): Promise<HttpServer>
       }
       send(res, result, requestId, correlationId, corsHeaders);
     } finally {
-      const durationMs = Number(process.hrtime.bigint() - startNs) / 1e6;
-      log({
-        service: serviceName,
-        method,
-        path: url.pathname,
-        status,
-        durationMs: Math.round(durationMs * 1000) / 1000,
-        requestId,
-        correlationId,
-      });
+      // A healthy probe is the one request class that carries no information:
+      // it is generated on a timer, forever, by tooling that already acts on
+      // the status code it got back. Anything else — including an UNhealthy
+      // probe — is logged exactly as before.
+      const isHealthyProbe = SILENT_WHEN_HEALTHY.has(url.pathname) && status >= 200 && status < 300;
+      if (!isHealthyProbe) {
+        const durationMs = Number(process.hrtime.bigint() - startNs) / 1e6;
+        log({
+          service: serviceName,
+          method,
+          path: url.pathname,
+          status,
+          durationMs: Math.round(durationMs * 1000) / 1000,
+          requestId,
+          correlationId,
+        });
+      }
     }
   }
 
