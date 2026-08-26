@@ -31,14 +31,30 @@
 # loses a name, this goes red. That allowlist is 54 hand-maintained strings
 # and nothing else in the repo executes it.
 #
-# Proven both directions before commit, as this repo requires:
-#   • reconciled template ............................ green
-#   • injected port collision ........................ red
-#   • removed scoped variable ........................ red
-#   • scoped port dropped from turbo.json ............ red  (new: strict-mode gap)
-#   • variable absent from template but exported by
-#     the gate ....................................... red  (new: sanitization)
-#     ...and GREEN under USRP_BOOT_INHERIT_ENV=1, which is the hole itself.
+# ── AND A PROOF MUST BE DIAGNOSABLE, NOT MERELY CORRECT ──
+#
+# This proof was RIGHT about biometric-service and useless about WHY, twice in
+# one evening. Two causes, both fixed here:
+#
+#   • IT PRINTED A SHARED TAIL. `tail -n 200` of one log holding eleven
+#     interleaved services means the noisiest services win the window. Ten
+#     healthy services probed for 600s filled it with their own /ready
+#     responses and pushed the hanging service's startup output out
+#     entirely. Evidence is now selected PER SERVICE by turbo's `@usrp/<pkg>:`
+#     prefix, so the failing service cannot be shouted over.
+#
+#   • IT WAITED OUT THE DEADLINE ON A DEAD SERVICE. The `dev` task is
+#     `tsx watch`, which SURVIVES its child exiting — that is what watch mode
+#     is for. So process.exit(1) inside a service does not end the process
+#     group, `kill -0` keeps reporting it alive, and this loop polls a closed
+#     socket for the remaining ten minutes. Every main() in this repo logs
+#     `startup_failed` before exiting, so that marker is watched directly.
+#
+# It still boots through `pnpm dev`. Switching CI to the non-watch `start:dev`
+# task would make crashes end the process group, and would also stop
+# exercising turbo.json's `dev` allowlist — the one surface nothing else in
+# the repo executes and the direct cause of two un-bootable-main incidents.
+# Fail-fast is worth having; it is not worth blinding the proof to get it.
 #
 # It boots from .env.example ON PURPOSE. A developer's local .env is not the
 # artefact that must stay honest; the committed template is.
@@ -67,6 +83,10 @@ ENV_FILE="${USRP_ENV_FILE:-.env.example}"
 # 180s still wasn't enough (job failed on `Run all proofs` at ~7m40s).
 # CI now pins this explicitly to 600s (see ci-backend.yml); 600s is the
 # default here too, so a bare local run under load is covered as well.
+#
+# NOTE this is the ceiling for a SLOW boot, not the time a BROKEN one costs.
+# A service that dies during startup is detected the moment it says so — see
+# FATAL_STARTUP_PATTERN.
 BOOT_TIMEOUT_S="${BOOT_TIMEOUT_S:-600}"
 # Repo-relative ON PURPOSE. The first version wrote to `mktemp -d` and told the
 # reader "logs kept in $LOG_DIR" — a directory the CI runner then discarded,
@@ -76,15 +96,23 @@ LOG_DIR="${USRP_BOOT_LOG_DIR:-$REPO_ROOT/.boot-logs}"
 BOOT_LOG="$LOG_DIR/dev-boot.log"
 INHERIT_ENV="${USRP_BOOT_INHERIT_ENV:-0}"
 
+# Every service's main() ends with a .catch() that logs this and exits. It is
+# therefore the one marker that means "this service is not coming up", for all
+# eleven, regardless of cause — bad config, invalid key, unreachable broker.
+FATAL_STARTUP_PATTERN='startup_failed'
+# How many of a service's OWN lines to show when it fails. Generous: these are
+# one service's lines, not eleven services' lines, so there is no flood to cap.
+EVIDENCE_LINES="${USRP_BOOT_EVIDENCE_LINES:-80}"
+
 GREEN=$'\033[0;32m'
 RED=$'\033[0;31m'
 CYAN=$'\033[1;36m'
 BOLD=$'\033[1m'
 NC=$'\033[0m'
 
-ok()  { printf '%s✓ PASS — %s%s\n' "$GREEN" "$*" "$NC"; }
-bad() { printf '%s✗ FAIL — %s%s\n' "$RED" "$*" "$NC"; }
-log() { printf '%s══ %s%s\n' "$CYAN" "$*" "$NC"; }
+ok()  { printf '%s\u2713 PASS — %s%s\n' "$GREEN" "$*" "$NC"; }
+bad() { printf '%s\u2717 FAIL — %s%s\n' "$RED" "$*" "$NC"; }
+log() { printf '%s\u2550\u2550 %s%s\n' "$CYAN" "$*" "$NC"; }
 
 pass=0
 fail=0
@@ -98,7 +126,7 @@ command -v curl >/dev/null 2>&1 || { bad 'curl is required'; exit 1; }
 mkdir -p "$LOG_DIR"
 : >"$BOOT_LOG"
 
-# ── Service discovery ─────────────────────────────────────────────
+# ── Service discovery ──────────────────────────────────────
 # DERIVED from the filesystem, not a hard-coded list: a service added later is
 # covered by this proof the day it ships a src/main.ts, instead of sitting
 # outside the gate the way .env.example sat outside it for thirty slices.
@@ -123,6 +151,14 @@ port_var_for() {
   printf 'PORT_%s' "$up"
 }
 
+# Turbo prefixes every line with '<package-name>:<task>: ' under --ui=stream,
+# and the package name is always @usrp/<directory>. That prefix is the ONLY
+# thing that attributes a line in the shared log to a service, so selecting on
+# it is what makes per-service evidence possible.
+turbo_prefix_for() {
+  printf '@usrp/%s:dev:' "$1"
+}
+
 # Read a value straight out of the TEMPLATE FILE — never from the live
 # environment. Reading the environment is how contamination hides a missing
 # variable. Strips one layer of surrounding quotes, matching `set -a; source`.
@@ -138,7 +174,7 @@ template_value() {
   printf '%s' "$raw"
 }
 
-# ── 1. Static: the template assigns every service its OWN port ─────────
+# ── 1. Static: the template assigns every service its OWN port ─────
 # Checked BEFORE booting: a collision here is deterministic, and diagnosing it
 # from eleven interleaved EADDRINUSE stack traces is miserable.
 log "per-service port assignment (read from $ENV_FILE)"
@@ -196,7 +232,7 @@ fi
 # Nothing below can succeed if the port contract is broken. Fail now, with a
 # named cause, instead of after 180s of polling dead sockets.
 if [[ $port_conflict -ne 0 || $turbo_gap -ne 0 ]]; then
-  printf '\n%s─────────────────────────────────────────────%s\n' "$BOLD" "$NC"
+  printf '\n%s\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500%s\n' "$BOLD" "$NC"
   printf '%s%d failed%s — port contract is broken; not booting services.\n' "$RED" "$fail" "$NC"
   exit 1
 fi
@@ -205,7 +241,9 @@ fi
 # `pnpm dev` is `bash scripts/dev.sh`, which sources the env file and execs
 # `turbo run dev --parallel`. We invoke exactly that, so the loading boundary
 # AND Turbo's strict-mode allowlist are both under test. --ui=stream because
-# turbo.json sets "ui": "tui", which is useless in a captured CI log.
+# turbo.json sets "ui": "tui", which is useless in a captured CI log — and
+# because stream mode is what prefixes each line with its package name, which
+# is what per-service evidence below depends on.
 #
 # env -i is what makes this honest under `pnpm verify`: without it the gate's
 # own exports stand in for anything the template forgot. Only what is needed
@@ -271,6 +309,7 @@ log "booting ${#SERVICES[@]} services via scripts/dev.sh (timeout ${BOOT_TIMEOUT
 declare -A READY=()
 deadline=$(( $(date +%s) + BOOT_TIMEOUT_S ))
 boot_died=0
+fatal_startup=0
 
 probe() { curl -fsS --max-time 3 "http://127.0.0.1:$1$2" 2>/dev/null; }
 
@@ -296,6 +335,17 @@ while :; do
     fi
   done
   [[ $all_ready -eq 1 ]] && break
+
+  # FAIL FAST on a service that has ALREADY given up. `tsx watch` outlives its
+  # child by design, so process.exit(1) in a service does NOT end the process
+  # group and the liveness check below stays true — which is how a crash that
+  # is known in two seconds used to cost the entire ten-minute deadline.
+  if grep -q "$FATAL_STARTUP_PATTERN" "$BOOT_LOG" 2>/dev/null; then
+    fatal_startup=1
+    log 'a service reported startup_failed — not waiting out the deadline'
+    break
+  fi
+
   if ! kill -0 "-$BOOT_PGID" 2>/dev/null && ! kill -0 "$BOOT_PGID" 2>/dev/null; then
     boot_died=1
     break
@@ -304,6 +354,7 @@ while :; do
   sleep 2
 done
 
+declare -a FAILED_SERVICES=()
 for svc in "${SERVICES[@]}"; do
   p="${PORT_OF[$svc]}"
   state="${READY[$svc]:-}"
@@ -311,30 +362,65 @@ for svc in "${SERVICES[@]}"; do
     note_pass "$svc — $state on :$p"
   elif [[ "$state" == WRONG:* ]]; then
     note_fail "$svc — :$p answered as someone else: ${state#WRONG:}"
+    FAILED_SERVICES+=("$svc")
   else
     note_fail "$svc — never answered /ready or /health on :$p"
+    FAILED_SERVICES+=("$svc")
   fi
 done
 
 [[ $boot_died -eq 1 ]] && note_fail 'scripts/dev.sh exited before every service was ready'
 
-# ── Summary ───────────────────────────────────────────────────────────
-printf '\n%s─────────────────────────────────────────────%s\n' "$BOLD" "$NC"
+# ── Evidence ────────────────────────────────────────────────────
+# ONE SERVICE'S LINES AT A TIME. A shared tail is what made the last two red
+# runs undiagnosable: the services that WORKED out-logged the one that did not.
+dump_service_log() {
+  local svc="$1" prefix lines
+  prefix="$(turbo_prefix_for "$svc")"
+  lines="$(grep -F "$prefix" "$BOOT_LOG" 2>/dev/null | tail -n "$EVIDENCE_LINES")"
+  printf '\n%s\u2500\u2500 %s — its own last %s lines ─\u2500%s\n' "$BOLD" "$svc" "$EVIDENCE_LINES" "$NC"
+  if [[ -n "$lines" ]]; then
+    printf '%s\n' "$lines" | sed 's/^/    /'
+  else
+    # Not a formatting edge case — a real and specific diagnosis. No output at
+    # all under this package's prefix means the process never got far enough to
+    # print, or turbo never ran its dev task. The unprefixed section below is
+    # where that failure lives.
+    printf '    (no output under %s at all — the process printed nothing, or\n' "$prefix"
+    printf '     turbo never started its dev task. See the harness lines below.)\n'
+  fi
+}
+
+# ── Summary ──────────────────────────────────────────────────
+printf '\n%s\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500%s\n' "$BOLD" "$NC"
 printf 'Checks: %s%d passed%s, ' "$GREEN" "$pass" "$NC"
 if [[ $fail -eq 0 ]]; then
   printf '%s%d failed%s\n' "$GREEN" "$fail" "$NC"
-  printf '%s%sDEV BOOT GREEN — all %d services start from %s through `pnpm dev` ✓%s\n' \
+  printf '%s%sDEV BOOT GREEN — all %d services start from %s through `pnpm dev` \u2713%s\n' \
     "$GREEN" "$BOLD" "${#SERVICES[@]}" "$ENV_FILE" "$NC"
   exit 0
 fi
 printf '%s%d failed%s\n' "$RED" "$fail" "$NC"
 printf 'Failed:\n'
-for f in "${FAILED[@]}"; do printf '  %s✗ %s%s\n' "$RED" "$f" "$NC"; done
+for f in "${FAILED[@]}"; do printf '  %s\u2717 %s%s\n' "$RED" "$f" "$NC"; done
 
-# Fail loud WITH EVIDENCE, inline in the job output. Pointing at a discarded
-# tmpdir is why the first red run of this proof could not be diagnosed.
-printf '\n%s── scripts/dev.sh output (last 200 lines of %s) ──%s\n' \
-  "$BOLD" "${BOOT_LOG#"$REPO_ROOT"/}" "$NC"
-tail -n 200 "$BOOT_LOG" 2>/dev/null | sed 's/^/    /'
+# Fail loud WITH EVIDENCE, inline in the job output, ATTRIBUTED. Pointing at a
+# discarded tmpdir is why the first red run could not be diagnosed; printing a
+# shared tail is why the next two could not be either.
+if [[ $fatal_startup -eq 1 ]]; then
+  printf '\n%s\u2500\u2500 startup_failed reported by ─\u2500%s\n' "$BOLD" "$NC"
+  grep "$FATAL_STARTUP_PATTERN" "$BOOT_LOG" 2>/dev/null | tail -n 20 | sed 's/^/    /'
+fi
+
+for svc in "${FAILED_SERVICES[@]}"; do
+  dump_service_log "$svc"
+done
+
+# Lines with NO package prefix are turbo's own and the env boundary's: a
+# strict-mode drop, a missing template variable, a pnpm resolution failure. A
+# service that never started at all leaves its ONLY trace here.
+printf '\n%s\u2500\u2500 harness / turbo output (unattributed lines) ─\u2500%s\n' "$BOLD" "$NC"
+grep -v '^@usrp/' "$BOOT_LOG" 2>/dev/null | tail -n 40 | sed 's/^/    /'
+
 printf '\n%sfull log retained at %s%s\n' "$BOLD" "${BOOT_LOG#"$REPO_ROOT"/}" "$NC"
 exit 1
