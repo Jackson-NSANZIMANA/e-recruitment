@@ -8,10 +8,24 @@
 // KAFKA_BROKERS is set, else an in-memory bus in DEVELOPMENT only (a reactor
 // with no producers on that bus is a no-op, logged loudly). In production that
 // no-op means a citizen is expected at an exam venue they were never told about.
+//
+// STARTUP IS PHASED AND BOUNDED, via the shared primitive in
+// @usrp/shared-events. Consumer registration happens BEFORE the HTTP server
+// starts — that ordering is the reason /ready means 'this reactor is actually
+// consuming' and not merely 'this process is alive' — which also means a
+// consumer that never finishes registering keeps the service invisible. Each
+// registration is therefore announced before it is attempted and bounded while
+// it runs.
 // ══════════════════════════════════════════════════════════════════
 
 import { sql } from '@usrp/shared-database';
-import { InMemoryEventBus, KafkaEventBus, type EventBus } from '@usrp/shared-events';
+import {
+  InMemoryEventBus,
+  KafkaEventBus,
+  logStartupPhase,
+  withStartupTimeout,
+  type EventBus,
+} from '@usrp/shared-events';
 import {
   assertProductionSecrets,
   loadKafkaConfig,
@@ -26,7 +40,7 @@ import { loadNotificationConfig } from './config.js';
 import { startSlotAssignedConsumer } from './adapters/events/slot-assigned.consumer.js';
 import { startApplicationWithdrawnConsumer } from './adapters/events/application-withdrawn.consumer.js';
 
-const STARTUP_TIMEOUT_MS = 30_000;
+const SERVICE_NAME = 'notification-service';
 
 function createEventBus(serviceName: string, transport: EventTransport): EventBus {
   if (transport.kind === 'kafka') {
@@ -44,33 +58,21 @@ function createEventBus(serviceName: string, transport: EventTransport): EventBu
   return new InMemoryEventBus();
 }
 
-async function withStartupTimeout<T>(operation: Promise<T>, step: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      operation,
-      new Promise<T>((_, reject) => {
-        timer = setTimeout(() => {
-          reject(new Error(`notification-service startup timed out while ${step} after ${STARTUP_TIMEOUT_MS}ms`));
-        }, STARTUP_TIMEOUT_MS);
-      }),
-    ]);
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-  }
-}
-
 async function main(): Promise<void> {
-  console.log(JSON.stringify({ msg: 'startup_begin', service: 'notification-service' }));
+  logStartupPhase(SERVICE_NAME, 'asserting_production_secrets');
   assertProductionSecrets();
 
+  logStartupPhase(SERVICE_NAME, 'loading_config');
   const config = loadNotificationConfig();
+
+  logStartupPhase(SERVICE_NAME, 'resolving_event_transport');
   const transport = resolveEventTransport();
+
   const bus = createEventBus(config.runtime.serviceName, transport);
 
-  console.log(JSON.stringify({ msg: 'notification_event_bus_connecting', transport: transport.kind }));
-  await withStartupTimeout(bus.connect(), 'connecting to the event bus');
-  console.log(JSON.stringify({ msg: 'notification_event_bus_connected', transport: transport.kind }));
+  logStartupPhase(SERVICE_NAME, 'connecting_event_bus', { transport: transport.kind });
+  await withStartupTimeout(bus.connect(), 'connecting the event bus');
+  logStartupPhase(SERVICE_NAME, 'event_bus_connected', { transport: transport.kind });
 
   const service = createNotificationService(config, bus, {
     resolver: new PgContactResolver(config.security.encryptionKey),
@@ -78,22 +80,28 @@ async function main(): Promise<void> {
   });
 
   // Subscribe BEFORE serving so a "ready" signal implies we are consuming.
+  // That invariant is load-bearing and is NOT relaxed by bounding these calls:
+  // a registration that times out ends the process rather than letting it
+  // serve /ready while consuming nothing.
   if (transport.kind === 'kafka') {
-    console.log(JSON.stringify({ msg: 'notification_consumer_starting', topic: 'slot.assigned' }));
+    logStartupPhase(SERVICE_NAME, 'starting_consumer', { topic: 'slot.assigned' });
     await withStartupTimeout(
       startSlotAssignedConsumer(bus, service.deliver),
       'starting the slot.assigned consumer',
     );
-    console.log(JSON.stringify({ msg: 'notification_consumer_started', topic: 'slot.assigned' }));
 
-    console.log(JSON.stringify({ msg: 'notification_consumer_starting', topic: 'application.withdrawn' }));
+    logStartupPhase(SERVICE_NAME, 'starting_consumer', { topic: 'application.withdrawn' });
     await withStartupTimeout(
       startApplicationWithdrawnConsumer(bus, service.withdrawalNotice),
       'starting the application.withdrawn consumer',
     );
-    console.log(JSON.stringify({ msg: 'notification_consumer_started', topic: 'application.withdrawn' }));
+
+    logStartupPhase(SERVICE_NAME, 'consumers_started', {
+      topics: 'slot.assigned, application.withdrawn',
+    });
   }
 
+  logStartupPhase(SERVICE_NAME, 'starting_http_server', { port: config.runtime.port });
   const server = await startHttpServer({
     serviceName: config.runtime.serviceName,
     port: config.runtime.port,
@@ -127,6 +135,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err: unknown) => {
-  console.error(JSON.stringify({ msg: 'startup_failed', service: 'notification-service' }), err);
+  console.error(JSON.stringify({ msg: 'startup_failed', service: SERVICE_NAME }), err);
   process.exit(1);
 });
