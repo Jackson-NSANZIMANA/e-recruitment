@@ -4,12 +4,18 @@
 // The second runnable USRP service, following the identity-service
 // template exactly: load config → build the event bus → assemble the use
 // case → serve over HTTP (ADR-005) → shut down cleanly. Transport is
-// chosen by environment (Kafka when KAFKA_BROKERS is set, else in-memory).
+// resolved by @usrp/shared-config (Kafka when KAFKA_BROKERS is set, else an
+// in-memory bus in DEVELOPMENT only).
 // ══════════════════════════════════════════════════════════════════
 
 import { sql } from '@usrp/shared-database';
 import { InMemoryEventBus, KafkaEventBus, type EventBus } from '@usrp/shared-events';
-import { loadKafkaConfig } from '@usrp/shared-config';
+import {
+  assertProductionSecrets,
+  loadKafkaConfig,
+  resolveEventTransport,
+  type EventTransport,
+} from '@usrp/shared-config';
 import { makeAuthVerifier } from '@usrp/shared-auth';
 import { startHttpServer } from '@usrp/shared-http';
 import { createEligibilityService } from './index.js';
@@ -20,8 +26,8 @@ import { degreeCheckRoute } from './adapters/http/degree.controller.js';
 import { startApplicantSubmittedConsumer } from './adapters/events/applicant-submitted.consumer.js';
 import { startAcademicVettingConsumer } from './adapters/events/academic-vetting.consumer.js';
 
-function createEventBus(serviceName: string): EventBus {
-  if (process.env['KAFKA_BROKERS']) {
+function createEventBus(serviceName: string, transport: EventTransport): EventBus {
+  if (transport.kind === 'kafka') {
     const kafka = loadKafkaConfig(serviceName);
     return new KafkaEventBus({ brokers: kafka.brokers, clientId: kafka.clientId, ssl: kafka.ssl });
   }
@@ -29,14 +35,18 @@ function createEventBus(serviceName: string): EventBus {
     JSON.stringify({
       msg: 'kafka_not_configured',
       detail: 'KAFKA_BROKERS unset — using in-memory event bus (events are NOT durably published). Dev/tier1 only.',
+      reason: transport.reason,
     }),
   );
   return new InMemoryEventBus();
 }
 
 async function main(): Promise<void> {
+  assertProductionSecrets();
+
   const config = loadEligibilityConfig();
-  const bus = createEventBus(config.runtime.serviceName);
+  const transport = resolveEventTransport();
+  const bus = createEventBus(config.runtime.serviceName, transport);
   await bus.connect();
 
   const services = createEligibilityService(config, bus);
@@ -56,7 +66,7 @@ async function main(): Promise<void> {
   // drives all three vetting dimensions the application-state projection needs to
   // reach the positive terminal. (In-memory bus has no cross-process delivery, so
   // this is only meaningful with real Kafka.)
-  if (process.env['KAFKA_BROKERS']) {
+  if (transport.kind === 'kafka') {
     await startApplicantSubmittedConsumer(bus, services.age);
     await startAcademicVettingConsumer(bus, { education: services.education, degree: services.degree });
     console.log(JSON.stringify({ msg: 'event_consumers_started', topic: 'applicant.submitted', gates: ['age', 'academic'] }));

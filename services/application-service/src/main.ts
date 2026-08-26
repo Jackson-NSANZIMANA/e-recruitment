@@ -10,12 +10,14 @@
 // load config → build the bus → assemble the aggregate → (subscribe) → serve →
 // shut down cleanly.
 //
-// Transport is chosen by environment: with KAFKA_BROKERS set we publish AND
-// consume over Kafka (prod/tier2); without it we fall back to an in-memory bus
-// so the service still runs on a tier1-only dev stack (events are then
-// local-only — logged loudly so this is never mistaken for durable transport).
-// The projection consumer is only meaningful with a real broker, so it is wired
-// only when KAFKA_BROKERS is set.
+// Transport is resolved by @usrp/shared-config: with KAFKA_BROKERS set we
+// publish AND consume over Kafka (prod/tier2); without it, in DEVELOPMENT only,
+// we fall back to an in-memory bus so the service still runs on a tier1-only dev
+// stack (events are then local-only — logged loudly so this is never mistaken
+// for durable transport). The projection consumers are only meaningful with a
+// real broker, so they are wired only for the kafka transport — which is why
+// the fallback is refused in production: the front door would keep accepting
+// submissions that then never advance through a single lifecycle stage.
 //
 // ROUTE TABLE NOTE (why the two single-record reads are safe to add here):
 // shared-http keys its table by EXACT path — there is no prefix matching and no
@@ -29,7 +31,12 @@
 
 import { sql } from '@usrp/shared-database';
 import { InMemoryEventBus, KafkaEventBus, type EventBus } from '@usrp/shared-events';
-import { loadKafkaConfig } from '@usrp/shared-config';
+import {
+  assertProductionSecrets,
+  loadKafkaConfig,
+  resolveEventTransport,
+  type EventTransport,
+} from '@usrp/shared-config';
 import { makeAuthVerifier } from '@usrp/shared-auth';
 import { startHttpServer } from '@usrp/shared-http';
 import { createApplicationService } from './index.js';
@@ -52,8 +59,8 @@ import { startFieldScoreCapturedConsumer } from './adapters/events/field-score-c
 import { startForensicsResultConsumer } from './adapters/events/forensics-result.consumer.js';
 import { startApplicationAcceptedConsumer } from './adapters/events/application-accepted.consumer.js';
 
-function createEventBus(serviceName: string): EventBus {
-  if (process.env['KAFKA_BROKERS']) {
+function createEventBus(serviceName: string, transport: EventTransport): EventBus {
+  if (transport.kind === 'kafka') {
     const kafka = loadKafkaConfig(serviceName);
     return new KafkaEventBus({ brokers: kafka.brokers, clientId: kafka.clientId, ssl: kafka.ssl });
   }
@@ -61,14 +68,18 @@ function createEventBus(serviceName: string): EventBus {
     JSON.stringify({
       msg: 'kafka_not_configured',
       detail: 'KAFKA_BROKERS unset — using in-memory event bus (events are NOT durably published). Dev/tier1 only.',
+      reason: transport.reason,
     }),
   );
   return new InMemoryEventBus();
 }
 
 async function main(): Promise<void> {
+  assertProductionSecrets();
+
   const config = loadApplicationConfig();
-  const bus = createEventBus(config.runtime.serviceName);
+  const transport = resolveEventTransport();
+  const bus = createEventBus(config.runtime.serviceName, transport);
   await bus.connect();
 
   const service = createApplicationService(config, bus);
@@ -83,7 +94,7 @@ async function main(): Promise<void> {
   // State-projection ingress: consume the vetting result topics and advance
   // applications. Subscribe BEFORE serving so a "ready" signal implies we are
   // consuming. Only meaningful with a real broker.
-  if (process.env['KAFKA_BROKERS']) {
+  if (transport.kind === 'kafka') {
     await startVettingResultConsumer(bus, service.projector);
     await startSlotAssignedConsumer(bus, service.slotProjector);
     await startNotificationDeliveredConsumer(bus, service.notificationProjector);

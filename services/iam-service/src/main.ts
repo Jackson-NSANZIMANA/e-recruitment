@@ -6,22 +6,29 @@
 // It is the SOLE holder of the issuer private key; every other service only
 // verifies with the public key.
 //
-// Transport is env-selected like the other services: with KAFKA_BROKERS set it
-// publishes the login AUDIT_ENTRY to real Kafka; without it, an in-memory bus
-// keeps the process runnable on a tier1-only stack (the audit is then recorded
-// by nobody — logged loudly). Login itself does not depend on the bus.
+// Transport is resolved by @usrp/shared-config: with KAFKA_BROKERS set it
+// publishes the login AUDIT_ENTRY to real Kafka; without it, in DEVELOPMENT
+// only, an in-memory bus keeps the process runnable on a tier1-only stack (the
+// audit is then recorded by nobody — logged loudly). Login itself does not
+// depend on the bus, which is precisely why this degradation is dangerous in
+// production: every login succeeds and NOTHING records that it happened.
 // ══════════════════════════════════════════════════════════════════
 
 import { sql } from '@usrp/shared-database';
 import { InMemoryEventBus, KafkaEventBus, type EventBus } from '@usrp/shared-events';
-import { loadKafkaConfig } from '@usrp/shared-config';
+import {
+  assertProductionSecrets,
+  loadKafkaConfig,
+  resolveEventTransport,
+  type EventTransport,
+} from '@usrp/shared-config';
 import { startHttpServer } from '@usrp/shared-http';
 import { createIamService, loadIamConfig } from './index.js';
 import { officerLoginRoutes } from './adapters/http/officer-login.controller.js';
 import { serviceTokenRoutes } from './adapters/http/service-token.controller.js';
 
-function createEventBus(serviceName: string): EventBus {
-  if (process.env['KAFKA_BROKERS']) {
+function createEventBus(serviceName: string, transport: EventTransport): EventBus {
+  if (transport.kind === 'kafka') {
     const kafka = loadKafkaConfig(serviceName);
     return new KafkaEventBus({ brokers: kafka.brokers, clientId: kafka.clientId, ssl: kafka.ssl });
   }
@@ -30,14 +37,18 @@ function createEventBus(serviceName: string): EventBus {
       msg: 'kafka_not_configured',
       detail:
         'KAFKA_BROKERS unset — using in-memory event bus. Login still works; the success AUDIT_ENTRY is recorded by nobody. Dev/tier1 only.',
+      reason: transport.reason,
     }),
   );
   return new InMemoryEventBus();
 }
 
 async function main(): Promise<void> {
+  assertProductionSecrets();
+
   const config = loadIamConfig();
-  const bus = createEventBus(config.runtime.serviceName);
+  const transport = resolveEventTransport();
+  const bus = createEventBus(config.runtime.serviceName, transport);
   await bus.connect();
 
   const service = createIamService(config, bus);
@@ -69,7 +80,7 @@ async function main(): Promise<void> {
       service: config.runtime.serviceName,
       url: server.url,
       env: config.runtime.nodeEnv,
-      auditing: process.env['KAFKA_BROKERS'] ? 'audit.immutable' : 'none (in-memory bus)',
+      auditing: transport.kind === 'kafka' ? 'audit.immutable' : 'none (in-memory bus)',
     }),
   );
 }

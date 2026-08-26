@@ -4,15 +4,21 @@
 // An officer-facing HTTP service that owns the offline physical-test score log.
 // It exposes three officer-authenticated routes — enroll a device, batch-sync
 // signed score records, resolve a conflict — writes physical_test_scores /
-// field_devices, and emits field.score.captured. Transport is env-selected:
-// Kafka when KAFKA_BROKERS is set, else an in-memory bus (dev only; the emitted
-// event then reaches no consumer — logged loudly).
+// field_devices, and emits field.score.captured. Transport is resolved by
+// @usrp/shared-config: Kafka when KAFKA_BROKERS is set, else an in-memory bus
+// in DEVELOPMENT only (the emitted event then reaches no consumer — logged
+// loudly).
 // load config → bus → assemble → serve → shut down cleanly.
 // ══════════════════════════════════════════════════════════════════
 
 import { sql } from '@usrp/shared-database';
 import { InMemoryEventBus, KafkaEventBus, type EventBus } from '@usrp/shared-events';
-import { loadKafkaConfig } from '@usrp/shared-config';
+import {
+  assertProductionSecrets,
+  loadKafkaConfig,
+  resolveEventTransport,
+  type EventTransport,
+} from '@usrp/shared-config';
 import { makeAuthVerifier } from '@usrp/shared-auth';
 import { startHttpServer } from '@usrp/shared-http';
 import { createFieldSyncService } from './index.js';
@@ -21,8 +27,8 @@ import { enrollDeviceRoute } from './adapters/http/enroll-device.controller.js';
 import { syncScoresRoute } from './adapters/http/sync-scores.controller.js';
 import { resolveConflictRoute } from './adapters/http/resolve-conflict.controller.js';
 
-function createEventBus(serviceName: string): EventBus {
-  if (process.env['KAFKA_BROKERS']) {
+function createEventBus(serviceName: string, transport: EventTransport): EventBus {
+  if (transport.kind === 'kafka') {
     const kafka = loadKafkaConfig(serviceName);
     return new KafkaEventBus({ brokers: kafka.brokers, clientId: kafka.clientId, ssl: kafka.ssl });
   }
@@ -30,6 +36,7 @@ function createEventBus(serviceName: string): EventBus {
     JSON.stringify({
       msg: 'kafka_not_configured',
       detail: 'KAFKA_BROKERS unset — using in-memory event bus (field.score.captured reaches no consumer). Dev/tier1 only.',
+      reason: transport.reason,
     }),
   );
   return new InMemoryEventBus();
@@ -55,8 +62,11 @@ async function checkDatabaseReadiness(): Promise<boolean> {
 }
 
 async function main(): Promise<void> {
+  assertProductionSecrets();
+
   const config = loadFieldSyncConfig();
-  const bus = createEventBus(config.runtime.serviceName);
+  const transport = resolveEventTransport();
+  const bus = createEventBus(config.runtime.serviceName, transport);
   await bus.connect();
 
   const service = createFieldSyncService(config, bus);

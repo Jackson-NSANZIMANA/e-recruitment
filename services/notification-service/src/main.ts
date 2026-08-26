@@ -4,14 +4,20 @@
 // A near-pure event reactor: consumes slot.assigned, delivers the invitation,
 // emits notification.delivered + audit. Like audit-service it exposes NO
 // business HTTP route — only /health and /ready — so orchestrators supervise
-// it uniformly. Transport is env-selected: Kafka when KAFKA_BROKERS is set,
-// else an in-memory bus (a reactor with no producers on that bus is a dev
-// no-op, logged loudly).
+// it uniformly. Transport is resolved by @usrp/shared-config: Kafka when
+// KAFKA_BROKERS is set, else an in-memory bus in DEVELOPMENT only (a reactor
+// with no producers on that bus is a no-op, logged loudly). In production that
+// no-op means a citizen is expected at an exam venue they were never told about.
 // ══════════════════════════════════════════════════════════════════
 
 import { sql } from '@usrp/shared-database';
 import { InMemoryEventBus, KafkaEventBus, type EventBus } from '@usrp/shared-events';
-import { loadKafkaConfig } from '@usrp/shared-config';
+import {
+  assertProductionSecrets,
+  loadKafkaConfig,
+  resolveEventTransport,
+  type EventTransport,
+} from '@usrp/shared-config';
 import { startHttpServer } from '@usrp/shared-http';
 import { LogSmsChannel } from '@usrp/shared-sms';
 import { createNotificationService } from './index.js';
@@ -20,8 +26,8 @@ import { loadNotificationConfig } from './config.js';
 import { startSlotAssignedConsumer } from './adapters/events/slot-assigned.consumer.js';
 import { startApplicationWithdrawnConsumer } from './adapters/events/application-withdrawn.consumer.js';
 
-function createEventBus(serviceName: string): EventBus {
-  if (process.env['KAFKA_BROKERS']) {
+function createEventBus(serviceName: string, transport: EventTransport): EventBus {
+  if (transport.kind === 'kafka') {
     const kafka = loadKafkaConfig(serviceName);
     return new KafkaEventBus({ brokers: kafka.brokers, clientId: kafka.clientId, ssl: kafka.ssl });
   }
@@ -30,14 +36,18 @@ function createEventBus(serviceName: string): EventBus {
       msg: 'kafka_not_configured',
       detail:
         'KAFKA_BROKERS unset — using in-memory event bus. notification-service reacts to nothing durable (no producers on this bus). Dev/tier1 only.',
+      reason: transport.reason,
     }),
   );
   return new InMemoryEventBus();
 }
 
 async function main(): Promise<void> {
+  assertProductionSecrets();
+
   const config = loadNotificationConfig();
-  const bus = createEventBus(config.runtime.serviceName);
+  const transport = resolveEventTransport();
+  const bus = createEventBus(config.runtime.serviceName, transport);
   await bus.connect();
 
   const service = createNotificationService(config, bus, {
@@ -46,7 +56,7 @@ async function main(): Promise<void> {
   });
 
   // Subscribe BEFORE serving so a "ready" signal implies we are consuming.
-  if (process.env['KAFKA_BROKERS']) {
+  if (transport.kind === 'kafka') {
     await startSlotAssignedConsumer(bus, service.deliver);
     await startApplicationWithdrawnConsumer(bus, service.withdrawalNotice);
   }
@@ -77,7 +87,8 @@ async function main(): Promise<void> {
       service: config.runtime.serviceName,
       url: server.url,
       env: config.runtime.nodeEnv,
-      consuming: process.env['KAFKA_BROKERS'] ? 'slot.assigned, application.withdrawn' : 'none (in-memory bus)',
+      consuming:
+        transport.kind === 'kafka' ? 'slot.assigned, application.withdrawn' : 'none (in-memory bus)',
     }),
   );
 }

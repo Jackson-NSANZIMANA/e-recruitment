@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ═══════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════
 # run-selfchecks.sh — run EVERY proof in the repo, in dependency order,
 # against live infrastructure. This is the project's real quality gate:
 # "prove it, don't assert it" made repeatable and enforceable (CI runs
@@ -19,9 +19,13 @@
 # for ~30 slices — no proof read it. The final section closes that seam by
 # booting the platform from the committed template instead of from here.
 #
+# NOTE 2: because this file COMMITS dev secrets, the values it exports are
+# published material exactly like the template's, and the production guard
+# fingerprints them too (see packages/shared-config/src/production-guard.ts).
+#
 # Usage:  bash scripts/run-selfchecks.sh
 # Exit:   0 iff every proof passes; first failure aborts (fail-fast).
-# ═══════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -82,6 +86,16 @@ run_ts() {
   hdr "$label"
   if npx tsx "$path"; then ok "$label"; else bad "$label"; fi
 }
+
+# ── 0. The production boot guard — zero infrastructure, fastest signal ──
+# Runs FIRST, ahead of even the RLS proof, for two reasons. It needs no
+# Postgres, no Kafka, no MinIO and no docker at all, so a regression is known
+# in under a second instead of after ClamAV downloads a virus database. And it
+# guards @usrp/shared-config — the config layer every service in the 39 proofs
+# below boots through — including the assertion that the guard stays INERT
+# outside production. If that inertness ever broke, every proof below would
+# fail at once and the cause would be far from obvious.
+run_ts "shared-config: production boot guard (dev secrets / placeholders / loopback / mocks)" packages/shared-config/selfcheck/verify-production-guard.ts
 
 # ── 1. Cross-agency isolation — the system's first hard invariant ──
 # Runs as usrp_admin inside the PG container; rolls back; ERRORs on any leak.
@@ -162,7 +176,7 @@ else
   bad "dev boot: all 11 services from .env.example"
 fi
 
-# ── Summary ────────────────────────────────────────────────────
+# ── Summary ────────────────────────────────────────────
 printf '\n\033[1m─────────────────────────────────────────────\033[0m\n'
 printf 'Proofs: \033[0;32m%d passed\033[0m, ' "$pass"
 if [[ $fail -eq 0 ]]; then
