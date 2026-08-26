@@ -3,25 +3,31 @@
 //
 // A new service ARCHETYPE for USRP: a pure event SINK. Unlike identity/
 // eligibility it exposes NO business HTTP route — it only consumes
-// `audit.immutable` and appends to the immutable trail. It still runs an HTTP
-// server, but solely for `/health` and `/ready` (liveness + DB reachability),
+// `audit.immutable` and appends to the immutable trail. It still runs an
+// HTTP server, but solely for `/health` and `/ready` (liveness + DB reachability),
 // so orchestrators (k8s, Compose healthchecks) can supervise it like any other.
 //
 // TRANSPORT IS RESOLVED BY @usrp/shared-config, NOT BY READING process.env HERE.
 // With KAFKA_BROKERS set it consumes from real Kafka; without it, in DEVELOPMENT
 // ONLY, an in-memory bus keeps the process runnable on a tier1-only stack (it
 // records nothing durable — logged loudly). In PRODUCTION resolveEventTransport()
-// throws instead of degrading, and this service is the reason it has to:
+// throws instead of degrading.
 //
-//   an audit SINK on an in-memory bus accepts every append and stores NOTHING,
-//   while /health and /ready both stay green — readiness probes the DATABASE,
-//   which is perfectly healthy; it is the INGRESS that is missing. The
-//   append-only trail that rls/0007 enforces and Law N° 058/2021 requires would
-//   be an empty table, and nothing in any log would look wrong.
+// STARTUP IS PHASED AND BOUNDED. The boot proof can only report a missing port;
+// without markers that symptom does not identify whether config, Kafka, or the
+// HTTP bind failed. Each marker is emitted BEFORE its phase, and the transport
+// operations use the shared 30-second startup bound. The sink still subscribes
+// BEFORE serving, so /ready means the consumer is actually attached.
 // ══════════════════════════════════════════════════════════════════
 
 import { sql } from '@usrp/shared-database';
-import { InMemoryEventBus, KafkaEventBus, type EventBus } from '@usrp/shared-events';
+import {
+  InMemoryEventBus,
+  KafkaEventBus,
+  logStartupPhase,
+  withStartupTimeout,
+  type EventBus,
+} from '@usrp/shared-events';
 import {
   assertProductionSecrets,
   loadKafkaConfig,
@@ -32,6 +38,8 @@ import { startHttpServer } from '@usrp/shared-http';
 import { createAuditWriter } from './index.js';
 import { loadAuditConfig } from './config.js';
 import { startAuditEntryConsumer } from './adapters/events/audit-entry.consumer.js';
+
+const SERVICE_NAME = 'audit-service';
 
 function createEventBus(serviceName: string, transport: EventTransport): EventBus {
   if (transport.kind === 'kafka') {
@@ -51,32 +59,35 @@ function createEventBus(serviceName: string, transport: EventTransport): EventBu
 }
 
 async function main(): Promise<void> {
-  // FIRST, before any other loader: die on a production config that still
-  // carries dev key material, placeholder secrets, loopback endpoints or mock
-  // G2G integrations — while this process still holds no database pool, no
-  // socket and no consumer-group membership. A doomed boot that joins and
-  // leaves a consumer group perturbs the healthy replicas on its way down.
+  logStartupPhase(SERVICE_NAME, 'asserting_production_secrets');
   assertProductionSecrets();
 
+  logStartupPhase(SERVICE_NAME, 'loading_config');
   const config = loadAuditConfig();
+
+  logStartupPhase(SERVICE_NAME, 'resolving_event_transport');
   const transport = resolveEventTransport();
   const bus = createEventBus(config.runtime.serviceName, transport);
-  await bus.connect();
 
+  logStartupPhase(SERVICE_NAME, 'connecting_event_bus', { transport: transport.kind });
+  await withStartupTimeout(bus.connect(), 'connecting the event bus');
+
+  logStartupPhase(SERVICE_NAME, 'building_audit_writer');
   const writer = createAuditWriter();
 
-  // The sink's ingress: subscribe BEFORE serving so a "ready" signal implies
-  // we are actually consuming. Only meaningful with a real broker.
   if (transport.kind === 'kafka') {
-    await startAuditEntryConsumer(bus, writer);
+    logStartupPhase(SERVICE_NAME, 'starting_consumer', { topic: 'audit.immutable' });
+    await withStartupTimeout(
+      startAuditEntryConsumer(bus, writer),
+      'starting the audit.immutable consumer',
+    );
   }
 
+  logStartupPhase(SERVICE_NAME, 'starting_http_server', { port: config.runtime.port });
   const server = await startHttpServer({
     serviceName: config.runtime.serviceName,
     port: config.runtime.port,
-    // No business routes — the trail is written ONLY off the event backbone.
     routes: [],
-    // Ready only when the audit database — the trail's home — is reachable.
     readiness: async (): Promise<boolean> => {
       try {
         await sql`SELECT 1`;
@@ -105,6 +116,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err: unknown) => {
-  console.error(JSON.stringify({ msg: 'startup_failed', service: 'audit-service' }), err);
+  console.error(JSON.stringify({ msg: 'startup_failed', service: SERVICE_NAME }), err);
   process.exit(1);
 });
