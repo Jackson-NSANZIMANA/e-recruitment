@@ -41,20 +41,27 @@ set +a
 
 printf '\033[0;36m▶ loaded %s — starting services\033[0m\n' "$ENV_FILE"
 
-# Turbo percentage concurrency is relative to the runner's CPU count. On a
-# small CI runner, `--concurrency=100%` can therefore be only 2 or 4 tasks;
-# persistent `tsx watch` tasks occupy those slots forever and the remaining
-# services are never spawned. That failure is silent: no package prefix,
-# no startup marker, no socket. Use an explicit numeric ceiling instead.
-#
-# There are currently 19 packages in scope and 11 persistent service `dev`
-# tasks. `100` is intentionally above the package count so a newly-added
-# service cannot be starved by the scheduler. Turbo still filters execution
-# through each package's actual `dev` script; this does not create processes
-# for packages without one.
-#
-# `--parallel` is deprecated in the installed Turbo version. An explicit
-# concurrency value provides the same scheduling behaviour without the
-# deprecated flag.
-exec pnpm exec turbo run dev --concurrency=100 "$@"
+# Every runnable service has a persistent `dev` task (`tsx watch`). Turbo's
+# default concurrency can be smaller than that set, which leaves the excess
+# tasks queued forever: no process, no output, no socket, only a misleading
+# health-check timeout. Count the same src/main.ts contract used by
+# verify-dev-boot.sh and make every runnable service schedulable immediately.
+SERVICE_TASK_COUNT=0
+for dir in services/*/; do
+  if [[ -f "${dir}src/main.ts" ]]; then
+    SERVICE_TASK_COUNT=$((SERVICE_TASK_COUNT + 1))
+  fi
+done
+
+if (( SERVICE_TASK_COUNT == 0 )); then
+  printf '\033[0;31m✗ no runnable services found under services/*/src/main.ts.\033[0m\n' >&2
+  exit 1
+fi
+
+# Use a numeric count, not `100%`: Turbo percentage concurrency is relative to
+# available CPU capacity, so 100% on a small CI runner may still schedule only
+# two or four persistent tasks. Use the exact runnable-service count instead.
+# `--parallel` is deprecated in current Turbo and is unnecessary when the
+# concurrency is explicit.
+exec pnpm exec turbo run dev --concurrency="$SERVICE_TASK_COUNT" "$@"
 
