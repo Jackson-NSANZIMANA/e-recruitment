@@ -5,6 +5,7 @@
 //   Route:             topicForEvent, partitionKeyForEvent
 //   Serialize:         JsonEventSerializer (EventSerializer interface)
 //   Transport:         KafkaEventBus (prod) / InMemoryEventBus (tests)
+//   Bootstrap:         withStartupTimeout, logStartupPhase
 //
 // Services depend on the EventBus interface — never on kafkajs directly.
 // ══════════════════════════════════════════════════════════════════
@@ -35,3 +36,11 @@ export {
 } from './bus.js';
 
 export { KafkaEventBus, type KafkaBusOptions } from './kafka-bus.js';
+
+// Bootstrap: the bound and the phase marker every service main() shares.
+export {
+  DEFAULT_STARTUP_TIMEOUT_MS,
+  StartupTimeoutError,
+  logStartupPhase,
+  withStartupTimeout,
+} from './startup.js';
