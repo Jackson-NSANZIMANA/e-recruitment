@@ -5,15 +5,21 @@
 // real event transport and exposes it over HTTP (ADR-005): load config →
 // build the event bus → assemble the use case → serve → shut down cleanly.
 //
-// Transport is chosen by environment: with KAFKA_BROKERS set we publish to
-// Kafka (prod/tier2); without it we fall back to an in-memory bus so the
-// service still runs on a tier1-only dev stack (events are then local-only
-// — logged loudly so this is never mistaken for durable publishing).
+// Transport is resolved by @usrp/shared-config: with KAFKA_BROKERS set we
+// publish to Kafka (prod/tier2); without it, in DEVELOPMENT only, we fall back
+// to an in-memory bus so the service still runs on a tier1-only dev stack
+// (events are then local-only — logged loudly so this is never mistaken for
+// durable publishing).
 // ══════════════════════════════════════════════════════════════════
 
 import { sql } from '@usrp/shared-database';
 import { InMemoryEventBus, KafkaEventBus, type EventBus } from '@usrp/shared-events';
-import { loadKafkaConfig } from '@usrp/shared-config';
+import {
+  assertProductionSecrets,
+  loadKafkaConfig,
+  resolveEventTransport,
+  type EventTransport,
+} from '@usrp/shared-config';
 import { makeAuthVerifier } from '@usrp/shared-auth';
 import { startHttpServer } from '@usrp/shared-http';
 import {
@@ -32,8 +38,8 @@ import { LogSmsChannel } from '@usrp/shared-sms';
 import { HttpApplicationsGateway } from './adapters/applications.http-gateway.js';
 import { startBiometricResultConsumer } from './adapters/events/biometric-result.consumer.js';
 
-function createEventBus(serviceName: string): EventBus {
-  if (process.env['KAFKA_BROKERS']) {
+function createEventBus(serviceName: string, transport: EventTransport): EventBus {
+  if (transport.kind === 'kafka') {
     const kafka = loadKafkaConfig(serviceName);
     return new KafkaEventBus({ brokers: kafka.brokers, clientId: kafka.clientId, ssl: kafka.ssl });
   }
@@ -41,14 +47,18 @@ function createEventBus(serviceName: string): EventBus {
     JSON.stringify({
       msg: 'kafka_not_configured',
       detail: 'KAFKA_BROKERS unset — using in-memory event bus (events are NOT durably published). Dev/tier1 only.',
+      reason: transport.reason,
     }),
   );
   return new InMemoryEventBus();
 }
 
 async function main(): Promise<void> {
+  assertProductionSecrets();
+
   const config = loadIdentityConfig();
-  const bus = createEventBus(config.runtime.serviceName);
+  const transport = resolveEventTransport();
+  const bus = createEventBus(config.runtime.serviceName, transport);
   await bus.connect();
 
   const service = createIdentityService(config, bus);
@@ -56,7 +66,7 @@ async function main(): Promise<void> {
   // Record biometric outcomes onto applicant_identities off the backbone.
   // Subscribe BEFORE serving so a "ready" signal implies we are consuming.
   // Only meaningful with a real broker.
-  if (process.env['KAFKA_BROKERS']) {
+  if (transport.kind === 'kafka') {
     await startBiometricResultConsumer(bus, createBiometricResultProjector(config, bus));
     console.log(JSON.stringify({ msg: 'event_consumers_started', topics: 'biometric.result' }));
   }

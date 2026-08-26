@@ -14,13 +14,20 @@
 // which is exactly how P1's by-id and status-history sat finished-but-invisible
 // in the tree. Adding a use case is not the same as shipping an endpoint.
 //
-// Transport is env-selected: Kafka when KAFKA_BROKERS is set, else in-memory
-// (dev only — the emitted verdict then reaches no routing projection, logged
-// loudly). Ready = the database (the verdict's durable home) is reachable.
+// Transport is resolved by @usrp/shared-config: Kafka when KAFKA_BROKERS is set,
+// else in-memory in DEVELOPMENT only (the emitted verdict then reaches no
+// routing projection, logged loudly — in production an AMBER document would
+// never reach an officer's queue). Ready = the database (the verdict's durable
+// home) is reachable.
 // ══════════════════════════════════════════════════════════════════
 
 import { InMemoryEventBus, KafkaEventBus, type EventBus } from '@usrp/shared-events';
-import { loadKafkaConfig } from '@usrp/shared-config';
+import {
+  assertProductionSecrets,
+  loadKafkaConfig,
+  resolveEventTransport,
+  type EventTransport,
+} from '@usrp/shared-config';
 import { makeAuthVerifier } from '@usrp/shared-auth';
 import { startHttpServer } from '@usrp/shared-http';
 import { sql } from '@usrp/shared-database';
@@ -29,8 +36,8 @@ import { loadDocumentForensicsConfig } from './config.js';
 import { analyzeDocumentRoute } from './adapters/http/analyze-document.controller.js';
 import { uploadDocumentRoute } from './adapters/http/upload-document.controller.js';
 
-function createEventBus(serviceName: string): EventBus {
-  if (process.env['KAFKA_BROKERS']) {
+function createEventBus(serviceName: string, transport: EventTransport): EventBus {
+  if (transport.kind === 'kafka') {
     const kafka = loadKafkaConfig(serviceName);
     return new KafkaEventBus({ brokers: kafka.brokers, clientId: kafka.clientId, ssl: kafka.ssl });
   }
@@ -39,14 +46,18 @@ function createEventBus(serviceName: string): EventBus {
       msg: 'kafka_not_configured',
       detail:
         'KAFKA_BROKERS unset — using in-memory event bus (document.forensics reaches no consumer). Dev/tier1 only.',
+      reason: transport.reason,
     }),
   );
   return new InMemoryEventBus();
 }
 
 async function main(): Promise<void> {
+  assertProductionSecrets();
+
   const config = loadDocumentForensicsConfig();
-  const bus = createEventBus(config.runtime.serviceName);
+  const transport = resolveEventTransport();
+  const bus = createEventBus(config.runtime.serviceName, transport);
   await bus.connect();
 
   const service = createDocumentForensicsService(config, bus);
