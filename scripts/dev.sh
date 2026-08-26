@@ -10,9 +10,6 @@
 #      process only receives variables enumerated in that task's `env`
 #      (or globalEnv / passThroughEnv). That is turbo.json.
 #
-# Fixing either one alone leaves `pnpm dev` broken, which is exactly how
-# this bug survived several rounds of diagnosis.
-#
 # Deliberately ONE boundary. The alternative — `--env-file=../../.env` in
 # all eleven service package.json files — hard-codes the repo layout eleven
 # times, lets the dev environment drift per service, and trades tsx watch's
@@ -44,4 +41,11 @@ set +a
 
 printf '\033[0;36m▶ loaded %s — starting services\033[0m\n' "$ENV_FILE"
 
-exec pnpm exec turbo run dev --parallel "$@"
+# `dev` is persistent (`tsx watch`). Turbo's default concurrency is 10, but
+# this workspace has 11 service dev tasks. The first ten watchers consume all
+# slots forever and the eleventh is queued indefinitely, so it never prints,
+# never binds its port, and the boot proof can only report a missing health
+# endpoint. Start all persistent service tasks together. `100%` is dynamic:
+# it remains correct when another service is added, unlike a hard-coded 11.
+exec pnpm exec turbo run dev --parallel --concurrency=100% "$@"
+
