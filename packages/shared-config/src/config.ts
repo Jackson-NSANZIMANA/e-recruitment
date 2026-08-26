@@ -3,7 +3,7 @@
 //
 // Each loader validates only the variables it owns and returns a typed,
 // frozen section. Services compose the sections they need. Cross-cutting
-// infra (db/redis/kafka) is standardised here so every service reads the
+// infra (db/kafka) is standardised here so every service reads the
 // same variable names — the exact names Turbo passes through (see turbo.json
 // `env`) and docker-compose defines.
 //
@@ -14,6 +14,7 @@
 
 import { createPrivateKey, createPublicKey } from 'node:crypto';
 import {
+  EnvValidationError,
   boolean,
   deepFreeze,
   integer,
@@ -27,7 +28,7 @@ import {
   type EnvSource,
 } from './env.js';
 
-// ── Runtime ─────────────────────────────────────────────────
+// ── Runtime ───────────────────────────────────────────
 
 export const NODE_ENVS = ['development', 'test', 'staging', 'production'] as const;
 export type NodeEnv = (typeof NODE_ENVS)[number];
@@ -87,7 +88,7 @@ export function loadRuntimeConfig(serviceName: string, source: EnvSource = proce
   });
 }
 
-// ── Database (PostgreSQL) ──────────────────────────────────────
+// ── Database (PostgreSQL) ────────────────────────────────
 
 export interface DatabaseConfig {
   readonly url: string;
@@ -105,7 +106,12 @@ export function loadDatabaseConfig(source: EnvSource = process.env): DatabaseCon
   return deepFreeze({ url: env.DATABASE_URL, maxConnections: env.DATABASE_MAX_CONNECTIONS });
 }
 
-// ── Redis ──────────────────────────────────────────────────
+// ── Redis ──────────────────────────────────────────────
+// NOT part of loadServiceConfig. The Redis dependency was deleted on
+// 2026-07-19 and REDIS_URL is deliberately unset in .env.example, so a
+// composite that required it could not boot from the committed template.
+// Kept exported for the day a real consumer appears — as c6fecea intended,
+// and as its message claimed had already been done.
 
 export interface RedisConfig {
   readonly url: string;
@@ -119,7 +125,7 @@ export function loadRedisConfig(source: EnvSource = process.env): RedisConfig {
   return deepFreeze({ url: env.REDIS_URL });
 }
 
-// ── Kafka ─────────────────────────────────────────────────
+// ── Kafka ────────────────────────────────────────────
 
 export interface KafkaConfig {
   readonly brokers: readonly string[];
@@ -138,7 +144,7 @@ export function loadKafkaConfig(clientId: string, source: EnvSource = process.en
   return deepFreeze({ brokers: env.KAFKA_BROKERS, clientId, ssl: env.KAFKA_SSL });
 }
 
-// ── G2G integrations (NIDA / NESA / HEC / RIB) ─────────────────────
+// ── G2G integrations (NIDA / NESA / HEC / RIB) ─────────────────
 // HMAC secrets are dev-length in the mocks; production values are longer.
 // NOTE the names: <AGENCY>_BASE_URL, not <AGENCY>_API_BASE_URL.
 
@@ -183,10 +189,14 @@ export function loadG2GConfig(source: EnvSource = process.env): G2GConfig {
   });
 }
 
-// ── Security ───────────────────────────────────────────────
+// ── Security ────────────────────────────────────────
 // Master keys MUST be strong. We refuse to boot with weak keys — a bad
 // key here means every hashed National ID and encrypted PII column is
 // weak. 32 chars is the enforced floor for dev; production uses HSM/KMS.
+//
+// A LENGTH FLOOR IS NOT A STRENGTH CHECK. 'CHANGE_ME_32_CHAR_MIN_AES256_KEY'
+// clears this validator and provides no secrecy whatsoever, which is why
+// assertProductionSecrets() in ./production-guard.ts exists alongside it.
 
 export interface SecurityConfig {
   /** HMAC key used to derive the system-wide `nationalIdHash`. */
@@ -215,7 +225,7 @@ export function loadSecurityConfig(source: EnvSource = process.env): SecurityCon
   });
 }
 
-// ── Auth verification (Ed25519 bearer tokens) ─────────────────────
+// ── Auth verification (Ed25519 bearer tokens) ─────────────────
 // Every service that exposes HTTP verifies incoming bearer tokens with the
 // issuer's PUBLIC key (asymmetric — the private signing key lives only with
 // the token issuer, never shipped to verifiers). The public key is supplied
@@ -252,7 +262,7 @@ export function loadAuthVerifyConfig(source: EnvSource = process.env): AuthVerif
   });
 }
 
-// ── Auth issuer (PRIVATE key) ─────────────────────────────────
+// ── Auth issuer (PRIVATE key) ────────────────────────────
 // The mirror of loadAuthVerifyConfig for the ONE service that MINTS tokens
 // (iam-service). It holds the Ed25519 PRIVATE key; every other service only
 // ever verifies with the public key — the whole point of the asymmetric design.
@@ -291,7 +301,7 @@ export function loadAuthIssuerConfig(source: EnvSource = process.env): AuthIssue
   });
 }
 
-// ── CORS (edge tier only) ──────────────────────────────────────
+// ── CORS (edge tier only) ────────────────────────────────
 // CORS_ORIGINS has existed in .env.example from the beginning with nothing
 // reading it. It becomes load-bearing the moment a browser talks to a BFF,
 // so it gets a real loader. Internal microservices must NOT call this: a
@@ -316,7 +326,7 @@ export function loadCorsConfig(source: EnvSource = process.env): CorsConfig {
   return deepFreeze({ origins: env.CORS_ORIGINS });
 }
 
-// ── Edge session (BFF cookie tier) ───────────────────────────────
+// ── Edge session (BFF cookie tier) ───────────────────────────
 // The browser holds an opaque HANDLE; the upstream credential (officer Ed25519
 // JWT or citizen opaque session token) stays server-side in the edge session
 // store. Two TTLs, not one:
@@ -374,7 +384,7 @@ export function loadEdgeSessionConfig(source: EnvSource = process.env): EdgeSess
   });
 }
 
-// ── Agency deployment selector ──────────────────────────────────
+// ── Agency deployment selector ──────────────────────────────
 // The whole mechanism behind "ONE agency-bff codebase, THREE deployments".
 // Three codebases would be three places to forget the same security fix; the
 // officer token already carries the agency claim and the DB roles do the real
@@ -392,25 +402,29 @@ export function loadAgencyDeploymentConfig(source: EnvSource = process.env): Age
   return deepFreeze({ agency: env.AGENCY });
 }
 
-// ── Composite service config ───────────────────────────────────
+// ── Composite service config ───────────────────────────────
 
 export interface ServiceConfig {
   readonly runtime: RuntimeConfig;
   readonly database: DatabaseConfig;
-  readonly redis: RedisConfig;
   readonly kafka: KafkaConfig;
 }
 
 /**
  * Standard bootstrap config for a typical USRP microservice
- * (runtime + database + redis + kafka). Services layer on the extra
- * sections they need (e.g. G2G, security) explicitly.
+ * (runtime + database + kafka). Services layer on the extra sections they
+ * need (e.g. G2G, security) explicitly.
+ *
+ * Redis is deliberately NOT in this composite. It was deleted as a dependency
+ * on 2026-07-19 and REDIS_URL is unset in .env.example, so including it made
+ * this loader unable to boot from the committed template — a hard
+ * 'REDIS_URL is required' no operator could satisfy. Call loadRedisConfig
+ * explicitly if a real Redis consumer ever appears.
  */
 export function loadServiceConfig(serviceName: string, source: EnvSource = process.env): ServiceConfig {
   return deepFreeze({
     runtime: loadRuntimeConfig(serviceName, source),
     database: loadDatabaseConfig(source),
-    redis: loadRedisConfig(source),
     kafka: loadKafkaConfig(serviceName, source),
   });
 }
