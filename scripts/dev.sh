@@ -46,15 +46,50 @@ printf '\033[0;36m▶ loaded %s — starting services\033[0m\n' "$ENV_FILE"
 # tasks queued forever: no process, no output, no socket, only a misleading
 # health-check timeout. Count the same src/main.ts contract used by
 # verify-dev-boot.sh and make every runnable service schedulable immediately.
+#
+# Validate the scoped port contract before Turbo starts. Without this guard,
+# a stale .env silently makes a service fall back to PORT or 3000; with eleven
+# persistent processes that becomes either a misleading healthy-looking boot
+# or an EADDRINUSE failure. The service directory is the source of truth for
+# both the task count and the derived PORT_<SERVICE_NAME> variable.
 SERVICE_TASK_COUNT=0
+PORT_VALIDATION_ERRORS=0
+declare -A PORT_OWNERS=()
 for dir in services/*/; do
   if [[ -f "${dir}src/main.ts" ]]; then
     SERVICE_TASK_COUNT=$((SERVICE_TASK_COUNT + 1))
+
+    service_name="${dir#services/}"
+    service_name="${service_name%/}"
+    port_var="PORT_${service_name^^}"
+    port_var="${port_var//-/_}"
+    port_value="${!port_var-}"
+
+    if [[ -z "$port_value" ]]; then
+      printf '\033[0;31m✗ %s is required for runnable service %s.\033[0m\n' \
+        "$port_var" "$service_name" >&2
+      PORT_VALIDATION_ERRORS=$((PORT_VALIDATION_ERRORS + 1))
+    elif [[ ! "$port_value" =~ ^[0-9]+$ ]] || (( port_value < 1 || port_value > 65535 )); then
+      printf '\033[0;31m✗ %s must be a TCP port from 1 to 65535, got %s.\033[0m\n' \
+        "$port_var" "$port_value" >&2
+      PORT_VALIDATION_ERRORS=$((PORT_VALIDATION_ERRORS + 1))
+    elif [[ -n "${PORT_OWNERS[$port_value]+present}" ]]; then
+      printf '\033[0;31m✗ %s=%s collides with %s.\033[0m\n' \
+        "$port_var" "$port_value" "${PORT_OWNERS[$port_value]}" >&2
+      PORT_VALIDATION_ERRORS=$((PORT_VALIDATION_ERRORS + 1))
+    else
+      PORT_OWNERS[$port_value]="$port_var"
+    fi
   fi
 done
 
 if (( SERVICE_TASK_COUNT == 0 )); then
   printf '\033[0;31m✗ no runnable services found under services/*/src/main.ts.\033[0m\n' >&2
+  exit 1
+fi
+
+if (( PORT_VALIDATION_ERRORS > 0 )); then
+  printf '\033[0;31m✗ fix the service port configuration before starting Turbo.\033[0m\n' >&2
   exit 1
 fi
 
@@ -75,4 +110,3 @@ fi
 # headroom instead. `--parallel` is deprecated in current Turbo and is
 # unnecessary when the concurrency is explicit.
 exec pnpm exec turbo run dev --concurrency="$SERVICE_TASK_CONCURRENCY" "$@"
-
