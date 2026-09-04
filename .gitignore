@@ -8,12 +8,31 @@ build/
 coverage/
 .turbo/
 
+# ─────────────────────────────────────────────────────────────────────────────
 # Environment files (NEVER commit these)
+#
+# DENY BY DEFAULT, then allow back the templates. This shape is deliberate.
+#
+# The previous version of this block listed five exact names. That is an
+# allowlist pretending to be a denylist: it only protects the suffixes someone
+# already thought of, and it fails silently in the leaking direction. It missed
+# `.env.backup.<timestamp>`, which is how a real 10 KB env file reached main.
+#
+# Do not add exceptions here without a review. If you need a new tracked
+# template, name it `*.example` and it is already covered.
+# ─────────────────────────────────────────────────────────────────────────────
 .env
-.env.local
-.env.*.local
-.env.production
-.env.staging
+.env.*
+*.env
+!.env.example
+!.env.*.example
+
+# Backup/editor copies, which routinely sit next to a real secret file
+*.backup
+*.bak
+*.orig
+*.save
+*~
 
 # Docker volumes (local)
 .docker-volumes/
@@ -52,9 +71,13 @@ test-results/
 packages/shared-database/.drift-check/
 
 # HSM / Certificate artifacts (never commit)
+# Same deny-by-default reasoning as the env block above.
 *.pem
 *.key
 *.crt
 *.p12
 *.pfx
+*.jks
+*.keystore
+*.pkcs12
 !infrastructure/docker/certs/.gitkeep
