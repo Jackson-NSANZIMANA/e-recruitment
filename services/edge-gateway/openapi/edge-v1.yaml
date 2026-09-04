@@ -1,0 +1,1357 @@
+# ══════════════════════════════════════════════════════════════════
+# USRP Edge Gateway — OpenAPI 3.1
+#
+# The single browser-facing origin. See docs/architecture/adr/ADR-021-edge-tier.md.
+#
+# PROVENANCE. Every path, method, session kind and retry disposition below is
+# transcribed from `EDGE_OPERATIONS` in the frontend's
+# `packages/api-client/src/paths.ts` at commit a869b52 (branch
+# feat/agent2-auth-transport). The frontend asserts that registry against
+# @usrp/contracts at module load, so it is the authoritative statement of what
+# this tier must serve. This document does not get a second opinion.
+#
+# READ `x-usrp-verified` BEFORE IMPLEMENTING ANYTHING:
+#   frontend-registry        path/method/session/retry are verified.
+#   pending-controller-read  the BODY has not been read from the upstream
+#                            controller. Read it, then remove the marker. Do not
+#                            implement a body from this document alone.
+#
+# The tier this replaces was written in the present indicative with no provenance
+# at all. That is how four BFF services that never existed were read as fact for
+# a month. The markers are the fix.
+# ══════════════════════════════════════════════════════════════════
+
+openapi: 3.1.0
+
+info:
+  title: USRP Edge Gateway
+  version: 1.0.0-draft
+  summary: The only browser-reachable origin in the USRP platform.
+  description: |
+    One edge for all three agencies (RDF, RNP, RCS) and for citizens.
+
+    ## Credentials never reach the browser
+
+    Two human credential kinds exist upstream and they are not interchangeable:
+
+    | | Officer | Applicant |
+    |---|---|---|
+    | Credential | Ed25519 bearer JWT (iam-service) | opaque 32-byte DB token (identity-service) |
+    | Revocable | **no**, until expiry, by design (ADR-016) | yes, next request (ADR-018) |
+
+    Neither is ever sent to a browser. The browser holds an opaque **edge session
+    handle** in an httpOnly cookie; this service maps it to the real upstream
+    credential. Because officer JWTs are non-revocable, killing the edge handle is
+    the only way an officer session can be ended before its JWT expires.
+
+    There is no `Authorization` header on any operation in this document and no
+    security scheme that would permit one.
+
+    ## Agency is never a request field
+
+    No path segment, query parameter or body property in this document carries an
+    agency. It is read from the officer session, which makes it
+    server-authoritative by construction rather than by validation.
+
+    ## Exact paths only
+
+    `shared-http` matches paths exactly and has no parameter syntax (ADR-005).
+    Single-record reads use `?applicationId=`. There are no path parameters
+    anywhere in this platform, and a client that builds `/applications/{id}` will
+    type-check perfectly and 404 in production for every input.
+  contact:
+    name: USRP Frontend Systems Architecture
+  license:
+    name: UNLICENSED
+
+servers:
+  - url: https://portal.usrp.gov.rw
+    description: Production. Same-origin with both SPAs; `__Host-` cookie prefix required.
+  - url: http://localhost:4021
+    description: Local development. Plain http, so the dev CSRF cookie name is used.
+
+tags:
+  - name: session
+    description: Session introspection and refresh. The SPA calls these on mount.
+  - name: auth-officer
+    description: Officer credential exchange.
+  - name: auth-applicant
+    description: Citizen OTP authentication.
+  - name: officer-reads
+    description: Agency-scoped reads. Agency comes from the session, never the request.
+  - name: officer-transitions
+    description: The four separately-guarded decisions. There is no generic transition.
+  - name: officer-walkin
+    description: Field registration and on-site vetting (RDF only upstream).
+  - name: citizen
+    description: Citizen self-service. Cross-agency by construction.
+
+security:
+  - edgeSessionCookie: []
+
+paths:
+
+  # ────────────────────────────────────────────────────────────────
+  # Session
+  # ────────────────────────────────────────────────────────────────
+
+  /edge/v1/session:
+    get:
+      operationId: readSession
+      tags: [session]
+      summary: Read the current session, if any.
+      description: |
+        Returns session **metadata** and no credential. There is no field for a
+        token, so no component can read, log, or forward one.
+
+        Replaces the fictional `GET /auth/me`, which no service ever served and
+        which returned a decoded JWT payload including `email` and a `SUPERADMIN`
+        role. RLS is FORCE'd with NOLOGIN group roles and there is no bypass
+        principal, so that role is unrepresentable end to end.
+      security: []
+      x-usrp-session: anonymous
+      x-usrp-retry-on-g2g: false
+      x-usrp-verified: frontend-registry
+      responses:
+        '200':
+          description: An active session.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+        '401':
+          description: |
+            No session. Deliberately a normal, expected outcome — the SPA calls
+            this on every mount and must distinguish `checking` from `anonymous`
+            so it does not flash a login screen at an authenticated user.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BareError' }
+
+  /edge/v1/session/refresh:
+    post:
+      operationId: refreshSession
+      tags: [session]
+      summary: Advance the idle window.
+      description: |
+        Advances `idleExpiresAt`. Never advances `absoluteExpiresAt` — the hard
+        ceiling does not move, so the UI can tell the truth about when the session
+        will end regardless of activity.
+      security: []
+      x-usrp-session: anonymous
+      x-usrp-retry-on-g2g: false
+      x-usrp-verified: frontend-registry
+      parameters:
+        - $ref: '#/components/parameters/CsrfHeader'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Session refreshed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+        '401': { $ref: '#/components/responses/SessionEnded' }
+        '403': { $ref: '#/components/responses/CsrfRejected' }
+
+  # ────────────────────────────────────────────────────────────────
+  # Officer auth
+  # ────────────────────────────────────────────────────────────────
+
+  /edge/v1/auth/officer/login:
+    post:
+      operationId: officerLogin
+      tags: [auth-officer]
+      summary: Exchange officer credentials for an edge session.
+      description: |
+        Fronts iam-service `POST /v1/auth/officer/login`.
+
+        **`loginHandle`, not `email`.** `officer_accounts.login_handle` is a
+        `varchar(128)`; there is no email column anywhere in the credential store.
+        The old frontend sent `{ email, password }`, which could never have worked
+        against any schema.
+
+        On success an `httpOnly` session cookie and a readable CSRF echo cookie are
+        set. The Ed25519 JWT is retained server-side and never sent to the browser.
+      security: []
+      x-usrp-session: anonymous
+      x-usrp-retry-on-g2g: false
+      x-usrp-verified: frontend-registry
+      x-usrp-public-allowlist: true
+      parameters:
+        - $ref: '#/components/parameters/CsrfHeader'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [loginHandle, password]
+              properties:
+                loginHandle:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                  description: Matches `officer_accounts.login_handle`. Not an email address.
+                password:
+                  type: string
+                  minLength: 1
+                  writeOnly: true
+      responses:
+        '204':
+          description: |
+            Authenticated. Cookies set; **no body**. The session is read back via
+            `GET /edge/v1/session` so there is exactly one shape describing a
+            session rather than two that can disagree.
+          headers:
+            Set-Cookie: { $ref: '#/components/headers/SetSessionCookie' }
+        '400': { $ref: '#/components/responses/CredentialRejected' }
+        '401': { $ref: '#/components/responses/CredentialRejected' }
+        '403': { $ref: '#/components/responses/CsrfRejected' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/UpstreamUnavailable' }
+
+  /edge/v1/auth/officer/logout:
+    post:
+      operationId: officerLogout
+      tags: [auth-officer]
+      summary: End the officer session.
+      description: |
+        Destroys the edge session and discards the retained JWT.
+
+        This is the **only** revocation point that exists for an officer. Per
+        ADR-016 the Ed25519 JWT is non-revocable until expiry, so if the handle
+        outlives the logout there is nothing else to fall back on. Destroy it
+        server-side; clearing the cookie alone is not logout.
+      x-usrp-session: officer
+      x-usrp-retry-on-g2g: false
+      x-usrp-verified: frontend-registry
+      parameters:
+        - $ref: '#/components/parameters/CsrfHeader'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '204':
+          description: |
+            Session destroyed. Idempotent: logging out without a session is also
+            204, because a client retrying a logout must never be told it failed.
+        '403': { $ref: '#/components/responses/CsrfRejected' }
+
+  # ────────────────────────────────────────────────────────────────
+  # Applicant auth
+  # ────────────────────────────────────────────────────────────────
+
+  /edge/v1/auth/applicant/otp/request:
+    post:
+      operationId: requestApplicantOtp
+      tags: [auth-applicant]
+      summary: Request a one-time passcode.
+      description: |
+        **`202` means the request was ACCEPTED. Nothing more.**
+
+        It does not indicate that the National ID exists, that a citizen record
+        was found, or that an SMS was sent. Any of those would make this endpoint
+        an unauthenticated national-identity enumeration oracle: submit a candidate
+        NID, read the response, learn whether a real citizen is behind it. At
+        national scale on a public endpoint that is a bulk PII disclosure channel.
+
+        This is the same reasoning that withholds the document forensic verdict
+        from an uploader. The deprecated frontend architecture doc specified a
+        green checkmark on NID field blur — that is rejected, and no endpoint will
+        ever feed one.
+
+        Rate limiting is a correctness requirement here, not hardening: without it
+        the 202 becomes an oracle by timing and volume even though the body says
+        nothing.
+      security: []
+      x-usrp-session: anonymous
+      x-usrp-retry-on-g2g: true
+      x-usrp-verified: frontend-registry
+      x-usrp-public-allowlist: true
+      parameters:
+        - $ref: '#/components/parameters/CsrfHeader'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [nationalId]
+              properties:
+                nationalId: { $ref: '#/components/schemas/NationalId' }
+                channel:
+                  type: string
+                  enum: [WEB, USSD, FIELD]
+                  default: WEB
+      responses:
+        '202':
+          description: Request accepted. Carries no information about the subject.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BareAccepted' }
+        '400':
+          description: |
+            Malformed request — structurally invalid National ID only. Must NOT
+            distinguish "well-formed but unknown", which would restore the oracle.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BareError' }
+        '403': { $ref: '#/components/responses/CsrfRejected' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/UpstreamUnavailable' }
+
+  /edge/v1/auth/applicant/otp/verify:
+    post:
+      operationId: verifyApplicantOtp
+      tags: [auth-applicant]
+      summary: Verify a passcode and open a citizen session.
+      description: |
+        On success the edge mints an opaque citizen session upstream
+        (identity-service, 30-minute sliding TTL, revocable) and sets the session
+        cookie. Nothing is returned in the body.
+      security: []
+      x-usrp-session: anonymous
+      x-usrp-retry-on-g2g: false
+      x-usrp-verified: frontend-registry
+      x-usrp-public-allowlist: true
+      parameters:
+        - $ref: '#/components/parameters/CsrfHeader'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [nationalId, otp]
+              properties:
+                nationalId: { $ref: '#/components/schemas/NationalId' }
+                otp:
+                  type: string
+                  pattern: '^[0-9]{6}$'
+                  writeOnly: true
+                channel:
+                  type: string
+                  enum: [WEB, USSD, FIELD]
+                  default: WEB
+      responses:
+        '204':
+          description: Verified. Cookies set; no body.
+          headers:
+            Set-Cookie: { $ref: '#/components/headers/SetSessionCookie' }
+        '400': { $ref: '#/components/responses/CredentialRejected' }
+        '401': { $ref: '#/components/responses/CredentialRejected' }
+        '403': { $ref: '#/components/responses/CsrfRejected' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/UpstreamUnavailable' }
+
+  /edge/v1/auth/applicant/logout:
+    post:
+      operationId: logoutApplicant
+      tags: [auth-applicant]
+      summary: End the citizen session.
+      description: |
+        Revokes the opaque token upstream **and** destroys the edge handle. ADR-018
+        chose a revocable token precisely so a stolen session could be killed;
+        only clearing the cookie would waste that property.
+      x-usrp-session: applicant
+      x-usrp-retry-on-g2g: false
+      x-usrp-verified: frontend-registry
+      parameters:
+        - $ref: '#/components/parameters/CsrfHeader'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '204': { description: 'Session revoked and destroyed. Idempotent.' }
+        '403': { $ref: '#/components/responses/CsrfRejected' }
+
+  # ────────────────────────────────────────────────────────────────
+  # Officer reads — agency from session, never from request
+  # ────────────────────────────────────────────────────────────────
+
+  /edge/v1/applications:
+    get:
+      operationId: listApplications
+      tags: [officer-reads]
+      summary: List applications for the officer's agency.
+      description: |
+        **Takes no parameters and does not paginate.** Nothing in this platform
+        paginates; the upstream read is capped and returns a bare array.
+
+        The old frontend sent five parameters (`status`, `requiresAction`, `page`,
+        `pageSize`, `search`) and expected a `PaginatedResult`. All five were
+        silently ignored and every consumer reading `.items` / `.total` got
+        `undefined`. Filtering and search are client-side over the capped result
+        until an upstream read supports them — and if one is added it arrives here
+        as an explicit new operation, not as parameters bolted onto this one.
+      x-usrp-session: officer
+      x-usrp-retry-on-g2g: true
+      x-usrp-verified: frontend-registry
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: A capped, unpaginated array scoped to the session's agency.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ApplicationListItem' }
+        '401': { $ref: '#/components/responses/SessionEnded' }
+        '403': { $ref: '#/components/responses/WrongSessionKind' }
+        '503': { $ref: '#/components/responses/UpstreamUnavailable' }
+
+  /edge/v1/applications/amber-queue:
+    get:
+      operationId: listAmberQueue
+      tags: [officer-reads]
+      summary: Applications in the AMBER forensic lane awaiting review.
+      x-usrp-session: officer
+      x-usrp-retry-on-g2g: true
+      x-usrp-verified: frontend-registry, pending-controller-read
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: The AMBER queue for the session's agency.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ApplicationListItem' }
+        '401': { $ref: '#/components/responses/SessionEnded' }
+        '403': { $ref: '#/components/responses/WrongSessionKind' }
+        '503': { $ref: '#/components/responses/UpstreamUnavailable' }
+
+  /edge/v1/applications/by-id:
+    get:
+      operationId: findApplicationById
+      tags: [officer-reads]
+      summary: One application by id.
+      description: |
+        Query parameter, not a path parameter (ADR-005). The old frontend's
+        `GET /applications/${id}` was unroutable and 404'd for every input.
+      x-usrp-session: officer
+      x-usrp-retry-on-g2g: true
+      x-usrp-verified: frontend-registry
+      parameters:
+        - $ref: '#/components/parameters/ApplicationId'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: The application.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Application' }
+        '401': { $ref: '#/components/responses/SessionEnded' }
+        '403': { $ref: '#/components/responses/WrongSessionKind' }
+        '404': { $ref: '#/components/responses/IndistinguishableNotFound' }
+        '503': { $ref: '#/components/responses/UpstreamUnavailable' }
+
+  /edge/v1/applications/detail:
+    get:
+      operationId: getApplicationDetail
+      tags: [officer-reads]
+      summary: Application with its full event history.
+      description: |
+        Fronts the same upstream operation as `findApplicationById`, composed with
+        the status history so the Procedural Justice view (actor, timestamp, note
+        for every decision) is one request rather than two.
+      x-usrp-session: officer
+      x-usrp-retry-on-g2g: true
+      x-usrp-verified: frontend-registry, pending-controller-read
+      parameters:
+        - $ref: '#/components/parameters/ApplicationId'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Application plus ordered event history.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [application, history]
+                properties:
+                  application: { $ref: '#/components/schemas/Application' }
+                  history:
+                    type: array
+                    items: { $ref: '#/components/schemas/StatusHistoryEntry' }
+        '401': { $ref: '#/components/responses/SessionEnded' }
+        '403': { $ref: '#/components/responses/WrongSessionKind' }
+        '404': { $ref: '#/components/responses/IndistinguishableNotFound' }
+        '503': { $ref: '#/components/responses/UpstreamUnavailable' }
+
+  /edge/v1/applications/status-history:
+    get:
+      operationId: getApplicationStatusHistory
+      tags: [officer-reads]
+      summary: Ordered status history for one application.
+      x-usrp-session: officer
+      x-usrp-retry-on-g2g: true
+      x-usrp-verified: frontend-registry
+      parameters:
+        - $ref: '#/components/parameters/ApplicationId'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Oldest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/StatusHistoryEntry' }
+        '401': { $ref: '#/components/responses/SessionEnded' }
+        '403': { $ref: '#/components/responses/WrongSessionKind' }
+        '404': { $ref: '#/components/responses/IndistinguishableNotFound' }
+        '503': { $ref: '#/components/responses/UpstreamUnavailable' }
+
+  # ────────────────────────────────────────────────────────────────
+  # The FOUR transitions. Not one. None returns an application.
+  # ────────────────────────────────────────────────────────────────
+
+  /edge/v1/applications/medical-review:
+    post:
+      operationId: recordMedicalReview
+      tags: [officer-transitions]
+      summary: Record a medical review outcome.
+      description: |
+        One of four separately-guarded decisions. They are separate because they
+        carry different authority — collapsing them into a generic field write is
+        a broken authorization model, not a URL style choice.
+
+        `retryOnG2G` is **false**: a retried transition is a double write on a
+        citizen's legal record. The registry decides, so a call site cannot opt in.
+      x-usrp-session: officer
+      x-usrp-retry-on-g2g: false
+      x-usrp-verified: frontend-registry, pending-controller-read
+      parameters:
+        - $ref: '#/components/parameters/CsrfHeader'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TransitionRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/TransitionOutcome' }
+        '401': { $ref: '#/components/responses/SessionEnded' }
+        '403': { $ref: '#/components/responses/WrongSessionKind' }
+        '404': { $ref: '#/components/responses/IndistinguishableNotFound' }
+        '409': { $ref: '#/components/responses/IllegalTransition' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '503': { $ref: '#/components/responses/UpstreamUnavailable' }
+
+  /edge/v1/applications/final-decision:
+    post:
+      operationId: recordFinalDecision
+      tags: [officer-transitions]
+      summary: Record the final recruitment decision.
+      x-usrp-session: officer
+      x-usrp-retry-on-g2g: false
+      x-usrp-verified: frontend-registry, pending-controller-read
+      parameters:
+        - $ref: '#/components/parameters/CsrfHeader'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TransitionRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/TransitionOutcome' }
+        '401': { $ref: '#/components/responses/SessionEnded' }
+        '403': { $ref: '#/components/responses/WrongSessionKind' }
+        '404': { $ref: '#/components/responses/IndistinguishableNotFound' }
+        '409': { $ref: '#/components/responses/IllegalTransition' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '503': { $ref: '#/components/responses/UpstreamUnavailable' }
+
+  /edge/v1/applications/accept:
+    post:
+      operationId: acceptApplication
+      tags: [officer-transitions]
+      summary: Accept an applicant into the programme.
+      description: |
+        Subject to the ADR-014 cross-agency accept lock: an applicant accepted by
+        one agency cannot be accepted by another. The conflict surfaces as `409`
+        and the message must not name the other agency — that would disclose a
+        sibling agency's processing state to an officer who cannot see it.
+      x-usrp-session: officer
+      x-usrp-retry-on-g2g: false
+      x-usrp-verified: frontend-registry, pending-controller-read
+      parameters:
+        - $ref: '#/components/parameters/CsrfHeader'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TransitionRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/TransitionOutcome' }
+        '401': { $ref: '#/components/responses/SessionEnded' }
+        '403': { $ref: '#/components/responses/WrongSessionKind' }
+        '404': { $ref: '#/components/responses/IndistinguishableNotFound' }
+        '409':
+          description: |
+            Not acceptable in the current state, or the ADR-014 accept lock is
+            held elsewhere. The body does NOT identify the holding agency.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CodedError' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '503': { $ref: '#/components/responses/UpstreamUnavailable' }
+
+  /edge/v1/applications/adjudicate:
+    post:
+      operationId: adjudicateApplication
+      tags: [officer-transitions]
+      summary: Adjudicate a flagged application.
+      x-usrp-session: officer
+      x-usrp-retry-on-g2g: false
+      x-usrp-verified: frontend-registry, pending-controller-read
+      parameters:
+        - $ref: '#/components/parameters/CsrfHeader'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TransitionRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/TransitionOutcome' }
+        '401': { $ref: '#/components/responses/SessionEnded' }
+        '403': { $ref: '#/components/responses/WrongSessionKind' }
+        '404': { $ref: '#/components/responses/IndistinguishableNotFound' }
+        '409': { $ref: '#/components/responses/IllegalTransition' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '503': { $ref: '#/components/responses/UpstreamUnavailable' }
+
+  # ────────────────────────────────────────────────────────────────
+  # Walk-in (RDF only upstream)
+  # ────────────────────────────────────────────────────────────────
+
+  /edge/v1/applications/walk-in/register:
+    post:
+      operationId: registerWalkIn
+      tags: [officer-walkin]
+      summary: Register a walk-in applicant at a field site.
+      description: |
+        **The `WALK_IN_*` statuses exist only in `rdf_ops.application_status`.**
+        `rnp_ops` and `rcs_ops` do not have them, which is why the backend compares
+        `status::text` rather than casting to an enum (ADR-017 / ADR-020). An RNP or
+        RCS session calling this is a `403`, not a `422`.
+
+        **No `nationalIdHash`.** The old frontend computed one in the browser and
+        sent it as an identity assertion. A Rwandan National ID is 16 structured
+        digits, so an unsalted hash is a reversible identifier brute-forceable
+        offline in seconds — and a client-computed identity claim is one the client
+        can fabricate. The edge accepts the raw National ID over TLS and resolves
+        identity server-side against NIDA. A request body containing
+        `nationalIdHash` is rejected outright rather than forwarded.
+      x-usrp-session: officer
+      x-usrp-retry-on-g2g: false
+      x-usrp-verified: frontend-registry, pending-controller-read
+      parameters:
+        - $ref: '#/components/parameters/CsrfHeader'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [nationalId, postCode]
+              properties:
+                nationalId: { $ref: '#/components/schemas/NationalId' }
+                postCode:
+                  type: string
+                  minLength: 1
+                  description: The post being applied for.
+                note: { $ref: '#/components/schemas/OfficerNote' }
+      responses:
+        '201':
+          description: Registered.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [applicationId, status]
+                properties:
+                  applicationId: { $ref: '#/components/schemas/ApplicationId' }
+                  status: { type: string, examples: [WALK_IN_REGISTERED] }
+        '400':
+          description: Malformed, or a forbidden `nationalIdHash` field was present.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CodedError' }
+        '401': { $ref: '#/components/responses/SessionEnded' }
+        '403':
+          description: |
+            Not an officer session, or an RNP/RCS session — walk-in is RDF-only
+            upstream.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CodedError' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '503': { $ref: '#/components/responses/UpstreamUnavailable' }
+
+  /edge/v1/applications/walk-in/vet:
+    post:
+      operationId: vetWalkIn
+      tags: [officer-walkin]
+      summary: Record on-site vetting for a walk-in applicant.
+      x-usrp-session: officer
+      x-usrp-retry-on-g2g: false
+      x-usrp-verified: frontend-registry, pending-controller-read
+      parameters:
+        - $ref: '#/components/parameters/CsrfHeader'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TransitionRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/TransitionOutcome' }
+        '401': { $ref: '#/components/responses/SessionEnded' }
+        '403':
+          description: Not an officer session, or an RNP/RCS session (RDF-only upstream).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CodedError' }
+        '404': { $ref: '#/components/responses/IndistinguishableNotFound' }
+        '409': { $ref: '#/components/responses/IllegalTransition' }
+        '503': { $ref: '#/components/responses/UpstreamUnavailable' }
+
+  # ────────────────────────────────────────────────────────────────
+  # Identity verification — BROKERED
+  # ────────────────────────────────────────────────────────────────
+
+  /edge/v1/identities/verify:
+    post:
+      operationId: verifyIdentity
+      tags: [officer-reads]
+      summary: Verify a National ID against NIDA.
+      description: |
+        **The one brokered `service-internal` route.** The contract marks
+        `verifyIdentity` service-internal, and ADR-012 D1 widened `withAuth` to
+        accept officer principals on it. It is therefore named in exactly one
+        place in the frontend — the `BROKERED` allowlist in `paths.ts` — so the
+        exception is an auditable line of code rather than a permissive rule.
+
+        Officer session only. This is deliberately **not** reachable by an
+        applicant session: an unauthenticated or citizen-reachable NIDA check is a
+        national identity enumeration oracle. Citizens authenticate via OTP
+        instead, where the 202 reveals nothing.
+
+        Returns the verified name only. The raw National ID is never echoed back.
+      x-usrp-session: officer
+      x-usrp-retry-on-g2g: true
+      x-usrp-verified: frontend-registry
+      x-usrp-brokered: 'service-internal upstream; ADR-012 D1'
+      parameters:
+        - $ref: '#/components/parameters/CsrfHeader'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [nationalId]
+              properties:
+                nationalId: { $ref: '#/components/schemas/NationalId' }
+      responses:
+        '200':
+          description: Verified. Name only — never the submitted identifier.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [verified]
+                properties:
+                  verified: { type: boolean }
+                  fullName:
+                    type: string
+                    description: Present only when `verified` is true.
+        '401': { $ref: '#/components/responses/SessionEnded' }
+        '403': { $ref: '#/components/responses/WrongSessionKind' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/UpstreamUnavailable' }
+
+  # ────────────────────────────────────────────────────────────────
+  # Citizen self-service — cross-agency by construction
+  # ────────────────────────────────────────────────────────────────
+
+  /edge/v1/me/applications:
+    get:
+      operationId: listMyApplications
+      tags: [citizen]
+      summary: The citizen's own applications, across all agencies.
+      description: |
+        Unions all three ops schemas. A citizen is cross-agency by nature, which is
+        why `ApplicantSession` carries no agency and why a UI asking a citizen to
+        "choose your agency portal" is modelling the officer's world.
+
+        Scoped by the session, never by a request parameter. There is no way to ask
+        for someone else's applications because there is nothing to ask with.
+      x-usrp-session: applicant
+      x-usrp-retry-on-g2g: true
+      x-usrp-verified: frontend-registry
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: The session owner's applications.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ApplicationListItem' }
+        '401': { $ref: '#/components/responses/SessionEnded' }
+        '403': { $ref: '#/components/responses/WrongSessionKind' }
+        '503': { $ref: '#/components/responses/UpstreamUnavailable' }
+
+  /edge/v1/me/applications/withdraw:
+    post:
+      operationId: withdrawMyApplication
+      tags: [citizen]
+      summary: Withdraw one's own application.
+      description: |
+        The edge holds the citizen's opaque session and calls upstream with its own
+        client-credentials token — the ADR-016 pattern. Ownership is enforced
+        upstream against the session subject, not against a body field.
+      x-usrp-session: applicant
+      x-usrp-retry-on-g2g: false
+      x-usrp-verified: frontend-registry, pending-controller-read
+      parameters:
+        - $ref: '#/components/parameters/CsrfHeader'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [applicationId]
+              properties:
+                applicationId: { $ref: '#/components/schemas/ApplicationId' }
+                reason: { type: string, maxLength: 2000 }
+      responses:
+        '200': { $ref: '#/components/responses/TransitionOutcome' }
+        '401': { $ref: '#/components/responses/SessionEnded' }
+        '403': { $ref: '#/components/responses/WrongSessionKind' }
+        '404': { $ref: '#/components/responses/IndistinguishableNotFound' }
+        '409': { $ref: '#/components/responses/IllegalTransition' }
+        '503': { $ref: '#/components/responses/UpstreamUnavailable' }
+
+  /edge/v1/me/erasure-request:
+    get:
+      operationId: getMyErasureRequest
+      tags: [citizen]
+      summary: Status of one's own erasure request.
+      description: Law N° 058/2021 data-subject right. Session-scoped.
+      x-usrp-session: applicant
+      x-usrp-retry-on-g2g: true
+      x-usrp-verified: frontend-registry, pending-controller-read
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: The current request, or an explicit absence.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [exists]
+                properties:
+                  exists: { type: boolean }
+                  status: { type: string }
+                  filedAt: { type: string, format: date-time }
+        '401': { $ref: '#/components/responses/SessionEnded' }
+        '403': { $ref: '#/components/responses/WrongSessionKind' }
+        '503': { $ref: '#/components/responses/UpstreamUnavailable' }
+    post:
+      operationId: fileMyErasureRequest
+      tags: [citizen]
+      summary: File an erasure request.
+      description: |
+        Law N° 058/2021. Note the same exact path serves GET and POST — two methods
+        on one path is legal and is how the upstream constant is shaped.
+      x-usrp-session: applicant
+      x-usrp-retry-on-g2g: false
+      x-usrp-verified: frontend-registry, pending-controller-read
+      parameters:
+        - $ref: '#/components/parameters/CsrfHeader'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                reason: { type: string, maxLength: 2000 }
+      responses:
+        '202':
+          description: Filed. Erasure is adjudicated, not immediate.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BareAccepted' }
+        '401': { $ref: '#/components/responses/SessionEnded' }
+        '403': { $ref: '#/components/responses/WrongSessionKind' }
+        '409':
+          description: A request is already open.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CodedError' }
+        '503': { $ref: '#/components/responses/UpstreamUnavailable' }
+
+  # ────────────────────────────────────────────────────────────────
+  # Probes
+  # ────────────────────────────────────────────────────────────────
+
+  /health:
+    get:
+      operationId: edgeHealth
+      summary: Liveness.
+      security: []
+      x-usrp-verified: platform-convention
+      responses:
+        '200':
+          description: Process is up.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, examples: [ok] }
+
+  /ready:
+    get:
+      operationId: edgeReady
+      summary: Readiness.
+      description: |
+        **Must pass a real readiness callback.** biometric-service was found
+        returning 200 unconditionally because it passes none, which makes a
+        readiness probe decorative: the orchestrator routes traffic to a process
+        that cannot serve it. The edge checks the session store and iam-service
+        reachability and returns 503 when either is unavailable.
+      security: []
+      x-usrp-verified: platform-convention
+      responses:
+        '200': { description: Ready to serve. }
+        '503':
+          description: Not ready. Session store or iam-service unreachable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CodedError' }
+
+# ══════════════════════════════════════════════════════════════════
+components:
+
+  securitySchemes:
+    edgeSessionCookie:
+      type: apiKey
+      in: cookie
+      name: __Host-usrp_session
+      description: |
+        An opaque edge session handle. `httpOnly`, `Secure`, `SameSite=Strict`,
+        `__Host-` prefixed, `Path=/`.
+
+        It is **not** an upstream credential and carries no claims. The real
+        officer JWT / citizen opaque token are held server-side.
+
+        There is deliberately no `bearerAuth` scheme in this document. No operation
+        accepts an `Authorization` header and the frontend transport has no code
+        path that could add one.
+
+  parameters:
+    CsrfHeader:
+      name: x-csrf-token
+      in: header
+      required: true
+      schema: { type: string }
+      description: |
+        Double-submit CSRF. Must equal the readable echo cookie
+        (`__Host-usrp_csrf` in production, `usrp_csrf_dev` over plain http, since
+        browsers silently drop a `__Host-` cookie without TLS).
+
+        Required on every unsafe request. Missing or mismatched is a 403 — a
+        forgotten token must break visibly in development rather than silently
+        weaken CSRF in production.
+
+    CorrelationId:
+      name: x-correlation-id
+      in: header
+      required: false
+      schema: { type: string, maxLength: 128 }
+      description: |
+        Minted per user action by the browser and threaded through to backend
+        events and the Kafka trace, so one click is one trace. Reused across
+        several calls belonging to a single action rather than one per request.
+
+    ApplicationId:
+      name: applicationId
+      in: query
+      required: true
+      schema: { $ref: '#/components/schemas/ApplicationId' }
+      description: Query, not path — `shared-http` has no path parameter syntax (ADR-005).
+
+  headers:
+    SetSessionCookie:
+      description: |
+        Sets the httpOnly session cookie and the readable CSRF echo cookie.
+        Production: `Secure`, `SameSite=Strict`, `__Host-` prefix, `Path=/`.
+      schema: { type: string }
+
+  schemas:
+
+    NationalId:
+      type: string
+      pattern: '^[0-9]{16}$'
+      writeOnly: true
+      description: |
+        A Rwandan National ID: 16 digits.
+
+        `writeOnly` is deliberate — it travels **inbound only** and is never
+        present in a response. Two consequences that are contract, not style:
+
+        1. It is never echoed back, so it cannot leak into a client-side log, an
+           error boundary, or a screenshot.
+        2. There is **no `nationalIdHash`** anywhere in this document. A 16-digit
+           structured value has too little entropy for an unsalted hash to be a
+           pseudonym — the keyspace is brute-forceable offline in seconds — and a
+           client-computed identity claim is one the client can forge. Identity
+           resolution is server-side, against NIDA. Requests carrying such a field
+           are rejected, not forwarded.
+
+    ApplicationId:
+      type: string
+      format: uuid
+
+    OfficerNote:
+      type: string
+      maxLength: 4000
+      description: |
+        Free text recorded against the decision, surfaced in the status history for
+        Procedural Justice (the applicant can see who decided what, when, and why).
+
+        Must never contain a raw National ID or any credential. It is rendered
+        verbatim to an applicant.
+
+    Agency:
+      type: string
+      enum: [RDF, RNP, RCS]
+      description: |
+        Appears in **responses only**. There is no request anywhere in this
+        document that accepts an agency: it is derived from the officer session,
+        which is what makes it server-authoritative rather than validated.
+
+    Session:
+      oneOf:
+        - $ref: '#/components/schemas/OfficerSession'
+        - $ref: '#/components/schemas/ApplicantSession'
+      discriminator:
+        propertyName: kind
+        mapping:
+          officer: '#/components/schemas/OfficerSession'
+          applicant: '#/components/schemas/ApplicantSession'
+      description: |
+        A discriminated union, matching `Session` in `@usrp/auth`. The shape exists
+        to make one bug impossible at compile time: passing an applicant session
+        where an officer credential is required. One keystroke in a dynamic model;
+        a build failure here.
+
+        Neither variant has a `token` field. There is nothing to put in one.
+
+    OfficerSession:
+      type: object
+      additionalProperties: false
+      required: [kind, agency, roles, idleExpiresAt, absoluteExpiresAt]
+      properties:
+        kind: { type: string, const: officer }
+        agency: { $ref: '#/components/schemas/Agency' }
+        roles:
+          type: array
+          items: { type: string }
+          description: |
+            No `SUPERADMIN`. RLS is FORCE'd with NOLOGIN group roles and there is
+            no bypass principal, so the "superadmin, no RLS" role the deprecated
+            shared-types described is unrepresentable end to end.
+        idleExpiresAt:
+          type: string
+          format: date-time
+          description: Advances as the officer works.
+        absoluteExpiresAt:
+          type: string
+          format: date-time
+          description: |
+            Hard ceiling. Does **not** advance, so the UI can tell the truth about
+            when the session ends no matter how active the officer is.
+
+    ApplicantSession:
+      type: object
+      additionalProperties: false
+      required: [kind, idleExpiresAt, absoluteExpiresAt]
+      properties:
+        kind: { type: string, const: applicant }
+        idleExpiresAt: { type: string, format: date-time }
+        absoluteExpiresAt: { type: string, format: date-time }
+      description: |
+        **No agency, deliberately.** A citizen is cross-agency by construction:
+        ADR-014's accept lock spans all three and `listMyApplications` unions three
+        ops schemas.
+
+    ApplicationListItem:
+      type: object
+      description: |
+        Row shape for the list reads.
+        `x-usrp-verified: pending-controller-read` — transcribe from
+        `list-applications.controller.ts` and `application-read-repository.ts`
+        before implementing.
+      properties:
+        applicationId: { $ref: '#/components/schemas/ApplicationId' }
+        status:
+          type: string
+          description: |
+            Compared as text upstream, never cast to an enum: the `WALK_IN_*`
+            values exist only in `rdf_ops.application_status` (ADR-017 / ADR-020).
+            Casting passes every test against RDF fixtures and fails in production
+            for two agencies out of three.
+
+            The frontend narrows this per agency via `StatusFor<A>` in
+            `@usrp/contracts`, so an RNP row carrying a `WALK_IN_*` value is a
+            compile error rather than an impossible lozenge.
+        agency: { $ref: '#/components/schemas/Agency' }
+        submittedAt: { type: string, format: date-time }
+
+    Application:
+      type: object
+      description: |
+        `x-usrp-verified: pending-controller-read`.
+
+        **Must not carry a document forensic score, lane, or flag** on any
+        applicant-reachable path. A score handed to the person who uploaded the
+        file is a forgery-tuning oracle: edit, re-upload, watch the number move,
+        repeat until GREEN.
+      properties:
+        applicationId: { $ref: '#/components/schemas/ApplicationId' }
+        status: { type: string }
+        agency: { $ref: '#/components/schemas/Agency' }
+
+    StatusHistoryEntry:
+      type: object
+      additionalProperties: false
+      required: [status, occurredAt]
+      description: |
+        Procedural Justice: the applicant is entitled to see who decided what,
+        when, and why.
+      properties:
+        status: { type: string }
+        occurredAt: { type: string, format: date-time }
+        actorDisplayName:
+          type: string
+          description: Display name only. Never an internal user id or a credential.
+        note: { $ref: '#/components/schemas/OfficerNote' }
+
+    TransitionRequest:
+      type: object
+      additionalProperties: false
+      required: [applicationId]
+      description: |
+        **A shared envelope, NOT a generic transition.** Each of the four
+        operations validates its own outcome vocabulary and carries its own
+        authorization; only the envelope is common.
+
+        `x-usrp-verified: pending-controller-read` — the per-operation outcome
+        unions must be transcribed from their controllers before implementation.
+        Do not infer them from this envelope.
+      properties:
+        applicationId: { $ref: '#/components/schemas/ApplicationId' }
+        outcome:
+          type: string
+          description: Per-operation vocabulary. Not a free-form target status.
+        note: { $ref: '#/components/schemas/OfficerNote' }
+
+    TransitionResult:
+      type: object
+      additionalProperties: false
+      required: [applicationId, status]
+      description: |
+        **Not an `Application`.** None of the four transitions returns one, which
+        is why the old frontend hook — typed `UseMutationResult<Application>` and
+        writing the response into its detail cache — would have poisoned the cache
+        even if its route had existed. Callers re-read after a transition.
+      properties:
+        applicationId: { $ref: '#/components/schemas/ApplicationId' }
+        status: { type: string, description: The resulting status. }
+
+    BareError:
+      type: object
+      additionalProperties: false
+      description: |
+        An intentionally empty error body. Used where **any** detail would leak:
+        the 404s (id enumeration) and the credential rejections (account
+        enumeration). Do not add a `message` here "for debuggability" — the
+        correlation id is how you debug these.
+
+    BareAccepted:
+      type: object
+      additionalProperties: false
+      required: [accepted]
+      properties:
+        accepted: { type: boolean, const: true }
+      description: |
+        "Your request was accepted." Nothing more. Carries no information about the
+        subject of the request.
+
+    CodedError:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: A stable machine code. The UI maps it to localised copy.
+        message:
+          type: string
+          description: |
+            Operator-facing, English, optional.
+
+            **Never render this to a user.** It is not localised (this platform
+            serves Kinyarwanda, English and French) and it may carry upstream
+            detail. It must never embed a National ID, a session handle, or a
+            token — the frontend `ErrorBoundary` renders `error.message` verbatim,
+            so sanitising at the throw site is the only control that works.
+
+    G2GError:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: string
+          enum:
+            - NIDA_UNAVAILABLE
+            - NESA_UNAVAILABLE
+            - RIB_UNAVAILABLE
+            - HEC_UNAVAILABLE
+            - SCANNER_UNAVAILABLE
+            - ELIGIBILITY_STORE_UNAVAILABLE
+            - UPSTREAM_UNAVAILABLE
+          description: |
+            A named government-to-government dependency is down.
+
+            Safe to distinguish, and worth distinguishing: "the national ID service
+            is unavailable, please try shortly" is actionable; "something went
+            wrong" is not. These are the only 503 codes the frontend treats as
+            retryable, and only for operations whose registry entry says so.
+
+  responses:
+
+    SessionEnded:
+      description: |
+        No valid session. `reason` lets the UI say the right thing: `idle` earns
+        "you were away too long", `absolute` earns "sessions end after 12 hours",
+        `revoked` earns "this session was ended". Telling a user the wrong one
+        makes the product look broken.
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            properties:
+              reason: { type: string, enum: [idle, absolute, revoked] }
+
+    WrongSessionKind:
+      description: |
+        Authenticated, but with the wrong session kind — an applicant session on an
+        officer operation or the reverse. The two credentials are not
+        interchangeable (ADR-016, ADR-018) and the frontend fails at its own
+        boundary via `requireOfficerSession`, so reaching this response indicates a
+        client bug worth logging.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/CodedError' }
+
+    CsrfRejected:
+      description: |
+        Missing or mismatched `x-csrf-token`. Always a client bug — the browser
+        attaches the echo cookie automatically, so a failure here means the header
+        was not echoed.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/CodedError' }
+
+    CredentialRejected:
+      description: |
+        **One failure for every credential problem.** Unknown handle, wrong
+        password, disabled account, wrong OTP, expired OTP — all identical, with a
+        bare body.
+
+        The frontend's `AuthAttempt` type has a single `rejected` case with no
+        detail field, so it physically cannot render a message that distinguishes
+        them. Adding a code here would re-enable account enumeration.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/BareError' }
+
+    IndistinguishableNotFound:
+      description: |
+        **Byte-identical for a nonexistent id and for a sibling agency's real id.**
+
+        This is a security property, not an oversight: if the two differed, an
+        officer could walk ids to learn what another agency is processing. Proven
+        live in the backend's detail-reads selfcheck and recorded here as a
+        contract obligation the edge must preserve — do not enrich this response.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/BareError' }
+
+    IllegalTransition:
+      description: |
+        The application is not in a state from which this transition is legal.
+        Distinct from 422 (the request itself was malformed).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/CodedError' }
+
+    ValidationFailed:
+      description: Request well-formed but semantically invalid.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/CodedError' }
+
+    RateLimited:
+      description: |
+        Rate limited. On the OTP and identity operations this is a **correctness**
+        requirement rather than hardening: without it, a response body that reveals
+        nothing still becomes an enumeration oracle by timing and volume.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/CodedError' }
+
+    UpstreamUnavailable:
+      description: A named G2G dependency is unavailable.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/G2GError' }
+
+    TransitionOutcome:
+      description: |
+        The transition was recorded. Returns `TransitionResult`, **not** an
+        `Application`.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/TransitionResult' }
