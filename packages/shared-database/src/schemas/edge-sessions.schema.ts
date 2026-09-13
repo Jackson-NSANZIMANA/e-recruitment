@@ -26,7 +26,7 @@ export const edgeSessions = publicCore.table(
     previousCsrfTokenHash: varchar('previous_csrf_token_hash', { length: 64 }),
     previousValidUntil: timestamp('previous_valid_until', { withTimezone: true }),
     csrfTokenHash: varchar('csrf_token_hash', { length: 64 }).notNull(),
-    kind: varchar('kind', { length: 16 }).notNull(),
+    kind: text('kind').notNull(),
     subjectId: uuid('subject_id'),
     agency: agencyEnum('agency'),
     roles: text('roles').array().notNull().default([]),
