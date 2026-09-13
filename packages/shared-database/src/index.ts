@@ -17,8 +17,13 @@
 import type { InferSelectModel, InferInsertModel } from 'drizzle-orm';
 
 // ── Database Client ───────────────────────────────────────────────
-export { db, sql, asJsonb } from './client.js';
-export type { Database, JsonbValue } from './client.js';
+// configureDatabase / getSql / getDb are exported alongside the lazy `db` and
+// `sql` bindings because client.ts asks composition roots to hand over the
+// config they have ALREADY validated through @usrp/shared-config rather than let
+// the pool re-read process.env behind the config layer's back. That advice was
+// unfollowable while the function was not re-exported here.
+export { configureDatabase, db, getDb, getSql, sql, asJsonb } from './client.js';
+export type { Database, DatabaseClientOptions, JsonbValue } from './client.js';
 
 // ── Schema Objects (tables + enums) ──────────────────────────────
 // Re-exported so services can do:
