@@ -1,17 +1,17 @@
 // ══════════════════════════════════════════════════════════════════
 // edge-gateway — The EDGE OPERATION REGISTRY
 //
-// The single declaration of the browser boundary: 26 operations, each naming
-// its exact path, method, required session kind, CSRF obligation, body cap,
-// retry disposition and the approved upstream operation(s) it fronts.
+// The single declaration of the browser boundary: 26 operations, each naming its
+// exact path, method, required session kind, CSRF obligation, body cap, retry
+// disposition and the approved upstream operation(s) it fronts.
 //
-// DATA ONLY — no handlers, no imports from the adapter layer. That is what
-// lets selfcheck/verify-edge-contract.ts assert the whole boundary without
-// booting a process, opening a socket, or touching Postgres.
+// DATA ONLY — no handlers, no imports from the adapter layer. That is what lets
+// selfcheck/verify-edge-contract.ts assert the whole boundary without booting a
+// process, opening a socket, or touching Postgres.
 //
 // Route composition in src/routes.ts is keyed by `Record<EdgeOperationId, …>`,
-// so adding an operation here and forgetting its handler is a TYPE ERROR, not
-// a 404 discovered in production.
+// so adding an operation here and forgetting its handler is a TYPE ERROR, not a
+// 404 discovered in production.
 //
 // THREE THINGS ARE DELIBERATELY NOT EXPRESSIBLE HERE:
 //
@@ -36,9 +36,9 @@ export interface EdgeOperation {
   readonly path: string;
   readonly session: SessionRequirement;
   /**
-   * Whether `x-csrf-token` is validated. TRUE for every unsafe method,
-   * including the anonymous ones: login and OTP are exactly the requests a
-   * cross-site page would most like to forge on a victim's behalf.
+   * Whether `x-csrf-token` is validated. TRUE for every unsafe method, including
+   * the anonymous ones: login and OTP are exactly the requests a cross-site page
+   * would most like to forge on a victim's behalf.
    */
   readonly csrf: boolean;
   /** Per-route body cap. Raised only where a batch genuinely needs it. */
@@ -49,9 +49,18 @@ export interface EdgeOperation {
    * legal record. The edge itself retries NOTHING, ever (see upstream-client).
    */
   readonly retryOnG2G: boolean;
-  /** Reachable without a session by design. Four such operations exist. */
+  /** Reachable without a session by design. */
   readonly publicAllowlist: boolean;
-  /** The approved upstream operation(s). `readSession` fronts none. */
+  /**
+   * Declares that ABSENCE of a session is a success, not a 401.
+   *
+   * Set only on the two logout operations, because the contract makes logout
+   * IDEMPOTENT: a client retrying a logout must never be told it failed. Kept as
+   * registry data rather than leniency buried inside a handler, so the contract
+   * test can hold every other operation to "no session means 401".
+   */
+  readonly idempotentWithoutSession?: boolean;
+  /** The approved upstream operation(s). Session-local operations front none. */
   readonly upstream: readonly UpstreamOperation[];
   /**
    * `single`   exactly one upstream operation — the normal case.
@@ -124,6 +133,7 @@ export const EDGE_OPERATIONS = Object.freeze({
     maxBodyBytes: SMALL_BODY,
     retryOnG2G: false,
     publicAllowlist: false,
+    idempotentWithoutSession: true,
     // No upstream call: an Ed25519 officer JWT is NOT revocable (ADR-016).
     // Destroying the edge handle is the only revocation that exists, which is
     // why logout must be a server-side destroy and not a cookie clear.
@@ -165,6 +175,7 @@ export const EDGE_OPERATIONS = Object.freeze({
     maxBodyBytes: SMALL_BODY,
     retryOnG2G: false,
     publicAllowlist: false,
+    idempotentWithoutSession: true,
     // The citizen token IS revocable (ADR-018) — revoke it upstream AND destroy
     // the handle. Clearing only the cookie would waste the property ADR-018 was
     // chosen for.
@@ -222,9 +233,9 @@ export const EDGE_OPERATIONS = Object.freeze({
     composition: 'composed',
     compositionReason:
       'The Procedural Justice view renders the record and the decision trail together. ' +
-      'Composing here makes it ONE round trip from a field tablet on a slow link, and ' +
-      'both upstream reads are already agency-scoped through the same officer DB role, ' +
-      'so composition cannot widen either one.',
+      'Composing here makes it ONE round trip from a field tablet on a slow link, and both ' +
+      'upstream reads are already agency-scoped through the same officer DB role, so ' +
+      'composition cannot widen either one.',
   },
   getApplicationStatusHistory: {
     operationId: 'getApplicationStatusHistory',
@@ -289,7 +300,7 @@ export const EDGE_OPERATIONS = Object.freeze({
     composition: 'single',
   },
 
-  // ── Walk-in (RDF-only upstream; 501 for RNP/RCS is mapped to 403) ──
+  // ── Walk-in (rdf_ops-only upstream; 501 becomes 403 at the boundary) ──
   registerWalkIn: {
     operationId: 'registerWalkIn',
     method: 'POST',
@@ -323,8 +334,8 @@ export const EDGE_OPERATIONS = Object.freeze({
     session: 'officer',
     csrf: true,
     maxBodyBytes: SMALL_BODY,
-    // A NIDA lookup is a read whose only failure mode is "the registry is down".
-    // The frontend may retry it; nothing is written by it.
+    // A NIDA lookup writes no application state; its only failure mode is "the
+    // registry is down", so the frontend may retry it.
     retryOnG2G: true,
     publicAllowlist: false,
     upstream: [UPSTREAM.verifyIdentity],
@@ -395,8 +406,7 @@ export const EDGE_OPERATIONS = Object.freeze({
     path: '/edge/v1/field-sync/devices',
     session: 'officer',
     csrf: true,
-    // A PEM public key is the largest field. 8 KiB is ample; the controller
-    // caps publicKeyPem at 4096 characters.
+    // A PEM public key is the largest field; the upstream caps it at 4096 chars.
     maxBodyBytes: SMALL_BODY,
     retryOnG2G: false,
     publicAllowlist: false,
@@ -440,9 +450,9 @@ export function edgeOperation(id: EdgeOperationId): EdgeOperation {
 }
 
 /**
- * The public surface, derived rather than restated. A fifth entry appearing
- * here is a reviewable diff in the registry, and the contract selfcheck fails
- * if the count changes without the ADR being updated.
+ * The public surface, DERIVED rather than restated. A fifth entry is a reviewable
+ * diff in this file, and the contract selfcheck fails when the count changes
+ * without ADR-024 being updated.
  */
 export const PUBLIC_ALLOWLIST: readonly EdgeOperationId[] = Object.freeze(
   EDGE_OPERATION_IDS.filter((id) => EDGE_OPERATIONS[id].publicAllowlist),
