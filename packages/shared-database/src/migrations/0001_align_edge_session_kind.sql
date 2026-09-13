@@ -1,0 +1,1 @@
+ALTER TABLE "public_core"."edge_sessions" ALTER COLUMN "kind" SET DATA TYPE text;
