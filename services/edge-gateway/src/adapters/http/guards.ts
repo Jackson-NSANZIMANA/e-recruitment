@@ -13,24 +13,24 @@
 //      is wrong" — and the CSRF binding lives on the session row anyway.
 //   2. CSRF first on anonymous operations. There is no session to consult, and
 //      login is exactly the request a cross-site page would like to forge.
-//   3. Wrong session KIND is 403, never 401. The caller is authenticated; the
-//      credential is simply not interchangeable (ADR-016 vs ADR-018). A 401
-//      would send the SPA into a login loop it can never win.
+//   3. Wrong session KIND is 403, never 401. The caller IS authenticated; the
+//      two credentials are simply not interchangeable (ADR-016 vs ADR-018). A
+//      401 would send the SPA into a login loop it can never win.
 //
-// A dead or unknown handle always ships CLEARED COOKIES with the 401. Leaving a
-// stale handle in the jar means every subsequent request pays a database lookup
-// to be told the same thing.
+// A dead or unknown handle always ships CLEARED COOKIES with its 401. Leaving a
+// stale handle in the jar means every later request pays a database lookup to be
+// told the same thing.
 // ══════════════════════════════════════════════════════════════════
 
 import { HttpError, type HttpResult, type RequestContext, type RouteHandler } from '@usrp/shared-http';
 import type { Agency } from '@usrp/shared-types';
 import { auditEdge } from '../../observability/audit-log.js';
 import { edgeOperation, type EdgeOperationId } from '../../registry/edge-operations.js';
-import { clearedCookies, csrfCookieOnly, type CookiePolicy } from '../../security/cookies.js';
+import { anonymousProbeCookies, clearedCookies, type CookiePolicy } from '../../security/cookies.js';
 import { assertCsrf, newCsrfToken, type CsrfBinding } from '../../security/csrf.js';
-import { FixedWindowRateLimiter } from '../../security/rate-limiter.js';
+import type { FixedWindowRateLimiter } from '../../security/rate-limiter.js';
 import type { PgEdgeSessionStore } from '../../session/session-store.pg.js';
-import type { EdgeSession } from '../../session/session.types.js';
+import type { EdgeSession, SessionEndedReason } from '../../session/session.types.js';
 import { UpstreamUnavailableError, type UpstreamClient } from '../../upstream/upstream-client.js';
 import type { EdgeGatewayConfig } from '../../config.js';
 import { ForbiddenFieldError } from './validation.js';
@@ -44,7 +44,6 @@ export interface EdgeDeps {
   readonly now: () => Date;
 }
 
-/** An officer handler receives the session AND its agency, already narrowed. */
 export type OfficerHandler = (
   ctx: RequestContext,
   session: EdgeSession,
@@ -55,17 +54,20 @@ export type ApplicantHandler = (ctx: RequestContext, session: EdgeSession) => Pr
 
 export type AnonymousHandler = (ctx: RequestContext) => Promise<HttpResult>;
 
-function bindingFor(session: EdgeSession): CsrfBinding {
+/** A handler that must work with or without a session. Probe and logout only. */
+export type OptionalSessionHandler = (
+  ctx: RequestContext,
+  session: EdgeSession | null,
+  endedReason: SessionEndedReason | null,
+) => Promise<HttpResult>;
+
+export function csrfBindingFor(session: EdgeSession): CsrfBinding {
   return { currentHash: session.csrfTokenHash, previousHash: session.previousCsrfTokenHash };
 }
 
 /** The contract's 401: a `reason` the UI can turn into a true sentence. */
-function sessionEnded(deps: EdgeDeps, reason: string): HttpResult {
-  return {
-    status: 401,
-    body: { reason },
-    cookies: clearedCookies(deps.cookies),
-  };
+export function sessionEnded(deps: EdgeDeps, reason: SessionEndedReason): HttpResult {
+  return { status: 401, body: { reason }, cookies: clearedCookies(deps.cookies) };
 }
 
 /**
@@ -105,8 +107,7 @@ async function guarded(
     if (err instanceof HttpError) {
       if (err.code === 'CSRF_REJECTED') {
         auditEdge({ action: 'EDGE_CSRF_REJECTED', operationId, correlationId: ctx.correlationId });
-      }
-      if (err.code === 'RATE_LIMITED') {
+      } else if (err.code === 'RATE_LIMITED') {
         auditEdge({ action: 'EDGE_RATE_LIMITED', operationId, correlationId: ctx.correlationId });
       }
       throw err;
@@ -115,10 +116,45 @@ async function guarded(
   }
 }
 
+export type ResolvedSession =
+  | { readonly kind: 'ACTIVE'; readonly session: EdgeSession }
+  | { readonly kind: 'ENDED'; readonly reason: SessionEndedReason };
+
+async function resolveSession(deps: EdgeDeps, ctx: RequestContext): Promise<ResolvedSession> {
+  const handle = ctx.cookies.get(deps.cookies.sessionCookieName);
+  if (handle === undefined || handle.length === 0) {
+    // No cookie at all reports as `revoked`: an absent handle and a destroyed
+    // one are the same fact from the browser's side, and a fourth reason for
+    // "you never had one" tells the UI nothing it can act on.
+    return { kind: 'ENDED', reason: 'revoked' };
+  }
+  const lookup = await deps.sessions.resolve(handle, deps.now());
+  if (lookup.kind === 'ACTIVE') return { kind: 'ACTIVE', session: lookup.session };
+  // UNKNOWN and revoked report identically — a handle-existence oracle would
+  // let an attacker confirm that a stolen handle was once real.
+  return { kind: 'ENDED', reason: lookup.kind === 'UNKNOWN' ? 'revoked' : lookup.reason };
+}
+
+function wrongKind(
+  operationId: EdgeOperationId,
+  ctx: RequestContext,
+  actual: string,
+  required: string,
+): HttpResult {
+  auditEdge({
+    action: 'EDGE_WRONG_SESSION_KIND',
+    operationId,
+    correlationId: ctx.correlationId,
+    sessionKind: actual,
+    reason: `requires:${required}`,
+  });
+  return { status: 403, body: { error: 'WRONG_SESSION_KIND' } };
+}
+
 /**
  * Anonymous operations. CSRF is still enforced when the registry says so, using
- * pure double-submit — there is no session half to bind to yet, which is why
- * these four operations are also the rate-limited ones.
+ * pure double-submit — there is no session half to bind to yet, which is
+ * exactly why these operations are also the rate-limited ones.
  */
 export function withAnonymous(
   deps: EdgeDeps,
@@ -133,45 +169,6 @@ export function withAnonymous(
       }
       return handler(ctx);
     });
-}
-
-async function resolveSession(
-  deps: EdgeDeps,
-  ctx: RequestContext,
-): Promise<
-  | { readonly kind: 'ACTIVE'; readonly session: EdgeSession }
-  | { readonly kind: 'ENDED'; readonly reason: string }
-> {
-  const handle = ctx.cookies.get(deps.cookies.sessionCookieName);
-  if (handle === undefined || handle.length === 0) {
-    // No cookie at all is `revoked` to the caller: an absent handle and a
-    // destroyed one are the same fact from the browser's side, and inventing a
-    // fourth reason for "you never had one" tells the UI nothing it can use.
-    return { kind: 'ENDED', reason: 'revoked' };
-  }
-  const lookup = await deps.sessions.resolve(handle, deps.now());
-  if (lookup.kind === 'ACTIVE') return { kind: 'ACTIVE', session: lookup.session };
-  // UNKNOWN and revoked are reported identically — a handle-existence oracle
-  // would let an attacker confirm a stolen handle was once real.
-  return { kind: 'ENDED', reason: lookup.kind === 'UNKNOWN' ? 'revoked' : lookup.reason };
-}
-
-function wrongKind(
-  deps: EdgeDeps,
-  operationId: EdgeOperationId,
-  ctx: RequestContext,
-  actual: string,
-  required: string,
-): HttpResult {
-  auditEdge({
-    action: 'EDGE_WRONG_SESSION_KIND',
-    operationId,
-    correlationId: ctx.correlationId,
-    sessionKind: actual,
-    reason: required,
-  });
-  void deps;
-  return { status: 403, body: { error: 'WRONG_SESSION_KIND' } };
 }
 
 export function withOfficerSession(
@@ -194,12 +191,13 @@ export function withOfficerSession(
       }
       const { session } = resolved;
       if (session.kind !== 'officer') {
-        return wrongKind(deps, operationId, ctx, session.kind, 'officer');
+        return wrongKind(operationId, ctx, session.kind, 'officer');
       }
-      if (session.agency === null) {
+      const { agency } = session;
+      if (agency === null) {
         // Structurally impossible (DB CHECK + create() guard). Treated as a dead
-        // session rather than a 500: whatever produced it, the officer's next
-        // correct action is to log in again.
+        // session rather than a 500: whatever produced it, the officer's correct
+        // next action is to log in again.
         return sessionEnded(deps, 'revoked');
       }
       if (operation.csrf) {
@@ -207,10 +205,10 @@ export function withOfficerSession(
           ctx,
           deps.cookies.csrfCookieName,
           deps.config.session.handleHmacKey,
-          bindingFor(session),
+          csrfBindingFor(session),
         );
       }
-      return handler(ctx, session, session.agency);
+      return handler(ctx, session, agency);
     });
 }
 
@@ -234,14 +232,14 @@ export function withApplicantSession(
       }
       const { session } = resolved;
       if (session.kind !== 'applicant') {
-        return wrongKind(deps, operationId, ctx, session.kind, 'applicant');
+        return wrongKind(operationId, ctx, session.kind, 'applicant');
       }
       if (operation.csrf) {
         assertCsrf(
           ctx,
           deps.cookies.csrfCookieName,
           deps.config.session.handleHmacKey,
-          bindingFor(session),
+          csrfBindingFor(session),
         );
       }
       return handler(ctx, session);
@@ -249,34 +247,44 @@ export function withApplicantSession(
 }
 
 /**
- * A session probe that must not fail. Used only by GET /edge/v1/session, which
- * the SPA calls on every mount and which therefore also SEEDS the readable CSRF
- * cookie — without that, the very first login could not carry the token the
- * contract requires it to carry.
+ * For the two operations that must behave sanely WITHOUT a session:
+ *
+ *   readSession  a 401 is a normal, expected answer — the SPA must be able to
+ *                tell `checking` from `anonymous` so it does not flash a login
+ *                screen at a signed-in user. It also seeds the CSRF cookie.
+ *   logout       idempotent by contract: a client retrying a logout must never
+ *                be told it failed, so "no session" is a 204, not a 401.
+ *
+ * CSRF still applies when the registry demands it, bound to the session when
+ * there is one and double-submit only when there is not.
  */
-export function withSessionProbe(
+export function withOptionalSession(
   deps: EdgeDeps,
   operationId: EdgeOperationId,
-  handler: (ctx: RequestContext, session: EdgeSession | null) => Promise<HttpResult>,
+  handler: OptionalSessionHandler,
 ): RouteHandler {
+  const operation = edgeOperation(operationId);
   return async (ctx: RequestContext): Promise<HttpResult> =>
     guarded(operationId, ctx, async () => {
       const resolved = await resolveSession(deps, ctx);
-      if (resolved.kind === 'ENDED') {
-        // 401 with a fresh CSRF cookie and NO session cookie. A 401 here is a
-        // normal, expected answer — the SPA must be able to tell `checking` from
-        // `anonymous` so it does not flash a login screen at a signed-in user.
-        return {
-          status: 401,
-          body: { reason: resolved.reason },
-          cookies: [...clearedCookies(deps.cookies), ...csrfCookieOnly(deps.cookies, newCsrfToken())]
-            // clearedCookies also clears the CSRF cookie; the fresh one must win,
-            // so keep the LAST Set-Cookie per name.
-            .filter((cookie, index, all) => all.findIndex((c) => c.name === cookie.name) === index
-              ? cookie.value !== '' || all.every((c) => c.name !== cookie.name || c.value === '')
-              : false),
-        };
+      const session = resolved.kind === 'ACTIVE' ? resolved.session : null;
+      if (operation.csrf) {
+        assertCsrf(
+          ctx,
+          deps.cookies.csrfCookieName,
+          deps.config.session.handleHmacKey,
+          session === null ? null : csrfBindingFor(session),
+        );
       }
-      return handler(ctx, resolved.session);
+      return handler(ctx, session, resolved.kind === 'ENDED' ? resolved.reason : null);
     });
+}
+
+/** The anonymous answer from the session probe: no session, fresh CSRF token. */
+export function anonymousProbeResult(deps: EdgeDeps, reason: SessionEndedReason): HttpResult {
+  return {
+    status: 401,
+    body: { reason },
+    cookies: anonymousProbeCookies(deps.cookies, newCsrfToken()),
+  };
 }

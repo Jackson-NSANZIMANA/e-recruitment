@@ -1,8 +1,8 @@
 // ══════════════════════════════════════════════════════════════════
 // edge-gateway — The two cookies, and nothing else
 //
-//   session   opaque handle. httpOnly. No script may read it. This is the
-//             credential, and it is not a credential the browser understands.
+//   session   opaque handle. httpOnly. No script may read it. This IS the
+//             credential, and it is not one the browser can understand.
 //   csrf      readable echo. NOT httpOnly, deliberately: on its own it
 //             authenticates nothing, and it is useless without the session
 //             cookie no script can read.
@@ -35,75 +35,60 @@ export function cookiePolicy(secure: boolean): CookiePolicy {
   };
 }
 
+function sessionCookie(policy: CookiePolicy, value: string, clear: boolean): SetCookie {
+  return {
+    name: policy.sessionCookieName,
+    value,
+    httpOnly: true,
+    secure: policy.secure,
+    sameSite: 'Strict',
+    path: '/',
+    ...(clear ? { maxAgeSeconds: 0 } : {}),
+  };
+}
+
+function csrfCookie(policy: CookiePolicy, value: string, clear: boolean): SetCookie {
+  return {
+    name: policy.csrfCookieName,
+    value,
+    httpOnly: false,
+    secure: policy.secure,
+    sameSite: 'Strict',
+    path: '/',
+    ...(clear ? { maxAgeSeconds: 0 } : {}),
+  };
+}
+
 /**
  * Both cookies for a freshly issued (or rotated) session.
  *
  * NO Max-Age / Expires: these are SESSION cookies, gone when the browser
- * closes. Expiry is authoritative server-side — a cookie lifetime the client
- * controls is not an expiry, and a shared officer console at a district office
- * should not leave a resumable handle behind on the machine.
+ * closes. Expiry is authoritative server-side — a lifetime the client controls
+ * is not an expiry, and a shared officer console at a district office must not
+ * leave a resumable handle behind on the machine.
  */
 export function sessionCookies(
   policy: CookiePolicy,
   handle: string,
   csrfToken: string,
 ): readonly SetCookie[] {
-  return [
-    {
-      name: policy.sessionCookieName,
-      value: handle,
-      httpOnly: true,
-      secure: policy.secure,
-      sameSite: 'Strict',
-      path: '/',
-    },
-    {
-      name: policy.csrfCookieName,
-      value: csrfToken,
-      httpOnly: false,
-      secure: policy.secure,
-      sameSite: 'Strict',
-      path: '/',
-    },
-  ];
+  return [sessionCookie(policy, handle, false), csrfCookie(policy, csrfToken, false)];
 }
 
-/** The readable CSRF cookie alone — issued to anonymous callers so that the
- *  very first unsafe request (login, OTP) has a token to echo. Without this,
- *  "CSRF required on login" would be unimplementable by an honest client. */
-export function csrfCookieOnly(policy: CookiePolicy, csrfToken: string): readonly SetCookie[] {
-  return [
-    {
-      name: policy.csrfCookieName,
-      value: csrfToken,
-      httpOnly: false,
-      secure: policy.secure,
-      sameSite: 'Strict',
-      path: '/',
-    },
-  ];
-}
-
-/** Clear both cookies. Max-Age=0 with an empty value, matching RFC 6265. */
+/** Clear both. Used on logout and on every dead-session 401. */
 export function clearedCookies(policy: CookiePolicy): readonly SetCookie[] {
-  return [
-    {
-      name: policy.sessionCookieName,
-      value: '',
-      httpOnly: true,
-      secure: policy.secure,
-      sameSite: 'Strict',
-      path: '/',
-      maxAgeSeconds: 0,
-    },
-    {
-      name: policy.csrfCookieName,
-      value: '',
-      httpOnly: false,
-      secure: policy.secure,
-      sameSite: 'Strict',
-      path: '/',
-      maxAgeSeconds: 0,
-    },
-  ];
+  return [sessionCookie(policy, '', true), csrfCookie(policy, '', true)];
+}
+
+/**
+ * Drop the session cookie and hand out a FRESH readable CSRF token.
+ *
+ * This is what makes the anonymous 401 from `GET /edge/v1/session` useful rather
+ * than merely correct: the SPA calls that route on mount, and without a CSRF
+ * cookie in hand the very first login could not carry the `x-csrf-token` the
+ * contract requires it to carry. "CSRF required on login" would be
+ * unimplementable by an honest client.
+ */
+export function anonymousProbeCookies(policy: CookiePolicy, csrfToken: string): readonly SetCookie[] {
+  return [sessionCookie(policy, '', true), csrfCookie(policy, csrfToken, false)];
 }
