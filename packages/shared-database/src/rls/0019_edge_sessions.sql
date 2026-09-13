@@ -132,9 +132,24 @@ BEGIN
   WHERE table_schema = 'public_core' AND table_name = 'edge_sessions'
     AND column_name = 'roles';
   IF roles_type = 'jsonb' THEN
+    -- PostgreSQL disallows a subquery directly inside an ALTER COLUMN USING
+    -- expression. Convert through a schema-local helper instead.
+    CREATE OR REPLACE FUNCTION public_core.jsonb_text_array(value jsonb)
+    RETURNS text[]
+    LANGUAGE sql
+    IMMUTABLE
+    STRICT
+    AS $fn$
+      SELECT COALESCE(
+        array_agg(item ORDER BY ordinal),
+        '{}'::text[]
+      )
+      FROM jsonb_array_elements_text(value) WITH ORDINALITY AS elements(item, ordinal)
+    $fn$;
+
     ALTER TABLE public_core.edge_sessions
       ALTER COLUMN roles TYPE text[]
-      USING COALESCE(ARRAY(SELECT jsonb_array_elements_text(roles)), '{}'::text[]);
+      USING public_core.jsonb_text_array(roles);
   END IF;
 
   ALTER TABLE public_core.edge_sessions
