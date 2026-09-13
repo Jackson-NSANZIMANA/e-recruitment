@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ══════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
 # bootstrap-db.sh — bring an EMPTY Postgres to the fully-provisioned,
 # proven USRP state, in the ONE canonical order. Idempotent: safe to
 # re-run. This codifies what was previously tribal knowledge scattered
@@ -21,7 +21,7 @@
 #   PG_DB          database name
 #
 # Usage:  bash scripts/bootstrap-db.sh
-# ══════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -129,15 +129,24 @@ apply_sql "${RLS_DIR}/0016_applicant_auth.sql" "rls/0016 (applicant auth)"
 #     the erasure they ask for. One live PENDING per citizen.
 apply_sql "${RLS_DIR}/0017_erasure_requests.sql" "rls/0017 (erasure requests)"
 
-# 19. Stored contact for invitation delivery (ADR-021, owner D13): the
-#     NIDA-registered phone captured at OTP verification, pgcrypto-encrypted
-#     at rest, so notification-service can deliver for real. NULLed on erasure.
+# 19. Stored contact for invitation delivery (owner D13): the NIDA-registered
+#     phone captured at OTP verification, pgcrypto-encrypted at rest, so
+#     notification-service can deliver for real. NULLed on erasure.
 apply_sql "${RLS_DIR}/0018_stored_contact.sql" "rls/0018 (stored contact column)"
 
-printf '\n'
-ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts + applicant auth + erasure requests + stored contact in place"
+# 20. Edge session store (ADR-021 / ADR-024): the browser boundary's own state.
+#     New public_core.edge_sessions table + a new usrp_edge_gateway role that is
+#     the SOLE grantee, under FORCE'd RLS. Because an officer's Ed25519 JWT is
+#     non-revocable until expiry (ADR-016), this table IS the only revocation
+#     mechanism the platform's most privileged human sessions have — which is
+#     exactly why it is durable, keyed-hashed and least-privileged rather than a
+#     map in one process.
+apply_sql "${RLS_DIR}/0019_edge_sessions.sql" "rls/0019 (edge session store)"
 
-# 20. Dev officer accounts (one per agency). A CONVENIENCE seed so the officer
+printf '\n'
+ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts + applicant auth + erasure requests + stored contact + edge sessions in place"
+
+# 21. Dev officer accounts (one per agency). A CONVENIENCE seed so the officer
 #     console / manual login smoke tests have real credentials to drive —
 #     dev-only, idempotent. Best-effort: it needs the workspace built (tsx
 #     resolves @usrp/* runtime dist), so a failure here NEVER blocks the
