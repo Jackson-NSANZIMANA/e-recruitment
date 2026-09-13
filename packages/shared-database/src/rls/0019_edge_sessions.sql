@@ -147,6 +147,9 @@ BEGIN
       FROM jsonb_array_elements_text(value) WITH ORDINALITY AS elements(item, ordinal)
     $fn$;
 
+    -- The prototype's jsonb default cannot be cast automatically alongside
+    -- the column. Remove it for the conversion, then restore the text[] form.
+    ALTER TABLE public_core.edge_sessions ALTER COLUMN roles DROP DEFAULT;
     ALTER TABLE public_core.edge_sessions
       ALTER COLUMN roles TYPE text[]
       USING public_core.jsonb_text_array(roles);
