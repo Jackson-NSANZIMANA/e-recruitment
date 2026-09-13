@@ -20,7 +20,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/**/*.ts",
     "selfcheck": "tsx selfcheck/verify-forensics-slice.ts",
-    "selfcheck:upload": "tsx selfcheck/verify-document-upload-slice.ts"
+    "selfcheck:upload": "tsx selfcheck/cleanup-upload-objects.ts && tsx selfcheck/verify-document-upload-slice.ts"
   },
   "dependencies": {
     "@usrp/shared-auth": "workspace:*",
