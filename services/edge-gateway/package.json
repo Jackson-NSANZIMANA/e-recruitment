@@ -1,0 +1,38 @@
+{
+  "name": "@usrp/edge-gateway",
+  "version": "1.0.0",
+  "private": true,
+  "description": "USRP Edge Gateway — the single browser-facing origin (/edge/v1/**). Upstream credentials stay server-side; the browser holds an opaque session handle.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "start:dev": "tsx src/main.ts",
+    "dev": "tsx watch src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/**/*.ts",
+    "selfcheck": "tsx selfcheck/verify-edge-contract.ts",
+    "selfcheck:security": "tsx selfcheck/verify-edge-security.ts"
+  },
+  "dependencies": {
+    "@usrp/shared-auth": "workspace:*",
+    "@usrp/shared-config": "workspace:*",
+    "@usrp/shared-database": "workspace:*",
+    "@usrp/shared-http": "workspace:*",
+    "@usrp/shared-security": "workspace:*",
+    "@usrp/shared-types": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.8.3"
+  }
+}
