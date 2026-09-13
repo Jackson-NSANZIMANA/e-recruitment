@@ -8,6 +8,13 @@
       "when": 1783329817306,
       "tag": "0000_grey_the_stranger",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1789328563320,
+      "tag": "0001_align_edge_session_kind",
+      "breakpoints": true
     }
   ]
 }

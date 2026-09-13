@@ -1,6 +1,6 @@
 {
-  "id": "cddbe223-d4f4-48d8-b270-088c8ae4d6a6",
-  "prevId": "2a566b68-f4de-4a29-983b-0789465cb04b",
+  "id": "35b1360c-77e1-4e11-89f5-d0f52700300a",
+  "prevId": "cddbe223-d4f4-48d8-b270-088c8ae4d6a6",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -271,7 +271,7 @@
         },
         "kind": {
           "name": "kind",
-          "type": "varchar(16)",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
