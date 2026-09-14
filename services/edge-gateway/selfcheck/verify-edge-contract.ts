@@ -280,7 +280,7 @@ check(
 );
 check(
   'only the two logout operations tolerate a missing session',
-  EDGE_OPERATION_IDS.filter((id) => EDGE_OPERATIONS[id].idempotentWithoutSession === true).join(
+  EDGE_OPERATION_IDS.filter((id) => edgeOperation(id).idempotentWithoutSession === true).join(
     ',',
   ) === 'officerLogout,logoutApplicant',
 );
@@ -301,7 +301,7 @@ for (const id of FIELD_SYNC) {
 }
 check(
   'the score batch has a raised body cap and nothing else does',
-  EDGE_OPERATION_IDS.filter((id) => EDGE_OPERATIONS[id].maxBodyBytes > 8 * 1_024).join(',') ===
+  EDGE_OPERATION_IDS.filter((id) => edgeOperation(id).maxBodyBytes > 8 * 1_024).join(',') ===
     'syncFieldScores',
 );
 
