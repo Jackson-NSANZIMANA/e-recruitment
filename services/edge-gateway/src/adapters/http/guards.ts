@@ -268,7 +268,7 @@ export function withOptionalSession(
     guarded(operationId, ctx, async () => {
       const resolved = await resolveSession(deps, ctx);
       const session = resolved.kind === 'ACTIVE' ? resolved.session : null;
-      if (operation.csrf) {
+      if (operation.csrf && (session !== null || !operation.idempotentWithoutSession)) {
         assertCsrf(
           ctx,
           deps.cookies.csrfCookieName,

@@ -21,6 +21,7 @@
 #         USRP_ENV_FILE=.env.local pnpm dev
 # ══════════════════════════════════════════════════════════════════
 set -euo pipefail
+ulimit -n 65536 2>/dev/null || true
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
