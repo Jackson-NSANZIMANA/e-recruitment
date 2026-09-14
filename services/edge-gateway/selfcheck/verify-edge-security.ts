@@ -282,7 +282,7 @@ async function main(): Promise<void> {
 
   const config = loadEdgeGatewayConfig({
     ...process.env,
-    PORT_EDGE_GATEWAY: '0',
+    PORT_EDGE_GATEWAY: '3000',
     IAM_BASE_URL: stubUrl,
     IDENTITY_SERVICE_BASE_URL: stubUrl,
     APPLICATION_SERVICE_BASE_URL: stubUrl,
