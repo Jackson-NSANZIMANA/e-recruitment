@@ -294,7 +294,7 @@ paths:
       tags: [identity]
       x-usrp-session: officer
       x-usrp-csrf: true
-      x-usrp-retry-on-g2g: true
+      x-usrp-retry-on-g2g: false
       responses:
         '200':
           description: Verified
