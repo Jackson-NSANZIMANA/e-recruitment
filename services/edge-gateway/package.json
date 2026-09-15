@@ -1,8 +1,8 @@
 {
-  "name": "@usrp/document-forensics-service",
+  "name": "@usrp/edge-gateway",
   "version": "1.0.0",
   "private": true,
-  "description": "USRP Document Forensics Service — document ingress + the amber-lane trigger: ingests uploaded bytes from the citizen portal (ClamAV scan BEFORE store, AES-256-GCM sealed at rest, C2PA-manifest capture in path), analyzes referenced documents' REAL bytes, records verdicts on document_records and emits document.forensics",
+  "description": "USRP Edge Gateway — the single browser-facing origin (/edge/v1/**). Upstream credentials stay server-side; the browser holds an opaque session handle.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -19,18 +19,16 @@
     "dev": "tsx watch src/main.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/**/*.ts",
-    "selfcheck": "tsx selfcheck/verify-forensics-slice.ts",
-    "selfcheck:upload": "tsx selfcheck/cleanup-upload-objects.ts && tsx selfcheck/verify-document-upload-slice.ts"
+    "selfcheck": "tsx selfcheck/verify-edge-contract.ts",
+    "selfcheck:security": "tsx selfcheck/verify-edge-security.ts"
   },
   "dependencies": {
     "@usrp/shared-auth": "workspace:*",
     "@usrp/shared-config": "workspace:*",
     "@usrp/shared-database": "workspace:*",
-    "@usrp/shared-events": "workspace:*",
     "@usrp/shared-http": "workspace:*",
     "@usrp/shared-security": "workspace:*",
-    "@usrp/shared-types": "workspace:*",
-    "postgres": "^3.4.5"
+    "@usrp/shared-types": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

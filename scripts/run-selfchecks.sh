@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════
 # run-selfchecks.sh — run EVERY proof in the repo, in dependency order,
 # against live infrastructure. This is the project's real quality gate:
 # "prove it, don't assert it" made repeatable and enforceable (CI runs
@@ -25,8 +25,9 @@
 #
 # Usage:  bash scripts/run-selfchecks.sh
 # Exit:   0 iff every proof passes; first failure aborts (fail-fast).
-# ════════════════════════════════════════════════════════════
+# ═════════════════════════════════════════════════
 set -euo pipefail
+ulimit -n 65536 2>/dev/null || true
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
@@ -68,6 +69,27 @@ export CLAMAV_PORT="${CLAMAV_PORT:-3310}"
 export CLAMAV_TIMEOUT_MS="${CLAMAV_TIMEOUT_MS:-30000}"
 export QR_SIGNING_KEY_ID="${QR_SIGNING_KEY_ID:-selfcheck-qr-key-1}"
 
+# ── Edge tier (ADR-021 / ADR-024) ──────────────────────────────
+# The edge proof boots the gateway in-process against a stub upstream, so it
+# needs the same names services/edge-gateway/src/config.ts reads. Two notes:
+#
+#   EDGE_COOKIE_SECURE=false because the proof drives plain http on loopback.
+#     __Host- cookies REQUIRE Secure and browsers silently drop them without it,
+#     so a proof that set this true would be testing a cookie no client could
+#     ever receive. The gateway itself refuses to boot with false under
+#     NODE_ENV=production.
+#   EDGE_SESSION_HMAC_KEY is also the ROOT of the derived at-rest key for stored
+#     upstream credentials, so it is one published dev secret rather than two.
+export IAM_BASE_URL="${IAM_BASE_URL:-http://localhost:4011}"
+export APPLICATION_SERVICE_BASE_URL="${APPLICATION_SERVICE_BASE_URL:-http://localhost:4006}"
+export IDENTITY_SERVICE_BASE_URL="${IDENTITY_SERVICE_BASE_URL:-http://localhost:4001}"
+export FIELD_SYNC_SERVICE_BASE_URL="${FIELD_SYNC_SERVICE_BASE_URL:-http://localhost:4009}"
+export EDGE_SESSION_HMAC_KEY="${EDGE_SESSION_HMAC_KEY:-dev_edge_session_hmac_key_min_32_chars!!}"
+export EDGE_SESSION_IDLE_TTL_SECONDS="${EDGE_SESSION_IDLE_TTL_SECONDS:-1800}"
+export EDGE_SESSION_ABSOLUTE_TTL_SECONDS="${EDGE_SESSION_ABSOLUTE_TTL_SECONDS:-43200}"
+export EDGE_COOKIE_SECURE="${EDGE_COOKIE_SECURE:-false}"
+export CORS_ORIGINS="${CORS_ORIGINS:-http://localhost:3000,http://localhost:3001}"
+
 PG_CONTAINER="${PG_CONTAINER:-usrp-postgres}"
 PG_ADMIN_USER="${PG_ADMIN_USER:-usrp_admin}"
 PG_DB="${PG_DB:-usrp_db}"
@@ -91,11 +113,19 @@ run_ts() {
 # Runs FIRST, ahead of even the RLS proof, for two reasons. It needs no
 # Postgres, no Kafka, no MinIO and no docker at all, so a regression is known
 # in under a second instead of after ClamAV downloads a virus database. And it
-# guards @usrp/shared-config — the config layer every service in the 39 proofs
+# guards @usrp/shared-config — the config layer every service in the proofs
 # below boots through — including the assertion that the guard stays INERT
 # outside production. If that inertness ever broke, every proof below would
 # fail at once and the cause would be far from obvious.
 run_ts "shared-config: production boot guard (dev secrets / placeholders / loopback / mocks)" packages/shared-config/selfcheck/verify-production-guard.ts
+
+# ── 0b. Edge contract drift — also zero infrastructure ────────────────
+# Placed beside the production guard for the same reason: it opens no socket and
+# touches no database, so contract drift between the operation registry, the
+# OpenAPI document and the approved upstream catalogue is known in milliseconds.
+# It is the check that would have caught the four BFF services that never
+# existed being read as fact for a month.
+run_ts "edge-gateway: contract drift (registry ↔ OpenAPI ↔ upstream catalogue)" services/edge-gateway/selfcheck/verify-edge-contract.ts
 
 # ── 1. Cross-agency isolation — the system's first hard invariant ──
 # Runs as usrp_admin inside the PG container; rolls back; ERRORs on any leak.
@@ -130,6 +160,11 @@ run_ts "iam-service: service tokens (client-credentials → system route accepts
 run_ts "identity-service: applicant auth (OTP → session → own applications)" services/identity-service/selfcheck/verify-applicant-auth-slice.ts
 run_ts "identity-service: applicant self-service (withdraw own + erasure intake, ADR-020)" services/identity-service/selfcheck/verify-applicant-self-service-slice.ts
 run_ts "identity-service: retention sweep (dry-run safe → gated tombstones)" services/identity-service/selfcheck/verify-retention-sweep-slice.ts
+# The BROWSER BOUNDARY. Runs after the two credential issuers above because it
+# asserts what happens to the credentials THEY mint: that neither ever crosses
+# to a browser, that the opaque handle is all the client gets, and that killing
+# the handle is a real revocation for a token ADR-016 makes non-revocable.
+run_ts "edge-gateway: browser boundary (opaque session, CSRF, isolation, anti-enumeration, no-retry)" services/edge-gateway/selfcheck/verify-edge-security.ts
 run_ts "application-service: lifecycle monotonicity" services/application-service/selfcheck/verify-lifecycle.ts
 run_ts "application-service: vetting projection"   services/application-service/selfcheck/verify-vetting-projection.ts
 run_ts "application-service: history immutability" services/application-service/selfcheck/verify-history-immutability.ts
@@ -140,7 +175,7 @@ run_ts "eligibility-service: event-driven age+academic" services/eligibility-ser
 run_ts "background-vetting: RIB criminal gate"    services/background-vetting-service/selfcheck/verify-vetting-slice.ts
 run_ts "scheduling-service: slot assignment"      services/scheduling-service/selfcheck/verify-slot-assignment.ts
 run_ts "notification-service: invitation delivery + lifecycle advance" services/notification-service/selfcheck/verify-notification-slice.ts
-run_ts "notification-service: contact capture → real delivery (ADR-021)" services/notification-service/selfcheck/verify-contact-delivery-slice.ts
+run_ts "notification-service: contact capture → real delivery" services/notification-service/selfcheck/verify-contact-delivery-slice.ts
 run_ts "notification-service: withdrawal notice (acceptance → sweep → citizen SMS, ADR-022)" services/notification-service/selfcheck/verify-notices-slice.ts
 run_ts "biometric-service: check-in gate + persistence" services/biometric-service/selfcheck/verify-biometric-slice.ts
 run_ts "field-sync-service: offline capture + CRDT merge + adjudication" services/field-sync-service/selfcheck/verify-field-sync-slice.ts
@@ -158,26 +193,26 @@ run_ts "application-service: walk-in lane (register → vet → physical → mer
 # Runs late — it exercises the most services (eligibility + background-vetting + application).
 run_ts "pipeline: full chain → DOCUMENT_REVIEW_GREEN" services/application-service/selfcheck/verify-pipeline-e2e.ts
 
-# ── 3. The developer entrypoint itself ─────────────────────────────
-# Boots ALL ELEVEN services from .env.example — the committed template, NOT
+# ── 3. The developer entrypoint itself ────────────────────────────
+# Boots ALL TWELVE services from .env.example — the committed template, NOT
 # the inline environment above. That distinction is the whole point: every
 # proof before this one is driven by this script's own exports, so the file a
 # fresh clone actually starts from was the one surface no proof touched, and
 # it drifted out of agreement with the code for ~30 slices.
 #
 # Runs LAST for two reasons: it is the broadest and most infra-heavy proof
-# (the same reason pipeline-e2e runs late), and booting eleven services joins
+# (the same reason pipeline-e2e runs late), and booting twelve services joins
 # and leaves real consumer groups — which must not perturb the behavioural
 # proofs above it.
-hdr "dev boot: all 11 services from .env.example"
+hdr "dev boot: all 12 services from .env.example"
 if bash scripts/verify-dev-boot.sh; then
-  ok "dev boot: all 11 services from .env.example"
+  ok "dev boot: all 12 services from .env.example"
 else
-  bad "dev boot: all 11 services from .env.example"
+  bad "dev boot: all 12 services from .env.example"
 fi
 
-# ── Summary ────────────────────────────────────────────
-printf '\n\033[1m─────────────────────────────────────────────\033[0m\n'
+# ── Summary ────────────────────────────────────────
+printf '\n\033[1m───────────────────────────────────────────\033[0m\n'
 printf 'Proofs: \033[0;32m%d passed\033[0m, ' "$pass"
 if [[ $fail -eq 0 ]]; then
   printf '\033[0;32m%d failed\033[0m\n' "$fail"

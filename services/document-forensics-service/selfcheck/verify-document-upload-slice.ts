@@ -53,7 +53,26 @@ function jpegWithC2pa(): Buffer { const jumbf = Buffer.concat([Buffer.from('JP')
 const EICAR = Buffer.from('X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*');
 const EICAR_JPEG = jpeg(EICAR);
 const PDF_BYTES = Buffer.from('%PDF-1.4\n/Info 1 0 R\ntrailer\n%%EOF\n');
-async function cleanup(): Promise<void> { await admin.begin(async (tx) => { await tx`SET LOCAL session_replication_role = replica`; await tx`DELETE FROM rdf_ops.document_records WHERE application_id = ${RDF_APP}`; await tx`DELETE FROM rdf_ops.application_status_history WHERE application_id = ${RDF_APP}`; await tx`DELETE FROM rdf_ops.applications WHERE id = ${RDF_APP}`; await tx`DELETE FROM public_core.recruitment_campaigns WHERE id = ${RDF_CAMPAIGN}`; await tx`DELETE FROM public_core.applicant_identities WHERE id = ${APPLICANT_ID}`; }); }
+async function cleanup(): Promise<void> {
+  await admin.begin(async (tx) => {
+    await tx`SET LOCAL session_replication_role = replica`;
+    await tx`DELETE FROM rdf_ops.document_records WHERE application_id = ${RDF_APP}`;
+    await tx`DELETE FROM rdf_ops.application_status_history WHERE application_id = ${RDF_APP}`;
+    await tx`DELETE FROM rdf_ops.applications WHERE id = ${RDF_APP}`;
+    await tx`DELETE FROM public_core.recruitment_campaigns WHERE id = ${RDF_CAMPAIGN}`;
+    await tx`DELETE FROM public_core.applicant_identities WHERE id = ${APPLICANT_ID}`;
+  });
+  
+  const keys = [
+    deriveObjectKey("RDF", RDF_APP, "NATIONAL_ID"),
+    deriveObjectKey("RDF", RDF_APP, "GOOD_CONDUCT_CERTIFICATE"),
+    deriveObjectKey("RDF", RDF_APP, "OLEVEL_CERTIFICATE"),
+    deriveObjectKey("RDF", RDF_APP, "NON_CONVICTION_CERTIFICATE"),
+  ];
+  for (const key of keys) {
+    await s3Request(MINIO, "DELETE", encodeObjectPath(BUCKET, key), Buffer.alloc(0)).catch(() => {});
+  }
+}
 async function seed(): Promise<void> { await admin`INSERT INTO public_core.applicant_identities (id, national_id_hash, encrypted_full_name, encrypted_date_of_birth, encrypted_home_district, encrypted_home_province, gender, registration_channel, identity_status) VALUES (${APPLICANT_ID}, ${NID_HASH}, 'x', 'x', 'x', 'x', 'MALE', 'WEB', 'VERIFIED'::public_core.identity_verification_status)`; await admin`INSERT INTO public_core.recruitment_campaigns (id, campaign_label, agency, status, target_categories, registration_opens_at, registration_closes_at, examination_start_date, examination_end_date, examination_reporting_hour) VALUES (${RDF_CAMPAIGN}, 'Upload slice RDF', 'RDF', 'REGISTRATION_OPEN', '["GENERAL_ENLISTMENT"]', now() - interval '1 day', now() + interval '30 days', '2026-10-01', '2026-10-15', 7)`; await admin`INSERT INTO rdf_ops.applications (id, processing_code, applicant_id, campaign_id, category, status) VALUES (${RDF_APP}, 'RDF-97101', ${APPLICANT_ID}, ${RDF_CAMPAIGN}, 'GENERAL_ENLISTMENT', 'SUBMITTED'::rdf_ops.application_status)`; }
 async function docRows(): Promise<Record<string, unknown>[]> { return await admin<Record<string, unknown>[]>`SELECT id, document_type, minio_object_key, minio_object_bucket, virus_scan_status, forensics_score, forensics_lane, forensics_flags, file_size_bytes FROM rdf_ops.document_records WHERE application_id = ${RDF_APP} ORDER BY created_at`; }
 async function setStatus(status: string): Promise<void> { await admin`UPDATE rdf_ops.applications SET status = ${status}::rdf_ops.application_status WHERE id = ${RDF_APP}`; }

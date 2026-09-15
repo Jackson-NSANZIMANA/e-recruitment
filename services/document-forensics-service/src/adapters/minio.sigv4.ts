@@ -1,10 +1,11 @@
 // ══════════════════════════════════════════════════════════════════
-// document-forensics-service — Hand-rolled S3 SigV4 transport (GET + PUT)
+// document-forensics-service — Hand-rolled S3 SigV4 transport (GET + PUT + DELETE)
 //
-// ONE signer, two verbs. Retrieval had its own inline SigV4; the upload
-// ingress needs a signed PUT. Copying the recipe would mean two
-// implementations of a request signer, one of which misses the next fix — the
-// same reasoning that made agency-bff one codebase and three deployments.
+// ONE signer, three verbs. Retrieval had its own inline SigV4; the upload
+// ingress needs a signed PUT; the selfcheck teardown needs a signed DELETE.
+// Copying the recipe would mean two implementations of a request signer, one
+// of which misses the next fix — the same reasoning that made agency-bff one
+// codebase and three deployments.
 //
 // Zero npm deps on node:crypto/node:http, the same in-character lineage as the
 // hand-rolled G2G HMAC signing (invariant #5). SigV4 with a signed payload
@@ -68,7 +69,7 @@ function signingKey(secretKey: string, dateStamp: string): Buffer {
  */
 export function s3Request(
   config: ObjectStoreConfig,
-  method: 'GET' | 'PUT',
+  method: 'GET' | 'PUT' | 'DELETE',
   objectPath: string,
   payload: Buffer,
 ): Promise<S3Reply> {

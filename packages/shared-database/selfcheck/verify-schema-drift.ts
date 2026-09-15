@@ -6,8 +6,8 @@
 // USRP evolves its schema through hand-written `rls/` SQL (the system of
 // record — it carries the grants, FORCE'd RLS policies, triggers and
 // sequences that drizzle cannot express). The drizzle `.ts` schemas are the
-// READABLE MIRROR of that truth, and `meta/0000_snapshot.json` is drizzle's
-// belief about the post-bootstrap world.
+// READABLE MIRROR of that truth, and the latest committed Drizzle snapshot is
+// drizzle's belief about the post-bootstrap world.
 //
 // Three artefacts, and nothing used to hold them together: between rls/0005
 // and rls/0018 the mirror silently drifted 27 statements across 7 migrations
@@ -37,7 +37,7 @@ import { sql } from '../src/index.js';
 
 const PKG_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const MIGRATIONS_DIR = join(PKG_ROOT, 'src', 'migrations');
-const SNAPSHOT_PATH = join(MIGRATIONS_DIR, 'meta', '0000_snapshot.json');
+const SNAPSHOT_DIR = join(MIGRATIONS_DIR, 'meta');
 const SCHEMA_GLOB = join(PKG_ROOT, 'src', 'schemas', '*.schema.ts');
 // Scratch stays INSIDE the repo on purpose: /tmp is aggressively cleaned on
 // dev boxes and has eaten mid-run artefacts before.
@@ -61,16 +61,28 @@ function sample(items: string[], n = 8): string {
   return items.length > n ? `${head} … (+${items.length - n} more)` : head;
 }
 
-console.log('schema drift — .ts ↔ snapshot ↔ live DB');
+/** Select the newest numbered snapshot committed by drizzle-kit. */
+function latestSnapshotPath(): string {
+  const snapshots = readdirSync(SNAPSHOT_DIR)
+    .filter((name) => /^\d+_snapshot\.json$/.test(name))
+    .sort();
+  const latest = snapshots.at(-1);
+  if (latest === undefined) {
+    throw new Error(`No Drizzle snapshot found in ${SNAPSHOT_DIR}`);
+  }
+  return join(SNAPSHOT_DIR, latest);
+}
+
+console.log('schema drift — .ts ↔ latest snapshot ↔ live DB');
 
 // ══════════════════════════════════════════════════════════════════
 // A. .ts ↔ snapshot — generate must produce NOTHING
 // ══════════════════════════════════════════════════════════════════
-console.log('\n── A. drizzle .ts schemas vs committed snapshot ──');
+console.log('\n── A. drizzle .ts schemas vs latest snapshot ──');
 
 rmSync(SCRATCH, { recursive: true, force: true });
 mkdirSync(join(SCRATCH, 'out'), { recursive: true });
-cpSync(join(MIGRATIONS_DIR, 'meta'), join(SCRATCH, 'out', 'meta'), { recursive: true });
+cpSync(SNAPSHOT_DIR, join(SCRATCH, 'out', 'meta'), { recursive: true });
 
 // drizzle-kit resolves `out` relative to cwd, so the config lives in the
 // scratch dir and we run from there. The real src/migrations is never a target.
@@ -107,7 +119,7 @@ check('drizzle-kit generate ran', !generateFailed, generateOutput.slice(-400));
 
 const emitted = readdirSync(join(SCRATCH, 'out')).filter((f) => f.endsWith('.sql') && !before.has(f));
 check(
-  'no catch-up migration is emitted (.ts and snapshot agree)',
+  'no catch-up migration is emitted (.ts and latest snapshot agree)',
   emitted.length === 0,
   emitted.length
     ? `snapshot is STALE by ${emitted.length} migration(s): ${emitted.join(', ')} — regenerate the snapshot ` +
@@ -133,7 +145,7 @@ rmSync(SCRATCH, { recursive: true, force: true });
 // ══════════════════════════════════════════════════════════════════
 // B. snapshot ↔ live DB
 // ══════════════════════════════════════════════════════════════════
-console.log('\n── B. committed snapshot vs live database ──');
+console.log('\n── B. latest snapshot vs live database ──');
 
 interface SnapshotColumn {
   name: string;
@@ -152,7 +164,7 @@ interface Snapshot {
   enums: Record<string, { name: string; schema?: string; values: string[] }>;
 }
 
-const snapshot = JSON.parse(readFileSync(SNAPSHOT_PATH, 'utf8')) as Snapshot;
+const snapshot = JSON.parse(readFileSync(latestSnapshotPath(), 'utf8')) as Snapshot;
 
 /**
  * Normalise a drizzle snapshot type to what Postgres' format_type() reports.
@@ -325,11 +337,11 @@ await sql.end({ timeout: 5 });
 if (failures > 0) {
   console.error(`\n✗ schema drift detected — ${failures} check(s) failed`);
   console.error(
-    '  The .ts schemas, meta/0000_snapshot.json and the live database have diverged.\n' +
-      '  Mirror the change into the .schema.ts file, then refresh the snapshot\n' +
+    '  The .ts schemas, latest snapshot and live database have diverged.\n' +
+      '  Mirror the change into the .schema.ts file, then refresh the latest snapshot\n' +
       '  (see docs/architecture/schema-evolution.md).',
   );
   process.exit(1);
 }
 
-console.log('\n✓ no schema drift — .ts, snapshot and live database agree');
+console.log('\n✓ no schema drift — .ts, latest snapshot and live database agree');
