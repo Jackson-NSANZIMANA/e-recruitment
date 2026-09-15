@@ -61,8 +61,27 @@ services:
           memory: 512M
 
   # ── MinIO Object Store ──────────────────────────────────────────
+  # Image source changed 2026-09-15: `minio/minio` and `minio/mc` were
+  # removed from Docker Hub entirely between 2026-09-09 and 2026-09-14
+  # (repo returns 404 — not a rate limit, not a login problem, even
+  # though Docker's own error message reads like an auth failure).
+  # MinIO's community edition has been source-only since it was
+  # archived upstream, so there is no new Docker Hub build coming.
+  #
+  # Fix: pull the same official image from Quay instead, where MinIO
+  # still publishes it. Pinned to an exact tag on purpose, not
+  # `:latest` — the last community release was RELEASE.2025-09-07,
+  # so `:latest` on Quay already points at this same frozen build.
+  # Pinning costs nothing and stops a silent, unnoticed image change
+  # later. `mc` still ships inside this image, so the healthcheck
+  # below does not need to change.
+  #
+  # Caution for later: Quay is not guaranteed forever either — Red
+  # Hat hosts it but does not maintain MinIO's content there. If this
+  # pull ever 404s too, the next move is mirroring the image to our
+  # own registry (e.g. GHCR) rather than chasing a third registry.
   minio:
-    image: minio/minio:latest
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     container_name: usrp-minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
