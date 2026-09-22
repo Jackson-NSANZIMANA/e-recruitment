@@ -47,20 +47,20 @@ export function refreshSessionHandler(deps: EdgeDeps): RouteHandler {
       return { status: 401, body: { reason: endedReason ?? 'revoked' } };
     }
 
-    const issued = await deps.sessions.rotate(session, deps.now());
+    // Touch session to advance idle TTL
+    await deps.sessions.touch(session.sessionId, deps.now());
     auditEdge({
       action: 'EDGE_SESSION_REFRESHED',
       operationId: 'refreshSession',
       correlationId: ctx.correlationId,
-      sessionId: issued.session.sessionId,
-      sessionKind: issued.session.kind,
-      ...(issued.session.agency === null ? {} : { agency: issued.session.agency }),
+      sessionId: session.sessionId,
+      sessionKind: session.kind,
+      ...(session.agency === null ? {} : { agency: session.agency }),
     });
 
     const result: HttpResult = {
       status: 200,
-      body: toSessionView(issued.session),
-      cookies: sessionCookies(deps.cookies, issued.handle, issued.csrfToken),
+      body: toSessionView(session),
     };
     return result;
   });

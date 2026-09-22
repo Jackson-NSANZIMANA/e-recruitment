@@ -24,23 +24,41 @@
 
 import { HttpError, type HttpResult, type RequestContext, type RouteHandler } from '@usrp/shared-http';
 import type { Agency } from '@usrp/shared-types';
-import { auditEdge } from '../../observability/audit-log.js';
-import { edgeOperation, type EdgeOperationId } from '../../registry/edge-operations.js';
+import { auditEdge } from '../../adapters/audit-logger.adapter.js';
+import { edgeOperation, type EdgeOperationId } from '../../domain/edge-operations.js';
 import { anonymousProbeCookies, clearedCookies, type CookiePolicy } from '../../security/cookies.js';
 import { assertCsrf, newCsrfToken, type CsrfBinding } from '../../security/csrf.js';
-import type { FixedWindowRateLimiter } from '../../security/rate-limiter.js';
-import type { PgEdgeSessionStore } from '../../session/session-store.pg.js';
-import type { EdgeSession, SessionEndedReason } from '../../session/session.types.js';
-import { UpstreamUnavailableError, type UpstreamClient } from '../../upstream/upstream-client.js';
+import type { EdgeSession, SessionEndedReason } from '../../domain/session.types.js';
+import { UpstreamUnavailableError } from '../../domain/edge.errors.js';
 import type { EdgeGatewayConfig } from '../../config.js';
 import { ForbiddenFieldError } from './validation.js';
+
+// Import infrastructure types
+import type { PgEdgeSessionStore } from '../../adapters/session-store.pg-repository.js';
+import type { UpstreamClient } from '../../adapters/upstream.http-gateway.js';
+import type { FixedWindowRateLimiter } from '../../adapters/fixed-window-rate-limiter.js';
+
+// Import application services
+import type { SessionManagementService } from '../../application/session-management.service.js';
+import type { OfficerAuthService } from '../../application/officer-auth.service.js';
+import type { ApplicantAuthService } from '../../application/applicant-auth.service.js';
+import type { UpstreamProxyService } from '../../application/upstream-proxy.service.js';
 
 export interface EdgeDeps {
   readonly config: EdgeGatewayConfig;
   readonly cookies: CookiePolicy;
+
+  // Application Services
+  readonly sessionManagement: SessionManagementService;
+  readonly officerAuth: OfficerAuthService;
+  readonly applicantAuth: ApplicantAuthService;
+  readonly upstreamProxy: UpstreamProxyService;
+
+  // Infrastructure (for guards and backward compatibility)
   readonly sessions: PgEdgeSessionStore;
   readonly upstream: UpstreamClient;
   readonly limiter: FixedWindowRateLimiter;
+
   readonly now: () => Date;
 }
 
@@ -128,7 +146,7 @@ async function resolveSession(deps: EdgeDeps, ctx: RequestContext): Promise<Reso
     // "you never had one" tells the UI nothing it can act on.
     return { kind: 'ENDED', reason: 'revoked' };
   }
-  const lookup = await deps.sessions.resolve(handle, deps.now());
+  const lookup = await deps.sessions.findByHandle(handle, deps.now());
   if (lookup.kind === 'ACTIVE') return { kind: 'ACTIVE', session: lookup.session };
   // UNKNOWN and revoked report identically — a handle-existence oracle would
   // let an attacker confirm that a stolen handle was once real.
