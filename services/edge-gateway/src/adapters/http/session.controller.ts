@@ -47,8 +47,9 @@ export function refreshSessionHandler(deps: EdgeDeps): RouteHandler {
       return { status: 401, body: { reason: endedReason ?? 'revoked' } };
     }
 
-    // Touch session to advance idle TTL
-    await deps.sessions.touch(session.sessionId, deps.now());
+    // Rotate both secrets (handle and CSRF token) and advance idle TTL
+    const { handle, csrfToken } = await deps.sessions.rotate(session.sessionId, deps.now());
+
     auditEdge({
       action: 'EDGE_SESSION_REFRESHED',
       operationId: 'refreshSession',
@@ -61,6 +62,7 @@ export function refreshSessionHandler(deps: EdgeDeps): RouteHandler {
     const result: HttpResult = {
       status: 200,
       body: toSessionView(session),
+      cookies: sessionCookies(deps.cookies, handle, csrfToken),
     };
     return result;
   });

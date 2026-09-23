@@ -98,6 +98,21 @@ export interface SessionRepository {
   touch(sessionId: string, now: Date): Promise<void>;
 
   /**
+   * Rotate both session secrets (handle and CSRF token) and advance the idle TTL.
+   * Used by refresh endpoint. The old handle remains valid for a grace period
+   * (30 seconds) to allow in-flight requests to complete.
+   *
+   * SECURITY: Rotation means a stolen handle dies the next time the real client
+   * refreshes. Without rotation, a stolen handle stays valid for the whole
+   * absolute window.
+   *
+   * @param sessionId The session's database id
+   * @param now Current time (new lastActivityAt)
+   * @returns New handle and CSRF token to send to client
+   */
+  rotate(sessionId: string, now: Date): Promise<{ handle: string; csrfToken: string }>;
+
+  /**
    * Mark a session as revoked (logout or admin action). The session row stays
    * in the database for audit but will not resolve to ACTIVE anymore.
    *

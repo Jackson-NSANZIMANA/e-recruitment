@@ -313,6 +313,46 @@ export class PgEdgeSessionStore implements SessionRepository {
   }
 
   /**
+   * Rotate both session secrets (handle and CSRF token) and advance the idle TTL.
+   * Used by refresh endpoint. The old handle remains valid for a grace period
+   * (30 seconds) to allow in-flight requests to complete.
+   *
+   * SECURITY: Rotation means a stolen handle dies the next time the real client
+   * refreshes. Without rotation, a stolen handle stays valid for the whole
+   * absolute window.
+   *
+   * Port interface method: rotate(sessionId, now)
+   */
+  async rotate(sessionId: string, now: Date = new Date()): Promise<{ handle: string; csrfToken: string }> {
+    const handle = randomBytes(32).toString('base64url');
+    const handleHash = this.#handleHash(handle);
+    const csrfToken = newCsrfToken();
+    const tokenHash = csrfTokenHash(this.#config.handleHmacKey, csrfToken);
+    const graceDeadline = new Date(now.getTime() + ROTATION_GRACE_MS);
+    const next = new Date(now.getTime() + this.#config.idleTtlSeconds * 1_000);
+
+    try {
+      await sql.begin(async (tx) => {
+        await tx`SET LOCAL ROLE ${sql(EDGE_DB_ROLE)}`;
+        await tx`
+          UPDATE public_core.edge_sessions
+          SET previous_handle_hash = handle_hash,
+              previous_csrf_token_hash = csrf_token_hash,
+              previous_valid_until = ${graceDeadline},
+              handle_hash = ${handleHash},
+              csrf_token_hash = ${tokenHash},
+              idle_expires_at = LEAST(${next}, absolute_expires_at),
+              last_seen_at = ${now}
+          WHERE session_id = ${sessionId} AND revoked_at IS NULL
+        `;
+      });
+      return { handle, csrfToken };
+    } catch (err) {
+      throw new EdgeSessionStoreError('Failed to rotate edge session secrets.', { cause: err });
+    }
+  }
+
+  /**
    * Destroy a session. Idempotent — revoking an already-revoked or unknown
    * session is not an error, because a client retrying a logout must never be
    * told it failed.
