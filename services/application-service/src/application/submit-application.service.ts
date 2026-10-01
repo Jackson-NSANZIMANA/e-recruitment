@@ -12,18 +12,22 @@
 // stored national_id_hash.
 //
 // Ordering is deliberate: verify identity → validate academic inputs →
-// resolve the open campaign → persist → publish. Cheaper/clearer
-// rejections come first, and the event is published only after the
-// application is durably persisted, so a consumer never sees a submission
-// that isn't recorded.
+// resolve the open campaign → persist + stage → dispatch.
+//
+// ATOMIC ANNOUNCEMENT (ADR-025). APPLICANT_SUBMITTED is staged in the outbox
+// IN the transaction that files the application, so the two can no longer
+// disagree. Previously a broker hiccup after the commit returned a 500 for an
+// application that WAS filed — inviting the citizen to file it again — and its
+// vetting never started. Now the citizen gets 201 and the relay delivers.
 // ══════════════════════════════════════════════════════════════════
 
-import { newCorrelationContext, newEnvelope, type EventBus, type EventContext } from '@usrp/shared-events';
+import { newCorrelationContext, newEnvelope, type EventContext } from '@usrp/shared-events';
 import { agencyForCategory, type Agency, type ApplicationCategory, type ApplicationChannel, type ApplicantSubmittedEvent } from '@usrp/shared-types';
 import { resolveAcademicInputs } from '../domain/academic-input.js';
 import type { IdentityReader } from '../ports/identity-reader.js';
 import type { CampaignReader } from '../ports/campaign-reader.js';
-import type { ApplicationRepository } from '../ports/application-repository.js';
+import type { ApplicationRepository, CreateApplicationResult } from '../ports/application-repository.js';
+import type { EventDispatcher } from '../ports/event-outbox.js';
 
 export interface SubmitApplicationCommand {
   readonly applicantId: string;
@@ -52,7 +56,8 @@ export interface SubmitApplicationDeps {
   readonly identityReader: IdentityReader;
   readonly campaignReader: CampaignReader;
   readonly repository: ApplicationRepository;
-  readonly eventBus: EventBus;
+  /** Post-commit dispatch of the staged announcement (the outbox fast path). */
+  readonly events: EventDispatcher;
 }
 
 export class SubmitApplicationService {
@@ -90,32 +95,45 @@ export class SubmitApplicationService {
     // event carry the same correlationId (a fresh chain when none is inbound).
     const context = command.context ?? newCorrelationContext();
 
-    // 4. Persist into the owning agency's isolated ops schema (+ history).
-    const created = await this.deps.repository.createApplication({
-      agency,
-      applicantId: command.applicantId,
-      campaignId: campaign.campaignId,
-      category: command.category,
-      channel: command.channel,
-      nesaIndexNumber: academic.resolved.nesaIndexNumber,
-      hecRegistrationNumber: academic.resolved.hecRegistrationNumber,
-      correlationId: context.correlationId,
-    });
-
-    // 5. Announce it. Published only after durable persistence above.
-    const event: ApplicantSubmittedEvent = {
-      ...newEnvelope(context),
+    // The envelope is minted BEFORE the write so the event staged inside the
+    // transaction and the one dispatched/returned after it are the same event.
+    const envelope = newEnvelope(context);
+    const nationalIdHash = identity.nationalIdHash;
+    const nesaIndexNumber = academic.resolved.nesaIndexNumber;
+    const hecRegistrationNumber = academic.resolved.hecRegistrationNumber;
+    const announce = (created: CreateApplicationResult): ApplicantSubmittedEvent => ({
+      ...envelope,
       eventType: 'APPLICANT_SUBMITTED',
       applicantId: command.applicantId,
       applicationId: created.applicationId,
-      nationalIdHash: identity.nationalIdHash,
+      nationalIdHash,
       agency,
       category: command.category,
       channel: command.channel,
-      nesaIndexNumber: academic.resolved.nesaIndexNumber,
-      hecRegistrationNumber: academic.resolved.hecRegistrationNumber,
-    };
-    await this.deps.eventBus.publish(event);
+      nesaIndexNumber,
+      hecRegistrationNumber,
+    });
+
+    // 4. Persist into the owning agency's isolated ops schema (+ history), and
+    //    stage APPLICANT_SUBMITTED in that same transaction.
+    const created = await this.deps.repository.createApplication(
+      {
+        agency,
+        applicantId: command.applicantId,
+        campaignId: campaign.campaignId,
+        category: command.category,
+        channel: command.channel,
+        nesaIndexNumber,
+        hecRegistrationNumber,
+        correlationId: context.correlationId,
+      },
+      (c) => [announce(c)],
+    );
+
+    // 5. Fast-path dispatch. Never throws for a transport fault: the event is
+    //    already durable and the outbox relay will deliver it.
+    const event = announce(created);
+    await this.deps.events.dispatch([event]);
 
     return {
       kind: 'SUBMITTED',
