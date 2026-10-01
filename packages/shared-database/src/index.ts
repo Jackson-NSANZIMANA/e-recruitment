@@ -18,9 +18,11 @@ import type { InferSelectModel, InferInsertModel } from 'drizzle-orm';
 
 export { configureDatabase, db, getDb, getSql, sql, asJsonb } from './client.js';
 export type { Database, DatabaseClientOptions, JsonbValue } from './client.js';
+export type { SqlTransaction } from './transaction.js';
 
 export * from './schemas/public-core.schema.js';
 export * from './schemas/edge-sessions.schema.js';
+export * from './schemas/event-outbox.schema.js';
 export * from './schemas/rdf-ops.schema.js';
 export * from './schemas/rnp-ops.schema.js';
 export * from './schemas/rcs-ops.schema.js';
@@ -33,6 +35,7 @@ import {
   campaignVenueAssignments,
 } from './schemas/public-core.schema.js';
 import { edgeSessions } from './schemas/edge-sessions.schema.js';
+import { eventOutbox } from './schemas/event-outbox.schema.js';
 
 import {
   rdfApplications,
@@ -64,6 +67,8 @@ export type CampaignVenueAssignment = InferSelectModel<typeof campaignVenueAssig
 export type NewCampaignVenueAssignment = InferInsertModel<typeof campaignVenueAssignments>;
 export type EdgeSession = InferSelectModel<typeof edgeSessions>;
 export type NewEdgeSession = InferInsertModel<typeof edgeSessions>;
+export type OutboxEntry = InferSelectModel<typeof eventOutbox>;
+export type NewOutboxEntry = InferInsertModel<typeof eventOutbox>;
 
 export type RdfApplication = InferSelectModel<typeof rdfApplications>;
 export type NewRdfApplication = InferInsertModel<typeof rdfApplications>;
