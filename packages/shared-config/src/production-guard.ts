@@ -311,3 +311,39 @@ export function resolveEventTransport(source: EnvSource = process.env): EventTra
     reason: 'KAFKA_BROKERS unset — in-memory event bus. Nothing durable, nothing cross-service. Dev only.',
   };
 }
+
+// ── Rule 5: development-only ADAPTERS in a composition root ────────
+//
+// Rules 1–4 inspect ENV. They cannot see a composition root that does
+// `new LogSmsChannel()` or `new MockBiometricMatcher()` unconditionally —
+// and three did. The consequences were the worst kind (green healthchecks,
+// wrong outcomes):
+//
+//   * identity-service OTPs went to a log line → no citizen can log in;
+//   * notification-service invitations went to a log line → applicants are
+//     scheduled for a physical test nobody told them about;
+//   * biometric-service returned fixed PASSING scores for any capture →
+//     every venue check-in clears liveness + 1:1 face match.
+//
+// Call this at the wiring site, immediately BEFORE constructing the dev
+// adapter, naming the adapter and the consequence. Inert unless
+// NODE_ENV=production, exactly like every other rule in this module.
+
+/**
+ * Refuse to wire a development-only adapter into a production process.
+ *
+ * @param adapter     the adapter class name, e.g. 'LogSmsChannel'
+ * @param consequence what silently breaks if it were allowed, for the operator
+ * @throws {EnvValidationError} when NODE_ENV=production.
+ */
+export function assertDevAdapterAllowed(
+  adapter: string,
+  consequence: string,
+  source: EnvSource = process.env,
+): void {
+  if (!isProduction(source)) return;
+  throw new EnvValidationError([
+    `${adapter} is a DEVELOPMENT adapter and is forbidden in production — ${consequence}. ` +
+      `Wire the production adapter behind the same port before deploying this service.`,
+  ]);
+}

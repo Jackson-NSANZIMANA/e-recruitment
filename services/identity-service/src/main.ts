@@ -15,6 +15,7 @@
 import { sql } from '@usrp/shared-database';
 import { InMemoryEventBus, KafkaEventBus, type EventBus } from '@usrp/shared-events';
 import {
+  assertDevAdapterAllowed,
   assertProductionSecrets,
   loadKafkaConfig,
   resolveEventTransport,
@@ -85,6 +86,15 @@ async function main(): Promise<void> {
   const portal = loadApplicantPortalConfig();
   // ONE channel instance serves OTP delivery AND the erasure decision
   // notices (ADR-022) — the real telecom adapter lands exactly once.
+  //
+  // FAIL CLOSED: LogSmsChannel delivers nothing. In production that means no
+  // citizen ever receives an OTP (so none can authenticate) and erasure
+  // decisions are never communicated — all behind green healthchecks. The
+  // guard refuses to boot rather than run that way.
+  assertDevAdapterAllowed(
+    'LogSmsChannel',
+    'applicant OTPs and erasure-decision notices would be written to a log instead of delivered, so no citizen could authenticate',
+  );
   const smsChannel = new LogSmsChannel();
   const applicantAuth = createApplicantAuthService(config, bus, smsChannel);
   const applicationsGateway = new HttpApplicationsGateway({
