@@ -180,6 +180,10 @@ run_ts "eligibility-service: HEC degree gate"     services/eligibility-service/s
 run_ts "eligibility-service: event-driven age+academic" services/eligibility-service/selfcheck/verify-event-driven.ts
 run_ts "background-vetting: RIB criminal gate"    services/background-vetting-service/selfcheck/verify-vetting-slice.ts
 run_ts "scheduling-service: slot assignment"      services/scheduling-service/selfcheck/verify-slot-assignment.ts
+# ADR-026: one invitation per application, no venue overbooked. Right after the
+# assignment proof: that one proves the happy path over Kafka, this one proves
+# the path under redelivery, concurrency, capacity and a broker outage.
+run_ts "scheduling-service: slot integrity (idempotent re-announce, seat capacity, concurrent redelivery, durable)" services/scheduling-service/selfcheck/verify-slot-integrity.ts
 run_ts "notification-service: invitation delivery + lifecycle advance" services/notification-service/selfcheck/verify-notification-slice.ts
 run_ts "notification-service: contact capture → real delivery" services/notification-service/selfcheck/verify-contact-delivery-slice.ts
 run_ts "notification-service: withdrawal notice (acceptance → sweep → citizen SMS, ADR-022)" services/notification-service/selfcheck/verify-notices-slice.ts
