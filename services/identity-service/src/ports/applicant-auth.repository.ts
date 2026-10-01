@@ -8,6 +8,10 @@
 // port (the caller hashes them). The raw phone crosses it exactly once —
 // stampPhoneVerified — to be pgcrypto-encrypted in-transaction for
 // invitation delivery (ADR-021); it is never logged and never returned.
+//
+// Session tokens cross this port RAW (the caller holds the bearer) but are
+// persisted only as a digest by the adapter — a database read never yields
+// a working credential.
 // ══════════════════════════════════════════════════════════════════
 
 import type { ApplicationChannel } from '@usrp/shared-types';
@@ -29,7 +33,7 @@ export interface CreateChallengeInput {
 
 export interface CreateSessionInput {
   readonly applicantId: string;
-  /** The opaque bearer — crypto-random, unique, never logged. */
+  /** The opaque bearer — crypto-random, unique, never logged, digested at rest. */
   readonly sessionToken: string;
   readonly channel: ApplicationChannel;
   readonly expiresAt: Date;
@@ -47,8 +51,13 @@ export interface ApplicantAuthRepository {
   /** Count a failed guess; returns the post-increment attempt count. */
   recordFailedAttempt(challengeId: string): Promise<number>;
 
-  /** Single-use: stamp consumed_at so the code can never verify twice. */
-  consumeChallenge(challengeId: string): Promise<void>;
+  /**
+   * Single-use, as a COMPARE-AND-SET: stamp consumed_at iff the challenge is
+   * still unconsumed and unexpired. Returns true only for the ONE caller whose
+   * statement performed the stamp — a concurrent verifier holding the same
+   * valid code gets false and must not be issued a session.
+   */
+  consumeChallenge(challengeId: string): Promise<boolean>;
 
   createSession(input: CreateSessionInput): Promise<void>;
 

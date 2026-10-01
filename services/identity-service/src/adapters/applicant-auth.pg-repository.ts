@@ -7,14 +7,20 @@
 //     the raw phone reaches exactly ONE method — stampPhoneVerified — and
 //     is pgp_sym_encrypted in-transaction (ADR-021 stored contact), never
 //     logged, never returned;
-//   • the session token is stored verbatim (it IS the opaque credential,
-//     server-side; a hash-at-rest upgrade is an ADR-018 follow-on) but is
-//     never logged and never leaves via any method other than the
-//     caller-supplied lookup;
+//   • the session token is stored ONLY as SHA-256(token). The bearer is 256
+//     bits of CSPRNG output, so an unkeyed digest is sufficient (there is no
+//     dictionary to attack) and adds no key material to manage. A database
+//     read — backup, replica, any injection with system-role reach — yields
+//     digests, never a working citizen session. Callers still pass the raw
+//     token; the digest never leaves this adapter;
+//   • consumeChallenge is a COMPARE-AND-SET: it reports whether THIS call
+//     stamped consumed_at, so two concurrent verifiers holding the same valid
+//     code cannot both be issued a session;
 //   • findLiveSession slides last_activity_at in the same statement —
 //     one round trip, no read-then-write race.
 // ══════════════════════════════════════════════════════════════════
 
+import { createHash } from 'node:crypto';
 import { sql } from '@usrp/shared-database';
 import { IdentityPersistenceError } from '../domain/identity.errors.js';
 import type {
@@ -26,6 +32,15 @@ import type {
 
 const SYSTEM_ROLE = 'usrp_system_service';
 const ENCRYPTION_KEY_SETTING = 'app.encryption_key';
+
+/**
+ * The at-rest form of an applicant session bearer. Domain-separated so the
+ * same token value could never collide with a digest computed for another
+ * purpose. 64 hex chars — fits session_token varchar(256).
+ */
+function sessionTokenDigest(sessionToken: string): string {
+  return createHash('sha256').update(`usrp:applicant-session:v1:${sessionToken}`, 'utf8').digest('hex');
+}
 
 export class PgApplicantAuthRepository implements ApplicantAuthRepository {
   /**
@@ -112,15 +127,24 @@ export class PgApplicantAuthRepository implements ApplicantAuthRepository {
     }
   }
 
-  async consumeChallenge(challengeId: string): Promise<void> {
+  async consumeChallenge(challengeId: string): Promise<boolean> {
     try {
-      await sql.begin(async (tx) => {
+      return await sql.begin(async (tx) => {
         await tx`SET LOCAL ROLE ${sql(SYSTEM_ROLE)}`;
-        await tx`
+        // Compare-and-set. Row-level locking serialises concurrent UPDATEs on
+        // the same row; the loser re-evaluates `consumed_at IS NULL` after the
+        // winner commits, matches nothing, and RETURNING yields zero rows.
+        // Expiry is re-checked here too: the code may have been verified a
+        // hair before expiry but must not be consumed after it.
+        const rows = await tx<{ id: string }[]>`
           UPDATE public_core.applicant_otp_challenges
           SET consumed_at = now()
-          WHERE id = ${challengeId} AND consumed_at IS NULL
+          WHERE id = ${challengeId}
+            AND consumed_at IS NULL
+            AND expires_at > now()
+          RETURNING id
         `;
+        return rows.length === 1;
       });
     } catch (cause) {
       throw wrap(cause, 'Failed to consume OTP challenge');
@@ -134,7 +158,7 @@ export class PgApplicantAuthRepository implements ApplicantAuthRepository {
         await tx`
           INSERT INTO public_core.applicant_sessions
             (applicant_id, session_token, channel, expires_at)
-          VALUES (${input.applicantId}, ${input.sessionToken},
+          VALUES (${input.applicantId}, ${sessionTokenDigest(input.sessionToken)},
                   ${input.channel}::public_core.application_channel, ${input.expiresAt.toISOString()})
         `;
       });
@@ -151,7 +175,7 @@ export class PgApplicantAuthRepository implements ApplicantAuthRepository {
         const rows = await tx<{ applicant_id: string }[]>`
           UPDATE public_core.applicant_sessions
           SET last_activity_at = now()
-          WHERE session_token = ${sessionToken}
+          WHERE session_token = ${sessionTokenDigest(sessionToken)}
             AND terminated_at IS NULL
             AND expires_at > now()
           RETURNING applicant_id
@@ -171,7 +195,7 @@ export class PgApplicantAuthRepository implements ApplicantAuthRepository {
         await tx`
           UPDATE public_core.applicant_sessions
           SET terminated_at = now()
-          WHERE session_token = ${sessionToken} AND terminated_at IS NULL
+          WHERE session_token = ${sessionTokenDigest(sessionToken)} AND terminated_at IS NULL
         `;
       });
     } catch (cause) {
