@@ -14,7 +14,8 @@
 //     (engine-enforced, no silent official score) → resolve endpoint clears it
 //     and the application finally advances;
 //   • tamper (bad signature), unenrolled device, revoked device, cross-agency
-//     device, and wrong-agency application all REJECTED / guarded;
+//     device, wrong-agency application, and a FORGED EXAM TICKET all
+//     REJECTED / guarded;
 //   • biometric-precondition enforced (no completion without a check-in pass);
 //   • auth: unauthenticated → 401, system token → 403 (officer-only routes).
 //
@@ -85,6 +86,13 @@ const keysA = generateDeviceKeyPair();
 const keysB = generateDeviceKeyPair();
 const keysRevoked = generateDeviceKeyPair();
 
+/**
+ * The exam ticket ISSUED to an application (seeded into qr_invitation_code)
+ * and therefore the only ticket a genuine record may carry. Prefixed so it
+ * cannot collide with another proof's ticket under the column's UNIQUE.
+ */
+const ticketFor = (applicationId: string): string => `FS-TICKET-${applicationId.slice(-4)}`;
+
 let failures = 0;
 function check(label: string, cond: boolean, detail = ''): void {
   if (cond) console.log(`  ✓ ${label}`);
@@ -110,10 +118,11 @@ function makeRecord(
   deviceId: string,
   vectorClock: Record<string, number>,
   metrics: PhysicalTestMetrics = METRICS,
+  qrInvitationCode: string = ticketFor(applicationId),
 ): FieldScoreRecord {
   const payload: SignableFieldPayload = {
     applicationId,
-    qrInvitationCode: `TICKET-${applicationId.slice(-4)}`,
+    qrInvitationCode,
     metrics,
     capturedAt: '2026-07-11T09:00:00.000Z',
     deviceId,
@@ -171,13 +180,16 @@ async function seed(): Promise<void> {
        now() - interval '10 days', now() + interval '10 days', '2026-08-01', '2026-08-05', 8,
        'REGISTRATION_OPEN'::public_core.campaign_status)`;
 
-  // Four applications parked at PHYSICAL_TEST_SCHEDULED (the stage a score completes).
+  // Four applications parked at PHYSICAL_TEST_SCHEDULED (the stage a score
+  // completes), each holding the exam ticket scheduling would have issued.
   const seedApp = (id: string, applicant: string, code: string) => admin`
     INSERT INTO rdf_ops.applications
-      (id, processing_code, applicant_id, campaign_id, category, status)
+      (id, processing_code, applicant_id, campaign_id, category, status,
+       qr_invitation_code, qr_invitation_issued_at)
     VALUES (${id}, ${code}, ${applicant}, ${CAMPAIGN_ID},
        'GENERAL_ENLISTMENT'::rdf_ops.application_category,
-       'PHYSICAL_TEST_SCHEDULED'::rdf_ops.application_status)`;
+       'PHYSICAL_TEST_SCHEDULED'::rdf_ops.application_status,
+       ${ticketFor(id)}, now())`;
   await seedApp(APP_ACCEPT, APPLICANT_BIO, 'RDF-90001');
   await seedApp(APP_ORDER, APPLICANT_BIO, 'RDF-90002');
   await seedApp(APP_CONFLICT, APPLICANT_BIO, 'RDF-90003');
@@ -369,6 +381,15 @@ async function main(): Promise<void> {
     // A well-formed record for an application absent from the officer's agency schema.
     const crossApp = makeRecord('5f000000-0000-4000-8000-0000dead0001', keysA.privateKeyPem, DEV_A, { [DEV_A]: 1 });
     check('unknown application in agency schema → NOT_FOUND', (await syncOne(crossApp)).result['status'] === 'NOT_FOUND');
+    // A GENUINELY SIGNED record (enrolled device, right agency, valid
+    // signature, dominating clock) for a real application — but carrying a
+    // ticket that application was never issued. Device authorship is proven;
+    // the candidate's presence is not. Must be refused and never stored.
+    const forgedTicket = makeRecord(APP_ORDER, keysA.privateKeyPem, DEV_A, { [DEV_A]: 7 }, METRICS, 'FS-TICKET-FORGED');
+    const ft = await syncOne(forgedTicket);
+    check('forged exam ticket → REJECTED TICKET_MISMATCH', ft.result['status'] === 'REJECTED' && ft.result['reason'] === 'TICKET_MISMATCH', JSON.stringify(ft.result));
+    check('forged-ticket record never stored (APP_ORDER still has exactly 1 row)', (await admin`SELECT count(*)::int AS n FROM rdf_ops.physical_test_scores WHERE application_id=${APP_ORDER}`)[0]?.['n'] === 1);
+    check('rejection audited as FIELD_SCORE_REJECTED', busMain.published.some((e) => e.eventType === 'AUDIT_ENTRY' && asRecord(e)['action'] === 'FIELD_SCORE_REJECTED' && asRecord(asRecord(e)['metadata'])['reason'] === 'TICKET_MISMATCH'));
 
     // ── 7. Biometric precondition ──────────────────────────────────
     console.log('\n── 7. Biometric-pass precondition enforced ──');
@@ -392,7 +413,7 @@ async function main(): Promise<void> {
   }
 
   console.log('\n───────────────────────────────────────────────');
-  if (failures === 0) console.log('FIELD-SYNC OFFLINE CAPTURE + CRDT MERGE + CONFLICT ADJUDICATION PROVEN ✓');
+  if (failures === 0) console.log('FIELD-SYNC OFFLINE CAPTURE + CRDT MERGE + CONFLICT ADJUDICATION + TICKET BINDING PROVEN ✓');
   else console.error(`${failures} ASSERTION(S) FAILED ✗`);
 }
 

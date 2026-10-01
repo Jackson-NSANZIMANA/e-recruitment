@@ -15,8 +15,17 @@
 //   STALE / DUPLICATE  → no write.
 // Corrections are always NEW rows — stored history is never mutated (ADR-003 §4).
 // The cross-agency guard is the application lookup: absent here ⇒ NOT_FOUND.
+//
+// TICKET BINDING. The device signature proves WHICH TABLET authored a record;
+// it does not prove the candidate was there. The application's issued
+// qr_invitation_code (minted by scheduling for the digital lane, by walk-in
+// registration for the on-site lane) is that proof: the officer scans it at
+// the venue and it is signed into the record. It is compared here, under the
+// same row lock, BEFORE any merge — a mismatch (or no issued ticket at all)
+// is TICKET_MISMATCH and nothing is written.
 // ══════════════════════════════════════════════════════════════════
 
+import { timingSafeEqual } from 'node:crypto';
 import { sql, asJsonb } from '@usrp/shared-database';
 import { decideMerge } from '../domain/merge.js';
 import type { VectorClock } from '../domain/vector-clock.js';
@@ -36,10 +45,25 @@ interface AppRow {
   readonly campaign_id: string;
   readonly is_walk_in: boolean;
 }
+interface SyncAppRow extends AppRow {
+  readonly qr_invitation_code: string | null;
+}
 interface StoredRow {
   readonly id: string;
   readonly vector_clock: VectorClock;
   readonly signed_payload_hash: string;
+}
+
+/**
+ * The signed ticket matches the issued one. Constant-time: the issued code is
+ * a bearer credential, so its comparison should not leak a prefix via timing.
+ * No issued ticket ⇒ never a match (no ticket, no official score).
+ */
+function ticketMatches(issued: string | null, presented: string): boolean {
+  if (issued === null) return false;
+  const a = Buffer.from(issued, 'utf8');
+  const b = Buffer.from(presented, 'utf8');
+  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 export class PgFieldScoreStore implements FieldScoreStore {
@@ -51,14 +75,20 @@ export class PgFieldScoreStore implements FieldScoreStore {
 
         // Lock the application → serialise concurrent syncs; also the
         // cross-agency guard (0 rows ⇒ not in THIS agency's schema).
-        const appRows = await tx<AppRow[]>`
-          SELECT campaign_id, is_walk_in
+        const appRows = await tx<SyncAppRow[]>`
+          SELECT campaign_id, is_walk_in, qr_invitation_code
           FROM ${schema}.applications
           WHERE id = ${input.applicationId}
           FOR UPDATE
         `;
         const app = appRows[0];
         if (!app) return { kind: 'NOT_FOUND' };
+
+        // Candidate-presence guard — before any merge, so a forged ticket can
+        // neither append a row nor flag a conflict on a genuine one.
+        if (!ticketMatches(app.qr_invitation_code, input.qrInvitationCode)) {
+          return { kind: 'TICKET_MISMATCH' };
+        }
 
         const existing = await tx<StoredRow[]>`
           SELECT id, vector_clock, signed_payload_hash
