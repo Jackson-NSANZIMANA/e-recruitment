@@ -148,6 +148,9 @@ run_ts "shared-security: signed slot invitation"  packages/shared-security/selfc
 run_ts "shared-security: password KDF (scrypt)"   packages/shared-security/selfcheck/verify-password-kdf.ts
 run_ts "shared-auth: signed bearer token + enforcement" packages/shared-auth/selfcheck/verify-auth-token.ts
 run_ts "shared-events: Kafka round-trip"          packages/shared-events/selfcheck/verify-kafka-roundtrip.ts
+# ADR-025: a poison message costs one retry budget, never a partition. Right
+# after the round-trip because every consuming proof below rides on this path.
+run_ts "shared-events: dead-letter + bounded retry (no head-of-line poison)" packages/shared-events/selfcheck/verify-dead-letter.ts
 run_ts "identity-service: core slice"             services/identity-service/selfcheck/verify-slice.ts
 run_ts "identity-service: HTTP slice"             services/identity-service/selfcheck/verify-http-slice.ts
 run_ts "identity-service: right-to-erasure (gate → tombstone → freeze)" services/identity-service/selfcheck/verify-erasure-slice.ts
@@ -167,6 +170,9 @@ run_ts "identity-service: retention sweep (dry-run safe → gated tombstones)" s
 run_ts "edge-gateway: browser boundary (opaque session, CSRF, isolation, anti-enumeration, no-retry)" services/edge-gateway/selfcheck/verify-edge-security.ts
 run_ts "application-service: lifecycle monotonicity" services/application-service/selfcheck/verify-lifecycle.ts
 run_ts "application-service: vetting projection"   services/application-service/selfcheck/verify-vetting-projection.ts
+# ADR-025: a committed transition can no longer lose its event (the GREEN-but-
+# never-scheduled defect). Right after the projection proof it hardens.
+run_ts "application-service: transactional outbox (atomic stage → relay → no lost CLEARED)" services/application-service/selfcheck/verify-outbox-slice.ts
 run_ts "application-service: history immutability" services/application-service/selfcheck/verify-history-immutability.ts
 run_ts "eligibility-service: age gate"            services/eligibility-service/selfcheck/verify-age-eligibility.ts
 run_ts "eligibility-service: NESA education gate" services/eligibility-service/selfcheck/verify-education-eligibility.ts
