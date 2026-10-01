@@ -8,6 +8,10 @@
 // NUL-terminated line: "stream: OK" or "stream: <signature> FOUND".
 // Every failure mode (refused, timeout, malformed reply) maps to UNAVAILABLE
 // — the use case fails CLOSED on it; this adapter never guesses "clean".
+//
+// "Never guesses clean" is enforced in parseReply: CLEAN requires the EXACT
+// clamd clean verdict. A suffix match (any line ending in "OK") would accept
+// error lines, truncated replies or a misbehaving proxy as a clean scan.
 // ══════════════════════════════════════════════════════════════════
 
 import { connect } from 'node:net';
@@ -15,6 +19,9 @@ import type { ScanResult, VirusScanner } from '../ports/virus-scanner.js';
 import type { VirusScannerConfig } from '../config.js';
 
 const CHUNK_SIZE = 64 * 1024;
+
+/** The one and only reply clamd gives for a clean INSTREAM scan. */
+const CLEAN_VERDICT = 'stream: OK';
 
 export class ClamavVirusScanner implements VirusScanner {
   readonly #config: VirusScannerConfig;
@@ -76,7 +83,7 @@ export class ClamavVirusScanner implements VirusScanner {
 
 function parseReply(reply: string): ScanResult {
   const line = reply.replaceAll('\0', '').trim();
-  if (line.endsWith('OK')) return { kind: 'CLEAN' };
+  if (line === CLEAN_VERDICT) return { kind: 'CLEAN' };
   const found = /^stream: (.+) FOUND$/.exec(line);
   if (found?.[1]) return { kind: 'INFECTED', signature: found[1] };
   return { kind: 'UNAVAILABLE', detail: `unexpected clamd reply: ${line.slice(0, 120)}` };
