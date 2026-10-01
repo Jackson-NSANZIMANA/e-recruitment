@@ -25,6 +25,7 @@ import {
   type EventBus,
 } from '@usrp/shared-events';
 import {
+  assertDevAdapterAllowed,
   assertProductionSecrets,
   loadKafkaConfig,
   resolveEventTransport,
@@ -59,6 +60,16 @@ async function main(): Promise<void> {
   // only ever confirm what already succeeded.
   logStartupPhase(SERVICE_NAME, 'asserting_production_secrets');
   assertProductionSecrets();
+
+  // FAIL CLOSED: createBiometricService wires MockBiometricMatcher, which
+  // returns FIXED PASSING scores (liveness 0.95, match 96.0) for ANY capture.
+  // In production every venue check-in would clear biometrics. Refuse to boot
+  // until a real liveness + 1:1 match adapter replaces it behind the port.
+  logStartupPhase(SERVICE_NAME, 'asserting_biometric_matcher');
+  assertDevAdapterAllowed(
+    'MockBiometricMatcher',
+    'every capture would receive fixed passing liveness and face-match scores, so every check-in would clear biometrics',
+  );
 
   // Not merely reading env: this decodes QR_INVITATION_PUBLIC_KEY_B64 and
   // runs createPublicKey() on it, so a malformed or truncated key fails HERE.

@@ -13,7 +13,10 @@
 //   • NO ENUMERATION: an unknown NID, an unverified identity, a missing
 //     NIDA record, and a phoneless record all return the SAME 'CHALLENGED'
 //     outcome as a real send. Whether a NID is registered with USRP is not
-//     observable from this endpoint.
+//     observable from this endpoint;
+//   • SINGLE USE IS ENFORCED, NOT ASSUMED: a session is issued only to the
+//     verifier whose compare-and-set consumed the challenge. Two concurrent
+//     requests carrying the same valid code yield exactly one session.
 //
 // A citizen whose NIDA-registered phone is stale/absent cannot pass here —
 // their path is the walk-in lane (ADR-012), where a field officer
@@ -126,7 +129,12 @@ export class ApplicantAuthService {
       return { kind: 'INVALID_OTP' };
     }
 
-    await this.deps.repository.consumeChallenge(challenge.id);
+    // Single use is decided HERE, by the database, not by the read above. A
+    // concurrent verifier that read the same live challenge and the same
+    // correct code loses the compare-and-set and is refused — indistinguishable
+    // from a wrong code, so the race is not even observable as a signal.
+    const consumed = await this.deps.repository.consumeChallenge(challenge.id);
+    if (!consumed) return { kind: 'INVALID_OTP' };
 
     const sessionToken = randomBytes(32).toString('base64url');
     const expiresAt = new Date(this.#now().getTime() + this.deps.config.sessionTtlSeconds * 1000);

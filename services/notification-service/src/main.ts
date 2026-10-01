@@ -27,6 +27,7 @@ import {
   type EventBus,
 } from '@usrp/shared-events';
 import {
+  assertDevAdapterAllowed,
   assertProductionSecrets,
   loadKafkaConfig,
   resolveEventTransport,
@@ -74,6 +75,14 @@ async function main(): Promise<void> {
   await withStartupTimeout(bus.connect(), 'connecting the event bus');
   logStartupPhase(SERVICE_NAME, 'event_bus_connected', { transport: transport.kind });
 
+  // FAIL CLOSED: LogSmsChannel delivers nothing, yet the lifecycle still
+  // advances SLOT_ASSIGNED → PHYSICAL_TEST_SCHEDULED on the delivery event. In
+  // production that schedules citizens for an exam no one told them about.
+  logStartupPhase(SERVICE_NAME, 'asserting_sms_adapter');
+  assertDevAdapterAllowed(
+    'LogSmsChannel',
+    'exam invitations and withdrawal notices would be written to a log instead of delivered, while applications still advance to PHYSICAL_TEST_SCHEDULED',
+  );
   const service = createNotificationService(config, bus, {
     resolver: new PgContactResolver(config.security.encryptionKey),
     sms: new LogSmsChannel(),

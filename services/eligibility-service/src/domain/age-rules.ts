@@ -23,7 +23,10 @@ export function ageInYears(dateOfBirth: string, asOf: Date): number {
     throw new InvalidDateOfBirthError('expected format YYYY-MM-DD');
   }
   const dob = new Date(`${dateOfBirth}T00:00:00Z`);
-  if (Number.isNaN(dob.getTime())) {
+  // JS Date ROLLS OVER impossible calendar dates instead of rejecting them
+  // ('2004-02-30' → 2004-03-01, '2004-13-01' → NaN only for some). The round
+  // trip is the strict check: a real date formats back to exactly the input.
+  if (Number.isNaN(dob.getTime()) || dob.toISOString().slice(0, 10) !== dateOfBirth) {
     throw new InvalidDateOfBirthError('not a real calendar date');
   }
   let age = asOf.getUTCFullYear() - dob.getUTCFullYear();

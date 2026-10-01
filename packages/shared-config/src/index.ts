@@ -13,6 +13,10 @@
 //   Production boot guard — call assertProductionSecrets() as the FIRST
 //   statement in every service main(), before any other loader:
 //     import { assertProductionSecrets, resolveEventTransport } from '@usrp/shared-config'
+//
+//   Dev-adapter guard — call at the wiring site, before constructing a
+//   development-only adapter (LogSmsChannel, MockBiometricMatcher, …):
+//     import { assertDevAdapterAllowed } from '@usrp/shared-config'
 // ══════════════════════════════════════════════════════════════════
 
 export {
@@ -71,6 +75,7 @@ export {
 } from './config.js';
 
 export {
+  assertDevAdapterAllowed,
   assertProductionSecrets,
   isProduction,
   resolveEventTransport,

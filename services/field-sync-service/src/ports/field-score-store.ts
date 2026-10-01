@@ -10,6 +10,8 @@
 //                         can finally advance.
 // All writes run as usrp_system_service. The cross-agency guard is the
 // application lookup: an application absent from THIS agency's schema ⇒ NOT_FOUND.
+// The candidate-presence guard is the ticket check: a record whose signed
+// qrInvitationCode is not the application's ISSUED ticket ⇒ TICKET_MISMATCH.
 // ══════════════════════════════════════════════════════════════════
 
 import type { Agency } from '@usrp/shared-types';
@@ -19,6 +21,7 @@ import type { VectorClock } from '../domain/vector-clock.js';
 export interface SyncRecordInput {
   readonly applicationId: string;
   readonly agency: Agency;
+  /** The signed ticket code — must equal the application's issued qr_invitation_code. */
   readonly qrInvitationCode: string;
   readonly deviceId: string;
   readonly capturingOfficerId: string;
@@ -53,7 +56,13 @@ export type SyncOutcome =
   /** Exact signed payload already stored — idempotent no-op. */
   | { readonly kind: 'DUPLICATE' }
   /** No such application in THIS agency's schema — the cross-agency write guard. */
-  | { readonly kind: 'NOT_FOUND' };
+  | { readonly kind: 'NOT_FOUND' }
+  /**
+   * The signed ticket is not the application's issued ticket (or none was
+   * issued) — the device signed a score for a candidate who did not present
+   * that application's invitation. Never stored.
+   */
+  | { readonly kind: 'TICKET_MISMATCH' };
 
 export interface ResolveConflictInput {
   readonly applicationId: string;

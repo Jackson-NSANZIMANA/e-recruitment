@@ -7,7 +7,9 @@
 //   2. Cross-agency guard: the device's agency must equal the officer's agency.
 //   3. Verify the Ed25519 device signature AND the metrics hash
 //      (verifyFieldScoreRecord). Tampered → REJECT (never stored).
-//   4. Merge into physical_test_scores (vector-clock hybrid resolution).
+//   4. Merge into physical_test_scores (vector-clock hybrid resolution). The
+//      store first binds the record to the application's ISSUED exam ticket:
+//      a signed ticket that is not the issued one → REJECT TICKET_MISMATCH.
 //   5. On a clean accept/supersede → emit FIELD_SCORE_CAPTURED (application-
 //      service advances). On conflict → NO state event: the application is held.
 //
@@ -40,7 +42,8 @@ export type RejectReason =
   | 'UNENROLLED_DEVICE'
   | 'REVOKED_DEVICE'
   | 'AGENCY_MISMATCH'
-  | 'BAD_SIGNATURE';
+  | 'BAD_SIGNATURE'
+  | 'TICKET_MISMATCH';
 
 export interface RecordSyncResult {
   readonly applicationId: string;
@@ -109,7 +112,7 @@ export class SyncFieldScoresService {
     });
     if (!signatureOk) return this.reject(base, 'BAD_SIGNATURE', actorAgency, context);
 
-    // 4. Merge into the CRDT log.
+    // 4. Merge into the CRDT log (ticket-bound inside the store's lock).
     const outcome = await this.deps.store.sync({
       applicationId: record.applicationId,
       agency: actorAgency,
@@ -160,6 +163,10 @@ export class SyncFieldScoresService {
         return { ...base, status: 'DUPLICATE' };
       case 'NOT_FOUND':
         return { ...base, status: 'NOT_FOUND' };
+      case 'TICKET_MISMATCH':
+        // A validly-signed record for a candidate who did not present this
+        // application's invitation. Rejected and audited like any forgery.
+        return this.reject(base, 'TICKET_MISMATCH', agency, context);
     }
   }
 
