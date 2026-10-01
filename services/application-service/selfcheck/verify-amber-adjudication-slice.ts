@@ -122,6 +122,10 @@ const ALL_RDF_APPS = [
 async function cleanup(): Promise<void> {
   await admin.begin(async (tx) => {
     await tx`SET LOCAL session_replication_role = replica`;
+    // The slot ledger (ADR-026): these scenario ids are FIXED, so a reservation
+    // left by a previous run would make real scheduling re-announce THAT run's
+    // ticket and venue id into this one.
+    await tx`DELETE FROM public_core.slot_reservations WHERE application_id IN ${tx(ALL_RDF_APPS)}`;
     await tx`DELETE FROM rdf_ops.document_records WHERE application_id IN ${tx(ALL_RDF_APPS)}`;
     await tx`DELETE FROM rdf_ops.application_status_history WHERE application_id IN ${tx(ALL_RDF_APPS)}`;
     await tx`DELETE FROM rdf_ops.applications WHERE id IN ${tx(ALL_RDF_APPS)}`;
@@ -257,7 +261,7 @@ async function awaitStatus(id: string, want: string, timeoutMs = 8000): Promise<
   return last;
 }
 
-// ── Main ──────────────────────────────────────────────────────────
+// ── Main ──────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
   console.log('\n══ application-service — amber routing + adjudication self-check ══');
