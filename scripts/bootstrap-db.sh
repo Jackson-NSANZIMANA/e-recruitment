@@ -150,10 +150,17 @@ apply_sql "${RLS_DIR}/0019_edge_sessions.sql" "rls/0019 (edge session store)"
 #     only, FORCE'd RLS, producer-scoped.
 apply_sql "${RLS_DIR}/0020_event_outbox.sql" "rls/0020 (transactional event outbox)"
 
-printf '\n'
-ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts + applicant auth + erasure requests + stored contact + edge sessions + event outbox in place"
+# 22. Slot reservation ledger + enforced venue capacity (ADR-026): one
+#     reservation per application (a redelivered clearance re-announces the
+#     SAME invitation instead of minting a second ticket), and the seat counter
+#     that capacity_limit was always meant to bound. Append-only for its
+#     writer; system-service gets UPDATE on registered_count ONLY.
+apply_sql "${RLS_DIR}/0021_slot_reservations.sql" "rls/0021 (slot reservation ledger + venue capacity)"
 
-# 22. Dev officer accounts (one per agency). A CONVENIENCE seed so the officer
+printf '\n'
+ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts + applicant auth + erasure requests + stored contact + edge sessions + event outbox + slot reservations in place"
+
+# 23. Dev officer accounts (one per agency). A CONVENIENCE seed so the officer
 #     console / manual login smoke tests have real credentials to drive —
 #     dev-only, idempotent. Best-effort: it needs the workspace built (tsx
 #     resolves @usrp/* runtime dist), so a failure here NEVER blocks the

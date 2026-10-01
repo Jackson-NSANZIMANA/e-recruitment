@@ -20,9 +20,19 @@ export { configureDatabase, db, getDb, getSql, sql, asJsonb } from './client.js'
 export type { Database, DatabaseClientOptions, JsonbValue } from './client.js';
 export type { SqlTransaction } from './transaction.js';
 
+// Transactional outbox (ADR-025), shared since its second adopter (ADR-026).
+export {
+  PgOutboxDispatcher,
+  PgOutboxRelay,
+  describeOutboxError,
+  stageOutboxEvents,
+} from './outbox.js';
+export type { DrainResult, OutboxEvent, OutboxPublisher, OutboxRelayOptions } from './outbox.js';
+
 export * from './schemas/public-core.schema.js';
 export * from './schemas/edge-sessions.schema.js';
 export * from './schemas/event-outbox.schema.js';
+export * from './schemas/slot-reservations.schema.js';
 export * from './schemas/rdf-ops.schema.js';
 export * from './schemas/rnp-ops.schema.js';
 export * from './schemas/rcs-ops.schema.js';
@@ -36,6 +46,7 @@ import {
 } from './schemas/public-core.schema.js';
 import { edgeSessions } from './schemas/edge-sessions.schema.js';
 import { eventOutbox } from './schemas/event-outbox.schema.js';
+import { slotReservations } from './schemas/slot-reservations.schema.js';
 
 import {
   rdfApplications,
@@ -69,6 +80,8 @@ export type EdgeSession = InferSelectModel<typeof edgeSessions>;
 export type NewEdgeSession = InferInsertModel<typeof edgeSessions>;
 export type OutboxEntry = InferSelectModel<typeof eventOutbox>;
 export type NewOutboxEntry = InferInsertModel<typeof eventOutbox>;
+export type SlotReservation = InferSelectModel<typeof slotReservations>;
+export type NewSlotReservation = InferInsertModel<typeof slotReservations>;
 
 export type RdfApplication = InferSelectModel<typeof rdfApplications>;
 export type NewRdfApplication = InferInsertModel<typeof rdfApplications>;

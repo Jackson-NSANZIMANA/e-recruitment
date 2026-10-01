@@ -1,18 +1,17 @@
 // ══════════════════════════════════════════════════════════════════
 // scheduling-service — Runtime entrypoint (composition + bootstrap)
 //
-// A pure event-driven stage gate: it consumes APPLICATION_ELIGIBILITY_CLEARED,
-// resolves the applicant's home district to an exam venue, and emits
-// SLOT_ASSIGNED + AUDIT_ENTRY. It backs a datastore only to READ (identity PII
-// + venue reference data); it never writes application state — application-
-// service's projection applies the SLOT_ASSIGNED it emits (ADR-006). It runs an
-// HTTP server solely for /health + /ready so orchestrators can supervise it.
+// An event-driven stage gate: it consumes APPLICATION_ELIGIBILITY_CLEARED,
+// resolves the applicant's home district to an exam venue, reserves a seat in
+// its slot ledger, and announces SLOT_ASSIGNED + AUDIT_ENTRY through the
+// transactional outbox (ADR-026). It never writes application state —
+// application-service's projection applies the SLOT_ASSIGNED it emits
+// (ADR-006). It runs an HTTP server for /health + /ready and the public QR key.
 //
 // Transport is resolved by @usrp/shared-config: with KAFKA_BROKERS set it
 // consumes from real Kafka; without it, in DEVELOPMENT only, an in-memory bus
 // keeps the process runnable but there are no cross-process events to react to
-// — logged loudly. An event-driven gate on an in-memory bus is a no-op, so in
-// production applications would simply stop being scheduled, with no error.
+// — logged loudly.
 // ══════════════════════════════════════════════════════════════════
 
 import { sql } from '@usrp/shared-database';
@@ -24,7 +23,7 @@ import {
   type EventTransport,
 } from '@usrp/shared-config';
 import { startHttpServer } from '@usrp/shared-http';
-import { createSchedulingService } from './index.js';
+import { createSchedulingOutboxRelay, createSchedulingService } from './index.js';
 import { loadSchedulingConfig } from './config.js';
 import { startApplicationClearedConsumer } from './adapters/events/application-cleared.consumer.js';
 
@@ -53,6 +52,11 @@ async function main(): Promise<void> {
   await bus.connect();
 
   const service = createSchedulingService(config, bus);
+
+  // The delivery guarantee for everything the gate stages (ADR-025/026). Started
+  // before the consumer so a backlog left by a previous crash drains at once.
+  const relay = createSchedulingOutboxRelay(bus);
+  relay.start();
 
   // The gate's ingress: subscribe BEFORE serving so a "ready" signal implies we
   // are actually consuming. Only meaningful with a real broker.
@@ -91,6 +95,8 @@ async function main(): Promise<void> {
     },
     onShutdown: async (): Promise<void> => {
       console.log(JSON.stringify({ msg: 'service_stopping', service: config.runtime.serviceName }));
+      // Relay first: it publishes through the bus and reads through the pool.
+      await relay.stop();
       await bus.disconnect();
       await sql.end({ timeout: 5 });
       console.log(JSON.stringify({ msg: 'service_stopped', service: config.runtime.serviceName }));

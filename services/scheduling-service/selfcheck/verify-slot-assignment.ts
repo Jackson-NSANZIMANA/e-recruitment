@@ -13,7 +13,7 @@
 // emitted, right venue, a QR token); a district with NO venue → NO_VENUE
 // (deferral audit, NO SLOT_ASSIGNED). Asserts the raw home district never leaks
 // into the SLOT_ASSIGNED event. Repeatable: seeds identities + campaign + venue,
-// cleans up.
+// cleans up (including the slot ledger and this producer's outbox rows, ADR-026).
 //
 //   DATABASE_URL='postgresql://usrp_app:app_pw@localhost:5432/usrp_db' \
 //   PII_ENCRYPTION_KEY='dev_pii_encryption_key_min_32_chars_ok!!' \
@@ -81,6 +81,13 @@ async function seedIdentity(id: string, district: string): Promise<void> {
 }
 
 async function cleanup(): Promise<void> {
+  // The slot ledger (ADR-026) and this producer's outbox rows first: they are
+  // keyed by this campaign, and the venue rows they reference go next.
+  await admin`DELETE FROM public_core.slot_reservations WHERE campaign_id = ${CAMPAIGN_ID}`;
+  await admin`
+    DELETE FROM public_core.event_outbox
+    WHERE producer = 'scheduling-service'
+      AND (payload->>'campaignId' = ${CAMPAIGN_ID} OR payload->'metadata'->>'campaignId' = ${CAMPAIGN_ID})`;
   await admin`DELETE FROM public_core.campaign_venue_assignments WHERE campaign_id = ${CAMPAIGN_ID}`;
   await admin`DELETE FROM public_core.recruitment_campaigns WHERE id = ${CAMPAIGN_ID}`;
   await admin`DELETE FROM public_core.applicant_identities WHERE id IN ${admin([HAS_VENUE_APPLICANT, NO_VENUE_APPLICANT])}`;

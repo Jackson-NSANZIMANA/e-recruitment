@@ -2,7 +2,7 @@
   "name": "@usrp/scheduling-service",
   "version": "1.0.0",
   "private": true,
-  "description": "USRP Scheduling Service — event-driven exam-slot assignment: consumes application.cleared, resolves the applicant's home district to a venue, emits SLOT_ASSIGNED + AUDIT_ENTRY (stage 5)",
+  "description": "USRP Scheduling Service — event-driven exam-slot assignment: consumes application.cleared, resolves the applicant's home district to a venue, reserves a seat in the slot ledger, announces SLOT_ASSIGNED + AUDIT_ENTRY via the outbox (stage 5)",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -19,7 +19,8 @@
     "dev": "tsx watch src/main.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/**/*.ts",
-    "selfcheck": "tsx selfcheck/verify-slot-assignment.ts"
+    "selfcheck": "tsx selfcheck/verify-slot-assignment.ts",
+    "selfcheck:integrity": "tsx selfcheck/verify-slot-integrity.ts"
   },
   "dependencies": {
     "@usrp/shared-config": "workspace:*",
