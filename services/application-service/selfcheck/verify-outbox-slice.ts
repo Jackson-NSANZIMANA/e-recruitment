@@ -210,11 +210,11 @@ async function main(): Promise<void> {
     // ── 1. Front door while the broker is down ───────────────────────────
     console.log('\n── 1. Submission commits WITH its event while the broker is down ──');
     bus.down = true;
-    const outcome = await service.submit({
+    const outcome = await service.submit.submit({
       applicantId: APPLICANT_ID,
-      category: 'GENERAL_ENLISTMENT',
-      channel: 'WEB',
-      nesaIndexNumber: 'RW2024SC07777',
+      category: "GENERAL_ENLISTMENT",
+      channel: "WEB",
+      nesaIndexNumber: "RW2024SC07777",
     });
     check('citizen still gets SUBMITTED (no 500 for a filed application)', outcome.kind === 'SUBMITTED', outcome.kind);
     if (outcome.kind !== 'SUBMITTED') throw new Error('cannot continue without a submission');
@@ -258,7 +258,12 @@ async function main(): Promise<void> {
       hecRegistrationNumber: null,
       correlationId: randomUUID(),
     };
-    const second = await service.submit({ applicantId: APPLICANT_ID, category: 'GENERAL_ENLISTMENT', channel: 'WEB', nesaIndexNumber: 'RW2024SC07778' });
+        const second = await service.submit.submit({
+          applicantId: APPLICANT_ID,
+          category: "GENERAL_ENLISTMENT",
+          channel: "WEB",
+          nesaIndexNumber: "RW2024SC07778",
+        });
     if (second.kind === 'SUBMITTED') {
       await relay.drainOnce();
       const failed = await outboxRow(second.event.eventId);
