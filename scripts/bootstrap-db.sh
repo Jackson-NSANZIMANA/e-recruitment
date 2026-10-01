@@ -143,10 +143,17 @@ apply_sql "${RLS_DIR}/0018_stored_contact.sql" "rls/0018 (stored contact column)
 #     map in one process.
 apply_sql "${RLS_DIR}/0019_edge_sessions.sql" "rls/0019 (edge session store)"
 
-printf '\n'
-ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts + applicant auth + erasure requests + stored contact + edge sessions in place"
+# 21. Transactional event outbox (ADR-025): events are staged in the SAME
+#     transaction as the state change they announce and relayed to Kafka, so a
+#     committed transition can no longer lose its event (the lost-CLEARED
+#     defect: GREEN applications that were never scheduled). system-service
+#     only, FORCE'd RLS, producer-scoped.
+apply_sql "${RLS_DIR}/0020_event_outbox.sql" "rls/0020 (transactional event outbox)"
 
-# 21. Dev officer accounts (one per agency). A CONVENIENCE seed so the officer
+printf '\n'
+ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts + applicant auth + erasure requests + stored contact + edge sessions + event outbox in place"
+
+# 22. Dev officer accounts (one per agency). A CONVENIENCE seed so the officer
 #     console / manual login smoke tests have real credentials to drive —
 #     dev-only, idempotent. Best-effort: it needs the workspace built (tsx
 #     resolves @usrp/* runtime dist), so a failure here NEVER blocks the
