@@ -7,6 +7,12 @@
 // sequence, INSERT the applications row (status SUBMITTED), and INSERT the
 // initial null→SUBMITTED application_status_history row (the immutable
 // trail's first entry). All as usrp_system_service.
+//
+// OUTBOX (ADR-025): the write methods that announce their change accept a
+// StageEvents callback. It runs LAST inside the transaction, with the outcome,
+// and its events are persisted to public_core.event_outbox before COMMIT — so
+// the state and its announcement are one atomic unit. Optional, so direct
+// callers that only need the write (proof fixtures) are unaffected.
 // ══════════════════════════════════════════════════════════════════
 
 import type {
@@ -18,6 +24,7 @@ import type {
   ApplicationStatus,
   CriminalClearanceStatus,
 } from '@usrp/shared-types';
+import type { StageEvents } from './event-outbox.js';
 
 /** Everything needed to file one application under a resolved campaign. */
 export interface CreateApplicationInput {
@@ -257,14 +264,27 @@ export type ApplyForensicsOutcome =
   | { readonly kind: 'NOT_FOUND' };
 
 export interface ApplicationRepository {
-  createApplication(input: CreateApplicationInput): Promise<CreateApplicationResult>;
+  /**
+   * File the application (+ opening history row). When `stage` is given, the
+   * events it returns for the created application are persisted to the outbox
+   * in the SAME transaction (ADR-025) — a stage failure rolls the filing back.
+   */
+  createApplication(
+    input: CreateApplicationInput,
+    stage?: StageEvents<CreateApplicationResult>,
+  ): Promise<CreateApplicationResult>;
   /**
    * Project one vetting verdict onto its application row within the owning
    * agency's ops schema, in one transaction. Idempotent: a redelivered verdict
    * that changes nothing returns NO_CHANGE without writing. An application_id
    * absent from that agency's schema returns NOT_FOUND (never a silent success).
+   * When `stage` is given it is invoked for an APPLIED outcome only, and its
+   * events are persisted to the outbox in the same transaction (ADR-025).
    */
-  applyVettingResult(result: VettingResult): Promise<ApplyVettingOutcome>;
+  applyVettingResult(
+    result: VettingResult,
+    stage?: StageEvents<ApplyVettingOutcome>,
+  ): Promise<ApplyVettingOutcome>;
   /**
    * Stamp a venue/slot assignment onto its application row and advance
    * DOCUMENT_REVIEW_GREEN → SLOT_ASSIGNED, in one transaction. Only assignable
