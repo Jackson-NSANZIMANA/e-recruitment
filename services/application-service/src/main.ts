@@ -7,8 +7,8 @@
 //     publishes APPLICANT_SUBMITTED.
 //   • Event projector — consumes the vetting result topics (vetting.nesa/hec/
 //     rib) and advances the application through its lifecycle.
-// load config → build the bus → assemble the aggregate → (subscribe) → serve →
-// shut down cleanly.
+// load config → build the bus → assemble the aggregate → (subscribe) → relay →
+// serve → shut down cleanly.
 //
 // Transport is resolved by @usrp/shared-config: with KAFKA_BROKERS set we
 // publish AND consume over Kafka (prod/tier2); without it, in DEVELOPMENT only,
@@ -18,6 +18,11 @@
 // real broker, so they are wired only for the kafka transport — which is why
 // the fallback is refused in production: the front door would keep accepting
 // submissions that then never advance through a single lifecycle stage.
+//
+// OUTBOX RELAY (ADR-025): started for EVERY transport. It is what guarantees
+// that an event staged in a committed transaction reaches the bus even when
+// the post-commit fast path failed. Stopped BEFORE the bus on shutdown so an
+// in-flight drain never publishes into a disconnected producer.
 //
 // ROUTE TABLE NOTE (why the two single-record reads are safe to add here):
 // shared-http keys its table by EXACT path — there is no prefix matching and no
@@ -39,7 +44,7 @@ import {
 } from '@usrp/shared-config';
 import { makeAuthVerifier } from '@usrp/shared-auth';
 import { startHttpServer } from '@usrp/shared-http';
-import { createApplicationService } from './index.js';
+import { OUTBOX_PRODUCER, PgOutboxRelay, createApplicationService } from './index.js';
 import { loadApplicationConfig } from './config.js';
 import { submitApplicationRoute } from './adapters/http/submit-application.controller.js';
 import {
@@ -110,6 +115,11 @@ async function main(): Promise<void> {
     );
   }
 
+  // The delivery guarantee for every event staged in a committed transaction.
+  const outboxRelay = new PgOutboxRelay(bus);
+  outboxRelay.start();
+  console.log(JSON.stringify({ msg: 'outbox_relay_started', producer: OUTBOX_PRODUCER }));
+
   const server = await startHttpServer({
     serviceName: config.runtime.serviceName,
     port: config.runtime.port,
@@ -140,6 +150,7 @@ async function main(): Promise<void> {
     },
     onShutdown: async (): Promise<void> => {
       console.log(JSON.stringify({ msg: 'service_stopping', service: config.runtime.serviceName }));
+      await outboxRelay.stop();
       await bus.disconnect();
       await sql.end({ timeout: 5 });
       console.log(JSON.stringify({ msg: 'service_stopped', service: config.runtime.serviceName }));
