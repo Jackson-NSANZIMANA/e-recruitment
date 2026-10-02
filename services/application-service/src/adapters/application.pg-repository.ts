@@ -10,13 +10,15 @@
 //   2. INSERT the applications row (status SUBMITTED, submitted_at now()).
 //   3. INSERT the initial application_status_history row (null → SUBMITTED)
 //      — the immutable trail's first entry, carrying the correlation id.
+//   4. (When a stage callback is given) INSERT the announcing events into
+//      public_core.event_outbox — ADR-025. Last, so nothing after it can fail.
 //
 // The agency selects the schema; only three agencies exist and each maps
 // to a fixed, hard-coded ops schema — no user input ever reaches an
 // identifier. The category/status values are cast to that schema's enum
-// types. Both statements share the transaction: a failure on either rolls
+// types. All statements share the transaction: a failure on any rolls
 // back the whole submission, so an application never exists without its
-// opening history row.
+// opening history row — or without its announcement.
 // ══════════════════════════════════════════════════════════════════
 
 import { sql, asJsonb } from '@usrp/shared-database';
@@ -36,9 +38,11 @@ import type {
   SlotAssignmentResult,
   VettingResult,
 } from '../ports/application-repository.js';
+import type { StageEvents } from '../ports/event-outbox.js';
 import { ApplicationPersistenceError } from '../domain/application.errors.js';
 import { AGENCY_TARGET } from '../domain/agency-schema.js';
 import { deriveApplicationStatus } from '../domain/lifecycle.js';
+import { stageEvents } from './outbox/pg-event-outbox.js';
 
 const SYSTEM_ROLE = 'usrp_system_service';
 
@@ -54,7 +58,10 @@ interface ApplicationStateRow {
 }
 
 export class PgApplicationRepository implements ApplicationRepository {
-  async createApplication(input: CreateApplicationInput): Promise<CreateApplicationResult> {
+  async createApplication(
+    input: CreateApplicationInput,
+    stage?: StageEvents<CreateApplicationResult>,
+  ): Promise<CreateApplicationResult> {
     const target = AGENCY_TARGET[input.agency];
     const schema = sql(target.schema); // quoted identifier fragment
     const seqName = `${target.schema}.processing_code_seq`;
@@ -99,7 +106,15 @@ export class PgApplicationRepository implements ApplicationRepository {
           )
         `;
 
-        return { applicationId: row.id, processingCode: row.processing_code };
+        const created: CreateApplicationResult = {
+          applicationId: row.id,
+          processingCode: row.processing_code,
+        };
+
+        // 4: the announcement commits WITH the filing, or neither does.
+        if (stage !== undefined) await stageEvents(tx, stage(created));
+
+        return created;
       });
     } catch (cause) {
       if (cause instanceof ApplicationPersistenceError) throw cause;
@@ -107,7 +122,10 @@ export class PgApplicationRepository implements ApplicationRepository {
     }
   }
 
-  async applyVettingResult(result: VettingResult): Promise<ApplyVettingOutcome> {
+  async applyVettingResult(
+    result: VettingResult,
+    stage?: StageEvents<ApplyVettingOutcome>,
+  ): Promise<ApplyVettingOutcome> {
     const target = AGENCY_TARGET[result.agency];
     const schema = sql(target.schema); // quoted identifier fragment
 
@@ -218,7 +236,7 @@ export class PgApplicationRepository implements ApplicationRepository {
           `;
         }
 
-        return {
+        const applied: ApplyVettingOutcome = {
           kind: 'APPLIED',
           dimension: result.dimension,
           fromStatus: current.status,
@@ -228,6 +246,13 @@ export class PgApplicationRepository implements ApplicationRepository {
           campaignId: current.campaign_id,
           category: current.category,
         };
+
+        // The audit entry and (into GREEN) APPLICATION_ELIGIBILITY_CLEARED
+        // commit WITH the transition. This is the line that makes "GREEN but
+        // never scheduled" impossible (ADR-025).
+        if (stage !== undefined) await stageEvents(tx, stage(applied));
+
+        return applied;
       });
     } catch (cause) {
       if (cause instanceof ApplicationPersistenceError) throw cause;

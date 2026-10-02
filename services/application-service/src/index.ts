@@ -5,6 +5,11 @@
 // PostgreSQL adapters. The caller supplies the EventBus so tests can inject
 // InMemoryEventBus and production can inject KafkaEventBus — the use case
 // never knows which. Transport (HTTP) is composed in main.ts, not here.
+//
+// OUTBOX (ADR-025): the front door and the vetting projector stage their
+// events in the state transaction and dispatch through PgOutboxDispatcher
+// over the supplied bus. The relay that guarantees delivery is started by
+// main.ts, not here, so composing the service in a proof starts no timers.
 // ══════════════════════════════════════════════════════════════════
 
 import type { EventBus } from '@usrp/shared-events';
@@ -14,6 +19,7 @@ import { PgApplicationRepository } from './adapters/application.pg-repository.js
 import { PgApplicationReadRepository } from './adapters/application-read.pg-repository.js';
 import { PgOfficerTransitionRepository } from './adapters/officer-transition.pg-repository.js';
 import { PgWalkInRepository } from './adapters/walk-in.pg-repository.js';
+import { PgOutboxDispatcher } from './adapters/outbox/pg-event-outbox.js';
 import { SubmitApplicationService } from './application/submit-application.service.js';
 import { ListApplicationsService } from './application/list-applications.service.js';
 import { OfficerTransitionsService } from './application/officer-transitions.service.js';
@@ -75,13 +81,16 @@ export function createApplicationService(
   const repository = new PgApplicationRepository();
   const readRepository = new PgApplicationReadRepository();
   const officerTransitionRepository = new PgOfficerTransitionRepository();
+  // Outbox fast path (ADR-025) for the use cases already converted. The rest
+  // still publish directly and are listed as the mechanical follow-up.
+  const events = new PgOutboxDispatcher(eventBus);
 
   return {
     submit: new SubmitApplicationService({
       identityReader,
       campaignReader,
       repository,
-      eventBus,
+      events,
     }),
     list: new ListApplicationsService({ reader: readRepository }),
     officerTransitions: new OfficerTransitionsService({
@@ -94,7 +103,7 @@ export function createApplicationService(
       repository: new PgWalkInRepository(),
       eventBus,
     }),
-    projector: new ProjectVettingResultService({ repository, eventBus }),
+    projector: new ProjectVettingResultService({ repository, events }),
     slotProjector: new ProjectSlotAssignmentService({ repository, eventBus }),
     notificationProjector: new ProjectNotificationDeliveryService({ repository, eventBus }),
     physicalTestProjector: new ProjectPhysicalTestCompleteService({ repository, eventBus }),
@@ -199,6 +208,15 @@ export type {
   ProjectVettingResultCommand,
   ProjectVettingResultDeps,
 } from './application/project-vetting-result.service.js';
+// Transactional outbox (ADR-025).
+export {
+  OUTBOX_PRODUCER,
+  PgOutboxDispatcher,
+  PgOutboxRelay,
+  stageEvents,
+} from './adapters/outbox/pg-event-outbox.js';
+export type { DrainResult, OutboxRelayOptions } from './adapters/outbox/pg-event-outbox.js';
+export type { EventDispatcher, StageEvents } from './ports/event-outbox.js';
 export {
   APPLICATION_PROJECTION_GROUP,
   startVettingResultConsumer,

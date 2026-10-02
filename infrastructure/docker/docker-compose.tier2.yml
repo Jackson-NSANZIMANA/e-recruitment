@@ -95,6 +95,12 @@ services:
     # `${...}` as its own variables otherwise, blanking $topic/$parts and failing
     # with "invalid interpolation format". (Both this and the earlier backslash-
     # continuation form silently created NO topics — hence the escaping notes.)
+    #
+    # events.dead-letter (ADR-025): where KafkaEventBus parks poison messages
+    # instead of redelivering them forever. 30-day retention: long enough to
+    # diagnose and replay (packages/shared-events/scripts/replay-dead-letters.ts),
+    # and it MUST exist — broker auto-create is off, and a failed dead-letter
+    # write makes the consumer redeliver (safe, but it brings the block back).
     entrypoint: ["/bin/bash", "-c"]
     command:
       - |
@@ -105,6 +111,7 @@ services:
           kafka-topics --create --if-not-exists --topic $$topic --partitions $$parts --replication-factor 1 --config retention.ms=604800000 --bootstrap-server kafka:9092
         done
         kafka-topics --create --if-not-exists --topic audit.immutable --partitions 3 --replication-factor 1 --config retention.ms=-1 --config cleanup.policy=delete --bootstrap-server kafka:9092
+        kafka-topics --create --if-not-exists --topic events.dead-letter --partitions 3 --replication-factor 1 --config retention.ms=2592000000 --bootstrap-server kafka:9092
         echo 'All USRP topics created successfully.'
         kafka-topics --list --bootstrap-server kafka:9092
     restart: on-failure
@@ -166,7 +173,7 @@ services:
           # needs ~1.5-2G; at 512M it OOM-loops with "Failed to start clamd".
           memory: 2G
 
-  # ── Kafka UI (Dev tooling only) ──────────────────────────────────
+  # ── Kafka UI (Dev tooling only) ───────────────────────────────────
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
     container_name: usrp-kafka-ui

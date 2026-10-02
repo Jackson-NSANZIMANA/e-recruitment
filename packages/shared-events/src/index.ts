@@ -5,6 +5,7 @@
 //   Route:             topicForEvent, partitionKeyForEvent
 //   Serialize:         JsonEventSerializer (EventSerializer interface)
 //   Transport:         KafkaEventBus (prod) / InMemoryEventBus (tests)
+//   Poison handling:   NonRetryableEventError, DEAD_LETTER_TOPIC, DLQ_HEADERS
 //   Bootstrap:         withStartupTimeout, logStartupPhase
 //
 // Services depend on the EventBus interface — never on kafkajs directly.
@@ -36,6 +37,19 @@ export {
 } from './bus.js';
 
 export { KafkaEventBus, type KafkaBusOptions } from './kafka-bus.js';
+
+// Poison-message containment (ADR-025): retry, then park — never block, never drop.
+export {
+  DEAD_LETTER_TOPIC,
+  DEFAULT_DEAD_LETTER_POLICY,
+  DLQ_HEADERS,
+  NonRetryableEventError,
+  backoffMs,
+  describeError,
+  resolveDeadLetterPolicy,
+  type DeadLetterPolicy,
+  type DeadLetterReason,
+} from './dead-letter.js';
 
 // Bootstrap: the bound and the phase marker every service main() shares.
 export {

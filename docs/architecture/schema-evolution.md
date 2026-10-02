@@ -9,10 +9,7 @@ recorded in ADR-021 §D13d (owner decision D15, 2026-07-31).
 |---|---|
 | `packages/shared-database/src/rls/00NN_*.sql` | **System of record.** Hand-written, fully idempotent SQL. Carries what drizzle cannot express: role grants, FORCE'd RLS policies, immutability triggers, sequences, CHECK constraints, partial indexes. |
 | `packages/shared-database/src/schemas/*.schema.ts` | **Readable mirror.** The typed, human-facing model of the same tables. Source of the exported row types. Not the authority. |
-| `src/migrations/meta/0000_snapshot.json` | **Drizzle's belief.** Defines the baseline every future `drizzle-kit generate` diffs against. |
-
-`src/migrations/0000_grey_the_stranger.sql` is the genesis migration and is the
-only SQL drizzle-kit ever applies (`db:migrate`, step 1 of `bootstrap-db.sh`).
+| the **latest** `src/migrations/meta/NNNN_snapshot.json` | **Drizzle's belief.** Defines the baseline every future `drizzle-kit generate` diffs against. The drift proof always compares against the highest-numbered snapshot. |
 
 ## Why `rls/` is the authority
 
@@ -25,15 +22,11 @@ this document exists to prevent.
 
 ## The snapshot means "post-bootstrap state"
 
-`0000_snapshot.json` deliberately describes the database **after the full
-bootstrap** (genesis migration *plus* every `rls/` file), not the state the
-genesis SQL alone would produce. It was reconciled in place on 2026-07-31 —
-the SQL migration and `_journal.json` were left untouched, so nothing new
-executes on any database, warm or cold.
-
-This is what makes `drizzle-kit generate` meaningful again: diffing against an
-honest baseline yields only genuinely-new changes, instead of the 27 stale
-statements it would have replayed before reconciliation.
+The latest snapshot deliberately describes the database **after the full
+bootstrap** (drizzle migrations *plus* every `rls/` file), not the state the
+SQL migrations alone would produce. This is what makes `drizzle-kit generate`
+meaningful: diffing against an honest baseline yields only genuinely-new
+changes.
 
 ## Changing the schema
 
@@ -44,15 +37,16 @@ statements it would have replayed before reconciliation.
 2. **Mirror it** in the matching `*.schema.ts`. Model columns, types,
    nullability, named `idx_*` indexes and enum order. Do *not* model CHECK
    constraints — note them in a comment (`officer_accounts` sets the pattern).
-3. **Refresh the snapshot** so drizzle's baseline stays honest:
+   Name UNIQUE constraints the way drizzle does (`<table>_<column>_unique`).
+3. **Refresh the snapshot** — one command, no database needed:
    ```bash
-   # from packages/shared-database — writes 0001_*.sql + 0001_snapshot.json
-   pnpm db:generate
+   bash scripts/refresh-schema-snapshot.sh
    ```
-   Then fold the new snapshot into `meta/0000_snapshot.json`, preserving its
-   `id` and `prevId`, and **delete the generated `.sql` and `0001_snapshot.json`**.
-   The generated SQL is discarded on purpose: `rls/` already applied that
-   change, and replaying it would collide on every warm database.
+   It runs `drizzle-kit generate` in a scratch directory, folds the result into
+   the **latest** snapshot preserving its `id` and `prevId`, and discards the
+   generated SQL. The SQL is discarded on purpose: `rls/` already applied that
+   change, and replaying it would collide on every warm database. Commit the
+   updated snapshot file.
 4. **Register the change in `bootstrap-db.sh`** (the numbered `apply_sql` list).
 5. **Run the gate.** `verify-schema-drift.ts` fails loudly if any of the three
    artefacts moved without the others.
