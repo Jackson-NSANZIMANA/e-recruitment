@@ -11,7 +11,8 @@
 // applicant is referenced by opaque id, and the event carries only the
 // stored national_id_hash.
 //
-// Ordering is deliberate: verify identity → validate academic inputs →
+// Ordering is deliberate: validate the request → hash it → ANSWER A KNOWN KEY
+// FROM THE LEDGER → verify identity →
 // resolve the open campaign → persist + stage → dispatch.
 //
 // ATOMIC ANNOUNCEMENT (ADR-025). APPLICANT_SUBMITTED is staged in the outbox
@@ -19,15 +20,35 @@
 // disagree. Previously a broker hiccup after the commit returned a 500 for an
 // application that WAS filed — inviting the citizen to file it again — and its
 // vetting never started. Now the citizen gets 201 and the relay delivers.
+//
+// SUBMISSION INTEGRITY (ADR-027). ADR-025 made the citizen's retry SAFE to
+// send; it did not make it safe to RECEIVE. The filing now goes through the
+// submission ledger, which records the request in the same transaction as the
+// application, so the front door has three new honest answers:
+//
+//   REPLAYED        same idempotency key + identical body → the FIRST
+//                   application, returned again. Nothing filed, nothing
+//                   announced (the original event is already durable).
+//   KEY_REUSED      same key, different body → refused.
+//   ALREADY_APPLIED a live application already exists for this campaign and
+//                   category under another key — the engine's live-intent
+//                   index surfaced as an answer instead of a 500.
+//
+// The key is OPTIONAL at this seam. When the caller supplies none we mint
+// one, so every accepted submission still gets a ledger row; such a request
+// simply has no retry identity of its own, and a duplicate from it is caught
+// one layer down as ALREADY_APPLIED rather than replayed.
 // ══════════════════════════════════════════════════════════════════
 
+import { randomUUID } from 'node:crypto';
 import { newCorrelationContext, newEnvelope, type EventContext } from '@usrp/shared-events';
 import { agencyForCategory, type Agency, type ApplicationCategory, type ApplicationChannel, type ApplicantSubmittedEvent } from '@usrp/shared-types';
 import { resolveAcademicInputs } from '../domain/academic-input.js';
 import type { IdentityReader } from '../ports/identity-reader.js';
 import type { CampaignReader } from '../ports/campaign-reader.js';
-import type { ApplicationRepository, CreateApplicationResult } from '../ports/application-repository.js';
 import type { EventDispatcher } from '../ports/event-outbox.js';
+import type { SubmissionIdentifiers, SubmissionLedger } from '../ports/submission-ledger.js';
+import { canonicalRequestHash } from '../domain/request-hash.js';
 
 export interface SubmitApplicationCommand {
   readonly applicantId: string;
@@ -35,6 +56,12 @@ export interface SubmitApplicationCommand {
   readonly channel: ApplicationChannel;
   readonly nesaIndexNumber?: string | null;
   readonly hecRegistrationNumber?: string | null;
+  /**
+   * The caller's retry identity (`Idempotency-Key`). Re-sending the SAME key
+   * with the SAME body replays the first result instead of filing again.
+   * Omitted ⇒ a fresh key is minted and the request has no retry identity.
+   */
+  readonly idempotencyKey?: string;
   /** Inbound correlation context to continue a trace; a fresh chain when omitted. */
   readonly context?: EventContext;
 }
@@ -47,6 +74,26 @@ export type SubmitApplicationOutcome =
       readonly agency: Agency;
       readonly event: ApplicantSubmittedEvent;
     }
+  /**
+   * This exact request was already accepted. Same identifiers as the first
+   * time, and NO event — the original APPLICANT_SUBMITTED is already durable.
+   */
+  | {
+      readonly kind: 'REPLAYED';
+      readonly applicationId: string;
+      readonly processingCode: string;
+      readonly agency: Agency;
+      readonly firstSeenAt: Date;
+    }
+  /** The idempotency key is already spent on a materially different request. */
+  | { readonly kind: 'KEY_REUSED' }
+  /** A live application for this campaign + category already exists. */
+  | {
+      readonly kind: 'ALREADY_APPLIED';
+      readonly applicationId: string;
+      readonly processingCode: string;
+      readonly agency: Agency;
+    }
   | { readonly kind: 'APPLICANT_NOT_FOUND' }
   | { readonly kind: 'IDENTITY_NOT_VERIFIED' }
   | { readonly kind: 'INVALID_ACADEMIC_INPUT'; readonly reason: string }
@@ -55,7 +102,11 @@ export type SubmitApplicationOutcome =
 export interface SubmitApplicationDeps {
   readonly identityReader: IdentityReader;
   readonly campaignReader: CampaignReader;
-  readonly repository: ApplicationRepository;
+  /**
+   * The front door's decision of record (ADR-027): ledger + application +
+   * history + outbox in one transaction.
+   */
+  readonly ledger: SubmissionLedger;
   /** Post-commit dispatch of the staged announcement (the outbox fast path). */
   readonly events: EventDispatcher;
 }
@@ -66,7 +117,64 @@ export class SubmitApplicationService {
   async submit(command: SubmitApplicationCommand): Promise<SubmitApplicationOutcome> {
     const agency = agencyForCategory(command.category);
 
-    // 1. Identity precondition — identity-service owns NIDA; we only confirm
+    // 1. Academic inputs — the category fixes which credential is required.
+    //    PURE: a function of the request alone. It runs first because the
+    //    request hash is built from its resolved values, and because a
+    //    malformed request has no stable identity to look up.
+    const academic = resolveAcademicInputs(command.category, {
+      nesaIndexNumber: command.nesaIndexNumber ?? null,
+      hecRegistrationNumber: command.hecRegistrationNumber ?? null,
+    });
+    if (!academic.ok) {
+      return { kind: 'INVALID_ACADEMIC_INPUT', reason: academic.reason };
+    }
+
+    // 2. The request's identity. Covers ONLY what the citizen chose (see
+    //    domain/request-hash.ts) — not the campaign, which the server
+    //    resolves, and not the trace, which differs on every retry. Every
+    //    input is already in hand, which is what makes step 3 possible.
+    const requestHash = canonicalRequestHash({
+      applicantId: command.applicantId,
+      category: command.category,
+      channel: command.channel,
+      nesaIndexNumber: academic.resolved.nesaIndexNumber,
+      hecRegistrationNumber: academic.resolved.hecRegistrationNumber,
+    });
+
+    // 3. ANSWER A KEY WE HAVE ALREADY ANSWERED — before anything mutable is
+    //    read. This ordering is the whole point.
+    //
+    //    It used to sit after the identity and campaign reads below, inside
+    //    recordSubmission. That made the retry contract depend on state that
+    //    moves: a citizen whose 201 was lost on a dropped connection, retrying
+    //    after the registration window closed, was told NO_OPEN_CAMPAIGN —
+    //    that they had never applied — while their application sat filed in
+    //    the database. Same for an identity whose status changed between the
+    //    submission and the retry.
+    //
+    //    A retry is a question about the PAST ("what did you answer me?"), so
+    //    it must be answered from the ledger, which is immutable, and not from
+    //    the present. Only an UNSEEN key is a new submission and has to face
+    //    the preconditions.
+    if (command.idempotencyKey !== undefined) {
+      const prior = await this.deps.ledger.resolveKey({
+        applicantId: command.applicantId,
+        idempotencyKey: command.idempotencyKey,
+        requestHash,
+      });
+      if (prior !== null) {
+        if (prior.kind === 'KEY_REUSED') return { kind: 'KEY_REUSED' };
+        return {
+          kind: 'REPLAYED',
+          applicationId: prior.applicationId,
+          processingCode: prior.processingCode,
+          agency,
+          firstSeenAt: prior.firstSeenAt,
+        };
+      }
+    }
+
+    // 4. Identity precondition — identity-service owns NIDA; we only confirm
     //    the applicant is a known, VERIFIED identity and lift its hash.
     const identity = await this.deps.identityReader.findApplicantById(command.applicantId);
     if (identity === null) {
@@ -76,16 +184,7 @@ export class SubmitApplicationService {
       return { kind: 'IDENTITY_NOT_VERIFIED' };
     }
 
-    // 2. Academic inputs — the category fixes which credential is required.
-    const academic = resolveAcademicInputs(command.category, {
-      nesaIndexNumber: command.nesaIndexNumber ?? null,
-      hecRegistrationNumber: command.hecRegistrationNumber ?? null,
-    });
-    if (!academic.ok) {
-      return { kind: 'INVALID_ACADEMIC_INPUT', reason: academic.reason };
-    }
-
-    // 3. Resolve the open campaign for this agency+category (server-side).
+    // 5. Resolve the open campaign for this agency+category (server-side).
     const campaign = await this.deps.campaignReader.findOpenCampaign(agency, command.category);
     if (campaign === null) {
       return { kind: 'NO_OPEN_CAMPAIGN', agency };
@@ -101,7 +200,7 @@ export class SubmitApplicationService {
     const nationalIdHash = identity.nationalIdHash;
     const nesaIndexNumber = academic.resolved.nesaIndexNumber;
     const hecRegistrationNumber = academic.resolved.hecRegistrationNumber;
-    const announce = (created: CreateApplicationResult): ApplicantSubmittedEvent => ({
+    const announce = (created: SubmissionIdentifiers): ApplicantSubmittedEvent => ({
       ...envelope,
       eventType: 'APPLICANT_SUBMITTED',
       applicantId: command.applicantId,
@@ -114,12 +213,18 @@ export class SubmitApplicationService {
       hecRegistrationNumber,
     });
 
-    // 4. Persist into the owning agency's isolated ops schema (+ history), and
-    //    stage APPLICANT_SUBMITTED in that same transaction.
-    const created = await this.deps.repository.createApplication(
+    // A keyless caller still gets a ledger row, so the write stays uniform and
+    // the row is there if the same body is ever replayed under a real key.
+    const idempotencyKey = command.idempotencyKey ?? randomUUID();
+
+    // 6. Record + persist into the owning agency's isolated ops schema
+    //    (+ history), and stage APPLICANT_SUBMITTED, in ONE transaction.
+    const recorded = await this.deps.ledger.recordSubmission(
       {
         agency,
         applicantId: command.applicantId,
+        idempotencyKey,
+        requestHash,
         campaignId: campaign.campaignId,
         category: command.category,
         channel: command.channel,
@@ -130,15 +235,37 @@ export class SubmitApplicationService {
       (c) => [announce(c)],
     );
 
-    // 5. Fast-path dispatch. Never throws for a transport fault: the event is
+    // Nothing was filed — so nothing is announced. Re-dispatching the original
+    // event here would be wrong twice over: it is already durable in the
+    // outbox, and a replay must not look downstream like a new submission.
+    if (recorded.kind === 'KEY_REUSED') return { kind: 'KEY_REUSED' };
+    if (recorded.kind === 'REPLAYED') {
+      return {
+        kind: 'REPLAYED',
+        applicationId: recorded.applicationId,
+        processingCode: recorded.processingCode,
+        agency,
+        firstSeenAt: recorded.firstSeenAt,
+      };
+    }
+    if (recorded.kind === 'ALREADY_APPLIED') {
+      return {
+        kind: 'ALREADY_APPLIED',
+        applicationId: recorded.applicationId,
+        processingCode: recorded.processingCode,
+        agency,
+      };
+    }
+
+    // 7. Fast-path dispatch. Never throws for a transport fault: the event is
     //    already durable and the outbox relay will deliver it.
-    const event = announce(created);
+    const event = announce(recorded);
     await this.deps.events.dispatch([event]);
 
     return {
       kind: 'SUBMITTED',
-      applicationId: created.applicationId,
-      processingCode: created.processingCode,
+      applicationId: recorded.applicationId,
+      processingCode: recorded.processingCode,
       agency,
       event,
     };

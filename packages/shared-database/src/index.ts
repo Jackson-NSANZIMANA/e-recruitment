@@ -33,6 +33,7 @@ export * from './schemas/public-core.schema.js';
 export * from './schemas/edge-sessions.schema.js';
 export * from './schemas/event-outbox.schema.js';
 export * from './schemas/slot-reservations.schema.js';
+export * from './schemas/submission-requests.schema.js';
 export * from './schemas/rdf-ops.schema.js';
 export * from './schemas/rnp-ops.schema.js';
 export * from './schemas/rcs-ops.schema.js';
@@ -47,6 +48,7 @@ import {
 import { edgeSessions } from './schemas/edge-sessions.schema.js';
 import { eventOutbox } from './schemas/event-outbox.schema.js';
 import { slotReservations } from './schemas/slot-reservations.schema.js';
+import { submissionRequests } from './schemas/submission-requests.schema.js';
 
 import {
   rdfApplications,
@@ -82,6 +84,8 @@ export type OutboxEntry = InferSelectModel<typeof eventOutbox>;
 export type NewOutboxEntry = InferInsertModel<typeof eventOutbox>;
 export type SlotReservation = InferSelectModel<typeof slotReservations>;
 export type NewSlotReservation = InferInsertModel<typeof slotReservations>;
+export type SubmissionRequest = InferSelectModel<typeof submissionRequests>;
+export type NewSubmissionRequest = InferInsertModel<typeof submissionRequests>;
 
 export type RdfApplication = InferSelectModel<typeof rdfApplications>;
 export type NewRdfApplication = InferInsertModel<typeof rdfApplications>;

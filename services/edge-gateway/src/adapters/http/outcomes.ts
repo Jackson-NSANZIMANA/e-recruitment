@@ -83,7 +83,49 @@ export function conflictResult(body: unknown): HttpResult {
       // The upstream body names the agency; it is the officer's OWN agency, so
       // it is redundant rather than sensitive. Dropped for shape consistency.
       return { status: 409, body: { error: 'NO_WALK_IN_CAMPAIGN' } };
+    case 'ALREADY_APPLIED':
+      // ADR-027. The identifiers are KEPT, which is the opposite of the
+      // CROSS_AGENCY_LOCKED case above, so the difference is worth stating.
+      //
+      // There, naming the holder tells an RDF officer something about RNP —
+      // another agency's data, and an enumeration oracle. Here the application
+      // is in the officer's OWN agency (the walk-in lane is RDF-only and
+      // officer-scoped), for a candidate whose id that officer just supplied
+      // and who is standing in front of them. The same officer can already
+      // reach it through listApplications, so this grants no new capability.
+      //
+      // And without the identifiers the answer is useless: the upstream
+      // returns them precisely so the tablet can pull up the EXISTING
+      // application and continue with that one instead of trying to create a
+      // second. Falling through to the default would have relabelled this
+      // ILLEGAL_TRANSITION and dropped both fields.
+      return {
+        status: 409,
+        body: {
+          error: 'ALREADY_APPLIED',
+          applicationId: field(body, 'applicationId'),
+          processingCode: field(body, 'processingCode'),
+        },
+      };
     default:
+      // Reaching this branch is a DECISION, not a fallback. ALREADY_APPLIED
+      // sat here by omission and arrived mislabelled with its identifiers
+      // stripped, so the whole upstream 409 vocabulary was swept against this
+      // switch. The rule that came out of it:
+      //
+      //   the default is correct only for a status whose ENTIRE information
+      //   content is "wrong state, and here is the state" — because
+      //   currentStatus is the one field it preserves.
+      //
+      // It is wrong for any status carrying an identifier, an instruction or
+      // anything the caller must act on; that needs its own case.
+      //
+      // One status lives here deliberately: NOT_APPLICABLE (self-withdrawal,
+      // walk-in vet, officer transitions, citizen withdraw). Every one of its
+      // bodies carries currentStatus and nothing else the caller needs — the
+      // `agency` some of them add is the caller's own, dropped for the same
+      // reason as NO_WALK_IN_CAMPAIGN above. ILLEGAL_TRANSITION is an
+      // accurate label for it.
       return {
         status: 409,
         body: { error: 'ILLEGAL_TRANSITION', status: currentStatusOf(body) },

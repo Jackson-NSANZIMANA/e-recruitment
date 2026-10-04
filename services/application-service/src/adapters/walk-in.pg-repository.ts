@@ -20,6 +20,7 @@ import { sql } from '@usrp/shared-database';
 import type { AgeEligibilityStatus, ApplicationStatus } from '@usrp/shared-types';
 import type {
   CreateWalkInInput,
+  CreateWalkInOutcome,
   CreateWalkInResult,
   VetOnSiteInput,
   VetOnSiteOutcome,
@@ -27,9 +28,17 @@ import type {
 } from '../ports/walk-in-repository.js';
 import { ApplicationPersistenceError } from '../domain/application.errors.js';
 import { AGENCY_TARGET } from '../domain/agency-schema.js';
+import { findLiveApplication, isLiveIntentViolation } from './application-insert.js';
+import { stageEvents } from './outbox/pg-event-outbox.js';
+import type { StageEvents } from '../ports/event-outbox.js';
+
+const SYSTEM_ROLE = 'usrp_system_service';
 
 export class PgWalkInRepository implements WalkInRepository {
-  async createWalkInApplication(input: CreateWalkInInput): Promise<CreateWalkInResult> {
+  async createWalkInApplication(
+    input: CreateWalkInInput,
+    stage: StageEvents<CreateWalkInResult>,
+  ): Promise<CreateWalkInOutcome> {
     const target = AGENCY_TARGET[input.actor.agency];
     const schema = sql(target.schema); // quoted identifier fragment
     const seqName = `${target.schema}.processing_code_seq`;
@@ -76,15 +85,63 @@ export class PgWalkInRepository implements WalkInRepository {
           )
         `;
 
-        return { applicationId: row.id, processingCode: row.processing_code };
+        const created: CreateWalkInResult = {
+          applicationId: row.id,
+          processingCode: row.processing_code,
+        };
+
+        // The officer role owns the application/history writes but deliberately
+        // has no outbox grant. Switch to the system role only after all state
+        // writes, and stage LAST so any staging failure rolls the entire unit
+        // back (application, history, and both announcements).
+        await tx`RESET ROLE`;
+        await tx`SET LOCAL ROLE ${sql(SYSTEM_ROLE)}`;
+        await stageEvents(tx, stage(created));
+
+        return { kind: 'REGISTERED' as const, ...created };
       });
     } catch (cause) {
       if (cause instanceof ApplicationPersistenceError) throw cause;
+      // ADR-027: the live-intent index refused a second live application for
+      // this candidate. Postgres has already aborted the transaction above,
+      // so the winner is named in a fresh one and reported as a business
+      // outcome — the officer gets the existing processing code, not a 500.
+      if (isLiveIntentViolation(cause)) return await this.#existingApplication(input);
       throw new ApplicationPersistenceError('Failed to create walk-in application', { cause });
     }
   }
 
-  async vetOnSite(input: VetOnSiteInput): Promise<VetOnSiteOutcome> {
+  /** Name the live application the candidate already holds. */
+  async #existingApplication(input: CreateWalkInInput): Promise<CreateWalkInOutcome> {
+    const target = AGENCY_TARGET[input.actor.agency];
+    try {
+      const existing = await sql.begin(async (tx) => {
+        await tx`SET LOCAL ROLE ${sql(input.actor.dbRole)}`;
+        return await findLiveApplication(
+          tx,
+          target,
+          input.applicantId,
+          input.campaignId,
+          input.category,
+        );
+      });
+      if (existing === null) {
+        // Withdrawn between the refusal and this read — genuinely transient.
+        throw new ApplicationPersistenceError(
+          'live-intent conflict reported but no live application is visible',
+        );
+      }
+      return { kind: 'ALREADY_APPLIED', ...existing };
+    } catch (cause) {
+      if (cause instanceof ApplicationPersistenceError) throw cause;
+      throw new ApplicationPersistenceError('Failed to resolve a duplicate walk-in', { cause });
+    }
+  }
+
+  async vetOnSite(
+    input: VetOnSiteInput,
+    stage: StageEvents<VetOnSiteOutcome>,
+  ): Promise<VetOnSiteOutcome> {
     const { actor, applicationId } = input;
     const schema = sql(AGENCY_TARGET[actor.agency].schema);
 
@@ -140,12 +197,17 @@ export class PgWalkInRepository implements WalkInRepository {
           )
         `;
 
-        return {
+        const applied: VetOnSiteOutcome = {
           kind: 'APPLIED',
           fromStatus: 'WALK_IN_REGISTERED',
           toStatus: targetStatus,
           ageStatus: age,
         };
+
+        await tx`RESET ROLE`;
+        await tx`SET LOCAL ROLE ${sql(SYSTEM_ROLE)}`;
+        await stageEvents(tx, stage(applied));
+        return applied;
       });
     } catch (cause) {
       if (cause instanceof ApplicationPersistenceError) throw cause;

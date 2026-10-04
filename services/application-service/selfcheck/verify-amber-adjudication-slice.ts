@@ -68,6 +68,15 @@ process.env['QR_SIGNING_KEY_ID'] ??= 'amber-selfcheck-key-1';
 
 const APPLICANT = '6e6e6e6e-6e6e-4e6e-8e6e-6e6e6e6e6e6e';
 const RNP_APPLICANT = '6d6d6d6d-6d6d-4d6d-8d6d-6d6d6d6d6d6d';
+// ADR-027 permits one LIVE application per (applicant, campaign, category).
+// The six RDF scenarios below all sit in CAMPAIGN/GENERAL_ENLISTMENT, so each
+// needs its own citizen; they are identical fixtures (same district, same DOB)
+// and no assertion crosses from one scenario to another.
+const RDF_APPLICANTS: readonly string[] = Array.from(
+  { length: 6 },
+  (_, i) => `6e6e6e6e-6e6e-4e6e-8e6e-6e6e6e6e6e${String(i).padStart(2, '0')}`,
+);
+const ALL_APPLICANTS = [APPLICANT, RNP_APPLICANT, ...RDF_APPLICANTS];
 const CAMPAIGN = '6ec11111-1111-4111-8111-111111111111';
 const RNP_CAMPAIGN = '6ec22222-2222-4222-8222-222222222222';
 const VENUE_DISTRICT = 'GASABO';
@@ -133,14 +142,14 @@ async function cleanup(): Promise<void> {
     await tx`DELETE FROM rnp_ops.applications WHERE id = ${RNP_APP}`;
     await tx`DELETE FROM public_core.campaign_venue_assignments WHERE campaign_id = ${CAMPAIGN}`;
     await tx`DELETE FROM public_core.recruitment_campaigns WHERE id IN ${tx([CAMPAIGN, RNP_CAMPAIGN])}`;
-    await tx`DELETE FROM public_core.applicant_identities WHERE id IN ${tx([APPLICANT, RNP_APPLICANT])}`;
+    await tx`DELETE FROM public_core.applicant_identities WHERE id IN ${tx(ALL_APPLICANTS)}`;
   });
 }
 
 async function seed(): Promise<void> {
   await admin.begin(async (tx) => {
     await tx`SELECT set_config('app.encryption_key', ${ENCRYPTION_KEY}, true)`;
-    for (const [id] of [[APPLICANT], [RNP_APPLICANT]] as const) {
+    for (const id of ALL_APPLICANTS) {
       await tx`
         INSERT INTO public_core.applicant_identities
           (id, national_id_hash, encrypted_full_name, encrypted_date_of_birth,
@@ -181,12 +190,12 @@ async function seed(): Promise<void> {
     [APP_RED_LATE, 'RDF-98005', 'SLOT_ASSIGNED', true],
     [APP_GREEN, 'RDF-98006', 'SUBMITTED', false],
   ];
-  for (const [id, code, status, allPass] of rows) {
+  for (const [i, [id, code, status, allPass]] of rows.entries()) {
     await admin`
       INSERT INTO rdf_ops.applications
         (id, processing_code, applicant_id, campaign_id, category, status,
          age_eligibility_status, academic_status, criminal_clearance_status)
-      VALUES (${id}, ${code}, ${APPLICANT}, ${CAMPAIGN}, 'GENERAL_ENLISTMENT',
+      VALUES (${id}, ${code}, ${RDF_APPLICANTS[i]!}, ${CAMPAIGN}, 'GENERAL_ENLISTMENT',
               ${status}::rdf_ops.application_status,
               ${allPass ? 'ELIGIBLE' : 'ELIGIBLE'}::rdf_ops.age_eligibility_status,
               ${allPass ? 'ELIGIBLE' : 'ELIGIBLE'}::rdf_ops.academic_eligibility_status,

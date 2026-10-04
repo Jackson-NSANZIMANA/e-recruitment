@@ -108,6 +108,11 @@ interface StubState {
   sawCookieHeader: boolean;
 }
 
+// ADR-027 walk-in duplicate fixtures.
+const WALK_IN_EXISTING_APP = "7c0f1e2d-3a4b-4c5d-8e6f-0a1b2c3d4e5f";
+const WALK_IN_EXISTING_CODE = "RDF-00097";
+const WALK_IN_APPLICANT_ID = randomUUID();
+
 const state: StubState = {
   calls: [],
   finalDecisionUnavailable: false,
@@ -223,6 +228,15 @@ async function stubHandler(
         },
       });
     }
+
+    case "POST /v1/applications/walk-in/register":
+      // ADR-027: this candidate already holds a live application. The upstream
+      // names it on purpose so the tablet can open THAT record.
+      return send(res, 409, {
+        status: "ALREADY_APPLIED",
+        applicationId: WALK_IN_EXISTING_APP,
+        processingCode: WALK_IN_EXISTING_CODE,
+      });
 
     case "POST /v1/applications/accept":
       // ADR-014: the lock is held elsewhere, and the upstream names the holder.
@@ -626,6 +640,45 @@ async function main(): Promise<void> {
     check(
       "the upstream really did send it",
       state.calls.includes("POST /v1/applications/accept"),
+    );
+
+    // ── 11b. ALREADY_APPLIED keeps its identifiers ───────────────────
+    // The mirror image of section 11, and the reason both are here: the
+    // boundary must distinguish "this names ANOTHER agency's data" from "this
+    // names the officer's own, and is the entire point of the answer".
+    //
+    // Without an explicit case, ALREADY_APPLIED fell through conflictResult's
+    // default and reached the tablet as ILLEGAL_TRANSITION with both
+    // identifiers dropped — a wrong label on an answer the officer could no
+    // longer act on.
+    section("A duplicate walk-in registration names the application on file");
+    const dupe = await call(
+      "POST",
+      "/edge/v1/applications/walk-in/register",
+      {
+        body: {
+          applicantId: WALK_IN_APPLICANT_ID,
+          category: "GENERAL_ENLISTMENT",
+          nesaIndexNumber: "RW2024/1002",
+        },
+      },
+    );
+    check("duplicate registration is 409", dupe.status === 409, dupe.text);
+    check(
+      "the conflict is named ALREADY_APPLIED, not ILLEGAL_TRANSITION",
+      dupe.text.includes("ALREADY_APPLIED") &&
+        !dupe.text.includes("ILLEGAL_TRANSITION"),
+      dupe.text,
+    );
+    check(
+      "the existing application is named so the tablet can open it",
+      dupe.text.includes(WALK_IN_EXISTING_APP) &&
+        dupe.text.includes(WALK_IN_EXISTING_CODE),
+      dupe.text,
+    );
+    check(
+      "the upstream really was called",
+      state.calls.includes("POST /v1/applications/walk-in/register"),
     );
 
     // ── 12. No automatic retry on a write ──────────────────────────

@@ -69,11 +69,32 @@ const APPLICANT_ID = '4d000000-0000-4000-8000-000000000001';
 const APPLICANT_B = '4d000000-0000-4000-8000-000000000002'; // RNP cert lane
 const APPLICANT_C = '4d000000-0000-4000-8000-000000000003'; // RCS cert lanes
 const APPLICANT_D = '4d000000-0000-4000-8000-000000000004'; // accept race
-const ALL_APPLICANTS = [APPLICANT_ID, APPLICANT_B, APPLICANT_C, APPLICANT_D];
+// ADR-027 forbids two LIVE applications for the same
+// (applicant, campaign, category), so each RDF scenario below — which all run
+// in RDF_CAMPAIGN/GENERAL_ENLISTMENT — needs its own citizen. The scenarios
+// never assert about each other, so this changes nothing the slice proves.
+const APPLICANT_UNFIT = '4d000000-0000-4000-8000-000000000005';
+const APPLICANT_FINAL = '4d000000-0000-4000-8000-000000000006';
+const APPLICANT_HOLD = '4d000000-0000-4000-8000-000000000007';
+const APPLICANT_C_REJ = '4d000000-0000-4000-8000-000000000008'; // RCS CERT_REJECTED lane
+const ALL_APPLICANTS = [
+  APPLICANT_ID,
+  APPLICANT_B,
+  APPLICANT_C,
+  APPLICANT_D,
+  APPLICANT_UNFIT,
+  APPLICANT_FINAL,
+  APPLICANT_HOLD,
+  APPLICANT_C_REJ,
+];
 const NID_HASH = '4d4d4d4d'.repeat(8); // 64 hex
 const NID_HASH_B = '4e4e4e4e'.repeat(8);
 const NID_HASH_C = '4f4f4f4f'.repeat(8);
 const NID_HASH_D = '5a5a5a5a'.repeat(8);
+const NID_HASH_UNFIT = '5b5b5b5b'.repeat(8);
+const NID_HASH_FINAL = '5c5c5c5c'.repeat(8);
+const NID_HASH_HOLD = '5d5d5d5d'.repeat(8);
+const NID_HASH_C_REJ = '5e5e5e5e'.repeat(8);
 const RDF_CAMPAIGN = '4d000000-0000-4000-8000-0000000000c1';
 const RNP_CAMPAIGN = '4d000000-0000-4000-8000-0000000000c2';
 const RCS_CAMPAIGN = '4d000000-0000-4000-8000-0000000000c3';
@@ -147,6 +168,10 @@ async function seed(): Promise<void> {
     [APPLICANT_B, NID_HASH_B],
     [APPLICANT_C, NID_HASH_C],
     [APPLICANT_D, NID_HASH_D],
+    [APPLICANT_UNFIT, NID_HASH_UNFIT],
+    [APPLICANT_FINAL, NID_HASH_FINAL],
+    [APPLICANT_HOLD, NID_HASH_HOLD],
+    [APPLICANT_C_REJ, NID_HASH_C_REJ],
   ];
   for (const [id, hash] of identities) {
     await admin`
@@ -173,16 +198,16 @@ async function seed(): Promise<void> {
   // Seed each RDF scenario app at its starting status; the RNP app mirrors the
   // happy start for the cross-agency probe. Status seeded directly — this slice
   // proves the officer transitions, not the upstream pipeline that reaches them.
-  const rdf: ReadonlyArray<[string, string, string]> = [
-    [APP_HAPPY, 'RDF-96001', 'PHYSICAL_TEST_COMPLETE'],
-    [APP_UNFIT, 'RDF-96002', 'PHYSICAL_TEST_COMPLETE'],
-    [APP_FINAL, 'RDF-96003', 'MEDICAL_REVIEW'],
-    [APP_HOLD, 'RDF-96004', 'PHYSICAL_TEST_COMPLETE'],
+  const rdf: ReadonlyArray<[string, string, string, string]> = [
+    [APP_HAPPY, 'RDF-96001', 'PHYSICAL_TEST_COMPLETE', APPLICANT_ID],
+    [APP_UNFIT, 'RDF-96002', 'PHYSICAL_TEST_COMPLETE', APPLICANT_UNFIT],
+    [APP_FINAL, 'RDF-96003', 'MEDICAL_REVIEW', APPLICANT_FINAL],
+    [APP_HOLD, 'RDF-96004', 'PHYSICAL_TEST_COMPLETE', APPLICANT_HOLD],
   ];
-  for (const [id, code, status] of rdf) {
+  for (const [id, code, status, applicant] of rdf) {
     await admin`
       INSERT INTO rdf_ops.applications (id, processing_code, applicant_id, campaign_id, category, status)
-      VALUES (${id}, ${code}, ${APPLICANT_ID}, ${RDF_CAMPAIGN}, 'GENERAL_ENLISTMENT',
+      VALUES (${id}, ${code}, ${applicant}, ${RDF_CAMPAIGN}, 'GENERAL_ENLISTMENT',
               ${status}::rdf_ops.application_status)`;
   }
   await admin`
@@ -190,14 +215,14 @@ async function seed(): Promise<void> {
     VALUES (${RNP_APP}, 'RNP-96001', ${APPLICANT_B}, ${RNP_CAMPAIGN}, 'CADET_OFFICER',
             'PHYSICAL_TEST_COMPLETE'::rnp_ops.application_status)`;
   // CERTIFICATE-mode lanes (ADR-013): both RCS apps start where medical fires.
-  const rcs: ReadonlyArray<[string, string]> = [
-    [RCS_APP, 'RCS-96001'],
-    [RCS_APP_REJ, 'RCS-96002'],
+  const rcs: ReadonlyArray<[string, string, string]> = [
+    [RCS_APP, 'RCS-96001', APPLICANT_C],
+    [RCS_APP_REJ, 'RCS-96002', APPLICANT_C_REJ],
   ];
-  for (const [id, code] of rcs) {
+  for (const [id, code, applicant] of rcs) {
     await admin`
       INSERT INTO rcs_ops.applications (id, processing_code, applicant_id, campaign_id, category, status)
-      VALUES (${id}, ${code}, ${APPLICANT_C}, ${RCS_CAMPAIGN}, 'GENERAL_ENLISTEE',
+      VALUES (${id}, ${code}, ${applicant}, ${RCS_CAMPAIGN}, 'GENERAL_ENLISTEE',
               'PHYSICAL_TEST_COMPLETE'::rcs_ops.application_status)`;
   }
 

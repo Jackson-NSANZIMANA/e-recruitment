@@ -126,6 +126,7 @@ run_ts "shared-config: production boot guard (dev secrets / placeholders / loopb
 # It is the check that would have caught the four BFF services that never
 # existed being read as fact for a month.
 run_ts "edge-gateway: contract drift (registry ↔ OpenAPI ↔ upstream catalogue)" services/edge-gateway/selfcheck/verify-edge-contract.ts
+run_ts "edge-gateway: citizen submit front-door readiness (expected BLOCKED)" services/edge-gateway/selfcheck/verify-citizen-submit-readiness.ts
 run_ts "edge-gateway: source hygiene (layering, redaction, no raw console)" services/edge-gateway/selfcheck/verify-edge-hygiene.ts
 run_ts "edge-gateway: session refresh persistence" services/edge-gateway/selfcheck/verify-edge-session-refresh.ts
 
@@ -157,7 +158,19 @@ run_ts "identity-service: core slice"             services/identity-service/self
 run_ts "identity-service: HTTP slice"             services/identity-service/selfcheck/verify-http-slice.ts
 run_ts "identity-service: right-to-erasure (gate → tombstone → freeze)" services/identity-service/selfcheck/verify-erasure-slice.ts
 run_ts "application-service: front-door submit"   services/application-service/selfcheck/verify-submit-http-slice.ts
+# ADR-027: the front door is idempotent and one citizen holds at most ONE live
+# application per campaign+category. Immediately after the front-door proof it
+# hardens: that one proves a submission works, this one proves a RETRIED or
+# DUPLICATED submission does not quietly become a second application. Its
+# section 0 is a zero-infrastructure completeness manifest — the guard against
+# this slice ever shipping as its SQL migration alone again.
+run_ts "application-service: submission integrity (idempotent retry, key reuse, live-intent duplicates, walk-in)" services/application-service/selfcheck/verify-submission-integrity.ts
 run_ts "application-service: officer auth + RLS"  services/application-service/selfcheck/verify-auth-slice.ts
+# This proof existed since 2026-08-22 but was never registered here, so it had
+# never run. It was red the whole time: findById selected a column rnp_ops does
+# not have, and every RNP officer's detail read answered 500. An unregistered
+# proof is not a proof — it is a file. Registered so that cannot recur.
+run_ts "application-service: officer single-record reads (by-id + status-history)" services/application-service/selfcheck/verify-application-detail-reads.ts
 run_ts "application-service: officer lifecycle (medical→final→accept)" services/application-service/selfcheck/verify-officer-lifecycle-slice.ts
 run_ts "application-service: auto-withdrawal on accept (ADR-017)" services/application-service/selfcheck/verify-auto-withdrawal-slice.ts
 run_ts "iam-service: token issuer (mint → officer endpoint accepts)" services/iam-service/selfcheck/verify-iam-issuer-slice.ts

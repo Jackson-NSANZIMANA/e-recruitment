@@ -1,0 +1,12 @@
+{
+  "capability": "citizen-facing-application-submission-integrity",
+  "status": "BLOCKED",
+  "complete": false,
+  "blockingItems": [
+    "No explicit edge submitApplication operation exists.",
+    "The edge does not forward a validated Idempotency-Key to application-service.",
+    "The typed upstream result and browser response do not preserve Idempotency-Replayed.",
+    "No browser-boundary submission idempotency proof exists."
+  ],
+  "followUp": "docs/architecture/adrs/ADR-027-submission-integrity-and-idempotency.md#not-done-here"
+}

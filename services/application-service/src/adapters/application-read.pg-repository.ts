@@ -132,12 +132,28 @@ export class PgApplicationReadRepository implements ApplicationReadRepository {
    * port docs. Adding medical_reviewed_* or is_walk_in here would make this
    * method throw for RCS officers and only RCS officers.
    *
+   * ONE column breaks the intersection and is handled explicitly:
+   * declared_specialist_field exists in rdf_ops and rcs_ops but NOT in
+   * rnp_ops, because RNP has no specialist lane (its categories are
+   * CADET_OFFICER and BASIC_POLICE_COURSE). Selecting it unconditionally made
+   * every RNP officer's detail read throw 500 — the exact failure mode this
+   * comment warns about, shipped anyway, because the proof that catches it
+   * (selfcheck/verify-application-detail-reads.ts) was never registered in
+   * scripts/run-selfchecks.sh and so had not run since it was written. It is
+   * registered now. For RNP the column is projected as NULL, which is the
+   * truth: there is no specialist field to declare.
+   *
    * qr_invitation_code is excluded deliberately: it is a bearer credential
    * scanned at the venue, not a display field. Only its ISSUED timestamp is
    * returned, which is all the UI needs to say "invitation sent".
    */
   async findById(input: ReadOneInput): Promise<ApplicationDetail | null> {
     const schema = sql(schemaForAgency(input.agency)); // quoted identifier fragment
+    // See the note above: rnp_ops has no declared_specialist_field column.
+    const specialistField =
+      input.agency === 'RNP'
+        ? sql`NULL::varchar AS declared_specialist_field`
+        : sql`declared_specialist_field`;
     try {
       return await sql.begin(async (tx) => {
         await tx`SET LOCAL ROLE ${sql(input.dbRole)}`;
@@ -145,7 +161,7 @@ export class PgApplicationReadRepository implements ApplicationReadRepository {
           SELECT id, processing_code, category, status,
                  nesa_index_number, nesa_verified_at,
                  hec_registration_number, hec_verified_at,
-                 declared_specialist_field,
+                 ${specialistField},
                  academic_status, academic_eligibility_detail,
                  age_eligibility_status, age_verified_at, age_eligibility_detail,
                  criminal_clearance_status, criminal_clearance_at,

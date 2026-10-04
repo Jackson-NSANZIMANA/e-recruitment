@@ -27,6 +27,7 @@ import type {
   ApplicationStatus,
 } from '@usrp/shared-types';
 import type { OfficerActor } from './officer-transition-repository.js';
+import type { StageEvents } from './event-outbox.js';
 
 export interface CreateWalkInInput {
   readonly actor: OfficerActor;
@@ -35,7 +36,7 @@ export interface CreateWalkInInput {
   readonly category: ApplicationCategory;
   readonly nesaIndexNumber: string | null;
   readonly hecRegistrationNumber: string | null;
-  /** Minted by the use case (opaque, unique) — returned to the tablet. */
+  /** Minted by the use case (opaque, unique) — persisted/returned only when registration wins. */
   readonly qrInvitationCode: string;
 }
 
@@ -43,6 +44,22 @@ export interface CreateWalkInResult {
   readonly applicationId: string;
   readonly processingCode: string;
 }
+
+/**
+ * Outcome of an on-site registration (ADR-027).
+ *
+ * The walk-in lane files into the SAME applications table the digital front
+ * door does, so rls/0022's live-intent partial unique index governs it too:
+ * a citizen who already applied online cannot be registered again at the
+ * venue, and a double-tap on the officer's tablet cannot create two records.
+ *
+ * The officer needs the answer, not a 500 — ALREADY_APPLIED names the
+ * application the candidate already holds so the officer can look it up and
+ * continue with it instead of filing a second one.
+ */
+export type CreateWalkInOutcome =
+  | ({ readonly kind: 'REGISTERED' } & CreateWalkInResult)
+  | ({ readonly kind: 'ALREADY_APPLIED' } & CreateWalkInResult);
 
 export interface VetOnSiteInput {
   readonly actor: OfficerActor;
@@ -68,6 +85,17 @@ export type VetOnSiteOutcome =
   | { readonly kind: 'NOT_FOUND' };
 
 export interface WalkInRepository {
-  createWalkInApplication(input: CreateWalkInInput): Promise<CreateWalkInResult>;
-  vetOnSite(input: VetOnSiteInput): Promise<VetOnSiteOutcome>;
+  /**
+   * Register an on-site candidate. Returns ALREADY_APPLIED (never throws)
+   * when the engine's live-intent index refuses a second live application
+   * for this (applicant, campaign, category).
+   */
+  createWalkInApplication(
+    input: CreateWalkInInput,
+    stage: StageEvents<CreateWalkInResult>,
+  ): Promise<CreateWalkInOutcome>;
+  vetOnSite(
+    input: VetOnSiteInput,
+    stage: StageEvents<VetOnSiteOutcome>,
+  ): Promise<VetOnSiteOutcome>;
 }

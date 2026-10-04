@@ -147,6 +147,17 @@ function mapRegisterOutcome(outcome: RegisterWalkInOutcome): HttpResult {
       return { status: 422, body: { status: 'INVALID_ACADEMIC_INPUT', reason: outcome.reason } };
     case 'NO_WALK_IN_CAMPAIGN':
       return { status: 409, body: { status: 'NO_WALK_IN_CAMPAIGN', agency: outcome.agency } };
+    case 'ALREADY_APPLIED':
+      // ADR-027. The processing code is returned so the officer can pull up
+      // the existing application on the tablet and continue with THAT one.
+      return {
+        status: 409,
+        body: {
+          status: 'ALREADY_APPLIED',
+          applicationId: outcome.applicationId,
+          processingCode: outcome.processingCode,
+        },
+      };
     default:
       return assertNever(outcome);
   }

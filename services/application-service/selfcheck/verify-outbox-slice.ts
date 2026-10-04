@@ -47,8 +47,20 @@ if (process.env['AUTH_JWT_PUBLIC_KEY_B64'] === undefined) {
   ).toString('base64');
 }
 
+// ADR-027 binds the front door to ONE live application per
+// (applicant, campaign, category). This proof deliberately files three
+// separate applications against one campaign — the broker-down submission,
+// the failed-relay-attempt submission, and the lost-CLEARED fixture — so each
+// gets its OWN candidate. Reusing one applicant would now (correctly) be
+// answered ALREADY_APPLIED and the proof would be testing the duplicate guard
+// instead of the outbox.
 const APPLICANT_ID = '7a7a7a7a-7a7a-4a7a-8a7a-7a7a7a7a7a7a';
+const RELAY_APPLICANT_ID = '7a7a7a7a-7a7a-4a7a-8a7a-7a7a7a7a7a7b';
+const CLEARED_APPLICANT_ID = '7a7a7a7a-7a7a-4a7a-8a7a-7a7a7a7a7a7c';
+const APPLICANTS = [APPLICANT_ID, RELAY_APPLICANT_ID, CLEARED_APPLICANT_ID] as const;
 const NID_HASH = 'c0ffee00'.repeat(8);
+const RELAY_NID_HASH = 'c0ffee01'.repeat(8);
+const CLEARED_NID_HASH = 'c0ffee02'.repeat(8);
 const CAMPAIGN_ID = '8c8c8c8c-8c8c-4c8c-8c8c-8c8c8c8c8c8c';
 
 /** A bus whose broker can be switched off. Records what it actually delivered. */
@@ -85,9 +97,11 @@ async function cleanup(): Promise<void> {
     // Status history is append-only for every role (0007); the documented
     // superuser escape hatch disables triggers for this maintenance tx only.
     await tx`SET LOCAL session_replication_role = replica`;
-    const apps = await tx<{ id: string }[]>`SELECT id FROM rdf_ops.applications WHERE applicant_id = ${APPLICANT_ID}`;
+    const all = tx([...APPLICANTS]);
+    const apps = await tx<{ id: string }[]>`SELECT id FROM rdf_ops.applications WHERE applicant_id IN ${all}`;
     const ids = apps.map((a) => a.id);
-    await tx`DELETE FROM public_core.event_outbox WHERE payload->>'applicantId' = ${APPLICANT_ID}`;
+    await tx`DELETE FROM public_core.event_outbox WHERE payload->>'applicantId' IN ${all}`;
+    await tx`DELETE FROM public_core.submission_requests WHERE applicant_id IN ${all}`;
     if (ids.length > 0) {
       await tx`
         DELETE FROM public_core.event_outbox
@@ -96,7 +110,7 @@ async function cleanup(): Promise<void> {
       await tx`DELETE FROM rdf_ops.applications WHERE id IN ${tx(ids)}`;
     }
     await tx`DELETE FROM public_core.recruitment_campaigns WHERE id = ${CAMPAIGN_ID}`;
-    await tx`DELETE FROM public_core.applicant_identities WHERE id = ${APPLICANT_ID}`;
+    await tx`DELETE FROM public_core.applicant_identities WHERE id IN ${all}`;
   });
 }
 
@@ -106,8 +120,13 @@ async function seed(): Promise<void> {
       (id, national_id_hash, encrypted_full_name, encrypted_date_of_birth,
        encrypted_home_district, encrypted_home_province, gender,
        registration_channel, identity_status)
-    VALUES (${APPLICANT_ID}, ${NID_HASH}, 'x','x','x','x','MALE','WEB',
-            'VERIFIED'::public_core.identity_verification_status)`;
+    VALUES
+      (${APPLICANT_ID}, ${NID_HASH}, 'x','x','x','x','MALE','WEB',
+       'VERIFIED'::public_core.identity_verification_status),
+      (${RELAY_APPLICANT_ID}, ${RELAY_NID_HASH}, 'x','x','x','x','MALE','WEB',
+       'VERIFIED'::public_core.identity_verification_status),
+      (${CLEARED_APPLICANT_ID}, ${CLEARED_NID_HASH}, 'x','x','x','x','MALE','WEB',
+       'VERIFIED'::public_core.identity_verification_status)`;
   await admin`
     INSERT INTO public_core.recruitment_campaigns
       (id, campaign_label, agency, status, target_categories,
@@ -148,7 +167,8 @@ async function outboxFor(applicationId: string, eventType: string): Promise<Outb
 
 async function applicationCount(): Promise<number> {
   const rows = await admin<{ n: number }[]>`
-    SELECT count(*)::int AS n FROM rdf_ops.applications WHERE applicant_id = ${APPLICANT_ID}`;
+    SELECT count(*)::int AS n FROM rdf_ops.applications
+    WHERE applicant_id IN ${admin([...APPLICANTS])}`;
   return rows[0]?.n ?? -1;
 }
 
@@ -250,7 +270,7 @@ async function main(): Promise<void> {
     bus.down = true;
     const failingInput: CreateApplicationInput = {
       agency: 'RDF',
-      applicantId: APPLICANT_ID,
+      applicantId: CLEARED_APPLICANT_ID,
       campaignId: CAMPAIGN_ID,
       category: 'GENERAL_ENLISTMENT',
       channel: 'WEB',
@@ -259,7 +279,7 @@ async function main(): Promise<void> {
       correlationId: randomUUID(),
     };
         const second = await service.submit.submit({
-          applicantId: APPLICANT_ID,
+          applicantId: RELAY_APPLICANT_ID,
           category: "GENERAL_ENLISTMENT",
           channel: "WEB",
           nesaIndexNumber: "RW2024SC07778",
