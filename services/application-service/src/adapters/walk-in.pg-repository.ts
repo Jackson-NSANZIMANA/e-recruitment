@@ -21,6 +21,7 @@ import type { AgeEligibilityStatus, ApplicationStatus } from '@usrp/shared-types
 import type {
   CreateWalkInInput,
   CreateWalkInOutcome,
+  CreateWalkInResult,
   VetOnSiteInput,
   VetOnSiteOutcome,
   WalkInRepository,
@@ -28,9 +29,16 @@ import type {
 import { ApplicationPersistenceError } from '../domain/application.errors.js';
 import { AGENCY_TARGET } from '../domain/agency-schema.js';
 import { findLiveApplication, isLiveIntentViolation } from './application-insert.js';
+import { stageEvents } from './outbox/pg-event-outbox.js';
+import type { StageEvents } from '../ports/event-outbox.js';
+
+const SYSTEM_ROLE = 'usrp_system_service';
 
 export class PgWalkInRepository implements WalkInRepository {
-  async createWalkInApplication(input: CreateWalkInInput): Promise<CreateWalkInOutcome> {
+  async createWalkInApplication(
+    input: CreateWalkInInput,
+    stage: StageEvents<CreateWalkInResult>,
+  ): Promise<CreateWalkInOutcome> {
     const target = AGENCY_TARGET[input.actor.agency];
     const schema = sql(target.schema); // quoted identifier fragment
     const seqName = `${target.schema}.processing_code_seq`;
@@ -77,11 +85,20 @@ export class PgWalkInRepository implements WalkInRepository {
           )
         `;
 
-        return {
-          kind: 'REGISTERED' as const,
+        const created: CreateWalkInResult = {
           applicationId: row.id,
           processingCode: row.processing_code,
         };
+
+        // The officer role owns the application/history writes but deliberately
+        // has no outbox grant. Switch to the system role only after all state
+        // writes, and stage LAST so any staging failure rolls the entire unit
+        // back (application, history, and both announcements).
+        await tx`RESET ROLE`;
+        await tx`SET LOCAL ROLE ${sql(SYSTEM_ROLE)}`;
+        await stageEvents(tx, stage(created));
+
+        return { kind: 'REGISTERED' as const, ...created };
       });
     } catch (cause) {
       if (cause instanceof ApplicationPersistenceError) throw cause;
@@ -121,7 +138,10 @@ export class PgWalkInRepository implements WalkInRepository {
     }
   }
 
-  async vetOnSite(input: VetOnSiteInput): Promise<VetOnSiteOutcome> {
+  async vetOnSite(
+    input: VetOnSiteInput,
+    stage: StageEvents<VetOnSiteOutcome>,
+  ): Promise<VetOnSiteOutcome> {
     const { actor, applicationId } = input;
     const schema = sql(AGENCY_TARGET[actor.agency].schema);
 
@@ -177,12 +197,17 @@ export class PgWalkInRepository implements WalkInRepository {
           )
         `;
 
-        return {
+        const applied: VetOnSiteOutcome = {
           kind: 'APPLIED',
           fromStatus: 'WALK_IN_REGISTERED',
           toStatus: targetStatus,
           ageStatus: age,
         };
+
+        await tx`RESET ROLE`;
+        await tx`SET LOCAL ROLE ${sql(SYSTEM_ROLE)}`;
+        await stageEvents(tx, stage(applied));
+        return applied;
       });
     } catch (cause) {
       if (cause instanceof ApplicationPersistenceError) throw cause;

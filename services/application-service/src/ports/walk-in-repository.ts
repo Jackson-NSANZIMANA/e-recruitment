@@ -27,6 +27,7 @@ import type {
   ApplicationStatus,
 } from '@usrp/shared-types';
 import type { OfficerActor } from './officer-transition-repository.js';
+import type { StageEvents } from './event-outbox.js';
 
 export interface CreateWalkInInput {
   readonly actor: OfficerActor;
@@ -35,7 +36,7 @@ export interface CreateWalkInInput {
   readonly category: ApplicationCategory;
   readonly nesaIndexNumber: string | null;
   readonly hecRegistrationNumber: string | null;
-  /** Minted by the use case (opaque, unique) — returned to the tablet. */
+  /** Minted by the use case (opaque, unique) — persisted/returned only when registration wins. */
   readonly qrInvitationCode: string;
 }
 
@@ -89,6 +90,12 @@ export interface WalkInRepository {
    * when the engine's live-intent index refuses a second live application
    * for this (applicant, campaign, category).
    */
-  createWalkInApplication(input: CreateWalkInInput): Promise<CreateWalkInOutcome>;
-  vetOnSite(input: VetOnSiteInput): Promise<VetOnSiteOutcome>;
+  createWalkInApplication(
+    input: CreateWalkInInput,
+    stage: StageEvents<CreateWalkInResult>,
+  ): Promise<CreateWalkInOutcome>;
+  vetOnSite(
+    input: VetOnSiteInput,
+    stage: StageEvents<VetOnSiteOutcome>,
+  ): Promise<VetOnSiteOutcome>;
 }

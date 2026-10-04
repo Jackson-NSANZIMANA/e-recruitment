@@ -152,9 +152,11 @@ The on-site lane files into the same `applications` table, so the index
 governs it too. `PgWalkInRepository` classifies the refusal and returns
 `ALREADY_APPLIED` with the existing processing code, so the officer can pull
 up the application the candidate already holds. A duplicate registration
-writes no row, mints no ticket, and — importantly — **emits no second
-`APPLICANT_SUBMITTED`**, which would otherwise re-run the autonomous gates
-against an application already in vetting.
+writes no row, persists or returns no ticket, and — importantly — **stages or
+emits no second `APPLICANT_SUBMITTED`**, which would otherwise re-run the
+autonomous gates against an application already in vetting. The implementation
+currently creates an opaque candidate value before attempting the insert;
+duplicate detection discards that in-memory value.
 
 ### 7. A completeness manifest for the front door
 

@@ -20,7 +20,8 @@
 
 import { createPublicKey, randomUUID } from 'node:crypto';
 import postgres from 'postgres';
-import { InMemoryEventBus } from '@usrp/shared-events';
+import { InMemoryEventBus, newEnvelope } from '@usrp/shared-events';
+import type { AuditEvent } from '@usrp/shared-types';
 import { sql } from '@usrp/shared-database';
 import { startHttpServer } from '@usrp/shared-http';
 import { generateDeviceKeyPair } from '@usrp/shared-security';
@@ -37,6 +38,7 @@ import {
   ACCEPT_PATH,
   ADJUDICATE_PATH,
 } from '../src/index.js';
+import { PgWalkInRepository } from '../src/adapters/walk-in.pg-repository.js';
 
 // ── In-test issuer key: set the verify public key BEFORE loading config ──
 const AUTH_KEYS = generateDeviceKeyPair();
@@ -60,6 +62,8 @@ const NID_HASH = '6a6a6a6a'.repeat(8); // 64 hex
 // asserts deliberately rather than works around.
 const FAIL_APPLICANT_ID = '6a000000-0000-4000-8000-000000000002';
 const FAIL_NID_HASH = '6b6b6b6b'.repeat(8);
+const STAGING_FAILURE_APPLICANT_ID = '6a000000-0000-4000-8000-000000000003';
+const STAGING_FAILURE_NID_HASH = '6c6c6c6c'.repeat(8);
 const RDF_CAMPAIGN = '6a000000-0000-4000-8000-0000000000c1';
 const RDF_OFFICER_ID = '6a000000-0000-4000-8000-00000000ff01';
 const RNP_OFFICER_ID = '6a000000-0000-4000-8000-00000000ff02';
@@ -92,13 +96,17 @@ async function cleanup(): Promise<void> {
   await admin.begin(async (tx) => {
     await tx`SET LOCAL session_replication_role = replica`;
     await tx`DELETE FROM rdf_ops.physical_test_scores WHERE application_id IN (SELECT id FROM rdf_ops.applications WHERE campaign_id = ${RDF_CAMPAIGN})`;
+    await tx`DELETE FROM public_core.event_outbox
+             WHERE payload->>'applicationId' IN (SELECT id::text FROM rdf_ops.applications WHERE campaign_id = ${RDF_CAMPAIGN})
+                OR payload->>'entityId' IN (SELECT id::text FROM rdf_ops.applications WHERE campaign_id = ${RDF_CAMPAIGN})
+                OR payload->>'applicantId' IN ${tx([APPLICANT_ID, FAIL_APPLICANT_ID, STAGING_FAILURE_APPLICANT_ID])}`;
     await tx`DELETE FROM rdf_ops.application_status_history WHERE application_id IN (SELECT id FROM rdf_ops.applications WHERE campaign_id = ${RDF_CAMPAIGN})`;
     await tx`DELETE FROM rdf_ops.applications WHERE campaign_id = ${RDF_CAMPAIGN}`;
     await tx`DELETE FROM public_core.recruitment_campaigns WHERE id = ${RDF_CAMPAIGN}`;
     await tx`DELETE FROM public_core.submission_requests
-             WHERE applicant_id IN ${tx([APPLICANT_ID, FAIL_APPLICANT_ID])}`;
+             WHERE applicant_id IN ${tx([APPLICANT_ID, FAIL_APPLICANT_ID, STAGING_FAILURE_APPLICANT_ID])}`;
     await tx`DELETE FROM public_core.applicant_identities
-             WHERE id IN ${tx([APPLICANT_ID, FAIL_APPLICANT_ID])}`;
+             WHERE id IN ${tx([APPLICANT_ID, FAIL_APPLICANT_ID, STAGING_FAILURE_APPLICANT_ID])}`;
   });
 }
 
@@ -116,7 +124,9 @@ async function seed(): Promise<void> {
       INSERT INTO public_core.applicant_identities
         (id, national_id_hash, encrypted_full_name, encrypted_date_of_birth,
          encrypted_home_district, encrypted_home_province, gender, identity_status, registration_channel)
-      VALUES (${FAIL_APPLICANT_ID}, ${FAIL_NID_HASH}, 'enc','enc','enc','enc','MALE','VERIFIED','WALK_IN')
+      VALUES
+        (${FAIL_APPLICANT_ID}, ${FAIL_NID_HASH}, 'enc','enc','enc','enc','MALE','VERIFIED','WALK_IN'),
+        (${STAGING_FAILURE_APPLICANT_ID}, ${STAGING_FAILURE_NID_HASH}, 'enc','enc','enc','enc','MALE','VERIFIED','WALK_IN')
     `;
     // Exam-day campaign: registration CLOSED, examination window contains
     // today, walk-ins allowed — the walk-in campaign-resolution predicate.
@@ -219,7 +229,79 @@ async function main(): Promise<void> {
         submitted?.['channel'] === 'WALK_IN' && submitted?.['applicationId'] === appId, JSON.stringify(submitted));
       check('AUDIT_ENTRY WALK_IN_REGISTERED attributed to officer',
         bus.published.some((e) => e.eventType === 'AUDIT_ENTRY' && (e as unknown as Record<string, unknown>)['action'] === 'WALK_IN_REGISTERED' && (e as unknown as Record<string, unknown>)['performedBy'] === RDF_OFFICER_ID));
+      const staged = await admin<{ event_type: string }[]>`
+        SELECT event_type FROM public_core.event_outbox
+        WHERE payload->>'applicationId' = ${appId} OR payload->>'entityId' = ${appId}
+        ORDER BY id`;
+      check(
+        'registration durably stages APPLICANT_SUBMITTED + AUDIT_ENTRY',
+        staged.length === 2 &&
+          staged.some((row) => row.event_type === 'APPLICANT_SUBMITTED') &&
+          staged.some((row) => row.event_type === 'AUDIT_ENTRY'),
+        JSON.stringify(staged),
+      );
     }
+
+    // ══ 1b. Outbox staging failure rolls the whole registration back ═
+    console.log('\n── 1b. Staging failure → application/history/audit all rollback ─');
+    const repository = new PgWalkInRepository();
+    const failureContext = { correlationId: randomUUID(), causationId: randomUUID() };
+    const duplicateEnvelope = newEnvelope(failureContext);
+    let stagingFailed = false;
+    try {
+      await repository.createWalkInApplication(
+        {
+          actor: {
+            agency: 'RDF',
+            dbRole: 'usrp_rdf_officer',
+            officerId: RDF_OFFICER_ID,
+            correlationId: failureContext.correlationId,
+          },
+          applicantId: STAGING_FAILURE_APPLICANT_ID,
+          campaignId: RDF_CAMPAIGN,
+          category: 'GENERAL_ENLISTMENT',
+          nesaIndexNumber: 'RW2024/1003',
+          hecRegistrationNumber: null,
+          qrInvitationCode: randomUUID(),
+        },
+        (created) => {
+          const audit: AuditEvent = {
+            ...duplicateEnvelope,
+            eventType: 'AUDIT_ENTRY',
+            entityType: 'APPLICATION',
+            entityId: created.applicationId,
+            action: 'WALK_IN_REGISTERED',
+            performedBy: RDF_OFFICER_ID,
+            agency: 'RDF',
+            newStatus: 'WALK_IN_REGISTERED',
+            metadata: { failureInjection: true },
+          };
+          // The duplicate event_id makes the second stage INSERT fail after
+          // application, history, and the first audit outbox INSERT occurred.
+          return [audit, audit];
+        },
+      );
+    } catch {
+      stagingFailed = true;
+    }
+    check('injected duplicate event id makes staging fail', stagingFailed);
+    const failedApps = await admin<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM rdf_ops.applications
+      WHERE applicant_id = ${STAGING_FAILURE_APPLICANT_ID}`;
+    const failedHistory = await admin<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM rdf_ops.application_status_history h
+      JOIN rdf_ops.applications a ON a.id = h.application_id
+      WHERE a.applicant_id = ${STAGING_FAILURE_APPLICANT_ID}`;
+    const failedOutbox = await admin<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM public_core.event_outbox
+      WHERE event_id = ${duplicateEnvelope.eventId}`;
+    check('application rolled back', failedApps[0]?.n === 0, String(failedApps[0]?.n));
+    check('history rolled back', failedHistory[0]?.n === 0, String(failedHistory[0]?.n));
+    check(
+      'staged audit and all outbox rows rolled back',
+      failedOutbox[0]?.n === 0,
+      String(failedOutbox[0]?.n),
+    );
 
     // ══ 2. On-site vetting gates on the autonomous age verdict ═════
     console.log('\n── 2. On-site vetting: age gate drives the transition ───────');
@@ -233,6 +315,12 @@ async function main(): Promise<void> {
     const vet = await post(WALK_IN_VET_PATH, { applicationId: appId });
     check('vet → 200 APPLIED WALK_IN_REGISTERED → WALK_IN_ON_SITE_VETTING',
       vet.status === 200 && vet.json['toStatus'] === 'WALK_IN_ON_SITE_VETTING' && vet.json['ageStatus'] === 'ELIGIBLE', vet.text);
+    const vetAudit = await admin<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM public_core.event_outbox
+      WHERE event_type = 'AUDIT_ENTRY'
+        AND payload->>'entityId' = ${appId}
+        AND payload->>'action' = 'APPLICATION_STATUS_ADVANCED'`;
+    check('on-site vetting audit is durably staged', vetAudit[0]?.n === 1, String(vetAudit[0]?.n));
     const revet = await post(WALK_IN_VET_PATH, { applicationId: appId });
     check('re-vet → 200 NO_CHANGE (idempotent)', revet.status === 200 && revet.json['status'] === 'NO_CHANGE', revet.text);
 

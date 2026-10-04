@@ -66,6 +66,36 @@ const MANIFEST_PATH = join(
   'front-door.manifest.json',
 );
 
+// Fixed outside the manifest: deleting an artefact entry from the manifest
+// must fail this proof rather than shrinking the set the proof trusts.
+const EXPECTED_ARTEFACT_IDS = [
+  'migration',
+  'bootstrap-registration',
+  'drizzle-mirror',
+  'drizzle-mirror-export',
+  'drizzle-snapshot',
+  'request-hash',
+  'ledger-port',
+  'ledger-adapter',
+  'insert-primitives',
+  'use-case',
+  'http-adapter',
+  'composition-root',
+  'walk-in-port',
+  'walk-in-adapter',
+  'walk-in-use-case',
+  'walk-in-http',
+  'ops-mirror-note-rdf',
+  'ops-mirror-note-rnp',
+  'ops-mirror-note-rcs',
+  'citizen-submit-readiness',
+  'citizen-submit-readiness-gate',
+  'gate-registration',
+  'ci-registration',
+  'adr',
+  'slice-doc',
+] as const;
+
 const ADMIN_URL =
   process.env['ADMIN_DATABASE_URL'] ??
   'postgresql://usrp_admin:usrp_dev_password@localhost:5432/usrp_db';
@@ -217,7 +247,14 @@ async function main(): Promise<void> {
   const manifest = JSON.parse(readFileSync(MANIFEST_PATH, 'utf8')) as {
     readonly artefacts: readonly Artefact[];
   };
-  check('manifest declares artefacts', manifest.artefacts.length > 0);
+  const actualIds = manifest.artefacts.map((artefact) => artefact.id);
+  check(
+    'manifest has the complete fixed artefact ID set',
+    actualIds.length === EXPECTED_ARTEFACT_IDS.length &&
+      new Set(actualIds).size === actualIds.length &&
+      EXPECTED_ARTEFACT_IDS.every((id) => actualIds.includes(id)),
+    `expected ${EXPECTED_ARTEFACT_IDS.join(',')}; got ${actualIds.join(',')}`,
+  );
   for (const artefact of manifest.artefacts) {
     let content: string | null = null;
     try {
@@ -485,6 +522,15 @@ async function main(): Promise<void> {
       unverifiedRetry.status === 201 && unverifiedRetry.json['applicationId'] === appId,
       unverifiedRetry.text,
     );
+    const changedStateReuse = await submit(
+      { ...digitalBody, nesaIndexNumber: 'RW2024SC07777' },
+      KEY,
+    );
+    check(
+      'same key + different body after identity AND campaign change → KEY_REUSED',
+      changedStateReuse.status === 409 && changedStateReuse.json['status'] === 'KEY_REUSED',
+      changedStateReuse.text,
+    );
     await admin`
       UPDATE public_core.applicant_identities
       SET identity_status = 'VERIFIED' WHERE id = ${DIGITAL_APPLICANT}`;
@@ -609,13 +655,30 @@ async function main(): Promise<void> {
     const reg1 = await register(WALK_IN_APPLICANT);
     check('walk-in register → 201 REGISTERED', reg1.status === 201 && reg1.json['status'] === 'REGISTERED', reg1.text);
     const walkInCode = String(reg1.json['processingCode']);
+    const walkInId = String(reg1.json['applicationId']);
+    const walkInOutboxBeforeDuplicate = await admin<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM public_core.event_outbox
+      WHERE payload->>'applicationId' = ${walkInId} OR payload->>'entityId' = ${walkInId}`;
 
     // The double-tap on the officer's tablet.
     const reg2 = await register(WALK_IN_APPLICANT);
     check('duplicate walk-in register → 409 (not a 500)', reg2.status === 409, reg2.text);
     check('…with status ALREADY_APPLIED', reg2.json['status'] === 'ALREADY_APPLIED', reg2.text);
     check('…naming the existing processing code', reg2.json['processingCode'] === walkInCode, reg2.text);
+    check('…returns no discarded ticket', reg2.json['qrInvitationCode'] === undefined, reg2.text);
     check('…exactly one walk-in application exists', (await countApplications(WALK_IN_APPLICANT)) === 1);
+    const walkInHistory = await admin<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM rdf_ops.application_status_history
+      WHERE application_id = ${walkInId}`;
+    check('…exactly one opening history row exists', walkInHistory[0]?.n === 1, String(walkInHistory[0]?.n));
+    const walkInOutboxAfterDuplicate = await admin<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM public_core.event_outbox
+      WHERE payload->>'applicationId' = ${walkInId} OR payload->>'entityId' = ${walkInId}`;
+    check(
+      '…no second audit or submitted outbox event',
+      walkInOutboxAfterDuplicate[0]?.n === walkInOutboxBeforeDuplicate[0]?.n,
+      `${walkInOutboxBeforeDuplicate[0]?.n} → ${walkInOutboxAfterDuplicate[0]?.n}`,
+    );
     const walkInSubmits = bus.published.filter(
       (e) => e.eventType === 'APPLICANT_SUBMITTED' &&
         (e as unknown as Record<string, unknown>)['applicantId'] === WALK_IN_APPLICANT,
@@ -657,6 +720,10 @@ async function main(): Promise<void> {
     // with real consequences for a rejected candidate, so it is asserted
     // rather than left to be inferred from the SQL.
     await admin`UPDATE rdf_ops.applications SET status = 'REJECTED' WHERE id = ${appId}`;
+    const rejectedBaselineHistory = await admin<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM rdf_ops.application_status_history
+      WHERE application_id = ${appId}`;
+    const rejectedBaselineEvents = await countSubmittedEvents(DIGITAL_APPLICANT);
     const afterReject = await submit(digitalBody, randomUUID());
     check(
       'a REJECTED application still blocks a new one',
@@ -664,7 +731,20 @@ async function main(): Promise<void> {
       afterReject.text,
     );
     check('…naming the rejected application', afterReject.json['applicationId'] === appId, afterReject.text);
-    check('…and writing nothing', (await countApplications(DIGITAL_APPLICANT)) === 1);
+    check('…no second application', (await countApplications(DIGITAL_APPLICANT)) === 1);
+    check('…no fresh-key ledger row', (await countLedger(DIGITAL_APPLICANT)) === 1);
+    const rejectedAfterHistory = await admin<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM rdf_ops.application_status_history
+      WHERE application_id = ${appId}`;
+    check(
+      '…no history row',
+      rejectedAfterHistory[0]?.n === rejectedBaselineHistory[0]?.n,
+      `${rejectedBaselineHistory[0]?.n} → ${rejectedAfterHistory[0]?.n}`,
+    );
+    check(
+      '…no event',
+      (await countSubmittedEvents(DIGITAL_APPLICANT)) === rejectedBaselineEvents,
+    );
     await admin`UPDATE rdf_ops.applications SET status = 'SUBMITTED' WHERE id = ${appId}`;
   } finally {
     await server.stop();

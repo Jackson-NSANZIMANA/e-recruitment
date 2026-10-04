@@ -105,7 +105,7 @@ export function createApplicationService(
       identityReader,
       campaignReader,
       repository: new PgWalkInRepository(),
-      eventBus,
+      events,
     }),
     projector: new ProjectVettingResultService({ repository, events }),
     slotProjector: new ProjectSlotAssignmentService({ repository, eventBus }),

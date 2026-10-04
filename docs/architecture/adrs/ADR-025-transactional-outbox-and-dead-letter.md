@@ -104,10 +104,16 @@ there, on that topic, for as long as the message exists.
 
 ## Not done here (mechanical follow-up, same pattern)
 
+Walk-in registration and on-site-vetting audit events now follow this pattern:
+the officer-role application/history writes switch to the system role and
+stage their events last in the same transaction, then the dispatcher provides
+the post-commit fast path. `verify-walk-in-slice.ts` proves both successful
+outbox rows and rollback of application, history, audit, and outbox on injected
+staging failure.
+
 The remaining dual writes in application-service (slot / notification /
-physical-test / forensics projectors, officer transitions, walk-in,
-self-withdrawal, auto-withdrawal) and in every other producing service still
-commit-then-publish. Each converts the same way: add `stage?` to the
+physical-test / forensics projectors, officer transitions, self-withdrawal,
+auto-withdrawal) and in every other producing service still commit-then-publish. Each converts the same way: add `stage?` to the
 repository method, build events from the outcome with pre-minted envelopes,
 swap `eventBus` for `PgOutboxDispatcher` in deps, start a relay in `main.ts`
 with that service's producer name. Lift `pg-event-outbox.ts` into a shared
