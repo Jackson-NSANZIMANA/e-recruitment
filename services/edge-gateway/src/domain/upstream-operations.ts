@@ -58,6 +58,12 @@ export const UPSTREAM = Object.freeze({
   otpVerify: op('otpVerify', 'identity', 'POST', '/v1/applicants/auth/otp/verify', 'none'),
   applicantLogout: op('applicantLogout', 'identity', 'POST', '/v1/applicants/auth/logout', 'applicant-opaque'),
   myApplications: op('myApplications', 'identity', 'GET', '/v1/applicants/me/applications', 'applicant-opaque'),
+  // The citizen submit bridge (ADR-027): identity-service authenticates the
+  // opaque session, derives the subject itself and carries the caller's
+  // Idempotency-Key to application-service's front door with its OWN system
+  // token. The edge forwards the session credential and the validated key —
+  // nothing else of the browser's.
+  mySubmit: op('mySubmit', 'identity', 'POST', '/v1/applicants/me/applications', 'applicant-opaque'),
   myWithdraw: op('myWithdraw', 'identity', 'POST', '/v1/applicants/me/applications/withdraw', 'applicant-opaque'),
   // identity-service — erasure-request.controller.ts (session-authenticated half)
   myErasureRequestGet: op('myErasureRequestGet', 'identity', 'GET', '/v1/applicants/me/erasure-request', 'applicant-opaque'),

@@ -1,12 +1,33 @@
 {
   "capability": "citizen-facing-application-submission-integrity",
-  "status": "BLOCKED",
-  "complete": false,
-  "blockingItems": [
-    "No explicit edge submitApplication operation exists.",
-    "The edge does not forward a validated Idempotency-Key to application-service.",
-    "The typed upstream result and browser response do not preserve Idempotency-Replayed.",
-    "No browser-boundary submission idempotency proof exists."
+  "status": "READY",
+  "complete": true,
+  "verifiedBy": [
+    {
+      "id": "identity-submit-bridge",
+      "proof": "services/identity-service/selfcheck/verify-applicant-submit-gateway.ts"
+    },
+    {
+      "id": "edge-contract",
+      "proof": "services/edge-gateway/selfcheck/verify-edge-contract.ts"
+    },
+    {
+      "id": "edge-socket-boundary",
+      "proof": "services/edge-gateway/selfcheck/verify-edge-security.ts"
+    },
+    {
+      "id": "shared-rate-limit-store",
+      "proof": "services/edge-gateway/selfcheck/verify-rate-limit-store.ts"
+    },
+    {
+      "id": "submission-integrity",
+      "proof": "services/application-service/selfcheck/verify-submission-integrity.ts"
+    },
+    {
+      "id": "walk-in-outbox",
+      "proof": "services/application-service/selfcheck/verify-walk-in-slice.ts"
+    }
   ],
-  "followUp": "docs/architecture/adrs/ADR-027-submission-integrity-and-idempotency.md#not-done-here"
+  "gate": "services/edge-gateway/selfcheck/verify-citizen-submit-readiness.ts",
+  "note": "READY means every structural condition below is verified by this gate AND each listed proof exists and is registered in the quality gate. The live proofs themselves run in scripts/run-selfchecks.sh; if any of them cannot run (infrastructure unavailable), the release signal reverts to BLOCKED — a skipped proof is not a passing one. Public contract: the browser sends Idempotency-Key; the edge answers 201, or 200 with Idempotency-Replayed: true on replay."
 }

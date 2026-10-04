@@ -106,6 +106,10 @@ interface StubState {
   lastAuthorization: string | undefined;
   /** Whether any inbound upstream request carried a cookie header. */
   sawCookieHeader: boolean;
+  /** Scripted answer for the citizen submit bridge (POST /v1/applicants/me/applications). */
+  submitAnswer: "first" | "replay" | "alreadyApplied" | "keyReused" | "unavailable";
+  /** Every submit-bridge call, headers and all, for the allowlist proofs. */
+  submitCalls: { headers: Record<string, string | string[] | undefined>; body: unknown }[];
 }
 
 // ADR-027 walk-in duplicate fixtures.
@@ -113,11 +117,17 @@ const WALK_IN_EXISTING_APP = "7c0f1e2d-3a4b-4c5d-8e6f-0a1b2c3d4e5f";
 const WALK_IN_EXISTING_CODE = "RDF-00097";
 const WALK_IN_APPLICANT_ID = randomUUID();
 
+// ADR-027 citizen submit fixtures.
+const SUBMIT_APPLICATION_ID = "0d1f2e3c-4b5a-4968-8776-655443332211";
+const SUBMIT_PROCESSING_CODE = "RDF-77042";
+
 const state: StubState = {
   calls: [],
   finalDecisionUnavailable: false,
   lastAuthorization: undefined,
   sawCookieHeader: false,
+  submitAnswer: "first",
+  submitCalls: [],
 };
 
 function officerToken(agency: "RDF" | "RNP"): string {
@@ -289,6 +299,49 @@ async function stubHandler(
         ],
       });
 
+    // The identity-service submit bridge, scripted per section 14b. The
+    // bodies are the BRIDGE's answers (which mirror application-service's
+    // front door): the edge maps them to the public contract.
+    case "POST /v1/applicants/me/applications": {
+      state.submitCalls.push({ headers: { ...req.headers }, body });
+      switch (state.submitAnswer) {
+        case "first":
+          return send(res, 201, {
+            status: "SUBMITTED",
+            applicationId: SUBMIT_APPLICATION_ID,
+            processingCode: SUBMIT_PROCESSING_CODE,
+            agency: "RDF",
+          });
+        case "replay":
+          res.setHeader("Idempotency-Replayed", "true");
+          return send(res, 201, {
+            status: "SUBMITTED",
+            applicationId: SUBMIT_APPLICATION_ID,
+            processingCode: SUBMIT_PROCESSING_CODE,
+            agency: "RDF",
+          });
+        case "alreadyApplied":
+          return send(res, 409, {
+            status: "ALREADY_APPLIED",
+            applicationId: SUBMIT_APPLICATION_ID,
+            processingCode: SUBMIT_PROCESSING_CODE,
+            agency: "RDF",
+          });
+        case "keyReused":
+          // Deliberately carries identifiers: the edge must still surface
+          // the identifier-free shape this answer is contracted to.
+          return send(res, 409, {
+            status: "KEY_REUSED",
+            reason: "This Idempotency-Key was already used for a different submission.",
+            applicationId: "00000000-0000-4000-8000-0000000000ff",
+            processingCode: "RDF-99999",
+          });
+        case "unavailable":
+          return send(res, 503, { error: "UPSTREAM_UNAVAILABLE" });
+      }
+      return send(res, 404, { error: "STUB_NO_SCRIPT" });
+    }
+
     case "POST /v1/identities/verify":
       // The RUNNING controller's shape — not the stale { verified, fullName }.
       return send(res, 201, { status: "CREATED", applicantId: randomUUID() });
@@ -316,13 +369,27 @@ async function main(): Promise<void> {
     APPLICATION_SERVICE_BASE_URL: stubUrl,
     FIELD_SYNC_SERVICE_BASE_URL: stubUrl,
     EDGE_COOKIE_SECURE: "false",
-    // Generous, so the proof's own traffic is never what trips the limiter.
+    // Generous, so the proof's own traffic is never what trips the limiter —
+    // EXCEPT the applicant submit limit, which section 14b pins at 3 so the
+    // per-session cap is observable within one proof run.
     EDGE_LOGIN_RATE_LIMIT_PER_MINUTE: "200",
     EDGE_OTP_RATE_LIMIT_PER_MINUTE: "200",
     EDGE_VERIFY_IDENTITY_RATE_LIMIT_PER_MINUTE: "200",
+    EDGE_APPLICANT_SUBMIT_RATE_LIMIT_PER_MINUTE: "4",
   });
 
-  const gateway = createEdgeGateway(config);
+  // A recording audit sink, so 14b can assert the integrity audit events
+  // fire (and carry no key material) without scraping stdout.
+  const auditRecords: { action: string; record: unknown }[] = [];
+  const gateway = createEdgeGateway(config, undefined, {
+    audit: {
+      log(record): void {
+        auditRecords.push({ action: record.action, record });
+      },
+      stats(): void {},
+      fault(): void {},
+    },
+  });
   const server: HttpServer = await startHttpServer({
     serviceName: "edge-gateway-selfcheck",
     port: 0,
@@ -781,6 +848,247 @@ async function main(): Promise<void> {
       "no forensic signal reaches the citizen list",
       !/documentLane|forensics/i.test(citizenRead.text),
       "a score handed to the uploader is a forgery-tuning oracle",
+    );
+
+    // ── 14b. The citizen submit front door (ADR-027) ────────────────
+    section("Citizen submission: self-bound, idempotent, rate-limited, header-clean");
+    const submitCallsBefore = state.submitCalls.length;
+    const SUBMIT_KEY = randomUUID();
+
+    // CSRF first: an unsafe method without the token never reaches upstream.
+    const submitNoCsrf = await call("POST", "/edge/v1/me/applications", {
+      body: { category: "GENERAL_ENLISTMENT", nesaIndexNumber: "RW2026/1001" },
+      csrf: null,
+      extraHeaders: { "idempotency-key": SUBMIT_KEY },
+    });
+    check("submit without CSRF is 403", submitNoCsrf.status === 403);
+    check(
+      "the CSRF-rejected submit never reached the bridge",
+      state.submitCalls.length === submitCallsBefore,
+    );
+
+    // The key contract: required, UUID, exactly one.
+    const noKey = await call("POST", "/edge/v1/me/applications", {
+      body: { category: "GENERAL_ENLISTMENT" },
+    });
+    check("submit without an Idempotency-Key is 400", noKey.status === 400);
+    const badKey = await call("POST", "/edge/v1/me/applications", {
+      body: { category: "GENERAL_ENLISTMENT" },
+      extraHeaders: { "idempotency-key": "not-a-uuid" },
+    });
+    check("submit with a non-UUID key is 400", badKey.status === 400);
+
+    // Self-binding: identity fields are refused at the boundary.
+    const forgedApplicant = await call("POST", "/edge/v1/me/applications", {
+      body: { applicantId: randomUUID(), category: "GENERAL_ENLISTMENT" },
+      extraHeaders: { "idempotency-key": randomUUID() },
+    });
+    check("a body applicantId is REFUSED with 400", forgedApplicant.status === 400);
+    check("the refusal names FORBIDDEN_FIELD", forgedApplicant.text.includes("FORBIDDEN_FIELD"));
+    const forgedChannel = await call("POST", "/edge/v1/me/applications", {
+      body: { category: "GENERAL_ENLISTMENT", channel: "USSD" },
+      extraHeaders: { "idempotency-key": randomUUID() },
+    });
+    check("a body channel is REFUSED with 400", forgedChannel.status === 400);
+    const badCategory = await call("POST", "/edge/v1/me/applications", {
+      body: { category: "NOT_A_CATEGORY" },
+      extraHeaders: { "idempotency-key": randomUUID() },
+    });
+    check("an unknown category is 400, never forwarded", badCategory.status === 400);
+    check(
+      "no rejected shape ever reached the bridge",
+      state.submitCalls.length === submitCallsBefore,
+    );
+
+    // First submission: 201, identifiers, no replay header, exact key +
+    // allowlisted body + built-from-scratch headers upstream.
+    const first = await call("POST", "/edge/v1/me/applications", {
+      body: { category: "GENERAL_ENLISTMENT", nesaIndexNumber: "RW2026/1001" },
+      extraHeaders: {
+        "idempotency-key": SUBMIT_KEY,
+        // Browser junk a proxy might forward; the edge must not.
+        "x-internal-role": "usrp_system_service",
+        "user-agent": "evil-probe/1.0",
+        "x-forwarded-for": "203.0.113.9",
+      },
+    });
+    check("first submission is 201", first.status === 201, first.text);
+    check(
+      "the 201 names the application, processing code and agency",
+      first.text.includes(SUBMIT_APPLICATION_ID) &&
+        first.text.includes(SUBMIT_PROCESSING_CODE) &&
+        first.text.includes('"agency":"RDF"'),
+      first.text,
+    );
+    check("no replay header on a first submission", first.response.headers.get("idempotency-replayed") === null);
+    check("the bridge was called exactly once for it", state.submitCalls.length - submitCallsBefore === 1);
+    const firstCall = state.submitCalls[state.submitCalls.length - 1];
+    check(
+      "the Idempotency-Key is forwarded EXACTLY",
+      firstCall?.headers["idempotency-key"] === SUBMIT_KEY,
+      String(firstCall?.headers["idempotency-key"]),
+    );
+    check(
+      "the upstream body is the allowlist only (no applicantId, no channel, no junk)",
+      firstCall?.body !== null &&
+        typeof firstCall?.body === "object" &&
+        Object.keys(firstCall.body as Record<string, unknown>).sort().join(",") ===
+          "category,nesaIndexNumber",
+      JSON.stringify(firstCall?.body),
+    );
+    const firstHeaders = Object.keys(firstCall?.headers ?? {})
+      .map((h) => h.toLowerCase())
+      .sort();
+    check(
+      "the adapter's own headers are all present upstream",
+      ["accept", "authorization", "content-type", "idempotency-key", "x-correlation-id"].every((h) =>
+        firstHeaders.includes(h),
+      ),
+      JSON.stringify(firstHeaders),
+    );
+    check(
+      "NOTHING from the browser's header set is forwarded",
+      !firstHeaders.includes("x-internal-role") &&
+        !firstHeaders.includes("x-forwarded-for") &&
+        !firstHeaders.includes("x-csrf-token") &&
+        !firstHeaders.includes("cookie") &&
+        String(firstCall?.headers["user-agent"] ?? "") !== "evil-probe/1.0",
+      JSON.stringify(firstHeaders),
+    );
+
+    // Replay: same key, same body → 200, same identifiers, the header.
+    state.submitAnswer = "replay";
+    const replay = await call("POST", "/edge/v1/me/applications", {
+      body: { category: "GENERAL_ENLISTMENT", nesaIndexNumber: "RW2026/1001" },
+      extraHeaders: { "idempotency-key": SUBMIT_KEY },
+    });
+    check("a replay is 200, not 201", replay.status === 200, replay.text);
+    check(
+      "the replay sets Idempotency-Replayed: true",
+      replay.response.headers.get("idempotency-replayed") === "true",
+    );
+    check(
+      "the replayed body is the SAME identifiers as the first submit",
+      replay.text.includes(SUBMIT_APPLICATION_ID) && replay.text.includes(SUBMIT_PROCESSING_CODE),
+      replay.text,
+    );
+    check(
+      "the replay is audited as EDGE_IDEMPOTENT_REPLAY",
+      auditRecords.some((a) => a.action === "EDGE_IDEMPOTENT_REPLAY"),
+    );
+
+    // CORS: the browser must be able to READ the replay header.
+    const corsBase = { origin: "http://localhost:3000" };
+    const corsReplay = await fetch(`${base}/edge/v1/me/applications`, {
+      method: "POST",
+      headers: {
+        ...corsBase,
+        cookie: jar.header(),
+        "x-csrf-token": jar.get(CSRF_COOKIE) ?? "",
+        "content-type": "application/json",
+        "idempotency-key": SUBMIT_KEY,
+      },
+      body: JSON.stringify({ category: "GENERAL_ENLISTMENT", nesaIndexNumber: "RW2026/1001" }),
+    });
+    check("an allowed-origin replay is still 200", corsReplay.status === 200);
+    check(
+      "Access-Control-Expose-Headers names Idempotency-Replayed",
+      (corsReplay.headers.get("access-control-expose-headers") ?? "").includes("Idempotency-Replayed"),
+      corsReplay.headers.get("access-control-expose-headers") ?? "(none)",
+    );
+    const preflight = await fetch(`${base}/edge/v1/me/applications`, {
+      method: "OPTIONS",
+      headers: {
+        ...corsBase,
+        "access-control-request-method": "POST",
+        "access-control-request-headers": "content-type,x-csrf-token,idempotency-key",
+      },
+    });
+    check("the preflight allows POST", (preflight.headers.get("access-control-allow-methods") ?? "").includes("POST"));
+    check(
+      "the preflight allows the browser to SEND Idempotency-Key",
+      (preflight.headers.get("access-control-allow-headers") ?? "").includes("idempotency-key"),
+      preflight.headers.get("access-control-allow-headers") ?? "(none)",
+    );
+
+    // Live duplicate: identifiers KEPT.
+    state.submitAnswer = "alreadyApplied";
+    const duplicate = await call("POST", "/edge/v1/me/applications", {
+      body: { category: "GENERAL_ENLISTMENT", nesaIndexNumber: "RW2026/1001" },
+      extraHeaders: { "idempotency-key": randomUUID() },
+    });
+    check("a live duplicate is 409 ALREADY_APPLIED", duplicate.status === 409 && duplicate.text.includes("ALREADY_APPLIED"), duplicate.text);
+    check(
+      "the duplicate names the application on file (same shape as 201)",
+      duplicate.text.includes(SUBMIT_APPLICATION_ID) && duplicate.text.includes(SUBMIT_PROCESSING_CODE),
+      duplicate.text,
+    );
+
+    // The per-session rate limit: four upstream-reaching submissions are all
+    // this session gets in a minute (the proof pins the limit at 4).
+    const rateLimited = await call("POST", "/edge/v1/me/applications", {
+      body: { category: "GENERAL_ENLISTMENT", nesaIndexNumber: "RW2026/1001" },
+      extraHeaders: { "idempotency-key": randomUUID() },
+    });
+    check(
+      "the 5th submission in a minute is 429 RATE_LIMITED",
+      rateLimited.status === 429 && rateLimited.text.includes("RATE_LIMITED"),
+      rateLimited.text,
+    );
+    check(
+      "the rate-limited request never reached the bridge",
+      state.submitCalls.length === submitCallsBefore + 4,
+      `${state.submitCalls.length - submitCallsBefore} upstream calls`,
+    );
+
+    // A fresh citizen session (new bucket) for the rest of the submit map.
+    await call("POST", "/edge/v1/auth/applicant/logout");
+    await call("GET", "/edge/v1/session"); // seed a fresh CSRF cookie (§14's pattern)
+    const reLogin = await call("POST", "/edge/v1/auth/applicant/otp/verify", {
+      body: { nationalId: NID_A, otp: "123456" },
+    });
+    check("citizen re-login for the second half is 204", reLogin.status === 204);
+
+    // Key reuse: identifier-free even when upstream misbehaves.
+    state.submitAnswer = "keyReused";
+    const reused = await call("POST", "/edge/v1/me/applications", {
+      body: { category: "GENERAL_ENLISTMENT", nesaIndexNumber: "RW2026/1002" },
+      extraHeaders: { "idempotency-key": randomUUID() },
+    });
+    check("key reuse is 422 KEY_REUSED", reused.status === 422 && reused.text.includes("KEY_REUSED"), reused.text);
+    check(
+      "key reuse is IDENTIFIER-FREE at the boundary too",
+      !reused.text.includes("applicationId") && !reused.text.includes(SUBMIT_APPLICATION_ID),
+      reused.text,
+    );
+    check(
+      "key reuse is audited as EDGE_IDEMPOTENCY_KEY_REUSED",
+      auditRecords.some((a) => a.action === "EDGE_IDEMPOTENCY_KEY_REUSED"),
+    );
+    const reuseAudit = auditRecords.find((a) => a.action === "EDGE_IDEMPOTENCY_KEY_REUSED");
+    check(
+      "the reuse audit line carries no key material",
+      reuseAudit !== undefined && !JSON.stringify(reuseAudit).includes(SUBMIT_KEY),
+    );
+
+    // Dependency failure: 503, and the write is attempted EXACTLY once.
+    state.submitAnswer = "unavailable";
+    const callsBeforeUnavailable = state.submitCalls.length;
+    const unavailable = await call("POST", "/edge/v1/me/applications", {
+      body: { category: "GENERAL_ENLISTMENT", nesaIndexNumber: "RW2026/1003" },
+      extraHeaders: { "idempotency-key": randomUUID() },
+    });
+    check("an unavailable bridge is a 503", unavailable.status === 503, unavailable.text);
+    check(
+      "the failed submission was attempted EXACTLY ONCE (no hidden retry)",
+      state.submitCalls.length - callsBeforeUnavailable === 1,
+      "a retried submission is a double write on a citizen's legal record",
+    );
+
+    // An officer session cannot use the citizen door.
+    check(
+      "the audit trail contains no idempotency key value",
+      !auditRecords.some((a) => JSON.stringify(a).includes(SUBMIT_KEY)),
     );
 
     // ── 15. Anti-enumeration ───────────────────────────────────

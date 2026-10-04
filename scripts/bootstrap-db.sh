@@ -178,8 +178,17 @@ apply_sql "${RLS_DIR}/0022_submission_integrity.sql" "rls/0022 (submission integ
 #     announced to the vetting pipeline.
 apply_sql "${RLS_DIR}/0023_walk_in_outbox.sql" "rls/0023 (walk-in transactional outbox grant)"
 
+# 23c. Shared rate-limit store (ADR-021/027). The edge's limiter was
+#     per-process, so N replicas permitted N times every configured rate on
+#     exactly the operations where the limit is a correctness control — login,
+#     OTP, NIDA checks, and now citizen submission. rls/0024 creates
+#     public_core.edge_rate_limit_buckets (one atomic-upsert row per live
+#     fixed window, keyed hashes only) for usrp_edge_gateway alone, under
+#     FORCE'd RLS.
+apply_sql "${RLS_DIR}/0024_edge_rate_limit_buckets.sql" "rls/0024 (shared edge rate-limit buckets)"
+
 printf '\n'
-ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts + applicant auth + erasure requests + stored contact + edge sessions + event outbox + slot reservations + submission integrity + walk-in outbox grant in place"
+ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts + applicant auth + erasure requests + stored contact + edge sessions + event outbox + slot reservations + submission integrity + walk-in outbox grant + shared rate-limit buckets in place"
 
 # 24. Dev officer accounts (one per agency). A CONVENIENCE seed so the officer
 #     console / manual login smoke tests have real credentials to drive —

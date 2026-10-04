@@ -51,6 +51,7 @@ import {
   fileMyErasureRequestHandler,
   getMyErasureRequestHandler,
   listMyApplicationsHandler,
+  submitMyApplicationHandler,
   withdrawMyApplicationHandler,
 } from './adapters/http/citizen.controller.js';
 import {
@@ -94,6 +95,7 @@ export function edgeHandlers(deps: EdgeDeps): Record<EdgeOperationId, RouteHandl
     verifyIdentity: verifyIdentityHandler(deps),
 
     listMyApplications: listMyApplicationsHandler(deps),
+    submitMyApplication: submitMyApplicationHandler(deps),
     withdrawMyApplication: withdrawMyApplicationHandler(deps),
     getMyErasureRequest: getMyErasureRequestHandler(deps),
     fileMyErasureRequest: fileMyErasureRequestHandler(deps),

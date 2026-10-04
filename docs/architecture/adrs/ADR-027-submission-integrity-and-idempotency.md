@@ -366,32 +366,50 @@ gate runs; duplicate and unrecognised ids are reported too.
    citizen may hold live applications in two different campaigns of the same
    agency. Whether that is legitimate is an owner policy question, not a
    technical one.
-3. **Edge-tier passthrough of `Idempotency-Key`.** The service contract is
-   ready; the browser boundary (ADR-021) is not. Stated precisely, because
-   "the edge does not forward the header yet" undersells it:
+3. **Edge-tier passthrough of `Idempotency-Key` — DELIVERED** (was the
+   largest item here; shipped with the citizen submit front door). What
+   shipped, and why it has this shape:
 
-   - `POST /v1/applications` is **not exposed through the edge gateway at
-     all**. There is no `submitApplication` entry in
-     `edge-gateway/src/domain/upstream-operations.ts`; the citizen online
-     front door is still system-credentialed only. So there is nothing to
-     forward *yet* — but the header is the first thing that must be wired
-     when that operation is added, not an afterthought.
-   - **Both directions are trapped by design.** `upstream.http-gateway.ts`
-     builds the upstream header set from scratch, under the comment
-     *"Nothing from the browser's header set appears here"* — a deliberate
-     and correct default that will silently drop `Idempotency-Key`. And
-     `UpstreamResult` is `{ status, body }`: response headers are discarded,
-     so `Idempotency-Replayed: true` cannot reach the browser either. Both
-     need an explicit, narrow exception; neither should be solved by
-     relaxing the default.
-   - `EDGE_IDEMPOTENCY_KEY_REUSED` already exists in the audit event union of
-     `edge-gateway/src/ports/audit-logger.ts` and is **never emitted**, and
-     `idempotencykey` is already in the audit redaction set. Someone began
-     this and stopped. The follow-up should either emit that event or delete
-     it — dead vocabulary invites the reader to assume a mechanism that is
-     not there.
+   - The browser route is `POST /edge/v1/me/applications`
+     (`submitMyApplication`: applicant session, CSRF, never retried by the
+     edge). The edge does **not** hold a direct route to
+     `POST /v1/applications`: it fronts the **identity-service submit
+     bridge** (`POST /v1/applicants/me/applications`), which re-derives the
+     subject from the opaque session, pins `channel: 'WEB'`, refuses body
+     `applicantId`/`channel`, and calls application-service's front door
+     with identity-service's OWN client-credentials system token. The
+     browser's credential never crosses; the edge keeps no machine identity
+     of its own.
+   - **Both directions got their explicit, narrow exception** — and nothing
+     wider. `UpstreamCallInput` gained a typed `idempotencyKey?: string`
+     (validated UUID; the adapter emits it as exactly one
+     `Idempotency-Key` header) and `UpstreamResult` gained an allowlisted
+     `replayed?: boolean` parsed from `Idempotency-Replayed`. There is still
+     no generic header forwarding in either direction; the from-scratch
+     header set is otherwise untouched.
+   - `EDGE_IDEMPOTENCY_KEY_REUSED` — the vocabulary that sat dead in
+     `ports/audit-logger.ts` — is now EMITTED, alongside
+     `EDGE_IDEMPOTENT_REPLAY`, from the edge submit handler. Neither audit
+     line carries the key value (`idempotencykey` stays on the redaction
+     deny-list).
+   - The public edge contract: first submit `201`; replay `200` +
+     `Idempotency-Replayed: true` (exposed through CORS); live duplicate
+     `409 ALREADY_APPLIED` with the same identifiers as the 201; key reuse
+     `422 KEY_REUSED` with no identifiers; submissions are rate-limited per
+     applicant session against the shared Postgres store
+     (rls/0024), which production requires (the in-memory limiter refuses
+     to boot under `NODE_ENV=production`).
+   - The proofs: `verify-applicant-submit-gateway.ts` (the bridge, zero
+     infrastructure), `verify-edge-contract.ts` (registry ↔ OpenAPI ↔
+     catalogue), `verify-edge-security.ts` §14b (the browser boundary:
+     exact key forwarding, replay preservation, CORS exposure,
+     self-binding, no header forwarding, the rate limit, one-attempt-only),
+     and `verify-rate-limit-store.ts` (shared, concurrent, expiring,
+     fail-closed). `verify-citizen-submit-readiness.ts` gates the release
+     signal on all of them staying registered.
 
-   The walk-in path **is** exposed through the edge, and a first reading of
+   The officer (walk-in) half of this effort, recorded as it landed: the
+   walk-in path **is** exposed through the edge, and a first reading of
    `upstream.http-gateway.ts` (which returns `{ status, body }` verbatim for
    anything that is not 3xx or 502/503/504) suggested the new
    `409 ALREADY_APPLIED` already reached the officer's tablet intact. **That

@@ -80,6 +80,11 @@ export const EDGE_OPERATIONS = Object.freeze({
   vetWalkIn: { operationId: 'vetWalkIn', method: 'POST', path: '/edge/v1/applications/walk-in/vet', session: 'officer', csrf: true, maxBodyBytes: SMALL_BODY, retryOnG2G: false, publicAllowlist: false, upstream: [UPSTREAM.walkInVet], composition: 'single' },
   verifyIdentity: { operationId: 'verifyIdentity', method: 'POST', path: '/edge/v1/identities/verify', session: 'officer', csrf: true, maxBodyBytes: SMALL_BODY, retryOnG2G: false, publicAllowlist: false, upstream: [UPSTREAM.verifyIdentity], composition: 'single' },
   listMyApplications: { operationId: 'listMyApplications', method: 'GET', path: '/edge/v1/me/applications', session: 'applicant', csrf: false, maxBodyBytes: SMALL_BODY, retryOnG2G: true, publicAllowlist: false, upstream: [UPSTREAM.myApplications], composition: 'single' },
+  // The browser's submit (ADR-027). Same collection path as the list, POST
+  // instead of GET. NOT retryable at this tier: the edge never re-sends a
+  // write; the citizen's own Idempotency-Key makes their retry safe, and
+  // `retryOnG2G: false` is what keeps the retry THEIR decision.
+  submitMyApplication: { operationId: 'submitMyApplication', method: 'POST', path: '/edge/v1/me/applications', session: 'applicant', csrf: true, maxBodyBytes: SMALL_BODY, retryOnG2G: false, publicAllowlist: false, upstream: [UPSTREAM.mySubmit], composition: 'single' },
   withdrawMyApplication: { operationId: 'withdrawMyApplication', method: 'POST', path: '/edge/v1/me/applications/withdraw', session: 'applicant', csrf: true, maxBodyBytes: SMALL_BODY, retryOnG2G: false, publicAllowlist: false, upstream: [UPSTREAM.myWithdraw], composition: 'single' },
   getMyErasureRequest: { operationId: 'getMyErasureRequest', method: 'GET', path: '/edge/v1/me/erasure-request', session: 'applicant', csrf: false, maxBodyBytes: SMALL_BODY, retryOnG2G: true, publicAllowlist: false, upstream: [UPSTREAM.myErasureRequestGet], composition: 'single' },
   fileMyErasureRequest: { operationId: 'fileMyErasureRequest', method: 'POST', path: '/edge/v1/me/erasure-request', session: 'applicant', csrf: true, maxBodyBytes: SMALL_BODY, retryOnG2G: false, publicAllowlist: false, upstream: [UPSTREAM.myErasureRequestFile], composition: 'single' },

@@ -158,7 +158,10 @@ export {
   OTP_REQUEST_PATH,
   OTP_VERIFY_PATH,
   ME_APPLICATIONS_PATH,
+  ME_WITHDRAW_PATH,
   LOGOUT_PATH,
+  IDEMPOTENCY_KEY_HEADER,
+  IDEMPOTENCY_REPLAYED_HEADER,
   applicantAuthRoutes,
 } from './adapters/http/applicant-auth.controller.js';
 export { ApplicantAuthService } from './application/applicant-auth.service.js';
@@ -183,6 +186,8 @@ export { HttpApplicationsGateway } from './adapters/applications.http-gateway.js
 export type { HttpApplicationsGatewayOptions } from './adapters/applications.http-gateway.js';
 export type {
   ApplicantApplication,
+  ApplicantSubmitInput,
+  ApplicantSubmitResult,
   ApplicationsGateway,
   WithdrawApplicationResult,
 } from './ports/applications-gateway.js';

@@ -30,9 +30,11 @@ import { loadEdgeGatewayConfig, type EdgeGatewayConfig } from './config.js';
 import { PgEdgeSessionStore } from './adapters/session-store.pg-repository.js';
 import { UpstreamClient } from './adapters/upstream.http-gateway.js';
 import { InMemoryRateLimiter } from './adapters/rate-limiter.memory.js';
+import { PgRateLimiter } from './adapters/rate-limiter.pg.js';
 import { createCredentialCipher } from './adapters/credential-cipher.adapter.js';
 import { createAuditLogger } from './adapters/audit-logger.adapter.js';
 import type { AuditLogger } from './ports/audit-logger.js';
+import type { RateLimiter } from './ports/rate-limiter.js';
 
 export {
   EDGE_SERVICE_NAME,
@@ -60,6 +62,7 @@ export { redact, summariseError, StdoutAuditLogger, createAuditLogger } from './
 export { PgEdgeSessionStore } from './adapters/session-store.pg-repository.js';
 export { UpstreamClient } from './adapters/upstream.http-gateway.js';
 export { InMemoryRateLimiter } from './adapters/rate-limiter.memory.js';
+export { PgRateLimiter, type PgRateLimiterOptions } from './adapters/rate-limiter.pg.js';
 export { createCredentialCipher, deriveCredentialKey } from './adapters/credential-cipher.adapter.js';
 export type { EdgeDeps } from './adapters/http/guards.js';
 export type { SessionRepository, RotatedSession } from './ports/session-repository.js';
@@ -81,6 +84,12 @@ export interface EdgeGateway {
  * credentialed request, and the credential here travels as a cookie.
  * `x-csrf-token` must be allowed or every unsafe request fails preflight, and
  * `x-correlation-id` must be allowed or one click stops being one trace.
+ *
+ * `Idempotency-Replayed` is exposed (ADR-027) because a browser cannot read
+ * an unlisted response header — without this entry a replayed submission
+ * would be indistinguishable from a first one IN THE SPA, defeating the one
+ * purpose of the header. It is an explicit allowlisted name, not a wildcard:
+ * no other upstream header becomes readable by extension.
  */
 export function edgeCorsPolicy(config: EdgeGatewayConfig): CorsPolicy {
   return {
@@ -88,10 +97,31 @@ export function edgeCorsPolicy(config: EdgeGatewayConfig): CorsPolicy {
     credentials: true,
     // No PATCH, no DELETE: no route in this platform accepts either verb.
     allowedMethods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['content-type', CSRF_HEADER, 'x-correlation-id'],
-    exposedHeaders: ['x-request-id', 'x-correlation-id'],
+    allowedHeaders: ['content-type', CSRF_HEADER, 'x-correlation-id', 'idempotency-key'],
+    exposedHeaders: ['x-request-id', 'x-correlation-id', 'Idempotency-Replayed'],
     preflightMaxAgeSeconds: 600,
   };
+}
+
+/**
+ * The production boot guard for the rate-limit store.
+ *
+ * The in-memory limiter is PER-PROCESS: N replicas would permit N times every
+ * configured rate on exactly the operations where the limit is a correctness
+ * control (login, OTP, NIDA, citizen submission). Production must run the
+ * shared Postgres store (rate-limiter.pg.ts over rls/0024); a production
+ * boot configured for memory is refused here, before a single request is
+ * served — the same posture as the secure-cookie refusal in main.ts.
+ */
+export function assertRateLimitStoreAllowed(
+  isProduction: boolean,
+  store: RateLimiter['store'],
+): void {
+  if (isProduction && store !== 'postgres') {
+    throw new Error(
+      'Edge rate limiting would run in-memory in production. The per-process limiter lets N replicas permit N times every configured rate — including the applicant-submission cap — so the shared Postgres store (adapters/rate-limiter.pg.ts, rls/0024_edge_rate_limit_buckets.sql) is required. Refusing to boot.',
+    );
+  }
 }
 
 export interface EdgeGatewayOverrides {
@@ -119,9 +149,13 @@ export function createEdgeGateway(
     audit,
   );
   const upstream = new UpstreamClient(config.upstream);
-  // Per-process in this PR, behind the async port. The shared Postgres limiter
-  // lands in PR-4 together with its migration and its proof.
-  const limiter = new InMemoryRateLimiter(() => now().getTime());
+  // THE STORE IS SHARED IN PRODUCTION. The per-process limiter remains the
+  // dev/selfcheck implementation; a production boot with it is refused below
+  // rather than silently permitted (see assertRateLimitStoreAllowed).
+  const limiter = config.runtime.isProduction
+    ? new PgRateLimiter({ hmacKey: hmacKey })
+    : new InMemoryRateLimiter(() => now().getTime());
+  assertRateLimitStoreAllowed(config.runtime.isProduction, limiter.store);
 
   const deps: EdgeDeps = {
     config,
