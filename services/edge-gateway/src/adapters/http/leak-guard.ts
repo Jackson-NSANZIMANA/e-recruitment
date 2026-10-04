@@ -18,6 +18,7 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { HttpError } from '@usrp/shared-http';
+import type { AuditLogger } from '../../ports/audit-logger.js';
 import { isRecord } from './validation.js';
 
 const FORBIDDEN_OUTBOUND_KEYS: ReadonlySet<string> = new Set([
@@ -50,35 +51,35 @@ function normalizeKey(key: string): string {
   return key.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
-function fail(what: string, correlationId: string): never {
-  console.error(
-    JSON.stringify({
-      msg: 'edge_outbound_leak_blocked',
-      correlationId,
-      blocked: what,
-      detail:
-        'An un-projected upstream payload carried a field the browser boundary forbids. ' +
-        'Write an explicit projection for it rather than relaxing this guard.',
-    }),
-  );
+function fail(what: string, correlationId: string, audit: AuditLogger): never {
+  audit.log({
+    action: 'EDGE_FORBIDDEN_FIELD_REJECTED',
+    correlationId,
+    detail: { blocked: what },
+  });
   throw new HttpError(502, 'UPSTREAM_CONTRACT_MISMATCH', undefined, { expose: false });
 }
 
 /** Throws 502 rather than let an unexpected field cross the boundary. */
-export function assertNoLeakedFields(value: unknown, correlationId: string, depth = 0): void {
-  if (depth > MAX_DEPTH) fail('depth-limit', correlationId);
+export function assertNoLeakedFields(
+  value: unknown,
+  correlationId: string,
+  audit: AuditLogger,
+  depth = 0,
+): void {
+  if (depth > MAX_DEPTH) fail('depth-limit', correlationId, audit);
   if (typeof value === 'string') {
-    if (NID_SHAPED.test(value)) fail('national-id-shaped-value', correlationId);
+    if (NID_SHAPED.test(value)) fail('national-id-shaped-value', correlationId, audit);
     return;
   }
   if (value === null || typeof value !== 'object') return;
   if (Array.isArray(value)) {
-    for (const entry of value) assertNoLeakedFields(entry, correlationId, depth + 1);
+    for (const entry of value) assertNoLeakedFields(entry, correlationId, audit, depth + 1);
     return;
   }
   if (!isRecord(value)) return;
   for (const [key, entry] of Object.entries(value)) {
-    if (FORBIDDEN_OUTBOUND_KEYS.has(normalizeKey(key))) fail(`key:${key}`, correlationId);
-    assertNoLeakedFields(entry, correlationId, depth + 1);
+    if (FORBIDDEN_OUTBOUND_KEYS.has(normalizeKey(key))) fail(`key:${key}`, correlationId, audit);
+    assertNoLeakedFields(entry, correlationId, audit, depth + 1);
   }
 }

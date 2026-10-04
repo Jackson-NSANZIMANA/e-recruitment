@@ -126,6 +126,8 @@ run_ts "shared-config: production boot guard (dev secrets / placeholders / loopb
 # It is the check that would have caught the four BFF services that never
 # existed being read as fact for a month.
 run_ts "edge-gateway: contract drift (registry ↔ OpenAPI ↔ upstream catalogue)" services/edge-gateway/selfcheck/verify-edge-contract.ts
+run_ts "edge-gateway: source hygiene (layering, redaction, no raw console)" services/edge-gateway/selfcheck/verify-edge-hygiene.ts
+run_ts "edge-gateway: session refresh persistence" services/edge-gateway/selfcheck/verify-edge-session-refresh.ts
 
 # ── 1. Cross-agency isolation — the system's first hard invariant ──
 # Runs as usrp_admin inside the PG container; rolls back; ERRORs on any leak.

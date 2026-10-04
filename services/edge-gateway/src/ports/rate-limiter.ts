@@ -1,53 +1,58 @@
 // ══════════════════════════════════════════════════════════════════
 // edge-gateway — Rate limiter port
 //
-// The abstract interface for rate limiting. The application layer uses this
-// to enforce per-client and per-target rate limits without coupling to the
-// in-memory fixed-window implementation or any concrete algorithm.
+// On officer login, applicant OTP and NIDA identity checks the limiter is a
+// CORRECTNESS control, not hardening: a 202 whose body reveals nothing is still
+// an enumeration oracle by volume and timing without it.
 //
-// Implementations: adapters/fixed-window-rate-limiter.ts (in-memory)
-// Future: adapters/redis-rate-limiter.ts (distributed)
+// THE PORT IS ASYNC. The previous port was synchronous, which made a SHARED
+// counter unimplementable behind it — and a per-process counter means N
+// replicas permit N times the configured rate (audit 1.6, ADR-024 residual).
+// Async is what lets the Postgres adapter exist at all.
+//
+// Implementations:
+//   adapters/rate-limiter.pg.ts      shared across replicas (production)
+//   adapters/rate-limiter.memory.ts  single process (dev, selfchecks)
+//
+// main.ts REFUSES to boot the memory adapter under NODE_ENV=production.
 // ══════════════════════════════════════════════════════════════════
 
-/**
- * Result of a rate limit check. The application layer inspects `allowed` and
- * throws RateLimitExceededError if false, using `retryAfterSeconds` for the
- * HTTP Retry-After header.
- */
+/** The verdict for one bucket. */
 export interface RateLimitCheck {
-  /** Whether the request is allowed (under the limit). */
   readonly allowed: boolean;
-  /** How many tokens remain in the bucket (0 if denied). */
+  /** Tokens left in this window (0 when denied). */
   readonly remainingTokens: number;
-  /** How many seconds until the bucket resets (0 if allowed). */
+  /** Seconds until the window resets (0 when allowed). */
   readonly retryAfterSeconds: number;
 }
 
 /**
- * Rate limiter port. The application layer uses this to enforce rate limits
- * without coupling to the fixed-window algorithm, Redis, or any concrete
- * implementation.
+ * Fixed-window, per-minute limiter.
  *
- * Buckets are identified by string keys (e.g., "client:192.0.2.1:officerLogin"
- * or "target:handle_hash:officerLogin"). The application layer builds the keys
- * using domain knowledge (operation id, client ip, target handle hash).
+ * Bucket keys are built by the caller from domain knowledge (operation id plus
+ * a keyed hash of the target, the trusted client address, or the session id).
+ * Adapters must treat keys as SENSITIVE: a client key carries an IP address and
+ * a target key is derived from a National ID. The Postgres adapter therefore
+ * stores only a keyed hash of the key.
  */
 export interface RateLimiter {
-  /**
-   * Check whether a request is within the rate limit for the given bucket.
-   * Consumes a token if allowed; returns denial details if over the limit.
-   *
-   * @param bucketKey Unique bucket identifier
-   * @param limit Maximum requests per window (e.g., 5 per minute)
-   * @returns Rate limit check result
-   */
-  check(bucketKey: string, limit: number): RateLimitCheck;
+  /** Which backing store this limiter uses. Read by the production boot guard. */
+  readonly store: 'memory' | 'postgres';
 
-  /**
-   * Return the number of active buckets (for observability only). No detail
-   * about which buckets or their keys — just a count.
-   *
-   * @returns Number of active rate limit buckets
-   */
-  size(): number;
+  /** Count one attempt against `bucketKey`; deny once the window holds more than `limitPerMinute`. */
+  check(bucketKey: string, limitPerMinute: number): Promise<RateLimitCheck>;
+
+  /** Live bucket count, for the observability line only. No keys are ever exposed. */
+  activeBuckets(now: Date): Promise<number>;
+
+  /** Drop windows that ended before `now`. Returns the number removed. */
+  sweep(now: Date): Promise<number>;
+}
+
+/** The limiter's own backing store is unreachable. Fails CLOSED (503), never open. */
+export class RateLimiterUnavailableError extends Error {
+  constructor(options?: { readonly cause?: unknown }) {
+    super('Rate limiter store unavailable', options);
+    this.name = 'RateLimiterUnavailableError';
+  }
 }

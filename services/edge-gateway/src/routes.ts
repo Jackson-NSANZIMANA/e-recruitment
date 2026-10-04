@@ -10,6 +10,9 @@
 // annotation is the whole guarantee: register an operation and forget its
 // handler and the build fails, rather than a browser discovering a 404 that the
 // OpenAPI promised would work.
+//
+// There is ONE registry (src/domain/edge-operations.ts). routes.ts and guards.ts
+// read the same object, so "mounted" and "enforced" can no longer disagree.
 // ══════════════════════════════════════════════════════════════════
 
 import type { Route, RouteHandler } from '@usrp/shared-http';
@@ -17,7 +20,7 @@ import {
   EDGE_OPERATION_IDS,
   edgeOperation,
   type EdgeOperationId,
-} from './registry/edge-operations.js';
+} from './domain/edge-operations.js';
 import type { EdgeDeps } from './adapters/http/guards.js';
 import { readSessionHandler, refreshSessionHandler } from './adapters/http/session.controller.js';
 import {

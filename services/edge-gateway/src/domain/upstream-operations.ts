@@ -1,15 +1,19 @@
 // ══════════════════════════════════════════════════════════════════
-// edge-gateway — The APPROVED UPSTREAM CATALOGUE
+// edge-gateway — The APPROVED UPSTREAM CATALOGUE (domain)
 //
 // Every upstream route this tier may reach, transcribed from the running
-// controllers at backend commit 2b1814fd5ef1ea8d71625d2b58e9b75a16c3155e. Path
-// constants are duplicated here ON PURPOSE rather than imported: importing
-// application-service's constants would make the edge depend on that service's
-// package, and the whole point of a catalogue is that adding a target is a
-// reviewable edit to a named allowlist. The contract selfcheck asserts these
-// strings still match the controllers.
+// controllers. Path constants are duplicated here ON PURPOSE rather than
+// imported: importing application-service's constants would make the edge
+// depend on that service's package, and the whole point of a catalogue is that
+// adding a target is a reviewable edit to a named allowlist. The contract
+// selfcheck asserts these strings still match the controllers.
 //
 // An edge operation may reach NOTHING that is not in this file.
+//
+// This is the ONLY copy. The former src/registry/ duplicate was removed in the
+// edge homogenisation (docs/architecture/EDGE-GATEWAY-ARCHITECTURE.md): two
+// frozen copies of an allowlist is one allowlist too many, because a reviewer
+// can approve an edit to the copy nothing reads.
 // ══════════════════════════════════════════════════════════════════
 
 /** The four upstream services the edge composes. There is no fifth. */
@@ -55,7 +59,6 @@ export const UPSTREAM = Object.freeze({
   applicantLogout: op('applicantLogout', 'identity', 'POST', '/v1/applicants/auth/logout', 'applicant-opaque'),
   myApplications: op('myApplications', 'identity', 'GET', '/v1/applicants/me/applications', 'applicant-opaque'),
   myWithdraw: op('myWithdraw', 'identity', 'POST', '/v1/applicants/me/applications/withdraw', 'applicant-opaque'),
-
   // identity-service — erasure-request.controller.ts (session-authenticated half)
   myErasureRequestGet: op('myErasureRequestGet', 'identity', 'GET', '/v1/applicants/me/erasure-request', 'applicant-opaque'),
   myErasureRequestFile: op('myErasureRequestFile', 'identity', 'POST', '/v1/applicants/me/erasure-request', 'applicant-opaque'),

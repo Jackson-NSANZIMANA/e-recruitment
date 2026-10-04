@@ -5,32 +5,21 @@
 //
 // It does not indicate that the National ID exists, that a citizen record was
 // found, or that an SMS was sent. Any of those would make this an
-// unauthenticated national-identity enumeration oracle: submit a candidate NID,
-// read the response, learn whether a real citizen is behind it. At national
-// scale on a public endpoint that is a bulk PII disclosure channel.
+// unauthenticated national-identity enumeration oracle. So the 202 body is
+// byte-identical for every input the edge accepts, and the ONLY 400 is a
+// structurally invalid National ID. Rate limiting is a correctness requirement
+// here rather than hardening: without it the silence still leaks by timing and
+// volume — and in production the counters are SHARED across replicas.
 //
-// So the 202 body is byte-identical for every input the edge accepts, and the
-// ONLY 400 is a structurally invalid National ID — never "well-formed but
-// unknown", which would restore the oracle. Rate limiting is a correctness
-// requirement here rather than hardening: without it the silence still leaks by
-// timing and volume.
-//
-// CHANNEL IS SERVER-SET. The upstream channel vocabulary is
-// WEB | USSD | IREMBO_KIOSK | WALK_IN, and only one of those describes a
-// browser. USSD arrives from a telco gateway and IREMBO_KIOSK from a kiosk
-// integration — neither is a claim a web client gets to make about itself, so
-// `channel` is not in the request schema at all.
+// CHANNEL IS SERVER-SET. Only WEB describes a browser; USSD arrives from a telco
+// gateway and IREMBO_KIOSK from a kiosk integration, so `channel` is not in the
+// request schema at all.
 // ══════════════════════════════════════════════════════════════════
 
 import { HttpError, type RouteHandler } from '@usrp/shared-http';
-import { auditEdge } from '../../observability/audit-log.js';
-import { UPSTREAM } from '../../registry/upstream-operations.js';
-import { clearedCookies, sessionCookies } from '../../security/cookies.js';
-import {
-  assertWithinLimit,
-  clientBucketKey,
-  targetBucketKey,
-} from '../../security/rate-limiter.js';
+import { UPSTREAM } from '../../domain/upstream-operations.js';
+import { clearedCookies, sessionCookies } from './cookies.js';
+import { clientBucketKey, enforceRateLimit, targetBucketKey } from './rate-limit.js';
 import { field } from './projections.js';
 import { CREDENTIAL_REJECTED } from './outcomes.js';
 import { withAnonymous, withOptionalSession, type EdgeDeps } from './guards.js';
@@ -47,17 +36,12 @@ export function requestApplicantOtpHandler(deps: EdgeDeps): RouteHandler {
 
     const limits = deps.config.rateLimits;
     const key = deps.config.session.handleHmacKey;
-    // The target key is a KEYED HASH of the National ID. A national identifier
-    // must not sit in process memory as a plaintext map index — a heap dump is a
-    // real disclosure channel.
-    assertWithinLimit(
-      deps.limiter.check(targetBucketKey(key, 'otp', nationalId), limits.otpPerMinute),
-    );
-    assertWithinLimit(
-      deps.limiter.check(
-        `${clientBucketKey(ctx, limits.trustedProxyHops)}:otp`,
-        limits.otpPerMinute,
-      ),
+    // The target key is a KEYED HASH of the National ID — never a plaintext index.
+    await enforceRateLimit(deps.limiter, targetBucketKey(key, 'otp', nationalId), limits.otpPerMinute);
+    await enforceRateLimit(
+      deps.limiter,
+      `${clientBucketKey(ctx, limits.trustedProxyHops)}:otp`,
+      limits.otpPerMinute,
     );
 
     const upstream = await deps.upstream.call({
@@ -66,8 +50,7 @@ export function requestApplicantOtpHandler(deps: EdgeDeps): RouteHandler {
       body: { nationalId, channel: BROWSER_CHANNEL },
     });
 
-    // ONE body, whatever happened. 202 upstream, 404-shaped internals, a citizen
-    // who does not exist — all indistinguishable from here.
+    // ONE body, whatever happened.
     if (upstream.status === 202 || upstream.status === 200) {
       return { status: 202, body: { accepted: true } };
     }
@@ -92,14 +75,15 @@ export function verifyApplicantOtpHandler(deps: EdgeDeps): RouteHandler {
 
     const limits = deps.config.rateLimits;
     const key = deps.config.session.handleHmacKey;
-    assertWithinLimit(
-      deps.limiter.check(targetBucketKey(key, 'otpVerify', nationalId), limits.otpPerMinute),
+    await enforceRateLimit(
+      deps.limiter,
+      targetBucketKey(key, 'otpVerify', nationalId),
+      limits.otpPerMinute,
     );
-    assertWithinLimit(
-      deps.limiter.check(
-        `${clientBucketKey(ctx, limits.trustedProxyHops)}:otpVerify`,
-        limits.otpPerMinute,
-      ),
+    await enforceRateLimit(
+      deps.limiter,
+      `${clientBucketKey(ctx, limits.trustedProxyHops)}:otpVerify`,
+      limits.otpPerMinute,
     );
 
     const upstream = await deps.upstream.call({
@@ -116,9 +100,8 @@ export function verifyApplicantOtpHandler(deps: EdgeDeps): RouteHandler {
       return { status: 502, body: { error: 'UPSTREAM_CONTRACT_MISMATCH' } };
     }
 
-    // No subjectId and no agency. The edge never learns WHO the citizen is — the
-    // opaque token is the whole of what it holds — and a citizen is cross-agency
-    // by construction (ADR-014, ADR-018), so ApplicantSession has no agency.
+    // No subjectId and no agency. The edge never learns WHO the citizen is, and
+    // a citizen is cross-agency by construction (ADR-014, ADR-018).
     const issued = await deps.sessions.create(
       {
         kind: 'applicant',
@@ -131,7 +114,7 @@ export function verifyApplicantOtpHandler(deps: EdgeDeps): RouteHandler {
       deps.now(),
     );
 
-    auditEdge({
+    deps.audit.log({
       action: 'EDGE_SESSION_ISSUED',
       operationId: 'verifyApplicantOtp',
       correlationId: ctx.correlationId,
@@ -148,13 +131,8 @@ export function verifyApplicantOtpHandler(deps: EdgeDeps): RouteHandler {
 
 /**
  * Citizen logout. Revokes the opaque token UPSTREAM and destroys the edge
- * handle. ADR-018 chose a revocable token precisely so a stolen session could be
- * killed; only clearing the cookie would waste that property.
- *
- * Idempotent by contract, so a missing session is a 204. An upstream revoke
- * failure is also a 204: the edge handle is already gone, which is the half the
- * browser can actually use, and telling a user their logout failed would invite
- * them to leave the page believing they are still signed in.
+ * handle. Idempotent by contract; an upstream revoke failure is still a 204,
+ * because the edge handle (the half the browser can use) is already gone.
  */
 export function logoutApplicantHandler(deps: EdgeDeps): RouteHandler {
   return withOptionalSession(deps, 'logoutApplicant', async (ctx, session) => {
@@ -167,18 +145,18 @@ export function logoutApplicantHandler(deps: EdgeDeps): RouteHandler {
             credential: session.upstreamCredential,
           });
         } catch (err) {
-          console.error(
-            JSON.stringify({
-              msg: 'edge_applicant_upstream_revoke_failed',
+          deps.audit.fault(
+            {
+              event: 'EDGE_APPLICANT_UPSTREAM_REVOKE_FAILED',
               correlationId: ctx.correlationId,
               sessionId: session.sessionId,
-            }),
+            },
             err,
           );
         }
       }
       await deps.sessions.revoke(session.sessionId, 'applicant_logout', deps.now());
-      auditEdge({
+      deps.audit.log({
         action: 'EDGE_SESSION_DESTROYED',
         operationId: 'logoutApplicant',
         correlationId: ctx.correlationId,

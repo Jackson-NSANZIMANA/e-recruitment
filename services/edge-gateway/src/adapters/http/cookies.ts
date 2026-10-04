@@ -1,5 +1,5 @@
 // ══════════════════════════════════════════════════════════════════
-// edge-gateway — The two cookies, and nothing else
+// edge-gateway — The two cookies, and nothing else (HTTP adapter)
 //
 //   session   opaque handle. httpOnly. No script may read it. This IS the
 //             credential, and it is not one the browser can understand.
@@ -12,6 +12,8 @@
 // one rather than let auth fail invisibly. Production is same-origin over TLS
 // and uses the prefix; local development over http uses the `_dev` names, which
 // is exactly what the frontend's edge-client tries.
+//
+// (Moved from src/security/cookies.ts: cookies are an HTTP transport concern.)
 // ══════════════════════════════════════════════════════════════════
 
 import type { SetCookie } from '@usrp/shared-http';
@@ -86,8 +88,7 @@ export function clearedCookies(policy: CookiePolicy): readonly SetCookie[] {
  * This is what makes the anonymous 401 from `GET /edge/v1/session` useful rather
  * than merely correct: the SPA calls that route on mount, and without a CSRF
  * cookie in hand the very first login could not carry the `x-csrf-token` the
- * contract requires it to carry. "CSRF required on login" would be
- * unimplementable by an honest client.
+ * contract requires it to carry.
  */
 export function anonymousProbeCookies(policy: CookiePolicy, csrfToken: string): readonly SetCookie[] {
   return [sessionCookie(policy, '', true), csrfCookie(policy, csrfToken, false)];

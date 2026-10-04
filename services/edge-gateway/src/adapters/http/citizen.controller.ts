@@ -1,23 +1,22 @@
 // ══════════════════════════════════════════════════════════════════
 // edge-gateway — Citizen self-service
 //
-// SCOPED BY THE SESSION, NEVER BY A PARAMETER. There is no way to ask for
-// someone else's applications because there is nothing to ask with: the edge
-// forwards the citizen's own opaque token and identity-service resolves the
-// subject from it inside the read.
+// SCOPED BY THE SESSION, NEVER BY A PARAMETER. There is no way to ask for, or
+// act on, someone else's applications because there is nothing to ask with:
+// the edge forwards the citizen's own opaque token and identity-service
+// resolves the subject from it inside the read or write.
 //
-// Cross-agency by construction — the upstream read unions all three ops schemas,
-// which is why ApplicantSession carries no agency and why a UI asking a citizen
-// to "choose your agency portal" would be modelling the officer's world.
+// Cross-agency by construction — which is why ApplicantSession carries no
+// agency and why a UI asking a citizen to "choose your agency portal" would be
+// modelling the officer's world. The agency of a NEW application is derived
+// server-side from its category (agencyForCategory), never accepted as input.
 //
-// NO FORENSIC SIGNAL REACHES THIS SURFACE. The citizen projection has no field
-// for a lane, a score or a flag. A score handed to the person who uploaded the
-// file is a forgery-tuning oracle: edit, re-upload, watch the number move,
-// repeat until GREEN.
+// NO FORENSIC SIGNAL REACHES THIS SURFACE. A score handed to the person who
+// uploaded the file is a forgery-tuning oracle.
 // ══════════════════════════════════════════════════════════════════
 
 import type { RouteHandler } from '@usrp/shared-http';
-import { UPSTREAM } from '../../registry/upstream-operations.js';
+import { UPSTREAM } from '../../domain/upstream-operations.js';
 import { field, projectMyApplications } from './projections.js';
 import { NOT_FOUND, conflictResult } from './outcomes.js';
 import { withApplicantSession, type EdgeDeps } from './guards.js';
@@ -43,15 +42,10 @@ export function listMyApplicationsHandler(deps: EdgeDeps): RouteHandler {
 }
 
 /**
- * Withdraw one's own application.
+ * Withdraw one's own application. Ownership is enforced UPSTREAM, inside the
+ * write transaction, against the session subject — not against a body field.
  *
- * Ownership is enforced UPSTREAM, inside the write transaction, against the
- * session subject — not against a body field. The edge cannot weaken that and
- * does not try to.
- *
- * `reason` is accepted and NOT forwarded: the upstream route has no such field,
- * so a reason a citizen typed would be silently discarded. It is dropped from
- * the edge contract rather than pretended at — see the reconciliation record.
+ * `reason` is validated and NOT forwarded: the upstream route has no such field.
  */
 export function withdrawMyApplicationHandler(deps: EdgeDeps): RouteHandler {
   return withApplicantSession(deps, 'withdrawMyApplication', async (ctx, session) => {
@@ -76,8 +70,6 @@ export function withdrawMyApplicationHandler(deps: EdgeDeps): RouteHandler {
         body: {
           applicationId,
           outcome: typeof status === 'string' ? status : 'WITHDRAWN',
-          // The citizen's OWN application, so naming its agency discloses
-          // nothing they do not already know.
           agency: typeof agency === 'string' ? agency : null,
           fromStatus: field(upstream.body, 'fromStatus') ?? null,
         },
@@ -91,11 +83,8 @@ export function withdrawMyApplicationHandler(deps: EdgeDeps): RouteHandler {
 }
 
 /**
- * Erasure-request status (Law N° 058/2021 data-subject right).
- *
- * The upstream 404 becomes a 200 `{ exists: false }`. "You have no open request"
- * is an ANSWER, not a missing resource, and a 404 would send an SPA's error
- * boundary down a failure path for the normal case.
+ * Erasure-request status (Law N° 058/2021 data-subject right). The upstream 404
+ * becomes a 200 `{ exists: false }`: "you have no open request" is an ANSWER.
  */
 export function getMyErasureRequestHandler(deps: EdgeDeps): RouteHandler {
   return withApplicantSession(deps, 'getMyErasureRequest', async (ctx, session) => {
@@ -115,7 +104,6 @@ export function getMyErasureRequestHandler(deps: EdgeDeps): RouteHandler {
         status: field(upstream.body, 'status') ?? null,
         filedAt: field(upstream.body, 'requestedAt') ?? null,
         decidedAt: field(upstream.body, 'decidedAt') ?? null,
-        // The ground is the citizen's to see — it answers THEIR demand.
         decisionNote: field(upstream.body, 'decisionNote') ?? null,
       },
     };
@@ -125,8 +113,7 @@ export function getMyErasureRequestHandler(deps: EdgeDeps): RouteHandler {
 /** File an erasure request. 202 both ways — erasure is adjudicated, not immediate. */
 export function fileMyErasureRequestHandler(deps: EdgeDeps): RouteHandler {
   return withApplicantSession(deps, 'fileMyErasureRequest', async (ctx, session) => {
-    // The upstream intake takes no body; filing is idempotent (a live request is
-    // returned, not duplicated). A body is accepted and not forwarded.
+    // The upstream intake takes no body; filing is idempotent upstream.
     const upstream = await deps.upstream.call({
       operation: UPSTREAM.myErasureRequestFile,
       correlationId: ctx.correlationId,
