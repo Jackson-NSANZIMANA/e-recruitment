@@ -217,7 +217,35 @@ async function main(): Promise<void> {
   const manifest = JSON.parse(readFileSync(MANIFEST_PATH, 'utf8')) as {
     readonly artefacts: readonly Artefact[];
   };
+
+  // The manifest cannot be its own authority. Every check below reads the
+  // manifest and asks "is this artefact still intact?" — so deleting an
+  // ENTRY, rather than the file it guards, removes the question instead of
+  // failing it, and the slice can be dismantled one green run at a time.
+  // The expected roster therefore lives HERE, in the proof, where weakening
+  // it is a visible code change to a file the gate runs.
+  const EXPECTED_ARTEFACTS = [
+    'migration', 'bootstrap-registration', 'drizzle-mirror', 'drizzle-mirror-export',
+    'drizzle-snapshot', 'request-hash', 'ledger-port', 'ledger-adapter',
+    'insert-primitives', 'use-case', 'http-adapter', 'composition-root',
+    'walk-in-port', 'walk-in-adapter', 'walk-in-http', 'ops-mirror-note-rdf',
+    'ops-mirror-note-rnp', 'ops-mirror-note-rcs', 'gate-registration',
+    'ci-registration', 'adr', 'slice-doc', 'walk-in-outbox-migration',
+    'walk-in-service-staging', 'walk-in-atomicity-proof',
+  ] as const;
+
+  const declared = manifest.artefacts.map((a) => a.id);
+  const absent = EXPECTED_ARTEFACTS.filter((id) => !declared.includes(id));
+  const unexpected = declared.filter((id) => !(EXPECTED_ARTEFACTS as readonly string[]).includes(id));
   check('manifest declares artefacts', manifest.artefacts.length > 0);
+  check(`manifest still declares all ${String(EXPECTED_ARTEFACTS.length)} expected artefacts`,
+    absent.length === 0, absent.length > 0 ? `dropped: ${absent.join(', ')}` : '');
+  // Not an error — but a new artefact must be added to the roster above
+  // deliberately, so an unrecognised id is reported rather than absorbed.
+  check('manifest declares no artefact the proof does not know about',
+    unexpected.length === 0, unexpected.length > 0 ? `unlisted: ${unexpected.join(', ')}` : '');
+  check('no duplicate artefact ids (a duplicate would mask a dropped one)',
+    new Set(declared).size === declared.length);
   for (const artefact of manifest.artefacts) {
     let content: string | null = null;
     try {

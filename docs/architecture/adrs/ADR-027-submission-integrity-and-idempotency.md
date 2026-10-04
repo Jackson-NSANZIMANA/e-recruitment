@@ -262,6 +262,80 @@ answer currently depends on which other campaigns happen to be open, so
 asserting it would pin down an accident of fixture ordering rather than a
 property of this slice.
 
+## A second defect: this ADR made a pre-existing outbox gap dangerous
+
+ADR-025 gave the digital front door a transactional outbox. The walk-in lane
+never got one. The officer's transaction committed the application row and its
+history row; the service then published `APPLICANT_SUBMITTED` on the bus
+**after** the commit returned. A crash, a pod eviction or a broker timeout in
+that window left a durable application that the autonomous age, academic and
+criminal gates had never been told about — a candidate registered at the venue
+and never vetted, with no error anywhere to say so.
+
+That gap predates this ADR. What this ADR did was remove the accident that had
+been concealing it. **Before** the live-intent index, an officer who saw no
+confirmation and registered the candidate again filed a *second* application,
+and that second attempt published its event — an ugly recovery, but a recovery.
+**After** it, the retry is correctly refused `409 ALREADY_APPLIED`, naming the
+application already on file. The officer sees a row that exists and concludes
+the registration worked. It did; the announcement did not. The duplicate guard
+turned a self-healing failure into a permanent one, so shipping the guard
+without closing the gap would have been a net regression for the lane.
+
+### Why the fix needed a migration
+
+Staging into the outbox inside the officer's transaction was a permission
+error: `rls/0020` granted the outbox to `usrp_system_service` alone, and
+walk-in writes deliberately run as `usrp_rdf_officer`. That role **is** the
+cross-agency isolation mechanism — it holds no grant on `rnp_ops` or
+`rcs_ops`, so the engine, not application code, prevents a field officer from
+reaching a sibling agency's applications. Switching the write to the system
+role to dodge the grant would have traded an engine-enforced guarantee for a
+code-enforced one, to avoid writing eight lines of SQL.
+
+`rls/0023` instead grants the three officer roles exactly what the lane needs:
+`INSERT` and nothing else, under a policy with **no `USING` clause** — so an
+officer session can stage an event and cannot read a single outbox row back,
+not even the one it just wrote — and a `WITH CHECK` that pins `producer` so a
+session cannot stage a row attributed to another service.
+
+### Proving atomicity, and an instrument that lied
+
+The obvious assertion — "the outbox rows exist after registering" — is
+satisfied by the very design being replaced: commit, then stage in a second
+transaction. It cannot tell *announced* from *announced atomically*.
+
+The first instrument tried was `xmin`: Postgres stamps every row with the id
+of the transaction that wrote it, so equal `xmin` across two tables means one
+transaction wrote both. The assertion failed on correct code. The reason is
+that the post-commit fast path `UPDATE`s each row to stamp `published_at`, and
+an `UPDATE` creates a new row version with a new `xmin` — the instrument was
+measuring the dispatcher, not the write. Two probes in §1b of
+`verify-walk-in-slice.ts` now drive `PgWalkInRepository` directly, with no
+dispatcher in the way:
+
+- **Rollback.** A `StageEvents` callback that throws. Staging runs *last*, so
+  every state write has already succeeded; if the two were in separate
+  transactions the application would survive. The probe asserts it does not,
+  and asserts the failure it caught is *its own injected one* — an earlier
+  revision passed an invalid category enum by mistake, threw for that reason,
+  and went green without exercising staging at all. A rollback proof that
+  cannot name the failure that rolled the write back is not a rollback proof.
+- **`xmin` equality**, now valid because nothing has rewritten the rows.
+
+Both were confirmed load-bearing by disabling the `stageEvents` call and
+watching them turn red — the rollback probe reporting the orphaned application
+directly.
+
+### The manifest could delete its own questions
+
+§0 of `verify-submission-integrity.ts` walked the manifest and asked, for each
+declared artefact, whether it was still intact. Removing an *entry* therefore
+removed a question instead of failing one, and the slice could have been
+dismantled one green run at a time. The expected roster and its exact count
+now live in the proof, where weakening them is a visible change to a file the
+gate runs; duplicate and unrecognised ids are reported too.
+
 ## Not done here
 
 1. **Ledger retention.** Rows are permanent today. They are PII-free

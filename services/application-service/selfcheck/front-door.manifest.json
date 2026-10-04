@@ -33,8 +33,8 @@
     {
       "id": "bootstrap-registration",
       "path": "scripts/bootstrap-db.sh",
-      "role": "The migration runs on every bootstrap, in the canonical order.",
-      "mustContain": ["0022_submission_integrity.sql"]
+      "role": "Both migrations run on every bootstrap, in the canonical order.",
+      "mustContain": ["0022_submission_integrity.sql", "0023_walk_in_outbox.sql"]
     },
     {
       "id": "drizzle-mirror",
@@ -105,14 +105,14 @@
     {
       "id": "walk-in-port",
       "path": "services/application-service/src/ports/walk-in-repository.ts",
-      "role": "The on-site lane answers duplicates instead of faulting.",
-      "mustContain": ["CreateWalkInOutcome", "ALREADY_APPLIED"]
+      "role": "The on-site lane answers duplicates instead of faulting, and its write takes a StageEvents callback.",
+      "mustContain": ["CreateWalkInOutcome", "ALREADY_APPLIED", "StageEvents"]
     },
     {
       "id": "walk-in-adapter",
       "path": "services/application-service/src/adapters/walk-in.pg-repository.ts",
-      "role": "Classifies the live-intent refusal on the officer's write path.",
-      "mustContain": ["isLiveIntentViolation", "ALREADY_APPLIED"]
+      "role": "Classifies the live-intent refusal on the officer's write path, and stages the lane's events inside that same transaction.",
+      "mustContain": ["isLiveIntentViolation", "ALREADY_APPLIED", "stageEvents"]
     },
     {
       "id": "walk-in-http",
@@ -161,6 +161,24 @@
       "path": "docs/architecture/submission-integrity-slice.md",
       "role": "How to run the proof and what each section establishes.",
       "mustContain": ["verify-submission-integrity.ts"]
+    },
+    {
+      "id": "walk-in-outbox-migration",
+      "path": "packages/shared-database/src/rls/0023_walk_in_outbox.sql",
+      "role": "Grants the officer roles INSERT on the outbox so the walk-in write can stage its own events. Without it the staging call is a permission error and the lane silently reverts to announcing after commit.",
+      "mustContain": ["GRANT INSERT ON public_core.event_outbox", "pc_event_outbox_officer_stage", "usrp_rdf_officer"]
+    },
+    {
+      "id": "walk-in-service-staging",
+      "path": "services/application-service/src/application/walk-in.service.ts",
+      "role": "Mints both envelopes BEFORE the write so the staged row and the dispatched object are one event, then dispatches post-commit through the outbox dispatcher rather than the bare bus.",
+      "mustContain": ["buildEvents", "submittedEnvelope", "events.dispatch"]
+    },
+    {
+      "id": "walk-in-atomicity-proof",
+      "path": "services/application-service/selfcheck/verify-walk-in-slice.ts",
+      "role": "Proves the application row and its outbox row share one transaction id, and that an injected staging failure rolls the entire write back.",
+      "mustContain": ["outboxRowsFor", "applicationXmin", "injected staging failure"]
     }
   ]
 }

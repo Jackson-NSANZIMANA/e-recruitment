@@ -27,6 +27,7 @@ import type {
   ApplicationStatus,
 } from '@usrp/shared-types';
 import type { OfficerActor } from './officer-transition-repository.js';
+import type { StageEvents } from './event-outbox.js';
 
 export interface CreateWalkInInput {
   readonly actor: OfficerActor;
@@ -89,6 +90,9 @@ export interface WalkInRepository {
    * when the engine's live-intent index refuses a second live application
    * for this (applicant, campaign, category).
    */
-  createWalkInApplication(input: CreateWalkInInput): Promise<CreateWalkInOutcome>;
+  createWalkInApplication(
+    input: CreateWalkInInput,
+    stage: StageEvents<CreateWalkInResult>,
+  ): Promise<CreateWalkInOutcome>;
   vetOnSite(input: VetOnSiteInput): Promise<VetOnSiteOutcome>;
 }

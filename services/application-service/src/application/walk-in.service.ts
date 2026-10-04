@@ -32,9 +32,14 @@ import {
 } from '@usrp/shared-types';
 import { dbRoleForPrincipal, type Principal } from '@usrp/shared-auth';
 import { resolveAcademicInputs } from '../domain/academic-input.js';
+import type { EventDispatcher } from '../ports/event-outbox.js';
 import type { IdentityReader } from '../ports/identity-reader.js';
 import type { CampaignReader } from '../ports/campaign-reader.js';
-import type { VetOnSiteOutcome, WalkInRepository } from '../ports/walk-in-repository.js';
+import type {
+  CreateWalkInResult,
+  VetOnSiteOutcome,
+  WalkInRepository,
+} from '../ports/walk-in-repository.js';
 import type { OfficerActor } from '../ports/officer-transition-repository.js';
 
 /** Agencies whose ops schema models the walk-in lane (rdf_ops only, verified). */
@@ -92,6 +97,15 @@ export interface WalkInDeps {
   readonly identityReader: IdentityReader;
   readonly campaignReader: CampaignReader;
   readonly repository: WalkInRepository;
+  /**
+   * Post-commit dispatch of events the WRITE already staged in the outbox
+   * (ADR-025). A latency optimisation only — the relay is the guarantee.
+   */
+  readonly events: EventDispatcher;
+  /**
+   * Direct bus publish, still used by vetOnSite, whose writes do not yet
+   * stage. Registration no longer uses it.
+   */
   readonly eventBus: EventBus;
 }
 
@@ -140,15 +154,59 @@ export class WalkInService {
     //    on-site ticket the physical-test capture will bind scores to (same
     //    opaque shape as the scheduled lane's QR ticket id).
     const qrInvitationCode = randomBytes(32).toString('base64url');
-    const created = await this.#deps.repository.createWalkInApplication({
-      actor,
-      applicantId: command.applicantId,
-      campaignId: campaign.campaignId,
-      category: command.category,
-      nesaIndexNumber: academic.resolved.nesaIndexNumber,
-      hecRegistrationNumber: academic.resolved.hecRegistrationNumber,
-      qrInvitationCode,
+
+    // Envelopes are minted HERE, before the write, because a StageEvents
+    // callback must be pure: the row staged inside the transaction and the
+    // object dispatched after commit have to be the same event with the same
+    // eventId, or the relay and the fast path would deliver two.
+    const submittedEnvelope = newEnvelope(context);
+    const auditEnvelope = newEnvelope(context);
+
+    const buildEvents = (
+      result: CreateWalkInResult,
+    ): { submitted: ApplicantSubmittedEvent; audit: AuditEvent } => ({
+      // The SAME event as the digital front door (channel WALK_IN), so the
+      // autonomous age/academic/criminal gates fire unchanged.
+      submitted: {
+        ...submittedEnvelope,
+        eventType: 'APPLICANT_SUBMITTED',
+        applicantId: command.applicantId,
+        applicationId: result.applicationId,
+        nationalIdHash: identity.nationalIdHash,
+        agency,
+        category: command.category,
+        channel: 'WALK_IN',
+        nesaIndexNumber: academic.resolved.nesaIndexNumber,
+        hecRegistrationNumber: academic.resolved.hecRegistrationNumber,
+      },
+      audit: {
+        ...auditEnvelope,
+        eventType: 'AUDIT_ENTRY',
+        entityType: 'APPLICATION',
+        entityId: result.applicationId,
+        action: 'WALK_IN_REGISTERED',
+        performedBy: command.actor.subjectId,
+        agency,
+        newStatus: 'WALK_IN_REGISTERED',
+        metadata: { category: command.category, processingCode: result.processingCode },
+      },
     });
+
+    const created = await this.#deps.repository.createWalkInApplication(
+      {
+        actor,
+        applicantId: command.applicantId,
+        campaignId: campaign.campaignId,
+        category: command.category,
+        nesaIndexNumber: academic.resolved.nesaIndexNumber,
+        hecRegistrationNumber: academic.resolved.hecRegistrationNumber,
+        qrInvitationCode,
+      },
+      (result) => {
+        const { submitted, audit } = buildEvents(result);
+        return [submitted, audit];
+      },
+    );
 
     // Duplicate: no row, no ticket, no event, no audit of a registration that
     // did not happen. The officer is handed the application already on file.
@@ -160,35 +218,13 @@ export class WalkInService {
       };
     }
 
-    // 5. Announce it — the SAME event as the digital front door (channel
-    //    WALK_IN), so the autonomous age/academic/criminal gates fire
-    //    unchanged. Published only after durable persistence.
-    const event: ApplicantSubmittedEvent = {
-      ...newEnvelope(context),
-      eventType: 'APPLICANT_SUBMITTED',
-      applicantId: command.applicantId,
-      applicationId: created.applicationId,
-      nationalIdHash: identity.nationalIdHash,
-      agency,
-      category: command.category,
-      channel: 'WALK_IN',
-      nesaIndexNumber: academic.resolved.nesaIndexNumber,
-      hecRegistrationNumber: academic.resolved.hecRegistrationNumber,
-    };
-    await this.#deps.eventBus.publish(event);
-
-    const audit: AuditEvent = {
-      ...newEnvelope(context),
-      eventType: 'AUDIT_ENTRY',
-      entityType: 'APPLICATION',
-      entityId: created.applicationId,
-      action: 'WALK_IN_REGISTERED',
-      performedBy: command.actor.subjectId,
-      agency,
-      newStatus: 'WALK_IN_REGISTERED',
-      metadata: { category: command.category, processingCode: created.processingCode },
-    };
-    await this.#deps.eventBus.publish(audit);
+    // 5. Announce it. Both events are ALREADY durable — they were staged in
+    //    the outbox by the transaction that created the application. This
+    //    dispatch is the latency fast path, not the delivery guarantee: if
+    //    the process dies right here, the relay picks the rows up and the
+    //    candidate still enters the vetting pipeline.
+    const { submitted: event, audit } = buildEvents(created);
+    await this.#deps.events.dispatch([event, audit]);
 
     return {
       kind: 'REGISTERED',

@@ -20,7 +20,8 @@
 
 import { createPublicKey, randomUUID } from 'node:crypto';
 import postgres from 'postgres';
-import { InMemoryEventBus } from '@usrp/shared-events';
+import { InMemoryEventBus, newCorrelationContext, newEnvelope } from '@usrp/shared-events';
+import type { AuditEvent } from '@usrp/shared-types';
 import { sql } from '@usrp/shared-database';
 import { startHttpServer } from '@usrp/shared-http';
 import { generateDeviceKeyPair } from '@usrp/shared-security';
@@ -30,6 +31,7 @@ import {
   loadApplicationConfig,
   officerTransitionRoutes,
   walkInRoutes,
+  PgWalkInRepository,
   WALK_IN_REGISTER_PATH,
   WALK_IN_VET_PATH,
   MEDICAL_REVIEW_PATH,
@@ -61,6 +63,11 @@ const NID_HASH = '6a6a6a6a'.repeat(8); // 64 hex
 const FAIL_APPLICANT_ID = '6a000000-0000-4000-8000-000000000002';
 const FAIL_NID_HASH = '6b6b6b6b'.repeat(8);
 const RDF_CAMPAIGN = '6a000000-0000-4000-8000-0000000000c1';
+// A third candidate, used ONLY by the direct-adapter atomicity probes in §1b.
+// They must not share an intent with the HTTP candidates above, because the
+// live-intent index is per (applicant, campaign, category).
+const ATOMIC_APPLICANT_ID = '6a000000-0000-4000-8000-000000000003';
+const ATOMIC_NID_HASH = '6a6a6a6c'.repeat(8);
 const RDF_OFFICER_ID = '6a000000-0000-4000-8000-00000000ff01';
 const RNP_OFFICER_ID = '6a000000-0000-4000-8000-00000000ff02';
 const DEVICE_ID = 'walkin-selfcheck-tablet-1';
@@ -91,14 +98,20 @@ function mint(kind: 'officer' | 'system', opts: { agency?: 'RDF' | 'RNP'; sub?: 
 async function cleanup(): Promise<void> {
   await admin.begin(async (tx) => {
     await tx`SET LOCAL session_replication_role = replica`;
+    // The walk-in lane now stages its events transactionally (rls/0023), so
+    // this proof leaves outbox rows behind. Clear them FIRST, while the
+    // application ids they reference are still resolvable.
+    await tx`DELETE FROM public_core.event_outbox
+             WHERE payload->>'applicationId' IN (SELECT id::text FROM rdf_ops.applications WHERE campaign_id = ${RDF_CAMPAIGN})
+                OR payload->>'entityId'      IN (SELECT id::text FROM rdf_ops.applications WHERE campaign_id = ${RDF_CAMPAIGN})`;
     await tx`DELETE FROM rdf_ops.physical_test_scores WHERE application_id IN (SELECT id FROM rdf_ops.applications WHERE campaign_id = ${RDF_CAMPAIGN})`;
     await tx`DELETE FROM rdf_ops.application_status_history WHERE application_id IN (SELECT id FROM rdf_ops.applications WHERE campaign_id = ${RDF_CAMPAIGN})`;
     await tx`DELETE FROM rdf_ops.applications WHERE campaign_id = ${RDF_CAMPAIGN}`;
     await tx`DELETE FROM public_core.recruitment_campaigns WHERE id = ${RDF_CAMPAIGN}`;
     await tx`DELETE FROM public_core.submission_requests
-             WHERE applicant_id IN ${tx([APPLICANT_ID, FAIL_APPLICANT_ID])}`;
+             WHERE applicant_id IN ${tx([APPLICANT_ID, FAIL_APPLICANT_ID, ATOMIC_APPLICANT_ID])}`;
     await tx`DELETE FROM public_core.applicant_identities
-             WHERE id IN ${tx([APPLICANT_ID, FAIL_APPLICANT_ID])}`;
+             WHERE id IN ${tx([APPLICANT_ID, FAIL_APPLICANT_ID, ATOMIC_APPLICANT_ID])}`;
   });
 }
 
@@ -117,6 +130,12 @@ async function seed(): Promise<void> {
         (id, national_id_hash, encrypted_full_name, encrypted_date_of_birth,
          encrypted_home_district, encrypted_home_province, gender, identity_status, registration_channel)
       VALUES (${FAIL_APPLICANT_ID}, ${FAIL_NID_HASH}, 'enc','enc','enc','enc','MALE','VERIFIED','WALK_IN')
+    `;
+    await tx`
+      INSERT INTO public_core.applicant_identities
+        (id, national_id_hash, encrypted_full_name, encrypted_date_of_birth,
+         encrypted_home_district, encrypted_home_province, gender, identity_status, registration_channel)
+      VALUES (${ATOMIC_APPLICANT_ID}, ${ATOMIC_NID_HASH}, 'enc','enc','enc','enc','MALE','VERIFIED','WALK_IN')
     `;
     // Exam-day campaign: registration CLOSED, examination window contains
     // today, walk-ins allowed — the walk-in campaign-resolution predicate.
@@ -145,6 +164,29 @@ async function historyRows(id: string): Promise<{ from_status: string | null; to
     SELECT from_status, to_status, performed_by
     FROM rdf_ops.application_status_history
     WHERE application_id = ${id} ORDER BY performed_at`;
+}
+
+/**
+ * Outbox rows this registration staged, with the transaction id that wrote
+ * them. xmin is the proof instrument: two rows in two different tables carry
+ * the same xmin if and only if ONE transaction wrote both.
+ */
+async function outboxRowsFor(applicationId: string): Promise<
+  { event_type: string; producer: string; published_at: Date | null; xmin: string }[]
+> {
+  return admin<{ event_type: string; producer: string; published_at: Date | null; xmin: string }[]>`
+    SELECT event_type, producer, published_at, xmin::text AS xmin
+    FROM public_core.event_outbox
+    WHERE payload->>'applicationId' = ${applicationId}
+       OR payload->>'entityId' = ${applicationId}
+    ORDER BY id`;
+}
+
+/** The transaction id that wrote the application row itself. */
+async function applicationXmin(id: string): Promise<string | undefined> {
+  const rows = await admin<{ xmin: string }[]>`
+    SELECT xmin::text AS xmin FROM rdf_ops.applications WHERE id = ${id}`;
+  return rows[0]?.xmin;
 }
 
 async function main(): Promise<void> {
@@ -219,6 +261,138 @@ async function main(): Promise<void> {
         submitted?.['channel'] === 'WALK_IN' && submitted?.['applicationId'] === appId, JSON.stringify(submitted));
       check('AUDIT_ENTRY WALK_IN_REGISTERED attributed to officer',
         bus.published.some((e) => e.eventType === 'AUDIT_ENTRY' && (e as unknown as Record<string, unknown>)['action'] === 'WALK_IN_REGISTERED' && (e as unknown as Record<string, unknown>)['performedBy'] === RDF_OFFICER_ID));
+
+      // ── The events are DURABLE, not merely published ──────────────
+      //
+      // The two assertions above are satisfied by a service that writes the
+      // application, commits, and only then publishes to the bus — which is
+      // exactly the defect ADR-025/027 and rls/0023 close. An in-memory bus
+      // count cannot tell "announced" from "announced durably": it is written
+      // by the same process that would die in the gap. So read the committed
+      // outbox instead.
+      const staged = await outboxRowsFor(appId);
+      check('both events are COMMITTED in public_core.event_outbox (survive a crash here)',
+        staged.length === 2
+        && staged.some((r) => r.event_type === 'APPLICANT_SUBMITTED')
+        && staged.some((r) => r.event_type === 'AUDIT_ENTRY'),
+        JSON.stringify(staged));
+      check('staged under the application-service producer (relay will claim them)',
+        staged.length > 0 && staged.every((r) => r.producer === 'application-service'),
+        JSON.stringify(staged.map((r) => r.producer)));
+
+      check('the post-commit fast path marked them delivered (relay has nothing left to do)',
+        staged.every((r) => r.published_at !== null), JSON.stringify(staged.map((r) => r.published_at)));
+
+      // The officer role may WRITE the outbox and must not READ it: rls/0023
+      // grants INSERT only, under a policy with no USING clause.
+      let officerCouldRead = true;
+      try {
+        await admin.begin(async (tx) => {
+          await tx`SET LOCAL ROLE usrp_rdf_officer`;
+          await tx`SELECT id FROM public_core.event_outbox LIMIT 1`;
+        });
+      } catch {
+        officerCouldRead = false;
+      }
+      check('officer role can stage events but cannot read the outbox back (rls/0023)',
+        !officerCouldRead);
+    }
+
+    // ══ 1b. Atomicity, proven at the adapter ══════════════════════
+    //
+    // §1 shows the outbox rows EXIST after a successful registration. That is
+    // necessary but not sufficient: a service that committed the application,
+    // then opened a second transaction to stage the events, would satisfy it
+    // and would still lose events to a crash in the gap. Two probes close
+    // that, both driving PgWalkInRepository directly — the post-commit
+    // dispatcher is deliberately not in the way, because it UPDATEs each row
+    // to stamp published_at and that rewrites the row version (and with it
+    // xmin), destroying the evidence of which transaction did the INSERT.
+    console.log('\n── 1b. The event and the application commit together ────────');
+    {
+      const repo = new PgWalkInRepository();
+      const atomicContext = newCorrelationContext();
+      const officer = {
+        officerId: RDF_OFFICER_ID,
+        agency: 'RDF' as const,
+        dbRole: 'usrp_rdf_officer' as const,
+        correlationId: atomicContext.correlationId,
+      };
+      const input = {
+        actor: officer,
+        applicantId: ATOMIC_APPLICANT_ID,
+        campaignId: RDF_CAMPAIGN,
+        category: 'GENERAL_ENLISTMENT' as const,
+        nesaIndexNumber: 'RW2024/1003',
+        hecRegistrationNumber: null,
+        qrInvitationCode: randomUUID().repeat(2).replace(/-/g, ''),
+      };
+
+      // Probe 1 — ROLLBACK. Staging is the LAST thing the write does, so a
+      // failure there is the worst case: every state write has already
+      // succeeded. If the two were in separate transactions the application
+      // would survive this. It must not.
+      const INJECTED = 'injected staging failure';
+      let caught: unknown;
+      try {
+        await repo.createWalkInApplication(input, () => {
+          throw new Error(INJECTED);
+        });
+      } catch (error) {
+        caught = error;
+      }
+      // Assert the INJECTED failure specifically. An earlier revision of this
+      // probe passed a bad category enum by mistake: the write threw, the
+      // assertion went green, and nothing about staging had been exercised.
+      // A rollback proof that cannot say WHICH failure rolled the write back
+      // is not a rollback proof.
+      const causeMessage =
+        caught instanceof Error && caught.cause instanceof Error ? caught.cause.message : '';
+      check('a failure while staging the event aborts the write — and it is OUR failure',
+        caught instanceof Error && causeMessage === INJECTED,
+        `${String(caught)} / cause: ${causeMessage}`);
+      const orphans = await admin<{ n: string }[]>`
+        SELECT count(*)::text AS n FROM rdf_ops.applications
+        WHERE applicant_id = ${ATOMIC_APPLICANT_ID}`;
+      check('…and leaves NO application behind (no silently unannounced candidate)',
+        orphans[0]?.n === '0', JSON.stringify(orphans));
+      const orphanHistory = await admin<{ n: string }[]>`
+        SELECT count(*)::text AS n FROM rdf_ops.application_status_history h
+        JOIN rdf_ops.applications a ON a.id = h.application_id
+        WHERE a.applicant_id = ${ATOMIC_APPLICANT_ID}`;
+      check('…and no orphan history row', orphanHistory[0]?.n === '0');
+
+      // Probe 2 — the positive case, with the dispatcher absent so xmin still
+      // records the INSERT. Postgres stamps each row with the id of the
+      // transaction that wrote it: equal xmin across two different tables
+      // means one transaction wrote both, which is precisely atomicity.
+      const atomicEnvelope = newEnvelope(atomicContext);
+      const minted = await repo.createWalkInApplication(input, (result) => {
+        const audit: AuditEvent = {
+          ...atomicEnvelope,
+          eventType: 'AUDIT_ENTRY',
+          entityType: 'APPLICATION',
+          entityId: result.applicationId,
+          action: 'WALK_IN_REGISTERED',
+          performedBy: RDF_OFFICER_ID,
+          agency: 'RDF',
+          newStatus: 'WALK_IN_REGISTERED',
+          metadata: { probe: 'atomicity' },
+        };
+        return [audit];
+      });
+      check('direct adapter write succeeds once staging does not fail',
+        minted.kind === 'REGISTERED', JSON.stringify(minted));
+
+      if (minted.kind === 'REGISTERED') {
+        const appXmin = await applicationXmin(minted.applicationId);
+        const rows = await outboxRowsFor(minted.applicationId);
+        check('the staged event is unpublished — nothing has rewritten the row',
+          rows.length === 1 && rows[0]?.published_at === null, JSON.stringify(rows));
+        check('application row and outbox row carry the SAME transaction id (atomic)',
+          appXmin !== undefined && rows.length === 1 && rows[0]?.xmin === appXmin,
+          `application xmin=${String(appXmin)} outbox xmin=${String(rows[0]?.xmin)}`);
+      }
     }
 
     // ══ 2. On-site vetting gates on the autonomous age verdict ═════

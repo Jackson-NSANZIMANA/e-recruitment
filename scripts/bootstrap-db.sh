@@ -168,8 +168,18 @@ apply_sql "${RLS_DIR}/0021_slot_reservations.sql" "rls/0021 (slot reservation le
 #     and TRUNCATE are revoked and RLS is FORCE'd.
 apply_sql "${RLS_DIR}/0022_submission_integrity.sql" "rls/0022 (submission integrity + request ledger)"
 
+# 23b. Walk-in outbox grant. ADR-025 gave the digital front door a
+#     transactional outbox; the walk-in lane could not use it because only
+#     usrp_system_service could INSERT, and walk-in writes run as the OFFICER
+#     role (that role IS the cross-agency isolation). rls/0023 grants the three
+#     officer roles INSERT — and only INSERT, under a producer-pinned policy
+#     with no USING clause, so an officer can stage an event and cannot read
+#     one back. Without it a registered candidate could be committed and never
+#     announced to the vetting pipeline.
+apply_sql "${RLS_DIR}/0023_walk_in_outbox.sql" "rls/0023 (walk-in transactional outbox grant)"
+
 printf '\n'
-ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts + applicant auth + erasure requests + stored contact + edge sessions + event outbox + slot reservations + submission integrity in place"
+ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts + applicant auth + erasure requests + stored contact + edge sessions + event outbox + slot reservations + submission integrity + walk-in outbox grant in place"
 
 # 24. Dev officer accounts (one per agency). A CONVENIENCE seed so the officer
 #     console / manual login smoke tests have real credentials to drive —

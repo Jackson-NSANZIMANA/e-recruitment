@@ -20,6 +20,7 @@ import { sql } from '@usrp/shared-database';
 import type { AgeEligibilityStatus, ApplicationStatus } from '@usrp/shared-types';
 import type {
   CreateWalkInInput,
+  CreateWalkInResult,
   CreateWalkInOutcome,
   VetOnSiteInput,
   VetOnSiteOutcome,
@@ -28,9 +29,14 @@ import type {
 import { ApplicationPersistenceError } from '../domain/application.errors.js';
 import { AGENCY_TARGET } from '../domain/agency-schema.js';
 import { findLiveApplication, isLiveIntentViolation } from './application-insert.js';
+import { stageEvents } from './outbox/pg-event-outbox.js';
+import type { StageEvents } from '../ports/event-outbox.js';
 
 export class PgWalkInRepository implements WalkInRepository {
-  async createWalkInApplication(input: CreateWalkInInput): Promise<CreateWalkInOutcome> {
+  async createWalkInApplication(
+    input: CreateWalkInInput,
+    stage: StageEvents<CreateWalkInResult>,
+  ): Promise<CreateWalkInOutcome> {
     const target = AGENCY_TARGET[input.actor.agency];
     const schema = sql(target.schema); // quoted identifier fragment
     const seqName = `${target.schema}.processing_code_seq`;
@@ -77,11 +83,20 @@ export class PgWalkInRepository implements WalkInRepository {
           )
         `;
 
-        return {
-          kind: 'REGISTERED' as const,
+        const created = {
           applicationId: row.id,
           processingCode: row.processing_code,
         };
+
+        // ADR-025/027: stage LAST, inside the officer's own transaction. The
+        // application, its history row and the event that announces it now
+        // commit together or not at all. rls/0023 is what lets the officer
+        // role reach the outbox at all; before it, this line was a permission
+        // error and the event had to be published after commit — the window
+        // in which a registered candidate could be lost to the pipeline.
+        await stageEvents(tx, stage(created));
+
+        return { kind: 'REGISTERED' as const, ...created };
       });
     } catch (cause) {
       if (cause instanceof ApplicationPersistenceError) throw cause;
