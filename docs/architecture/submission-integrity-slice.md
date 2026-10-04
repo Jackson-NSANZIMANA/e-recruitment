@@ -141,3 +141,50 @@ work that is present in the tree but absent from the gate — which is why
 rather than trusting that someone wired everything up.
 
 `verify-pipeline-e2e` still cannot run locally: it needs a Kafka broker.
+
+## The browser boundary, and the sweep it triggered
+
+The service returning `409 ALREADY_APPLIED` is not the same as an officer
+seeing it. Between them sits the edge gateway's per-outcome projection,
+`conflictResult`, which switches on known upstream statuses.
+`ALREADY_APPLIED` was not one of them, so it fell through the default and
+reached the tablet as `ILLEGAL_TRANSITION` with `applicationId` and
+`processingCode` dropped — a wrong label on an answer the officer could no
+longer act on, defeating the exact reason the service returns those fields.
+
+That was found by writing the assertion instead of trusting a reading of
+`upstream.http-gateway.ts`, which does relay `{ status, body }` verbatim —
+one layer below the projection that does not.
+
+Because one gap was found by accident, the whole upstream 409 vocabulary was
+then swept against the switch:
+
+| Upstream 409 | Edge mapping | Verdict |
+| --- | --- | --- |
+| `AGE_PENDING` | explicit, keeps `currentStatus` | correct |
+| `NO_CONFLICT` | explicit | correct |
+| `CROSS_AGENCY_LOCKED` | explicit, **strips** `lockedByAgency` | correct — naming another agency is an enumeration oracle |
+| `IDENTITY_NOT_VERIFIED` | explicit | correct |
+| `NO_WALK_IN_CAMPAIGN` | explicit, drops redundant `agency` | correct |
+| `ALREADY_APPLIED` | **was missing** → explicit, **keeps** identifiers | fixed here |
+| `NOT_APPLICABLE` | default → `ILLEGAL_TRANSITION` + `currentStatus` | correct, and deliberate |
+
+Exactly one real gap. `NOT_APPLICABLE` relies on the default but is right to:
+every one of its bodies carries `currentStatus` and nothing else the caller
+needs, and that is the single field the default preserves.
+
+The rule this produced, now recorded at the `default:` branch itself:
+
+> the default is correct only for a status whose entire information content is
+> *"wrong state, and here is the state"*. It is wrong for any status carrying
+> an identifier, an instruction, or anything the caller must act on.
+
+`ALREADY_APPLIED` and `CROSS_AGENCY_LOCKED` are the two poles of the same
+question and now sit next to each other in the file: one keeps its
+identifiers because they name the officer's own agency for a candidate in
+front of them; the other strips its holder because it names a sibling agency.
+§11 and §11b of `verify-edge-security.ts` hold both halves.
+
+The front door itself (`POST /v1/applications`) is not exposed through the
+edge yet, so `KEY_REUSED` and the online `ALREADY_APPLIED` need the same
+treatment when it is — see ADR-027 "Not done here", item 3.

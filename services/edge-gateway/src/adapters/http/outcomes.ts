@@ -108,6 +108,24 @@ export function conflictResult(body: unknown): HttpResult {
         },
       };
     default:
+      // Reaching this branch is a DECISION, not a fallback. ALREADY_APPLIED
+      // sat here by omission and arrived mislabelled with its identifiers
+      // stripped, so the whole upstream 409 vocabulary was swept against this
+      // switch. The rule that came out of it:
+      //
+      //   the default is correct only for a status whose ENTIRE information
+      //   content is "wrong state, and here is the state" — because
+      //   currentStatus is the one field it preserves.
+      //
+      // It is wrong for any status carrying an identifier, an instruction or
+      // anything the caller must act on; that needs its own case.
+      //
+      // One status lives here deliberately: NOT_APPLICABLE (self-withdrawal,
+      // walk-in vet, officer transitions, citizen withdraw). Every one of its
+      // bodies carries currentStatus and nothing else the caller needs — the
+      // `agency` some of them add is the caller's own, dropped for the same
+      // reason as NO_WALK_IN_CAMPAIGN above. ILLEGAL_TRANSITION is an
+      // accurate label for it.
       return {
         status: 409,
         body: { error: 'ILLEGAL_TRANSITION', status: currentStatusOf(body) },
