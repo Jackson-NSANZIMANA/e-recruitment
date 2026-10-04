@@ -67,37 +67,6 @@ function declaredValueExports(src) {
   return names;
 }
 
-/**
- * Names visible in the emitted DECLARATIONS (dist/index.d.ts).
- *
- * A name that src declares, that the runtime namespace lacks, but that the .d.ts
- * carries is a TYPE (erased on purpose) — not staleness. A stale artifact lacks
- * the name in BOTH .js and .d.ts, which is the case this check exists to catch.
- * (Without this distinction the check false-positives on every `type` re-export:
- * AUTH_NS is a value, AuthTokenClaims is a type, and neither is missing.)
- */
-function namesInDeclarations(dts) {
-  const names = new Set();
-  for (const m of dts.matchAll(/export\s+(?:type\s+)?\{([^}]*)\}/g)) {
-    for (const raw of m[1].split(',')) {
-      const entry = raw.trim().replace(/^type\s+/, '');
-      if (entry === '') continue;
-      const parts = entry.split(/\s+as\s+/);
-      const name = (parts[1] ?? parts[0]).trim();
-      if (/^[A-Za-z_$][\w$]*$/.test(name)) names.add(name);
-    }
-  }
-  for (const m of dts.matchAll(
-    /^declare\s+(?:const|let|var|function\*?|class|interface|type|enum|namespace)\s+([A-Za-z_$][\w$]*)/gm,
-  )) {
-    names.add(m[1]);
-  }
-  for (const m of dts.matchAll(/^export\s+(?:declare\s+)?(?:const|let|var|function\*?|class|interface|type|enum)\s+([A-Za-z_$][\w$]*)/gm)) {
-    names.add(m[1]);
-  }
-  return names;
-}
-
 for (const root of ROOTS) {
   if (!existsSync(root)) continue;
   for (const entry of readdirSync(root)) {
@@ -124,11 +93,12 @@ for (const root of ROOTS) {
     }
 
     checked += 1;
-    const dtsIndex = join(dir, 'dist', 'index.d.ts');
-    const inDts = existsSync(dtsIndex) ? namesInDeclarations(readFileSync(dtsIndex, 'utf8')) : new Set();
-    // Missing at runtime AND absent from the declarations file ⇒ genuinely not
-    // built. Missing only at runtime ⇒ a type, which is supposed to be absent.
-    const missing = [...declared].filter((name) => !(name in mod) && !inDts.has(name));
+    // Strict: every name src declares as a VALUE must exist in the runtime
+    // namespace. Types are excluded at the source (see declaredValueExports),
+    // which is the only place the distinction is trustworthy — the emitted
+    // .d.ts keeps the same markers, but a .d.ts entry surviving while the value
+    // is missing from .js is itself an inconsistency worth failing on.
+    const missing = [...declared].filter((name) => !(name in mod));
     if (missing.length > 0) {
       problems.push(`${dir} — dist is STALE; missing ${missing.length} export(s): ${missing.join(', ')}`);
     }
