@@ -42,6 +42,11 @@ import type { StageEvents } from '../ports/event-outbox.js';
 import { ApplicationPersistenceError } from '../domain/application.errors.js';
 import { AGENCY_TARGET } from '../domain/agency-schema.js';
 import { deriveApplicationStatus } from '../domain/lifecycle.js';
+import {
+  insertOpeningHistory,
+  insertSubmittedApplication,
+  isLiveIntentViolation,
+} from './application-insert.js';
 import { stageEvents } from './outbox/pg-event-outbox.js';
 
 const SYSTEM_ROLE = 'usrp_system_service';
@@ -63,53 +68,18 @@ export class PgApplicationRepository implements ApplicationRepository {
     stage?: StageEvents<CreateApplicationResult>,
   ): Promise<CreateApplicationResult> {
     const target = AGENCY_TARGET[input.agency];
-    const schema = sql(target.schema); // quoted identifier fragment
-    const seqName = `${target.schema}.processing_code_seq`;
 
     try {
       return await sql.begin(async (tx) => {
         await tx`SET LOCAL ROLE ${sql(SYSTEM_ROLE)}`;
 
         // 1 + 2: mint the code and insert the application atomically.
-        const inserted = await tx<{ id: string; processing_code: string }[]>`
-          INSERT INTO ${schema}.applications
-            (processing_code, applicant_id, campaign_id, category, status,
-             nesa_index_number, hec_registration_number, submitted_at)
-          VALUES (
-            ${target.codePrefix} || '-' || lpad(nextval(${seqName}::regclass)::text, 5, '0'),
-            ${input.applicantId},
-            ${input.campaignId},
-            ${input.category}::${schema}.application_category,
-            'SUBMITTED',
-            ${input.nesaIndexNumber},
-            ${input.hecRegistrationNumber},
-            now()
-          )
-          RETURNING id, processing_code
-        `;
-        const row = inserted[0];
-        if (!row) {
-          throw new ApplicationPersistenceError('Application insert returned no row');
-        }
-
         // 3: the immutable trail's opening entry (null → SUBMITTED).
-        await tx`
-          INSERT INTO ${schema}.application_status_history
-            (application_id, from_status, to_status, reason, performed_by, correlation_id)
-          VALUES (
-            ${row.id},
-            NULL,
-            'SUBMITTED',
-            'Application submitted via front door',
-            'SYSTEM',
-            ${input.correlationId}
-          )
-        `;
-
-        const created: CreateApplicationResult = {
-          applicationId: row.id,
-          processingCode: row.processing_code,
-        };
+        // Both statements are shared with the idempotent front door
+        // (PgSubmissionLedger) so the two paths cannot drift — see
+        // adapters/application-insert.ts.
+        const created = await insertSubmittedApplication(tx, target, input);
+        await insertOpeningHistory(tx, target, created.applicationId, input.correlationId);
 
         // 4: the announcement commits WITH the filing, or neither does.
         if (stage !== undefined) await stageEvents(tx, stage(created));
@@ -118,6 +88,17 @@ export class PgApplicationRepository implements ApplicationRepository {
       });
     } catch (cause) {
       if (cause instanceof ApplicationPersistenceError) throw cause;
+      // ADR-027: the live-intent index refuses a second live application for
+      // one (applicant, campaign, category). This direct path has no request
+      // ledger to answer from, so it reports the refusal as a persistence
+      // fault. Callers that need the business answer go through
+      // SubmissionLedger.recordSubmission, which returns ALREADY_APPLIED.
+      if (isLiveIntentViolation(cause)) {
+        throw new ApplicationPersistenceError(
+          'A live application already exists for this applicant, campaign and category',
+          { cause },
+        );
+      }
       throw new ApplicationPersistenceError('Failed to create application', { cause });
     }
   }

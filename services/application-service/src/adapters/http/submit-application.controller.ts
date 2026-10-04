@@ -13,6 +13,20 @@
 //   2. Business outcomes map to status codes; infrastructure faults map to
 //      5xx with no internal detail leaked. The applicant is referenced only
 //      by opaque id — no raw National ID is ever accepted or returned here.
+//   3. IDEMPOTENCY (ADR-027). An optional `Idempotency-Key` request header
+//      carries the caller's retry identity. It must be a UUID — a 400 here,
+//      because a client that cannot produce a stable key is better told so
+//      than silently given at-least-once filing. Re-sending the same key
+//      with the same body replays the first response and sets
+//      `Idempotency-Replayed: true`; re-sending it with a different body is
+//      409 KEY_REUSED.
+//
+// WHY A REPLAY KEEPS ITS 201. The replayed response is byte-for-byte the
+// original answer, including its status, so a client that only reads the
+// status code behaves identically whether or not its first attempt survived
+// — which is the entire point of a retry. The header is how a client that
+// DOES care can tell the two apart; it is exposed to browsers through the
+// edge tier rather than inferred from the status.
 // ══════════════════════════════════════════════════════════════════
 
 import { HttpError, type HttpResult, type Route } from '@usrp/shared-http';
@@ -33,6 +47,11 @@ import type {
 } from '../../application/submit-application.service.js';
 
 export const SUBMIT_APPLICATION_PATH = '/v1/applications';
+
+/** Request header carrying the caller's retry identity (ADR-027). */
+export const IDEMPOTENCY_KEY_HEADER = 'idempotency-key';
+/** Response header set only when a stored result was replayed, never filed. */
+export const IDEMPOTENCY_REPLAYED_HEADER = 'Idempotency-Replayed';
 
 const CHANNELS: ReadonlySet<string> = new Set(APPLICATION_CHANNELS);
 // The opaque applicant handle is a UUID. Validating its SHAPE here keeps a
@@ -90,6 +109,7 @@ export function submitApplicationRoute(
       // domain rule, keyed off category) but, if present, must be strings.
       const nesaIndexNumber = optionalString(body.nesaIndexNumber, 'nesaIndexNumber');
       const hecRegistrationNumber = optionalString(body.hecRegistrationNumber, 'hecRegistrationNumber');
+      const idempotencyKey = readIdempotencyKey(ctx.headers[IDEMPOTENCY_KEY_HEADER]);
 
       let outcome: SubmitApplicationOutcome;
       try {
@@ -99,6 +119,7 @@ export function submitApplicationRoute(
           channel: channel as ApplicationChannel,
           nesaIndexNumber,
           hecRegistrationNumber,
+          ...(idempotencyKey === null ? {} : { idempotencyKey }),
           // Seed the event trace from the inbound HTTP correlation id.
           context: { correlationId: ctx.correlationId, causationId: ctx.correlationId },
         });
@@ -111,6 +132,30 @@ export function submitApplicationRoute(
   };
 }
 
+/**
+ * Validate the optional `Idempotency-Key` header.
+ *
+ * A repeated header arrives as an array — rejected rather than resolved by
+ * picking one, because the two values would denote two different requests and
+ * any choice we made would be a guess about which retry the client meant.
+ */
+function readIdempotencyKey(raw: string | readonly string[] | undefined): string | null {
+  if (raw === undefined) return null;
+  if (Array.isArray(raw)) {
+    throw new HttpError(
+      400,
+      'INVALID_IDEMPOTENCY_KEY',
+      'Header "Idempotency-Key" must appear at most once.',
+    );
+  }
+  const value = String(raw).trim();
+  if (value.length === 0) return null;
+  if (!UUID_RE.test(value)) {
+    throw new HttpError(400, 'INVALID_IDEMPOTENCY_KEY', 'Header "Idempotency-Key" must be a UUID.');
+  }
+  return value;
+}
+
 /** Business outcomes → HTTP status. Only non-PII identifiers are exposed. */
 function mapOutcome(outcome: SubmitApplicationOutcome): HttpResult {
   switch (outcome.kind) {
@@ -119,6 +164,40 @@ function mapOutcome(outcome: SubmitApplicationOutcome): HttpResult {
         status: 201,
         body: {
           status: 'SUBMITTED',
+          applicationId: outcome.applicationId,
+          processingCode: outcome.processingCode,
+          agency: outcome.agency,
+        },
+      };
+    case 'REPLAYED':
+      // The original answer, repeated verbatim — same 201, same body. Only
+      // the header distinguishes it, so a retrying client needs no new code.
+      return {
+        status: 201,
+        headers: { [IDEMPOTENCY_REPLAYED_HEADER]: 'true' },
+        body: {
+          status: 'SUBMITTED',
+          applicationId: outcome.applicationId,
+          processingCode: outcome.processingCode,
+          agency: outcome.agency,
+        },
+      };
+    case 'KEY_REUSED':
+      // Deliberately carries NO identifiers: the key belongs to a different
+      // submission, and echoing that submission's ids to a caller who asked
+      // about another one would leak across requests.
+      return {
+        status: 409,
+        body: {
+          status: 'KEY_REUSED',
+          reason: 'This Idempotency-Key was already used for a different submission.',
+        },
+      };
+    case 'ALREADY_APPLIED':
+      return {
+        status: 409,
+        body: {
+          status: 'ALREADY_APPLIED',
           applicationId: outcome.applicationId,
           processingCode: outcome.processingCode,
           agency: outcome.agency,

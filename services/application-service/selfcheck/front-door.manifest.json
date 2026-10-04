@@ -1,0 +1,166 @@
+{
+  "slice": "submission-integrity",
+  "adr": "ADR-027",
+  "why": [
+    "This manifest exists because of a specific failure, not as ceremony.",
+    "The submission-integrity slice once shipped as its SQL migration ALONE:",
+    "rls/0022 created the live-intent indexes and the request ledger, and",
+    "nothing else landed — no ledger adapter, no request hashing, no HTTP",
+    "idempotency, no drizzle mirror, no proof. The table existed and was never",
+    "written to; the schema-drift gate was red for an unmirrored table; and the",
+    "front door still filed a second application for every retried POST.",
+    "A half-applied slice is worse than an unstarted one: the schema says the",
+    "guarantee is in place while the behaviour says otherwise.",
+    "Every artefact below is therefore asserted to exist, and to still contain",
+    "the symbol that makes it load-bearing, by",
+    "selfcheck/verify-submission-integrity.ts section 0 — which runs with no",
+    "infrastructure at all, so it is the first thing to go red."
+  ],
+  "artefacts": [
+    {
+      "id": "migration",
+      "path": "packages/shared-database/src/rls/0022_submission_integrity.sql",
+      "role": "System of record: live-intent partial unique indexes + request ledger.",
+      "mustContain": [
+        "uq_rdf_applications_live_intent",
+        "uq_rnp_applications_live_intent",
+        "uq_rcs_applications_live_intent",
+        "public_core.submission_requests",
+        "ENABLE ROW LEVEL SECURITY",
+        "REVOKE UPDATE, DELETE, TRUNCATE"
+      ]
+    },
+    {
+      "id": "bootstrap-registration",
+      "path": "scripts/bootstrap-db.sh",
+      "role": "The migration runs on every bootstrap, in the canonical order.",
+      "mustContain": ["0022_submission_integrity.sql"]
+    },
+    {
+      "id": "drizzle-mirror",
+      "path": "packages/shared-database/src/schemas/submission-requests.schema.ts",
+      "role": "Readable mirror of the ledger table; keeps the drift gate green.",
+      "mustContain": ["submissionRequests", "submission_requests", "submission_requests_application_unique"]
+    },
+    {
+      "id": "drizzle-mirror-export",
+      "path": "packages/shared-database/src/index.ts",
+      "role": "The mirror is exported, so drizzle-kit and consumers both see it.",
+      "mustContain": ["submission-requests.schema.js", "SubmissionRequest"]
+    },
+    {
+      "id": "drizzle-snapshot",
+      "path": "packages/shared-database/src/migrations/meta/0001_snapshot.json",
+      "role": "Drizzle's belief about the post-bootstrap world includes the ledger.",
+      "mustContain": ["submission_requests"]
+    },
+    {
+      "id": "request-hash",
+      "path": "services/application-service/src/domain/request-hash.ts",
+      "role": "Canonical, order-independent, length-prefixed request fingerprint.",
+      "mustContain": ["canonicalRequestHash", "canonicalRequestString", "FIELD_ORDER"]
+    },
+    {
+      "id": "ledger-port",
+      "path": "services/application-service/src/ports/submission-ledger.ts",
+      "role": "The port: RECORDED / REPLAYED / KEY_REUSED / ALREADY_APPLIED.",
+      "mustContain": ["SubmissionLedger", "recordSubmission", "REPLAYED", "KEY_REUSED", "ALREADY_APPLIED"]
+    },
+    {
+      "id": "ledger-adapter",
+      "path": "services/application-service/src/adapters/submission-ledger.pg-repository.ts",
+      "role": "PostgreSQL adapter: ledger + application + history + outbox in ONE tx.",
+      "mustContain": [
+        "PgSubmissionLedger",
+        "public_core.submission_requests",
+        "ON CONFLICT (applicant_id, idempotency_key) DO NOTHING",
+        "stageEvents",
+        "isLiveIntentViolation"
+      ]
+    },
+    {
+      "id": "insert-primitives",
+      "path": "services/application-service/src/adapters/application-insert.ts",
+      "role": "One copy of the front-door INSERT, shared by both write paths.",
+      "mustContain": ["insertSubmittedApplication", "insertOpeningHistory", "isLiveIntentViolation", "findLiveApplication"]
+    },
+    {
+      "id": "use-case",
+      "path": "services/application-service/src/application/submit-application.service.ts",
+      "role": "The front door files through the ledger and surfaces its outcomes.",
+      "mustContain": ["ledger.recordSubmission", "idempotencyKey", "canonicalRequestHash", "REPLAYED", "KEY_REUSED", "ALREADY_APPLIED"]
+    },
+    {
+      "id": "http-adapter",
+      "path": "services/application-service/src/adapters/http/submit-application.controller.ts",
+      "role": "Idempotency-Key in, Idempotency-Replayed out, 409s for the refusals.",
+      "mustContain": ["IDEMPOTENCY_KEY_HEADER", "IDEMPOTENCY_REPLAYED_HEADER", "KEY_REUSED", "ALREADY_APPLIED"]
+    },
+    {
+      "id": "composition-root",
+      "path": "services/application-service/src/index.ts",
+      "role": "The ledger is actually WIRED — an adapter nobody constructs is dead code.",
+      "mustContain": ["PgSubmissionLedger", "ledger: new PgSubmissionLedger()"]
+    },
+    {
+      "id": "walk-in-port",
+      "path": "services/application-service/src/ports/walk-in-repository.ts",
+      "role": "The on-site lane answers duplicates instead of faulting.",
+      "mustContain": ["CreateWalkInOutcome", "ALREADY_APPLIED"]
+    },
+    {
+      "id": "walk-in-adapter",
+      "path": "services/application-service/src/adapters/walk-in.pg-repository.ts",
+      "role": "Classifies the live-intent refusal on the officer's write path.",
+      "mustContain": ["isLiveIntentViolation", "ALREADY_APPLIED"]
+    },
+    {
+      "id": "walk-in-http",
+      "path": "services/application-service/src/adapters/http/walk-in.controller.ts",
+      "role": "409 ALREADY_APPLIED with the existing processing code for the tablet.",
+      "mustContain": ["ALREADY_APPLIED", "processingCode"]
+    },
+    {
+      "id": "ops-mirror-note-rdf",
+      "path": "packages/shared-database/src/schemas/rdf-ops.schema.ts",
+      "role": "The unmodelled live-intent index is documented where a reader will look.",
+      "mustContain": ["uq_rdf_applications_live_intent"]
+    },
+    {
+      "id": "ops-mirror-note-rnp",
+      "path": "packages/shared-database/src/schemas/rnp-ops.schema.ts",
+      "role": "Same note for RNP.",
+      "mustContain": ["uq_rnp_applications_live_intent"]
+    },
+    {
+      "id": "ops-mirror-note-rcs",
+      "path": "packages/shared-database/src/schemas/rcs-ops.schema.ts",
+      "role": "Same note for RCS.",
+      "mustContain": ["uq_rcs_applications_live_intent"]
+    },
+    {
+      "id": "gate-registration",
+      "path": "scripts/run-selfchecks.sh",
+      "role": "The proof runs in the quality gate — an unregistered proof never runs.",
+      "mustContain": ["verify-submission-integrity.ts"]
+    },
+    {
+      "id": "ci-registration",
+      "path": ".github/workflows/ci-backend.yml",
+      "role": "CI runs the same gate, so a regression cannot merge. The workflow invokes `pnpm verify`, which is scripts/run-selfchecks.sh (see the root package.json) — asserting on the command rather than the script path keeps this file out of the diff of every proof that is added.",
+      "mustContain": ["pnpm verify"]
+    },
+    {
+      "id": "adr",
+      "path": "docs/architecture/adrs/ADR-027-submission-integrity-and-idempotency.md",
+      "role": "The decision, its alternatives and what is deliberately NOT done.",
+      "mustContain": ["Idempotency-Replayed", "KEY_REUSED", "ALREADY_APPLIED", "live-intent"]
+    },
+    {
+      "id": "slice-doc",
+      "path": "docs/architecture/submission-integrity-slice.md",
+      "role": "How to run the proof and what each section establishes.",
+      "mustContain": ["verify-submission-integrity.ts"]
+    }
+  ]
+}

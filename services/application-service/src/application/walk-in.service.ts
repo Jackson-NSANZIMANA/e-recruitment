@@ -63,7 +63,19 @@ export type RegisterWalkInOutcome =
   | { readonly kind: 'APPLICANT_NOT_FOUND' }
   | { readonly kind: 'IDENTITY_NOT_VERIFIED' }
   | { readonly kind: 'INVALID_ACADEMIC_INPUT'; readonly reason: string }
-  | { readonly kind: 'NO_WALK_IN_CAMPAIGN'; readonly agency: Agency };
+  | { readonly kind: 'NO_WALK_IN_CAMPAIGN'; readonly agency: Agency }
+  /**
+   * The candidate already holds a live application for this campaign and
+   * category (ADR-027) — whether filed online minutes ago or by a double-tap
+   * on this tablet. Nothing was written and NOTHING is announced: emitting a
+   * second APPLICANT_SUBMITTED would re-run the autonomous gates against an
+   * application that is already being vetted.
+   */
+  | {
+      readonly kind: 'ALREADY_APPLIED';
+      readonly applicationId: string;
+      readonly processingCode: string;
+    };
 
 export interface VetWalkInCommand {
   readonly actor: Principal;
@@ -137,6 +149,16 @@ export class WalkInService {
       hecRegistrationNumber: academic.resolved.hecRegistrationNumber,
       qrInvitationCode,
     });
+
+    // Duplicate: no row, no ticket, no event, no audit of a registration that
+    // did not happen. The officer is handed the application already on file.
+    if (created.kind === 'ALREADY_APPLIED') {
+      return {
+        kind: 'ALREADY_APPLIED',
+        applicationId: created.applicationId,
+        processingCode: created.processingCode,
+      };
+    }
 
     // 5. Announce it — the SAME event as the digital front door (channel
     //    WALK_IN), so the autonomous age/academic/criminal gates fire

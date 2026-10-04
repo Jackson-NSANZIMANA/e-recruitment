@@ -156,12 +156,22 @@ apply_sql "${RLS_DIR}/0020_event_outbox.sql" "rls/0020 (transactional event outb
 #     that capacity_limit was always meant to bound. Append-only for its
 #     writer; system-service gets UPDATE on registered_count ONLY.
 apply_sql "${RLS_DIR}/0021_slot_reservations.sql" "rls/0021 (slot reservation ledger + venue capacity)"
+
+# 23. Submission integrity: request ledger + live-intent indexes (ADR-027). A
+#     citizen on a dropped 3G connection taps "submit" again; the front door
+#     must ANSWER that retry with the application it already filed, not file a
+#     second one. public_core.submission_requests is the append-only record of
+#     (applicant, Idempotency-Key) → application, and the three partial unique
+#     indexes uq_{rdf,rnp,rcs}_applications_live_intent are the database-level
+#     backstop that holds even when the ledger is bypassed (walk-in lane,
+#     imports, a future service). Append-only for every role: UPDATE, DELETE
+#     and TRUNCATE are revoked and RLS is FORCE'd.
 apply_sql "${RLS_DIR}/0022_submission_integrity.sql" "rls/0022 (submission integrity + request ledger)"
 
 printf '\n'
-ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts + applicant auth + erasure requests + stored contact + edge sessions + event outbox + slot reservations in place"
+ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts + applicant auth + erasure requests + stored contact + edge sessions + event outbox + slot reservations + submission integrity in place"
 
-# 23. Dev officer accounts (one per agency). A CONVENIENCE seed so the officer
+# 24. Dev officer accounts (one per agency). A CONVENIENCE seed so the officer
 #     console / manual login smoke tests have real credentials to drive —
 #     dev-only, idempotent. Best-effort: it needs the workspace built (tsx
 #     resolves @usrp/* runtime dist), so a failure here NEVER blocks the

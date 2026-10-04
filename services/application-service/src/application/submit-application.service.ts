@@ -19,15 +19,35 @@
 // disagree. Previously a broker hiccup after the commit returned a 500 for an
 // application that WAS filed — inviting the citizen to file it again — and its
 // vetting never started. Now the citizen gets 201 and the relay delivers.
+//
+// SUBMISSION INTEGRITY (ADR-027). ADR-025 made the citizen's retry SAFE to
+// send; it did not make it safe to RECEIVE. The filing now goes through the
+// submission ledger, which records the request in the same transaction as the
+// application, so the front door has three new honest answers:
+//
+//   REPLAYED        same idempotency key + identical body → the FIRST
+//                   application, returned again. Nothing filed, nothing
+//                   announced (the original event is already durable).
+//   KEY_REUSED      same key, different body → refused.
+//   ALREADY_APPLIED a live application already exists for this campaign and
+//                   category under another key — the engine's live-intent
+//                   index surfaced as an answer instead of a 500.
+//
+// The key is OPTIONAL at this seam. When the caller supplies none we mint
+// one, so every accepted submission still gets a ledger row; such a request
+// simply has no retry identity of its own, and a duplicate from it is caught
+// one layer down as ALREADY_APPLIED rather than replayed.
 // ══════════════════════════════════════════════════════════════════
 
+import { randomUUID } from 'node:crypto';
 import { newCorrelationContext, newEnvelope, type EventContext } from '@usrp/shared-events';
 import { agencyForCategory, type Agency, type ApplicationCategory, type ApplicationChannel, type ApplicantSubmittedEvent } from '@usrp/shared-types';
 import { resolveAcademicInputs } from '../domain/academic-input.js';
 import type { IdentityReader } from '../ports/identity-reader.js';
 import type { CampaignReader } from '../ports/campaign-reader.js';
-import type { ApplicationRepository, CreateApplicationResult } from '../ports/application-repository.js';
 import type { EventDispatcher } from '../ports/event-outbox.js';
+import type { SubmissionIdentifiers, SubmissionLedger } from '../ports/submission-ledger.js';
+import { canonicalRequestHash } from '../domain/request-hash.js';
 
 export interface SubmitApplicationCommand {
   readonly applicantId: string;
@@ -35,6 +55,12 @@ export interface SubmitApplicationCommand {
   readonly channel: ApplicationChannel;
   readonly nesaIndexNumber?: string | null;
   readonly hecRegistrationNumber?: string | null;
+  /**
+   * The caller's retry identity (`Idempotency-Key`). Re-sending the SAME key
+   * with the SAME body replays the first result instead of filing again.
+   * Omitted ⇒ a fresh key is minted and the request has no retry identity.
+   */
+  readonly idempotencyKey?: string;
   /** Inbound correlation context to continue a trace; a fresh chain when omitted. */
   readonly context?: EventContext;
 }
@@ -47,6 +73,26 @@ export type SubmitApplicationOutcome =
       readonly agency: Agency;
       readonly event: ApplicantSubmittedEvent;
     }
+  /**
+   * This exact request was already accepted. Same identifiers as the first
+   * time, and NO event — the original APPLICANT_SUBMITTED is already durable.
+   */
+  | {
+      readonly kind: 'REPLAYED';
+      readonly applicationId: string;
+      readonly processingCode: string;
+      readonly agency: Agency;
+      readonly firstSeenAt: Date;
+    }
+  /** The idempotency key is already spent on a materially different request. */
+  | { readonly kind: 'KEY_REUSED' }
+  /** A live application for this campaign + category already exists. */
+  | {
+      readonly kind: 'ALREADY_APPLIED';
+      readonly applicationId: string;
+      readonly processingCode: string;
+      readonly agency: Agency;
+    }
   | { readonly kind: 'APPLICANT_NOT_FOUND' }
   | { readonly kind: 'IDENTITY_NOT_VERIFIED' }
   | { readonly kind: 'INVALID_ACADEMIC_INPUT'; readonly reason: string }
@@ -55,7 +101,11 @@ export type SubmitApplicationOutcome =
 export interface SubmitApplicationDeps {
   readonly identityReader: IdentityReader;
   readonly campaignReader: CampaignReader;
-  readonly repository: ApplicationRepository;
+  /**
+   * The front door's decision of record (ADR-027): ledger + application +
+   * history + outbox in one transaction.
+   */
+  readonly ledger: SubmissionLedger;
   /** Post-commit dispatch of the staged announcement (the outbox fast path). */
   readonly events: EventDispatcher;
 }
@@ -101,7 +151,7 @@ export class SubmitApplicationService {
     const nationalIdHash = identity.nationalIdHash;
     const nesaIndexNumber = academic.resolved.nesaIndexNumber;
     const hecRegistrationNumber = academic.resolved.hecRegistrationNumber;
-    const announce = (created: CreateApplicationResult): ApplicantSubmittedEvent => ({
+    const announce = (created: SubmissionIdentifiers): ApplicantSubmittedEvent => ({
       ...envelope,
       eventType: 'APPLICANT_SUBMITTED',
       applicantId: command.applicantId,
@@ -114,12 +164,26 @@ export class SubmitApplicationService {
       hecRegistrationNumber,
     });
 
-    // 4. Persist into the owning agency's isolated ops schema (+ history), and
-    //    stage APPLICANT_SUBMITTED in that same transaction.
-    const created = await this.deps.repository.createApplication(
+    // 4. The request's identity. The hash covers ONLY what the citizen chose
+    //    (see domain/request-hash.ts) — not the campaign, which the server
+    //    resolved, and not the trace, which differs on every retry.
+    const idempotencyKey = command.idempotencyKey ?? randomUUID();
+    const requestHash = canonicalRequestHash({
+      applicantId: command.applicantId,
+      category: command.category,
+      channel: command.channel,
+      nesaIndexNumber,
+      hecRegistrationNumber,
+    });
+
+    // 5. Record + persist into the owning agency's isolated ops schema
+    //    (+ history), and stage APPLICANT_SUBMITTED, in ONE transaction.
+    const recorded = await this.deps.ledger.recordSubmission(
       {
         agency,
         applicantId: command.applicantId,
+        idempotencyKey,
+        requestHash,
         campaignId: campaign.campaignId,
         category: command.category,
         channel: command.channel,
@@ -130,15 +194,37 @@ export class SubmitApplicationService {
       (c) => [announce(c)],
     );
 
-    // 5. Fast-path dispatch. Never throws for a transport fault: the event is
+    // Nothing was filed — so nothing is announced. Re-dispatching the original
+    // event here would be wrong twice over: it is already durable in the
+    // outbox, and a replay must not look downstream like a new submission.
+    if (recorded.kind === 'KEY_REUSED') return { kind: 'KEY_REUSED' };
+    if (recorded.kind === 'REPLAYED') {
+      return {
+        kind: 'REPLAYED',
+        applicationId: recorded.applicationId,
+        processingCode: recorded.processingCode,
+        agency,
+        firstSeenAt: recorded.firstSeenAt,
+      };
+    }
+    if (recorded.kind === 'ALREADY_APPLIED') {
+      return {
+        kind: 'ALREADY_APPLIED',
+        applicationId: recorded.applicationId,
+        processingCode: recorded.processingCode,
+        agency,
+      };
+    }
+
+    // 6. Fast-path dispatch. Never throws for a transport fault: the event is
     //    already durable and the outbox relay will deliver it.
-    const event = announce(created);
+    const event = announce(recorded);
     await this.deps.events.dispatch([event]);
 
     return {
       kind: 'SUBMITTED',
-      applicationId: created.applicationId,
-      processingCode: created.processingCode,
+      applicationId: recorded.applicationId,
+      processingCode: recorded.processingCode,
       agency,
       event,
     };

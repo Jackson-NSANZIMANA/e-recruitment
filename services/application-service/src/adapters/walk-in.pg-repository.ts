@@ -20,16 +20,17 @@ import { sql } from '@usrp/shared-database';
 import type { AgeEligibilityStatus, ApplicationStatus } from '@usrp/shared-types';
 import type {
   CreateWalkInInput,
-  CreateWalkInResult,
+  CreateWalkInOutcome,
   VetOnSiteInput,
   VetOnSiteOutcome,
   WalkInRepository,
 } from '../ports/walk-in-repository.js';
 import { ApplicationPersistenceError } from '../domain/application.errors.js';
 import { AGENCY_TARGET } from '../domain/agency-schema.js';
+import { findLiveApplication, isLiveIntentViolation } from './application-insert.js';
 
 export class PgWalkInRepository implements WalkInRepository {
-  async createWalkInApplication(input: CreateWalkInInput): Promise<CreateWalkInResult> {
+  async createWalkInApplication(input: CreateWalkInInput): Promise<CreateWalkInOutcome> {
     const target = AGENCY_TARGET[input.actor.agency];
     const schema = sql(target.schema); // quoted identifier fragment
     const seqName = `${target.schema}.processing_code_seq`;
@@ -76,11 +77,47 @@ export class PgWalkInRepository implements WalkInRepository {
           )
         `;
 
-        return { applicationId: row.id, processingCode: row.processing_code };
+        return {
+          kind: 'REGISTERED' as const,
+          applicationId: row.id,
+          processingCode: row.processing_code,
+        };
       });
     } catch (cause) {
       if (cause instanceof ApplicationPersistenceError) throw cause;
+      // ADR-027: the live-intent index refused a second live application for
+      // this candidate. Postgres has already aborted the transaction above,
+      // so the winner is named in a fresh one and reported as a business
+      // outcome — the officer gets the existing processing code, not a 500.
+      if (isLiveIntentViolation(cause)) return await this.#existingApplication(input);
       throw new ApplicationPersistenceError('Failed to create walk-in application', { cause });
+    }
+  }
+
+  /** Name the live application the candidate already holds. */
+  async #existingApplication(input: CreateWalkInInput): Promise<CreateWalkInOutcome> {
+    const target = AGENCY_TARGET[input.actor.agency];
+    try {
+      const existing = await sql.begin(async (tx) => {
+        await tx`SET LOCAL ROLE ${sql(input.actor.dbRole)}`;
+        return await findLiveApplication(
+          tx,
+          target,
+          input.applicantId,
+          input.campaignId,
+          input.category,
+        );
+      });
+      if (existing === null) {
+        // Withdrawn between the refusal and this read — genuinely transient.
+        throw new ApplicationPersistenceError(
+          'live-intent conflict reported but no live application is visible',
+        );
+      }
+      return { kind: 'ALREADY_APPLIED', ...existing };
+    } catch (cause) {
+      if (cause instanceof ApplicationPersistenceError) throw cause;
+      throw new ApplicationPersistenceError('Failed to resolve a duplicate walk-in', { cause });
     }
   }
 

@@ -19,6 +19,7 @@ import { PgApplicationRepository } from './adapters/application.pg-repository.js
 import { PgApplicationReadRepository } from './adapters/application-read.pg-repository.js';
 import { PgOfficerTransitionRepository } from './adapters/officer-transition.pg-repository.js';
 import { PgWalkInRepository } from './adapters/walk-in.pg-repository.js';
+import { PgSubmissionLedger } from './adapters/submission-ledger.pg-repository.js';
 import { PgOutboxDispatcher } from './adapters/outbox/pg-event-outbox.js';
 import { SubmitApplicationService } from './application/submit-application.service.js';
 import { ListApplicationsService } from './application/list-applications.service.js';
@@ -89,7 +90,10 @@ export function createApplicationService(
     submit: new SubmitApplicationService({
       identityReader,
       campaignReader,
-      repository,
+      // ADR-027: the front door writes through the submission ledger, so the
+      // request, the application, its history row and its announcement are
+      // one atomic unit and a retry replays instead of filing again.
+      ledger: new PgSubmissionLedger(),
       events,
     }),
     list: new ListApplicationsService({ reader: readRepository }),
@@ -122,6 +126,8 @@ export function createApplicationService(
 // ── Re-exports ──────────────────────────────────────────────────
 export {
   SUBMIT_APPLICATION_PATH,
+  IDEMPOTENCY_KEY_HEADER,
+  IDEMPOTENCY_REPLAYED_HEADER,
   submitApplicationRoute,
 } from './adapters/http/submit-application.controller.js';
 // The PATH CONSTANTS are part of the public surface on purpose: the edge tier
@@ -203,6 +209,17 @@ export type {
   SubmitApplicationDeps,
   SubmitApplicationOutcome,
 } from './application/submit-application.service.js';
+// Submission integrity (ADR-027).
+export { PgSubmissionLedger } from './adapters/submission-ledger.pg-repository.js';
+export type {
+  SubmissionLedger,
+  RecordSubmissionInput,
+  RecordSubmissionOutcome,
+  SubmissionIdentifiers,
+} from './ports/submission-ledger.js';
+export { canonicalRequestHash, canonicalRequestString } from './domain/request-hash.js';
+export type { CanonicalSubmission } from './domain/request-hash.js';
+export type { CreateWalkInOutcome } from './ports/walk-in-repository.js';
 export { ProjectVettingResultService } from './application/project-vetting-result.service.js';
 export type {
   ProjectVettingResultCommand,

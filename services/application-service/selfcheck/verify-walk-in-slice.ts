@@ -53,6 +53,13 @@ const admin = postgres(ADMIN_URL, { onnotice: () => {} });
 // Deterministic fixtures (officer subjects are UUIDs — Slice-4 alignment).
 const APPLICANT_ID = '6a000000-0000-4000-8000-000000000001';
 const NID_HASH = '6a6a6a6a'.repeat(8); // 64 hex
+// ADR-027 binds the walk-in lane to one LIVE application per
+// (applicant, campaign, category), so the early-hard-fail scenario needs its
+// own candidate — the first one is still live (and ends ACCEPTED) by then.
+// Re-registering APPLICANT_ID now returns 409 ALREADY_APPLIED, which §6b
+// asserts deliberately rather than works around.
+const FAIL_APPLICANT_ID = '6a000000-0000-4000-8000-000000000002';
+const FAIL_NID_HASH = '6b6b6b6b'.repeat(8);
 const RDF_CAMPAIGN = '6a000000-0000-4000-8000-0000000000c1';
 const RDF_OFFICER_ID = '6a000000-0000-4000-8000-00000000ff01';
 const RNP_OFFICER_ID = '6a000000-0000-4000-8000-00000000ff02';
@@ -88,7 +95,10 @@ async function cleanup(): Promise<void> {
     await tx`DELETE FROM rdf_ops.application_status_history WHERE application_id IN (SELECT id FROM rdf_ops.applications WHERE campaign_id = ${RDF_CAMPAIGN})`;
     await tx`DELETE FROM rdf_ops.applications WHERE campaign_id = ${RDF_CAMPAIGN}`;
     await tx`DELETE FROM public_core.recruitment_campaigns WHERE id = ${RDF_CAMPAIGN}`;
-    await tx`DELETE FROM public_core.applicant_identities WHERE id = ${APPLICANT_ID}`;
+    await tx`DELETE FROM public_core.submission_requests
+             WHERE applicant_id IN ${tx([APPLICANT_ID, FAIL_APPLICANT_ID])}`;
+    await tx`DELETE FROM public_core.applicant_identities
+             WHERE id IN ${tx([APPLICANT_ID, FAIL_APPLICANT_ID])}`;
   });
 }
 
@@ -101,6 +111,12 @@ async function seed(): Promise<void> {
         (id, national_id_hash, encrypted_full_name, encrypted_date_of_birth,
          encrypted_home_district, encrypted_home_province, gender, identity_status, registration_channel)
       VALUES (${APPLICANT_ID}, ${NID_HASH}, 'enc','enc','enc','enc','MALE','VERIFIED','WALK_IN')
+    `;
+    await tx`
+      INSERT INTO public_core.applicant_identities
+        (id, national_id_hash, encrypted_full_name, encrypted_date_of_birth,
+         encrypted_home_district, encrypted_home_province, gender, identity_status, registration_channel)
+      VALUES (${FAIL_APPLICANT_ID}, ${FAIL_NID_HASH}, 'enc','enc','enc','enc','MALE','VERIFIED','WALK_IN')
     `;
     // Exam-day campaign: registration CLOSED, examination window contains
     // today, walk-ins allowed — the walk-in campaign-resolution predicate.
@@ -279,9 +295,9 @@ async function main(): Promise<void> {
 
     // ══ 6. Early fail: age INELIGIBLE → WALK_IN_REJECTED (terminal) ══
     console.log('\n── 6. Early hard fail → WALK_IN_REJECTED, a real terminal ───');
-    const reg2 = await post(WALK_IN_REGISTER_PATH, { applicantId: APPLICANT_ID, category: 'GENERAL_ENLISTMENT', nesaIndexNumber: 'RW2024/1002' });
+    const reg2 = await post(WALK_IN_REGISTER_PATH, { applicantId: FAIL_APPLICANT_ID, category: 'GENERAL_ENLISTMENT', nesaIndexNumber: 'RW2024/1002' });
     const app2 = reg2.json['applicationId'] as string;
-    check('second walk-in registered', reg2.status === 201, reg2.text);
+    check('second candidate registered', reg2.status === 201, reg2.text);
     const badAge = await projectAge(app2, 'INELIGIBLE');
     check('age INELIGIBLE at WALK_IN_REGISTERED → WALK_IN_REJECTED autonomously (lane-local fail-closed)',
       badAge.kind === 'APPLIED' && (await readState(app2))?.['status'] === 'WALK_IN_REJECTED', JSON.stringify(badAge));
@@ -290,6 +306,19 @@ async function main(): Promise<void> {
     await projectCriminal(app2, 'FLAGGED_CONVICTION');
     check('redelivered hard fail never moves WALK_IN_REJECTED (terminal, not re-adjudicated)',
       (await readState(app2))?.['status'] === 'WALK_IN_REJECTED');
+
+    // ══ 6b. One live application per candidate (ADR-027) ══════════════
+    // The lane files into the same applications table the digital front door
+    // does, so rls/0022's live-intent index governs it too. A double-tap on
+    // the officer's tablet must be an ANSWER (the existing processing code),
+    // never a second record and never a 500.
+    console.log('\n── 6b. Duplicate on-site registration → 409 ALREADY_APPLIED ─');
+    const dupe = await post(WALK_IN_REGISTER_PATH, { applicantId: FAIL_APPLICANT_ID, category: 'GENERAL_ENLISTMENT', nesaIndexNumber: 'RW2024/1002' });
+    check('re-registering a live candidate → 409 ALREADY_APPLIED', dupe.status === 409 && dupe.json['status'] === 'ALREADY_APPLIED', dupe.text);
+    check('…names the application already on file', dupe.json['applicationId'] === app2, dupe.text);
+    const dupeCount = await admin<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM rdf_ops.applications WHERE applicant_id = ${FAIL_APPLICANT_ID}`;
+    check('…and wrote no second row', dupeCount[0]?.n === 1, String(dupeCount[0]?.n));
 
     // ══ 7. Guards ═════════════════════════════════════════════════════
     console.log('\n── 7. Agency, auth, and input guards ────────────────────────');

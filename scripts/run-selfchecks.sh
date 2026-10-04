@@ -157,6 +157,13 @@ run_ts "identity-service: core slice"             services/identity-service/self
 run_ts "identity-service: HTTP slice"             services/identity-service/selfcheck/verify-http-slice.ts
 run_ts "identity-service: right-to-erasure (gate → tombstone → freeze)" services/identity-service/selfcheck/verify-erasure-slice.ts
 run_ts "application-service: front-door submit"   services/application-service/selfcheck/verify-submit-http-slice.ts
+# ADR-027: the front door is idempotent and one citizen holds at most ONE live
+# application per campaign+category. Immediately after the front-door proof it
+# hardens: that one proves a submission works, this one proves a RETRIED or
+# DUPLICATED submission does not quietly become a second application. Its
+# section 0 is a zero-infrastructure completeness manifest — the guard against
+# this slice ever shipping as its SQL migration alone again.
+run_ts "application-service: submission integrity (idempotent retry, key reuse, live-intent duplicates, walk-in)" services/application-service/selfcheck/verify-submission-integrity.ts
 run_ts "application-service: officer auth + RLS"  services/application-service/selfcheck/verify-auth-slice.ts
 run_ts "application-service: officer lifecycle (medical→final→accept)" services/application-service/selfcheck/verify-officer-lifecycle-slice.ts
 run_ts "application-service: auto-withdrawal on accept (ADR-017)" services/application-service/selfcheck/verify-auto-withdrawal-slice.ts

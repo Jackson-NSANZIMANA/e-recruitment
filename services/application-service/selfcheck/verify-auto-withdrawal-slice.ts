@@ -67,7 +67,12 @@ const RCS_CAMPAIGN = 'ad170000-0000-4000-8000-0000000000c3';
 const RDF_OFFICER_ID = 'ad170000-0000-4000-8000-00000000ff01';
 
 const RDF_WIN = 'ad170000-0000-4000-8000-00000000a001'; // FINAL_SHORTLIST → accepted
-const RDF_SIB = 'ad170000-0000-4000-8000-00000000a002'; // SUBMITTED, same agency → WITHDRAWN
+// ADR-027 allows one LIVE application per (applicant, campaign, category), so
+// a same-agency sibling is only legal in another CATEGORY of the same campaign
+// — which is exactly the real case this slice is about: a citizen hedging
+// across lanes, then being accepted in one of them. Same reasoning for the RNP
+// pair below (the live-intent index spares only WITHDRAWN, not REJECTED).
+const RDF_SIB = 'ad170000-0000-4000-8000-00000000a002'; // SUBMITTED, same agency, other category → WITHDRAWN
 const RNP_SIB = 'ad170000-0000-4000-8000-00000000b001'; // SLOT_ASSIGNED, sibling agency → WITHDRAWN
 const RCS_HOLD = 'ad170000-0000-4000-8000-00000000b002'; // ADJUDICATION_REVIEW hold (D6) → WITHDRAWN
 const RNP_REJ = 'ad170000-0000-4000-8000-00000000b003'; // already REJECTED → untouched
@@ -131,9 +136,9 @@ async function seed(): Promise<void> {
        registration_opens_at, registration_closes_at,
        examination_start_date, examination_end_date, examination_reporting_hour)
     VALUES
-      (${RDF_CAMPAIGN}, 'Auto-withdrawal RDF', 'RDF', 'REGISTRATION_OPEN', '["GENERAL_ENLISTMENT"]',
+      (${RDF_CAMPAIGN}, 'Auto-withdrawal RDF', 'RDF', 'REGISTRATION_OPEN', '["GENERAL_ENLISTMENT","RESERVE_FORCE_UNIVERSITY"]',
        now() - interval '1 day', now() + interval '30 days', '2026-09-01', '2026-09-15', 7),
-      (${RNP_CAMPAIGN}, 'Auto-withdrawal RNP', 'RNP', 'REGISTRATION_OPEN', '["CADET_OFFICER"]',
+      (${RNP_CAMPAIGN}, 'Auto-withdrawal RNP', 'RNP', 'REGISTRATION_OPEN', '["CADET_OFFICER","BASIC_POLICE_COURSE"]',
        now() - interval '1 day', now() + interval '30 days', '2026-09-01', '2026-09-15', 7),
       (${RCS_CAMPAIGN}, 'Auto-withdrawal RCS', 'RCS', 'REGISTRATION_OPEN', '["GENERAL_ENLISTEE"]',
        now() - interval '1 day', now() + interval '30 days', '2026-09-01', '2026-09-15', 7)`;
@@ -143,14 +148,14 @@ async function seed(): Promise<void> {
     VALUES
       (${RDF_WIN}, 'RDF-98001', ${APPLICANT_W}, ${RDF_CAMPAIGN}, 'GENERAL_ENLISTMENT',
        'FINAL_SHORTLIST'::rdf_ops.application_status),
-      (${RDF_SIB}, 'RDF-98002', ${APPLICANT_W}, ${RDF_CAMPAIGN}, 'GENERAL_ENLISTMENT',
+      (${RDF_SIB}, 'RDF-98002', ${APPLICANT_W}, ${RDF_CAMPAIGN}, 'RESERVE_FORCE_UNIVERSITY',
        'SUBMITTED'::rdf_ops.application_status)`;
   await admin`
     INSERT INTO rnp_ops.applications (id, processing_code, applicant_id, campaign_id, category, status)
     VALUES
       (${RNP_SIB}, 'RNP-98001', ${APPLICANT_W}, ${RNP_CAMPAIGN}, 'CADET_OFFICER',
        'SLOT_ASSIGNED'::rnp_ops.application_status),
-      (${RNP_REJ}, 'RNP-98002', ${APPLICANT_W}, ${RNP_CAMPAIGN}, 'CADET_OFFICER',
+      (${RNP_REJ}, 'RNP-98002', ${APPLICANT_W}, ${RNP_CAMPAIGN}, 'BASIC_POLICE_COURSE',
        'REJECTED'::rnp_ops.application_status)`;
   await admin`
     INSERT INTO rcs_ops.applications (id, processing_code, applicant_id, campaign_id, category, status)

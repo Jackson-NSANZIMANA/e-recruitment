@@ -97,6 +97,19 @@ export const rcsUrProgramEnum = rcsOps.enum('ur_program', [
 ]);
 
 // ── rcs_ops.applications ──────────────────────────────────────────
+// NOT MODELLED HERE (deliberate, ADR-027): the live-intent partial unique
+// index applied by rls/0022_submission_integrity.sql —
+//   uq_rcs_applications_live_intent
+//     ON rcs_ops.applications (applicant_id, campaign_id, category)
+//     WHERE status <> 'WITHDRAWN'
+// It is the engine's guarantee that one citizen holds at most ONE live
+// application per campaign+category. It is omitted from the mirror for the
+// same reason CHECK constraints are (see docs/architecture/schema-evolution.md):
+// verify-schema-drift.ts compares only `idx_*`-named indexes, so adding a
+// `uq_`-named one to the snapshot would make the drift gate red forever.
+// Its existence, uniqueness and exact predicate are asserted against the LIVE
+// database instead, by
+// services/application-service/selfcheck/verify-submission-integrity.ts §2.
 
 export const rcsApplications = rcsOps.table(
   'applications',

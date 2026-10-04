@@ -56,6 +56,19 @@ if (process.env['AUTH_JWT_PUBLIC_KEY_B64'] === undefined) {
 
 const APPLICANT_ID = '2a2a2a2a-2a2a-4a2a-8a2a-2a2a2a2a2a2a';
 const NID_HASH = 'a1b2c3d4'.repeat(8);
+// ADR-027: one LIVE application per (applicant, campaign, category). This
+// proof needs ten applications sitting side by side — one per projection
+// scenario, most of them RDF/GENERAL_ENLISTMENT — so each gets its own
+// citizen. The projector keys on applicationId, so the scenarios stay exactly
+// as independent as they were when one applicant owned them all.
+const SCENARIO_APPLICANTS: readonly string[] = Array.from(
+  { length: 10 },
+  (_, i) => `2a2a2a2a-2a2a-4a2a-8a2a-2a2a2a2a2a${String(i).padStart(2, '0')}`,
+);
+const ALL_APPLICANTS = [APPLICANT_ID, ...SCENARIO_APPLICANTS];
+// applicationId → the citizen who filed it, so emitted events stay truthful.
+const OWNER_OF = new Map<string, string>();
+const ownerOf = (appId: string): string => OWNER_OF.get(appId) ?? APPLICANT_ID;
 const RDF_CAMPAIGN = '5c5c5c5c-5c5c-4c5c-8c5c-5c5c5c5c5c5c';
 const RNP_CAMPAIGN = '6c6c6c6c-6c6c-4c6c-8c6c-6c6c6c6c6c6c';
 
@@ -80,12 +93,13 @@ async function cleanup(): Promise<void> {
       await tx`
         DELETE FROM ${tx(schema)}.application_status_history
         WHERE application_id IN (
-          SELECT id FROM ${tx(schema)}.applications WHERE applicant_id = ${APPLICANT_ID}
+          SELECT id FROM ${tx(schema)}.applications WHERE applicant_id IN ${tx(ALL_APPLICANTS)}
         )`;
-      await tx`DELETE FROM ${tx(schema)}.applications WHERE applicant_id = ${APPLICANT_ID}`;
+      await tx`DELETE FROM ${tx(schema)}.applications WHERE applicant_id IN ${tx(ALL_APPLICANTS)}`;
     }
     await tx`DELETE FROM public_core.recruitment_campaigns WHERE id IN ${tx([RDF_CAMPAIGN, RNP_CAMPAIGN])}`;
-    await tx`DELETE FROM public_core.applicant_identities WHERE id = ${APPLICANT_ID}`;
+    await tx`DELETE FROM public_core.submission_requests WHERE applicant_id IN ${tx(ALL_APPLICANTS)}`;
+    await tx`DELETE FROM public_core.applicant_identities WHERE id IN ${tx(ALL_APPLICANTS)}`;
   });
 }
 
@@ -97,6 +111,15 @@ async function seed(): Promise<void> {
        registration_channel, identity_status)
     VALUES (${APPLICANT_ID}, ${NID_HASH}, 'x','x','x','x','MALE','WEB',
             'VERIFIED'::public_core.identity_verification_status)`;
+  for (const [i, id] of SCENARIO_APPLICANTS.entries()) {
+    await admin`
+      INSERT INTO public_core.applicant_identities
+        (id, national_id_hash, encrypted_full_name, encrypted_date_of_birth,
+         encrypted_home_district, encrypted_home_province, gender,
+         registration_channel, identity_status)
+      VALUES (${id}, ${`b${String(i).padStart(2, '0')}c3d4a`.repeat(8)}, 'x','x','x','x','MALE','WEB',
+              'VERIFIED'::public_core.identity_verification_status)`;
+  }
   await admin`
     INSERT INTO public_core.recruitment_campaigns
       (id, campaign_label, agency, status, target_categories,
@@ -117,10 +140,11 @@ async function fileApplication(
   agency: Agency,
   campaignId: string,
   category: ApplicationCategory,
+  applicantId: string,
 ): Promise<string> {
   const res = await repo.createApplication({
     agency,
-    applicantId: APPLICANT_ID,
+    applicantId,
     campaignId,
     category,
     channel: 'WEB',
@@ -128,6 +152,7 @@ async function fileApplication(
     hecRegistrationNumber: null,
     correlationId: randomUUID(),
   });
+  OWNER_OF.set(res.applicationId, applicantId);
   return res.applicationId;
 }
 
@@ -199,7 +224,7 @@ function ageEvent(appId: string, agency: Agency, category: ApplicationCategory, 
   return {
     ...newEnvelope(newCorrelationContext()),
     eventType: 'AGE_ELIGIBILITY_COMPLETED',
-    applicantId: APPLICANT_ID,
+    applicantId: ownerOf(appId),
     applicationId: appId,
     agency,
     category,
@@ -215,7 +240,7 @@ function nesaEvent(appId: string, agency: Agency, category: ApplicationCategory,
   return {
     ...newEnvelope(newCorrelationContext()),
     eventType: 'NESA_VERIFICATION_COMPLETED',
-    applicantId: APPLICANT_ID,
+    applicantId: ownerOf(appId),
     applicationId: appId,
     agency,
     category,
@@ -229,7 +254,7 @@ function hecEvent(appId: string, agency: Agency, category: ApplicationCategory):
   return {
     ...newEnvelope(newCorrelationContext()),
     eventType: 'HEC_VERIFICATION_COMPLETED',
-    applicantId: APPLICANT_ID,
+    applicantId: ownerOf(appId),
     applicationId: appId,
     agency,
     category,
@@ -254,7 +279,7 @@ function ribEvent(
   return {
     ...newEnvelope(newCorrelationContext()),
     eventType: 'RIB_VETTING_COMPLETED',
-    applicantId: APPLICANT_ID,
+    applicantId: ownerOf(appId),
     applicationId: appId,
     agency,
     category,
@@ -272,18 +297,18 @@ async function main(): Promise<void> {
   await seed();
 
   // File one SUBMITTED application per scenario (all for the one applicant).
-  const appAcademic = await fileApplication(repo, 'RDF', RDF_CAMPAIGN, 'GENERAL_ENLISTMENT');
-  const appHec = await fileApplication(repo, 'RDF', RDF_CAMPAIGN, 'RESERVE_FORCE_UNIVERSITY');
-  const appCriminal = await fileApplication(repo, 'RDF', RDF_CAMPAIGN, 'GENERAL_ENLISTMENT');
-  const appReject = await fileApplication(repo, 'RDF', RDF_CAMPAIGN, 'GENERAL_ENLISTMENT');
-  const appIdem = await fileApplication(repo, 'RDF', RDF_CAMPAIGN, 'GENERAL_ENLISTMENT');
-  const appOrder = await fileApplication(repo, 'RDF', RDF_CAMPAIGN, 'GENERAL_ENLISTMENT');
-  const appRnp = await fileApplication(repo, 'RNP', RNP_CAMPAIGN, 'CADET_OFFICER');
+  const appAcademic = await fileApplication(repo, 'RDF', RDF_CAMPAIGN, 'GENERAL_ENLISTMENT', SCENARIO_APPLICANTS[0]!);
+  const appHec = await fileApplication(repo, 'RDF', RDF_CAMPAIGN, 'RESERVE_FORCE_UNIVERSITY', SCENARIO_APPLICANTS[1]!);
+  const appCriminal = await fileApplication(repo, 'RDF', RDF_CAMPAIGN, 'GENERAL_ENLISTMENT', SCENARIO_APPLICANTS[2]!);
+  const appReject = await fileApplication(repo, 'RDF', RDF_CAMPAIGN, 'GENERAL_ENLISTMENT', SCENARIO_APPLICANTS[3]!);
+  const appIdem = await fileApplication(repo, 'RDF', RDF_CAMPAIGN, 'GENERAL_ENLISTMENT', SCENARIO_APPLICANTS[4]!);
+  const appOrder = await fileApplication(repo, 'RDF', RDF_CAMPAIGN, 'GENERAL_ENLISTMENT', SCENARIO_APPLICANTS[5]!);
+  const appRnp = await fileApplication(repo, 'RNP', RNP_CAMPAIGN, 'CADET_OFFICER', SCENARIO_APPLICANTS[6]!);
   // Age-dimension scenarios (the positive terminal).
-  const appGreen = await fileApplication(repo, 'RDF', RDF_CAMPAIGN, 'GENERAL_ENLISTMENT');
-  const appNoAge = await fileApplication(repo, 'RDF', RDF_CAMPAIGN, 'GENERAL_ENLISTMENT');
-  const appAgeReject = await fileApplication(repo, 'RDF', RDF_CAMPAIGN, 'GENERAL_ENLISTMENT');
-  console.log(`\nFiled 10 SUBMITTED applications for applicant ${APPLICANT_ID} — brokers ${BROKERS.join(',')}`);
+  const appGreen = await fileApplication(repo, 'RDF', RDF_CAMPAIGN, 'GENERAL_ENLISTMENT', SCENARIO_APPLICANTS[7]!);
+  const appNoAge = await fileApplication(repo, 'RDF', RDF_CAMPAIGN, 'GENERAL_ENLISTMENT', SCENARIO_APPLICANTS[8]!);
+  const appAgeReject = await fileApplication(repo, 'RDF', RDF_CAMPAIGN, 'GENERAL_ENLISTMENT', SCENARIO_APPLICANTS[9]!);
+  console.log(`\nFiled 10 SUBMITTED applications (one citizen each, ADR-027) — brokers ${BROKERS.join(',')}`);
 
   // Buses: the service consumes the vetting topics AND publishes AUDIT_ENTRY.
   const serviceBus = new KafkaEventBus({ brokers: BROKERS, clientId: 'application-service' });
@@ -391,7 +416,7 @@ async function main(): Promise<void> {
 
   // ── 8. Cross-agency guard: RNP-labelled event for an RDF app ───────
   console.log('\n── 8. Cross-agency guard (mis-routed event → NOT_FOUND) ─────');
-  const guardApp = await fileApplication(repo, 'RDF', RDF_CAMPAIGN, 'GENERAL_ENLISTMENT');
+  const guardApp = await fileApplication(repo, 'RDF', RDF_CAMPAIGN, 'GENERAL_ENLISTMENT', APPLICANT_ID);
   const before = await readState('rdf_ops', guardApp);
   // Same applicationId, but agency mislabelled RNP → projector targets rnp_ops.
   await producerBus.publish(ribEvent(guardApp, 'RNP', 'CADET_OFFICER', 'CLEARED', 'IMPRISONMENT_GT_6MO'));

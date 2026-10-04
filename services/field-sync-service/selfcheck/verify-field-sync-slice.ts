@@ -65,15 +65,21 @@ const ADMIN_URL =
 const admin = postgres(ADMIN_URL, { onnotice: () => {} });
 
 // ── Fixture ids ────────────────────────────────────────────────────
+// ADR-027: one LIVE application per (applicant, campaign, category). The
+// three biometric-verified scenarios below all sit in CAMPAIGN_ID /
+// GENERAL_ENLISTMENT, so each needs its own citizen — they are identical
+// fixtures and nothing here asserts across scenarios.
 const APPLICANT_BIO = '5f000000-0000-4000-8000-000000000001';   // has biometric_verified_at
 const APPLICANT_NOBIO = '5f000000-0000-4000-8000-000000000002'; // no biometric
+const APPLICANT_BIO_2 = '5f000000-0000-4000-8000-000000000003'; // out-of-order scenario
+const APPLICANT_BIO_3 = '5f000000-0000-4000-8000-000000000004'; // conflict scenario
 const CAMPAIGN_ID = '5f000000-0000-4000-8000-0000000000c0';
 const APP_ACCEPT = '5f000000-0000-4000-8000-00000000a001';   // happy path → COMPLETE
 const APP_ORDER = '5f000000-0000-4000-8000-00000000a002';    // out-of-order / stale / dup
 const APP_CONFLICT = '5f000000-0000-4000-8000-00000000a003'; // concurrent → held → resolve
 const APP_NOBIO = '5f000000-0000-4000-8000-00000000a004';    // biometric precondition
 const APP_IDS = [APP_ACCEPT, APP_ORDER, APP_CONFLICT, APP_NOBIO];
-const APPLICANT_IDS = [APPLICANT_BIO, APPLICANT_NOBIO];
+const APPLICANT_IDS = [APPLICANT_BIO, APPLICANT_NOBIO, APPLICANT_BIO_2, APPLICANT_BIO_3];
 
 const DEV_A = 'DEV-RDF-A';
 const DEV_B = 'DEV-RDF-B';
@@ -169,7 +175,11 @@ async function seed(): Promise<void> {
       (${APPLICANT_BIO}, ${'a1'.repeat(32)}, 'x','x','x','x','MALE','WEB',
        'VERIFIED'::public_core.identity_verification_status, now()),
       (${APPLICANT_NOBIO}, ${'a2'.repeat(32)}, 'x','x','x','x','MALE','WEB',
-       'VERIFIED'::public_core.identity_verification_status, NULL)`;
+       'VERIFIED'::public_core.identity_verification_status, NULL),
+      (${APPLICANT_BIO_2}, ${'a3'.repeat(32)}, 'x','x','x','x','MALE','WEB',
+       'VERIFIED'::public_core.identity_verification_status, now()),
+      (${APPLICANT_BIO_3}, ${'a4'.repeat(32)}, 'x','x','x','x','MALE','WEB',
+       'VERIFIED'::public_core.identity_verification_status, now())`;
 
   await admin`
     INSERT INTO public_core.recruitment_campaigns
@@ -191,8 +201,8 @@ async function seed(): Promise<void> {
        'PHYSICAL_TEST_SCHEDULED'::rdf_ops.application_status,
        ${ticketFor(id)}, now())`;
   await seedApp(APP_ACCEPT, APPLICANT_BIO, 'RDF-90001');
-  await seedApp(APP_ORDER, APPLICANT_BIO, 'RDF-90002');
-  await seedApp(APP_CONFLICT, APPLICANT_BIO, 'RDF-90003');
+  await seedApp(APP_ORDER, APPLICANT_BIO_2, 'RDF-90002');
+  await seedApp(APP_CONFLICT, APPLICANT_BIO_3, 'RDF-90003');
   await seedApp(APP_NOBIO, APPLICANT_NOBIO, 'RDF-90004');
 
   // A pre-revoked device (enrolled directly, revoked) to prove revocation-aware verify.

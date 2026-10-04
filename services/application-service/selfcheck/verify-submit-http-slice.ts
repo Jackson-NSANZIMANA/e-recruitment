@@ -68,6 +68,8 @@ const PENDING_NID_HASH = 'feedface'.repeat(8); // distinct — the hash column i
 const NESA_INDEX = 'RW2024SC00123';
 const HEC_REG = 'HEC-2024-000789';
 const CORRELATION_ID = '11111111-1111-4111-8111-111111111111';
+// ADR-027: the front door is idempotent on (applicantId, Idempotency-Key).
+const SUBMIT_KEY = '77777777-7777-4777-8777-777777777777';
 
 let failures = 0;
 function check(label: string, condition: boolean, detail = ''): void {
@@ -95,6 +97,10 @@ async function cleanup(): Promise<void> {
         )`;
       await tx`DELETE FROM ${tx(schema)}.applications WHERE applicant_id IN ${ids}`;
     }
+    // ADR-027: the request ledger is append-only for every role, so it is
+    // cleared inside the same escape hatch. It has no FK to applications, so
+    // skipping it would leave orphan rows behind every run.
+    await tx`DELETE FROM public_core.submission_requests WHERE applicant_id IN ${ids}`;
     await tx`DELETE FROM public_core.recruitment_campaigns WHERE id IN ${tx([CAMPAIGN_ID, RNP_CAMPAIGN_ID])}`;
     await tx`DELETE FROM public_core.applicant_identities WHERE id IN ${ids}`;
   });
@@ -199,7 +205,7 @@ async function main(): Promise<void> {
   try {
     console.log('\n── 1. POST verified applicant → 201 SUBMITTED ────────────────');
     const r1 = await call('POST', SUBMIT_APPLICATION_PATH, {
-      headers: { ...JSON_HEADERS, 'x-correlation-id': CORRELATION_ID },
+      headers: { ...JSON_HEADERS, 'x-correlation-id': CORRELATION_ID, 'idempotency-key': SUBMIT_KEY },
       body: JSON.stringify({
         applicantId: VERIFIED_ID,
         category: 'GENERAL_ENLISTMENT',
@@ -251,6 +257,41 @@ async function main(): Promise<void> {
     check('history to_status is SUBMITTED', h?.to_status === 'SUBMITTED', String(h?.to_status));
     check('history performed_by is SYSTEM', h?.performed_by === 'SYSTEM', String(h?.performed_by));
     check('history correlation_id == inbound', h?.correlation_id === CORRELATION_ID, String(h?.correlation_id));
+
+    console.log('\n── 3a. The retry contract at the door (ADR-027) ──────────────');
+    // A dropped response on a Rwandan mobile network is the normal case, not
+    // the exception. The full matrix is proven by
+    // selfcheck/verify-submission-integrity.ts; these three assertions hold
+    // the HTTP edge of it in the front-door proof itself, so a controller
+    // change cannot quietly drop idempotency.
+    const replay = await call('POST', SUBMIT_APPLICATION_PATH, {
+      headers: { ...JSON_HEADERS, 'x-correlation-id': CORRELATION_ID, 'idempotency-key': SUBMIT_KEY },
+      body: JSON.stringify({
+        applicantId: VERIFIED_ID,
+        category: 'GENERAL_ENLISTMENT',
+        channel: 'WEB',
+        nesaIndexNumber: NESA_INDEX,
+      }),
+    });
+    const replayBody = asRecord(replay.json);
+    check('same key + same body → 201 again', replay.status === 201, replay.text);
+    check('…flagged Idempotency-Replayed: true', replay.headers.get('idempotency-replayed') === 'true', String(replay.headers.get('idempotency-replayed')));
+    check('…same applicationId and processing code', replayBody['applicationId'] === applicationId && replayBody['processingCode'] === processingCode, JSON.stringify(replayBody));
+    check('…and published NO second event', bus.published.length === 1, `got ${bus.published.length}`);
+    const freshKey = await call('POST', SUBMIT_APPLICATION_PATH, {
+      headers: { ...JSON_HEADERS, 'x-correlation-id': CORRELATION_ID, 'idempotency-key': '77777777-7777-4777-8777-777777777778' },
+      body: JSON.stringify({
+        applicantId: VERIFIED_ID,
+        category: 'GENERAL_ENLISTMENT',
+        channel: 'WEB',
+        nesaIndexNumber: NESA_INDEX,
+      }),
+    });
+    const freshBody = asRecord(freshKey.json);
+    check('new key, live application → 409 ALREADY_APPLIED', freshKey.status === 409 && freshBody['status'] === 'ALREADY_APPLIED', freshKey.text);
+    const dupRows = await admin<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM rdf_ops.applications WHERE applicant_id = ${VERIFIED_ID}`;
+    check('…exactly one application on file throughout', dupRows[0]?.n === 1, String(dupRows[0]?.n));
 
     console.log('\n── 3b. Cross-agency routing → OWNING schema only (RNP) ───────');
     // An RNP category (HEC path) must land in rnp_ops, mint an RNP code, and
