@@ -27,8 +27,11 @@ import postgres from 'postgres';
 import { sql } from '@usrp/shared-database';
 import {
   assertRateLimitStoreAllowed,
+  createEdgeGateway,
+  InMemoryRateLimiter,
+  loadEdgeGatewayConfig,
   PgRateLimiter,
-} from '../src/index.js';
+} from "../src/index.js";
 import { RateLimiterUnavailableError } from '../src/ports/rate-limiter.js';
 
 const ADMIN_URL =
@@ -178,8 +181,48 @@ async function main(): Promise<void> {
   } catch {
     acceptedDevMemory = false;
   }
-  check('(development, memory) is accepted — dev and selfchecks keep it', acceptedDevMemory);
+   check('(development, memory) is accepted — dev and selfchecks keep it', acceptedDevMemory);
 
+  // ── 5b. The refusal is on the REAL boot path ───────────────────────
+  // Not just the guard function: the actual composition (createEdgeGateway,
+  // what main.ts boots) refuses a production config handed the memory
+  // limiter, before it returns a gateway that could serve a request.
+  section('5b. The real composition refuses production + memory at boot');
+  const prodEnv: Record<string, string> = {
+    NODE_ENV: 'production',
+    PORT: '43190', // proof-only, never listened on
+    DATABASE_URL: process.env['DATABASE_URL'] ?? '',
+    IAM_BASE_URL: 'http://127.0.0.1:9', // never contacted at boot
+    IDENTITY_SERVICE_BASE_URL: 'http://127.0.0.1:9',
+    APPLICATION_SERVICE_BASE_URL: 'http://127.0.0.1:9',
+    FIELD_SYNC_SERVICE_BASE_URL: 'http://127.0.0.1:9',
+    EDGE_SESSION_HMAC_KEY: 'prod_proof_only_key_not_a_published_dev_value_min_32_chars!!',
+    EDGE_COOKIE_SECURE: 'true',
+    CORS_ORIGINS: 'https://proof.example',
+    AUTH_JWT_PUBLIC_KEY_B64: process.env['AUTH_JWT_PUBLIC_KEY_B64'] ?? '',
+  };
+  const prodConfig = loadEdgeGatewayConfig(prodEnv);
+  check('the proof really built a production config', prodConfig.runtime.isProduction === true);
+  let bootRefused = false;
+  let refusalText = '';
+  try {
+    createEdgeGateway(prodConfig, () => new Date(), { limiter: new InMemoryRateLimiter(() => 0) });
+  } catch (err) {
+    bootRefused = err instanceof Error;
+    refusalText = err instanceof Error ? err.message : String(err);
+  }
+  check(
+    'a production boot handed the memory limiter THROWS before serving',
+    bootRefused && refusalText.includes('Refusing to boot'),
+    refusalText.slice(0, 120),
+  );
+  let prodPgBoot = true;
+  try {
+    createEdgeGateway(prodConfig, () => new Date(), { limiter: new PgRateLimiter({ hmacKey: prodConfig.session.handleHmacKey }) });
+  } catch {
+    prodPgBoot = false;
+  }
+  check('a production boot with the Postgres store composes', prodPgBoot);
   // ── 6. What is stored, and who may touch it ────────────────────────
   section('6. Keyed hashes only; the edge role alone may touch the table');
   const storedKey = await admin<{ bucket_key_hash: string }[]>`

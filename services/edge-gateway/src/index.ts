@@ -127,6 +127,15 @@ export function assertRateLimitStoreAllowed(
 export interface EdgeGatewayOverrides {
   /** Inject a recording sink in proofs. Defaults to the redacting stdout logger. */
   readonly audit?: AuditLogger;
+  /**
+   * Inject a limiter in proofs. Defaults to the store the runtime requires
+   * (Postgres in production, per-process in dev). The override exists so a
+   * proof can demonstrate, on the REAL boot path, that a production boot
+   * handed the memory limiter is REFUSED by assertRateLimitStoreAllowed
+   * below — before a single request is served — rather than silently
+   * permitting N-replicas-times-every-rate.
+   */
+  readonly limiter?: RateLimiter;
 }
 
 /** Compose the edge gateway: adapters → (use cases) → controllers. */
@@ -152,11 +161,12 @@ export function createEdgeGateway(
   // THE STORE IS SHARED IN PRODUCTION. The per-process limiter remains the
   // dev/selfcheck implementation; a production boot with it is refused below
   // rather than silently permitted (see assertRateLimitStoreAllowed).
-  const limiter = config.runtime.isProduction
-    ? new PgRateLimiter({ hmacKey: hmacKey })
-    : new InMemoryRateLimiter(() => now().getTime());
+  const limiter =
+    overrides.limiter ??
+    (config.runtime.isProduction
+      ? new PgRateLimiter({ hmacKey: hmacKey })
+      : new InMemoryRateLimiter(() => now().getTime()));
   assertRateLimitStoreAllowed(config.runtime.isProduction, limiter.store);
-
   const deps: EdgeDeps = {
     config,
     cookies: cookiePolicy(config.session.secureCookies),

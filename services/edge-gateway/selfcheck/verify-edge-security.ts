@@ -107,9 +107,17 @@ interface StubState {
   /** Whether any inbound upstream request carried a cookie header. */
   sawCookieHeader: boolean;
   /** Scripted answer for the citizen submit bridge (POST /v1/applicants/me/applications). */
-  submitAnswer: "first" | "replay" | "alreadyApplied" | "keyReused" | "unavailable";
+  submitAnswer:
+    | "first"
+    | "replay"
+    | "alreadyApplied"
+    | "keyReused"
+    | "unavailable";
   /** Every submit-bridge call, headers and all, for the allowlist proofs. */
-  submitCalls: { headers: Record<string, string | string[] | undefined>; body: unknown }[];
+  submitCalls: {
+    headers: Record<string, string | string[] | undefined>;
+    body: unknown;
+  }[];
 }
 
 // ADR-027 walk-in duplicate fixtures.
@@ -332,7 +340,8 @@ async function stubHandler(
           // the identifier-free shape this answer is contracted to.
           return send(res, 409, {
             status: "KEY_REUSED",
-            reason: "This Idempotency-Key was already used for a different submission.",
+            reason:
+              "This Idempotency-Key was already used for a different submission.",
             applicationId: "00000000-0000-4000-8000-0000000000ff",
             processingCode: "RDF-99999",
           });
@@ -375,7 +384,7 @@ async function main(): Promise<void> {
     EDGE_LOGIN_RATE_LIMIT_PER_MINUTE: "200",
     EDGE_OTP_RATE_LIMIT_PER_MINUTE: "200",
     EDGE_VERIFY_IDENTITY_RATE_LIMIT_PER_MINUTE: "200",
-    EDGE_APPLICANT_SUBMIT_RATE_LIMIT_PER_MINUTE: "4",
+    EDGE_APPLICANT_SUBMIT_RATE_LIMIT_PER_MINUTE: "5",
   });
 
   // A recording audit sink, so 14b can assert the integrity audit events
@@ -719,17 +728,13 @@ async function main(): Promise<void> {
     // identifiers dropped — a wrong label on an answer the officer could no
     // longer act on.
     section("A duplicate walk-in registration names the application on file");
-    const dupe = await call(
-      "POST",
-      "/edge/v1/applications/walk-in/register",
-      {
-        body: {
-          applicantId: WALK_IN_APPLICANT_ID,
-          category: "GENERAL_ENLISTMENT",
-          nesaIndexNumber: "RW2024/1002",
-        },
+    const dupe = await call("POST", "/edge/v1/applications/walk-in/register", {
+      body: {
+        applicantId: WALK_IN_APPLICANT_ID,
+        category: "GENERAL_ENLISTMENT",
+        nesaIndexNumber: "RW2024/1002",
       },
-    );
+    });
     check("duplicate registration is 409", dupe.status === 409, dupe.text);
     check(
       "the conflict is named ALREADY_APPLIED, not ILLEGAL_TRANSITION",
@@ -851,7 +856,9 @@ async function main(): Promise<void> {
     );
 
     // ── 14b. The citizen submit front door (ADR-027) ────────────────
-    section("Citizen submission: self-bound, idempotent, rate-limited, header-clean");
+    section(
+      "Citizen submission: self-bound, idempotent, rate-limited, header-clean",
+    );
     const submitCallsBefore = state.submitCalls.length;
     const SUBMIT_KEY = randomUUID();
 
@@ -877,14 +884,58 @@ async function main(): Promise<void> {
       extraHeaders: { "idempotency-key": "not-a-uuid" },
     });
     check("submit with a non-UUID key is 400", badKey.status === 400);
+    // Two Idempotency-Key headers arrive from the transport ALREADY JOINED
+    // ("k1, k2") — Node comma-joins duplicates — so sending the joined value
+    // IS the duplicate-header case, byte for byte.
+    const dupKey = await call("POST", "/edge/v1/me/applications", {
+      body: { category: "GENERAL_ENLISTMENT" },
+      extraHeaders: { "idempotency-key": `${randomUUID()}, ${randomUUID()}` },
+    });
+    check(
+      "two Idempotency-Key headers (transport-joined) are 400, not resolved by picking one",
+      dupKey.status === 400 && dupKey.text.includes("INVALID_IDEMPOTENCY_KEY"),
+      dupKey.text,
+    );
+    // HTTP permits optional surrounding whitespace; the controller accepts
+    // the key after trimming — and must forward the TRIMMED value (the
+    // canonical UUID), never the padded raw header.
+    const paddedKey = await call("POST", "/edge/v1/me/applications", {
+      body: { category: "GENERAL_ENLISTMENT" },
+      extraHeaders: { "idempotency-key": `  ${SUBMIT_KEY}  ` },
+    });
+    check(
+      "a whitespace-padded UUID key is accepted",
+      paddedKey.status === 201,
+      paddedKey.text,
+    );
+    check(
+      "the TRIMMED canonical key is what was forwarded upstream",
+      state.submitCalls[state.submitCalls.length - 1]?.headers[
+        "idempotency-key"
+      ] === SUBMIT_KEY,
+      String(
+        state.submitCalls[state.submitCalls.length - 1]?.headers[
+          "idempotency-key"
+        ],
+      ),
+    );
+    // Re-baseline: the padded-key accept above is the ONE upstream-reaching
+    // call this block makes; the rejected-shape checks below start from here.
+    const afterKeyContract = state.submitCalls.length;
 
     // Self-binding: identity fields are refused at the boundary.
     const forgedApplicant = await call("POST", "/edge/v1/me/applications", {
       body: { applicantId: randomUUID(), category: "GENERAL_ENLISTMENT" },
       extraHeaders: { "idempotency-key": randomUUID() },
     });
-    check("a body applicantId is REFUSED with 400", forgedApplicant.status === 400);
-    check("the refusal names FORBIDDEN_FIELD", forgedApplicant.text.includes("FORBIDDEN_FIELD"));
+    check(
+      "a body applicantId is REFUSED with 400",
+      forgedApplicant.status === 400,
+    );
+    check(
+      "the refusal names FORBIDDEN_FIELD",
+      forgedApplicant.text.includes("FORBIDDEN_FIELD"),
+    );
     const forgedChannel = await call("POST", "/edge/v1/me/applications", {
       body: { category: "GENERAL_ENLISTMENT", channel: "USSD" },
       extraHeaders: { "idempotency-key": randomUUID() },
@@ -894,10 +945,13 @@ async function main(): Promise<void> {
       body: { category: "NOT_A_CATEGORY" },
       extraHeaders: { "idempotency-key": randomUUID() },
     });
-    check("an unknown category is 400, never forwarded", badCategory.status === 400);
+    check(
+      "an unknown category is 400, never forwarded",
+      badCategory.status === 400,
+    );
     check(
       "no rejected shape ever reached the bridge",
-      state.submitCalls.length === submitCallsBefore,
+      state.submitCalls.length === afterKeyContract,
     );
 
     // First submission: 201, identifiers, no replay header, exact key +
@@ -920,8 +974,14 @@ async function main(): Promise<void> {
         first.text.includes('"agency":"RDF"'),
       first.text,
     );
-    check("no replay header on a first submission", first.response.headers.get("idempotency-replayed") === null);
-    check("the bridge was called exactly once for it", state.submitCalls.length - submitCallsBefore === 1);
+    check(
+      "no replay header on a first submission",
+      first.response.headers.get("idempotency-replayed") === null,
+    );
+    check(
+      "the bridge was called exactly once for it",
+      state.submitCalls.length - afterKeyContract === 1,
+    );
     const firstCall = state.submitCalls[state.submitCalls.length - 1];
     check(
       "the Idempotency-Key is forwarded EXACTLY",
@@ -932,8 +992,9 @@ async function main(): Promise<void> {
       "the upstream body is the allowlist only (no applicantId, no channel, no junk)",
       firstCall?.body !== null &&
         typeof firstCall?.body === "object" &&
-        Object.keys(firstCall.body as Record<string, unknown>).sort().join(",") ===
-          "category,nesaIndexNumber",
+        Object.keys(firstCall.body as Record<string, unknown>)
+          .sort()
+          .join(",") === "category,nesaIndexNumber",
       JSON.stringify(firstCall?.body),
     );
     const firstHeaders = Object.keys(firstCall?.headers ?? {})
@@ -941,9 +1002,13 @@ async function main(): Promise<void> {
       .sort();
     check(
       "the adapter's own headers are all present upstream",
-      ["accept", "authorization", "content-type", "idempotency-key", "x-correlation-id"].every((h) =>
-        firstHeaders.includes(h),
-      ),
+      [
+        "accept",
+        "authorization",
+        "content-type",
+        "idempotency-key",
+        "x-correlation-id",
+      ].every((h) => firstHeaders.includes(h)),
       JSON.stringify(firstHeaders),
     );
     check(
@@ -969,7 +1034,8 @@ async function main(): Promise<void> {
     );
     check(
       "the replayed body is the SAME identifiers as the first submit",
-      replay.text.includes(SUBMIT_APPLICATION_ID) && replay.text.includes(SUBMIT_PROCESSING_CODE),
+      replay.text.includes(SUBMIT_APPLICATION_ID) &&
+        replay.text.includes(SUBMIT_PROCESSING_CODE),
       replay.text,
     );
     check(
@@ -988,12 +1054,29 @@ async function main(): Promise<void> {
         "content-type": "application/json",
         "idempotency-key": SUBMIT_KEY,
       },
-      body: JSON.stringify({ category: "GENERAL_ENLISTMENT", nesaIndexNumber: "RW2026/1001" }),
+      body: JSON.stringify({
+        category: "GENERAL_ENLISTMENT",
+        nesaIndexNumber: "RW2026/1001",
+      }),
     });
     check("an allowed-origin replay is still 200", corsReplay.status === 200);
     check(
       "Access-Control-Expose-Headers names Idempotency-Replayed",
-      (corsReplay.headers.get("access-control-expose-headers") ?? "").includes("Idempotency-Replayed"),
+      (corsReplay.headers.get("access-control-expose-headers") ?? "").includes(
+        "Idempotency-Replayed",
+      ),
+      corsReplay.headers.get("access-control-expose-headers") ?? "(none)",
+    );
+    check(
+      "CORS exposes ONLY the approved response headers — nothing else leaks to the browser",
+      (corsReplay.headers.get("access-control-expose-headers") ?? "")
+        .split(",")
+        .map((h) => h.trim())
+        .sort()
+        .join(",") ===
+        ["Idempotency-Replayed", "x-correlation-id", "x-request-id"]
+          .sort()
+          .join(","),
       corsReplay.headers.get("access-control-expose-headers") ?? "(none)",
     );
     const preflight = await fetch(`${base}/edge/v1/me/applications`, {
@@ -1001,13 +1084,21 @@ async function main(): Promise<void> {
       headers: {
         ...corsBase,
         "access-control-request-method": "POST",
-        "access-control-request-headers": "content-type,x-csrf-token,idempotency-key",
+        "access-control-request-headers":
+          "content-type,x-csrf-token,idempotency-key",
       },
     });
-    check("the preflight allows POST", (preflight.headers.get("access-control-allow-methods") ?? "").includes("POST"));
+    check(
+      "the preflight allows POST",
+      (preflight.headers.get("access-control-allow-methods") ?? "").includes(
+        "POST",
+      ),
+    );
     check(
       "the preflight allows the browser to SEND Idempotency-Key",
-      (preflight.headers.get("access-control-allow-headers") ?? "").includes("idempotency-key"),
+      (preflight.headers.get("access-control-allow-headers") ?? "").includes(
+        "idempotency-key",
+      ),
       preflight.headers.get("access-control-allow-headers") ?? "(none)",
     );
 
@@ -1017,27 +1108,34 @@ async function main(): Promise<void> {
       body: { category: "GENERAL_ENLISTMENT", nesaIndexNumber: "RW2026/1001" },
       extraHeaders: { "idempotency-key": randomUUID() },
     });
-    check("a live duplicate is 409 ALREADY_APPLIED", duplicate.status === 409 && duplicate.text.includes("ALREADY_APPLIED"), duplicate.text);
+    check(
+      "a live duplicate is 409 ALREADY_APPLIED",
+      duplicate.status === 409 && duplicate.text.includes("ALREADY_APPLIED"),
+      duplicate.text,
+    );
     check(
       "the duplicate names the application on file (same shape as 201)",
-      duplicate.text.includes(SUBMIT_APPLICATION_ID) && duplicate.text.includes(SUBMIT_PROCESSING_CODE),
+      duplicate.text.includes(SUBMIT_APPLICATION_ID) &&
+        duplicate.text.includes(SUBMIT_PROCESSING_CODE),
       duplicate.text,
     );
 
-    // The per-session rate limit: four upstream-reaching submissions are all
-    // this session gets in a minute (the proof pins the limit at 4).
+    // The per-session rate limit: five upstream-reaching submissions are all
+    // this session gets in a minute (the proof pins the limit at 5: the
+    // padded-key accept, the first submit, the replay, the CORS replay and
+    // the live duplicate).
     const rateLimited = await call("POST", "/edge/v1/me/applications", {
       body: { category: "GENERAL_ENLISTMENT", nesaIndexNumber: "RW2026/1001" },
       extraHeaders: { "idempotency-key": randomUUID() },
     });
     check(
-      "the 5th submission in a minute is 429 RATE_LIMITED",
+      "the 6th submission in a minute is 429 RATE_LIMITED",
       rateLimited.status === 429 && rateLimited.text.includes("RATE_LIMITED"),
       rateLimited.text,
     );
     check(
       "the rate-limited request never reached the bridge",
-      state.submitCalls.length === submitCallsBefore + 4,
+      state.submitCalls.length === submitCallsBefore + 5,
       `${state.submitCalls.length - submitCallsBefore} upstream calls`,
     );
 
@@ -1047,7 +1145,10 @@ async function main(): Promise<void> {
     const reLogin = await call("POST", "/edge/v1/auth/applicant/otp/verify", {
       body: { nationalId: NID_A, otp: "123456" },
     });
-    check("citizen re-login for the second half is 204", reLogin.status === 204);
+    check(
+      "citizen re-login for the second half is 204",
+      reLogin.status === 204,
+    );
 
     // Key reuse: identifier-free even when upstream misbehaves.
     state.submitAnswer = "keyReused";
@@ -1055,20 +1156,28 @@ async function main(): Promise<void> {
       body: { category: "GENERAL_ENLISTMENT", nesaIndexNumber: "RW2026/1002" },
       extraHeaders: { "idempotency-key": randomUUID() },
     });
-    check("key reuse is 422 KEY_REUSED", reused.status === 422 && reused.text.includes("KEY_REUSED"), reused.text);
+    check(
+      "key reuse is 422 KEY_REUSED",
+      reused.status === 422 && reused.text.includes("KEY_REUSED"),
+      reused.text,
+    );
     check(
       "key reuse is IDENTIFIER-FREE at the boundary too",
-      !reused.text.includes("applicationId") && !reused.text.includes(SUBMIT_APPLICATION_ID),
+      !reused.text.includes("applicationId") &&
+        !reused.text.includes(SUBMIT_APPLICATION_ID),
       reused.text,
     );
     check(
       "key reuse is audited as EDGE_IDEMPOTENCY_KEY_REUSED",
       auditRecords.some((a) => a.action === "EDGE_IDEMPOTENCY_KEY_REUSED"),
     );
-    const reuseAudit = auditRecords.find((a) => a.action === "EDGE_IDEMPOTENCY_KEY_REUSED");
+    const reuseAudit = auditRecords.find(
+      (a) => a.action === "EDGE_IDEMPOTENCY_KEY_REUSED",
+    );
     check(
       "the reuse audit line carries no key material",
-      reuseAudit !== undefined && !JSON.stringify(reuseAudit).includes(SUBMIT_KEY),
+      reuseAudit !== undefined &&
+        !JSON.stringify(reuseAudit).includes(SUBMIT_KEY),
     );
 
     // Dependency failure: 503, and the write is attempted EXACTLY once.
@@ -1078,7 +1187,11 @@ async function main(): Promise<void> {
       body: { category: "GENERAL_ENLISTMENT", nesaIndexNumber: "RW2026/1003" },
       extraHeaders: { "idempotency-key": randomUUID() },
     });
-    check("an unavailable bridge is a 503", unavailable.status === 503, unavailable.text);
+    check(
+      "an unavailable bridge is a 503",
+      unavailable.status === 503,
+      unavailable.text,
+    );
     check(
       "the failed submission was attempted EXACTLY ONCE (no hidden retry)",
       state.submitCalls.length - callsBeforeUnavailable === 1,
