@@ -246,10 +246,23 @@ does not provide.
      it — dead vocabulary invites the reader to assume a mechanism that is
      not there.
 
-   What *does* work today: `walkInRegister` **is** exposed through the edge,
-   and the gateway returns `{ status, body }` verbatim for anything that is
-   not 3xx or 502/503/504. The new `409 ALREADY_APPLIED` therefore reaches
-   the officer's tablet intact, application id and all.
+   The walk-in path **is** exposed through the edge, and a first reading of
+   `upstream.http-gateway.ts` (which returns `{ status, body }` verbatim for
+   anything that is not 3xx or 502/503/504) suggested the new
+   `409 ALREADY_APPLIED` already reached the officer's tablet intact. **That
+   was wrong**, and writing the assertion instead of trusting the reading is
+   what caught it: above the transport sits a per-outcome projection,
+   `conflictResult`, which switches on known upstream statuses.
+   `ALREADY_APPLIED` was not one of them, so it fell through to the default
+   and arrived as `ILLEGAL_TRANSITION` **with both identifiers dropped** — a
+   wrong label on an answer the officer could no longer act on, defeating the
+   exact reason the service returns the processing code. Fixed here, with
+   §11b of `verify-edge-security.ts` holding it: the case is explicit, the
+   identifiers are kept, and the comment records why this is the opposite
+   choice to the `CROSS_AGENCY_LOCKED` case directly above it (that one names
+   *another* agency's data and is an enumeration oracle; this one names the
+   officer's own, for a candidate standing in front of them, already
+   reachable via `listApplications`).
 4. **Idempotency for the other write endpoints.** Officer transitions,
    adjudication and self-withdrawal are all state-machine guarded (a repeat
    is `NO_CHANGE`), so they are safe but not *replayable*. Extending the

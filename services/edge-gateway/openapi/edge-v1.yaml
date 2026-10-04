@@ -273,6 +273,12 @@ paths:
           description: Registered
         '403':
           description: Forbidden for this agency
+        '409':
+          description: >-
+            ALREADY_APPLIED (ADR-027) — this candidate already holds a live
+            application for the campaign and category. Carries applicationId
+            and processingCode so the tablet can open the existing record
+            instead of creating a second one.
 
   /edge/v1/applications/walk-in/vet:
     post:

@@ -83,6 +83,30 @@ export function conflictResult(body: unknown): HttpResult {
       // The upstream body names the agency; it is the officer's OWN agency, so
       // it is redundant rather than sensitive. Dropped for shape consistency.
       return { status: 409, body: { error: 'NO_WALK_IN_CAMPAIGN' } };
+    case 'ALREADY_APPLIED':
+      // ADR-027. The identifiers are KEPT, which is the opposite of the
+      // CROSS_AGENCY_LOCKED case above, so the difference is worth stating.
+      //
+      // There, naming the holder tells an RDF officer something about RNP —
+      // another agency's data, and an enumeration oracle. Here the application
+      // is in the officer's OWN agency (the walk-in lane is RDF-only and
+      // officer-scoped), for a candidate whose id that officer just supplied
+      // and who is standing in front of them. The same officer can already
+      // reach it through listApplications, so this grants no new capability.
+      //
+      // And without the identifiers the answer is useless: the upstream
+      // returns them precisely so the tablet can pull up the EXISTING
+      // application and continue with that one instead of trying to create a
+      // second. Falling through to the default would have relabelled this
+      // ILLEGAL_TRANSITION and dropped both fields.
+      return {
+        status: 409,
+        body: {
+          error: 'ALREADY_APPLIED',
+          applicationId: field(body, 'applicationId'),
+          processingCode: field(body, 'processingCode'),
+        },
+      };
     default:
       return {
         status: 409,
