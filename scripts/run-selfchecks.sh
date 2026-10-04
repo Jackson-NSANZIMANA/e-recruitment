@@ -165,6 +165,11 @@ run_ts "application-service: front-door submit"   services/application-service/s
 # this slice ever shipping as its SQL migration alone again.
 run_ts "application-service: submission integrity (idempotent retry, key reuse, live-intent duplicates, walk-in)" services/application-service/selfcheck/verify-submission-integrity.ts
 run_ts "application-service: officer auth + RLS"  services/application-service/selfcheck/verify-auth-slice.ts
+# This proof existed since 2026-08-22 but was never registered here, so it had
+# never run. It was red the whole time: findById selected a column rnp_ops does
+# not have, and every RNP officer's detail read answered 500. An unregistered
+# proof is not a proof — it is a file. Registered so that cannot recur.
+run_ts "application-service: officer single-record reads (by-id + status-history)" services/application-service/selfcheck/verify-application-detail-reads.ts
 run_ts "application-service: officer lifecycle (medical→final→accept)" services/application-service/selfcheck/verify-officer-lifecycle-slice.ts
 run_ts "application-service: auto-withdrawal on accept (ADR-017)" services/application-service/selfcheck/verify-auto-withdrawal-slice.ts
 run_ts "iam-service: token issuer (mint → officer endpoint accepts)" services/iam-service/selfcheck/verify-iam-issuer-slice.ts

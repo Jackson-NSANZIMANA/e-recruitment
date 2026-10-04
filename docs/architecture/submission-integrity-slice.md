@@ -108,8 +108,36 @@ would correct it:
 | `verify-vetting-projection` | ten applications on one citizen | one citizen per scenario; events carry the true owner via an `applicationId → applicant` map |
 | `verify-field-sync-slice` | three biometric lanes on one citizen | one citizen per lane |
 
-Two proofs in this service still fail for reasons that predate this work and
-are untouched by it: `verify-application-detail-reads` (the "three-schema
-intersection" column list in `application-read.pg-repository.ts` selects
-`declared_specialist_field`, which exists in `rdf_ops` and `rcs_ops` but not
-`rnp_ops`) and `verify-pipeline-e2e` (needs a Kafka broker).
+## A proof that was never run
+
+Running the neighbours turned up something worse than a broken fixture.
+`verify-application-detail-reads.ts` has existed since 2026-08-22 and was
+**never registered in `scripts/run-selfchecks.sh`**, so the gate had never
+executed it. It had been red that entire time.
+
+What it was failing on is the exact mistake its own target file warns about.
+`PgApplicationReadRepository.findById` carries this comment:
+
+> The column list is the THREE-SCHEMA INTERSECTION on purpose … Adding
+> `medical_reviewed_*` or `is_walk_in` here would make this method throw for
+> RCS officers and only RCS officers.
+
+and then selects `declared_specialist_field`, which exists in `rdf_ops` and
+`rcs_ops` but **not** in `rnp_ops` — RNP has no specialist lane, its
+categories being `CADET_OFFICER` and `BASIC_POLICE_COURSE`. Every RNP
+officer opening any application detail got a 500. The warning was written,
+ignored, and then not caught, because the thing that would have caught it was
+a file nobody ran.
+
+Both halves are fixed here: the column is projected as `NULL` for RNP (which
+is the truth — there is no specialist field to declare), and the proof is
+registered in the gate. A sweep of the repository found no other orphans:
+49 files under `selfcheck/`, 46 registered, and the remaining two are a
+cleanup utility and a shared `_auth-fixture.ts`.
+
+This is the same failure mode as the one this whole slice exists to repair —
+work that is present in the tree but absent from the gate — which is why
+§0 of `verify-submission-integrity.ts` asserts its own completeness manifest
+rather than trusting that someone wired everything up.
+
+`verify-pipeline-e2e` still cannot run locally: it needs a Kafka broker.
