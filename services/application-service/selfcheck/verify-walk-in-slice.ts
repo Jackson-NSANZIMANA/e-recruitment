@@ -326,6 +326,113 @@ async function main(): Promise<void> {
         !officerCouldRead);
     }
 
+    // ── 1c-continued. The FULL 0023 least-privilege matrix, pinned ──
+    //
+    // The walk-in lane is the one place a NON-system role writes into the
+    // transactional outbox, which makes its boundary worth proving directly
+    // rather than by implication from the registration flow above. The
+    // product/security decision (ADR-027 §"not done here" follow-up, rls/0023
+    // header): the system role stays the ONLY reader/updater/relay; the three
+    // officer roles may INSERT rows — and only rows whose producer is pinned
+    // to 'application-service' — because the officer role IS the cross-agency
+    // isolation for the application rows staged in the same transaction, and
+    // switching the transaction to the system role would end it in the one
+    // role that reaches every agency's schema. Every assertion below runs in
+    // its own subtransaction and is rolled back, so nothing persists.
+    {
+      // (a) INSERT with the pinned producer SUCCEEDS — the lane's whole design.
+      let pinnedInsertOk = false;
+      const pinnedEventId = randomUUID();
+      try {
+        await admin.begin(async (tx) => {
+          await tx`SET LOCAL ROLE usrp_rdf_officer`;
+          await tx`
+            INSERT INTO public_core.event_outbox (event_id, event_type, producer, payload)
+            VALUES (${pinnedEventId}, 'AUDIT_ENTRY', 'application-service', '{"proof":"1c"}'::jsonb)`;
+        });
+        pinnedInsertOk = true;
+      } catch {
+        pinnedInsertOk = false;
+      }
+      check('officer INSERT with producer=application-service is allowed (rls/0023)',
+        pinnedInsertOk);
+
+      // (b) INSERT under any OTHER producer is REFUSED by the WITH CHECK.
+      let foreignProducerRejected = false;
+      try {
+        await admin.begin(async (tx) => {
+          await tx`SET LOCAL ROLE usrp_rdf_officer`;
+          await tx`
+            INSERT INTO public_core.event_outbox (event_id, event_type, producer, payload)
+            VALUES (${randomUUID()}, 'AUDIT_ENTRY', 'scheduling-service', '{"proof":"1c"}'::jsonb)`;
+        });
+      } catch {
+        foreignProducerRejected = true;
+      }
+      check('officer INSERT with a foreign producer is refused (WITH CHECK producer pin)',
+        foreignProducerRejected);
+
+      // (c) The same INSERT under the system role IS allowed — the pin is a
+      //     policy on the OFFICER grant, not a column constraint, and the
+      //     relay producer scoping stays per-service.
+      let systemForeignProducerOk = false;
+      try {
+        await admin.begin(async (tx) => {
+          await tx`SET LOCAL ROLE usrp_system_service`;
+          await tx`
+            INSERT INTO public_core.event_outbox (event_id, event_type, producer, payload)
+            VALUES (${randomUUID()}, 'AUDIT_ENTRY', 'scheduling-service', '{"proof":"1c"}'::jsonb)`;
+        });
+        systemForeignProducerOk = true;
+      } catch {
+        systemForeignProducerOk = false;
+      }
+      check('system role may still stage any producer (it remains the general writer)',
+        systemForeignProducerOk);
+
+      // (d) Officer UPDATE is denied — the relay is the sole marker.
+      let officerUpdateDenied = false;
+      try {
+        await admin.begin(async (tx) => {
+          await tx`SET LOCAL ROLE usrp_rdf_officer`;
+          await tx`UPDATE public_core.event_outbox SET published_at = now() WHERE id = -1`;
+        });
+      } catch {
+        officerUpdateDenied = true;
+      }
+      check('officer UPDATE on the outbox is denied (no UPDATE grant)', officerUpdateDenied);
+
+      // (e) Officer DELETE is denied — staging is append-only for officers.
+      let officerDeleteDenied = false;
+      try {
+        await admin.begin(async (tx) => {
+          await tx`SET LOCAL ROLE usrp_rdf_officer`;
+          await tx`DELETE FROM public_core.event_outbox WHERE id = -1`;
+        });
+      } catch {
+        officerDeleteDenied = true;
+      }
+      check('officer DELETE on the outbox is denied (no DELETE grant)', officerDeleteDenied);
+
+      // (f) Sequence SELECT is denied while USAGE alone suffices: the
+      //     successful INSERT in (a) already proved nextval() works under
+      //     USAGE; this proves the counter is not READABLE by officers.
+      let officerCouldReadSequence = true;
+      try {
+        await admin.begin(async (tx) => {
+          await tx`SET LOCAL ROLE usrp_rdf_officer`;
+          await tx`SELECT last_value FROM public_core.event_outbox_id_seq`;
+        });
+      } catch {
+        officerCouldReadSequence = false;
+      }
+      check('officer cannot read the outbox sequence (USAGE granted, SELECT withheld)',
+        !officerCouldReadSequence);
+
+      // (g) Clean up the two rows (a) and (c) staged for the assertion itself.
+      await admin`DELETE FROM public_core.event_outbox WHERE payload->>'proof' = '1c'`;
+    }
+
     // ══ 2. On-site vetting gates on the autonomous age verdict ═════
     console.log('\n── 2. On-site vetting: age gate drives the transition ───────');
     const pend = await post(WALK_IN_VET_PATH, { applicationId: appId });

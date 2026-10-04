@@ -107,6 +107,12 @@ export interface EdgeRateLimitConfig {
   readonly otpPerMinute: number;
   readonly verifyIdentityPerMinute: number;
   /**
+   * Submissions per minute per applicant session (ADR-027 front door). The
+   * ledger already makes a RETRY safe; this bounds a runaway or hostile
+   * client's write volume against the front door.
+   */
+  readonly applicantSubmitPerMinute: number;
+  /**
    * How many `x-forwarded-for` hops this deployment's own ingress appends.
    *
    * 0 (the dev default) means "trust nothing": every caller shares ONE bucket,
@@ -122,6 +128,7 @@ export function loadEdgeRateLimitConfig(source: EnvSource = process.env): EdgeRa
       EDGE_LOGIN_RATE_LIMIT_PER_MINUTE: withDefault(integer({ min: 1, max: 10_000 }), 10),
       EDGE_OTP_RATE_LIMIT_PER_MINUTE: withDefault(integer({ min: 1, max: 10_000 }), 5),
       EDGE_VERIFY_IDENTITY_RATE_LIMIT_PER_MINUTE: withDefault(integer({ min: 1, max: 10_000 }), 20),
+      EDGE_APPLICANT_SUBMIT_RATE_LIMIT_PER_MINUTE: withDefault(integer({ min: 1, max: 10_000 }), 5),
       EDGE_TRUSTED_PROXY_HOPS: withDefault(integer({ min: 0, max: 8 }), 0),
     },
     source,
@@ -130,6 +137,7 @@ export function loadEdgeRateLimitConfig(source: EnvSource = process.env): EdgeRa
     loginPerMinute: env.EDGE_LOGIN_RATE_LIMIT_PER_MINUTE,
     otpPerMinute: env.EDGE_OTP_RATE_LIMIT_PER_MINUTE,
     verifyIdentityPerMinute: env.EDGE_VERIFY_IDENTITY_RATE_LIMIT_PER_MINUTE,
+    applicantSubmitPerMinute: env.EDGE_APPLICANT_SUBMIT_RATE_LIMIT_PER_MINUTE,
     trustedProxyHops: env.EDGE_TRUSTED_PROXY_HOPS,
   });
 }

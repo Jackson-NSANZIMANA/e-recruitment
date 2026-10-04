@@ -126,7 +126,7 @@ run_ts "shared-config: production boot guard (dev secrets / placeholders / loopb
 # It is the check that would have caught the four BFF services that never
 # existed being read as fact for a month.
 run_ts "edge-gateway: contract drift (registry ↔ OpenAPI ↔ upstream catalogue)" services/edge-gateway/selfcheck/verify-edge-contract.ts
-run_ts "edge-gateway: citizen submit front-door readiness (expected BLOCKED)" services/edge-gateway/selfcheck/verify-citizen-submit-readiness.ts
+run_ts "edge-gateway: citizen submit front-door readiness (the release signal)" services/edge-gateway/selfcheck/verify-citizen-submit-readiness.ts
 run_ts "edge-gateway: source hygiene (layering, redaction, no raw console)" services/edge-gateway/selfcheck/verify-edge-hygiene.ts
 run_ts "edge-gateway: session refresh persistence" services/edge-gateway/selfcheck/verify-edge-session-refresh.ts
 
@@ -144,6 +144,11 @@ fi
 # database must agree. Runs early: every proof below asserts behaviour ON
 # this schema, so a silent divergence here would undermine all of them.
 run_ts "shared-database: schema drift (.ts ↔ snapshot ↔ live DB)" packages/shared-database/selfcheck/verify-schema-drift.ts
+# ADR-027 follow-up: the citizen submit rate limit's shared store. Two limiter
+# instances over one database share one window, concurrent increments are
+# lossless, windows expire, store faults fail closed (never "allow"), and
+# production refuses the memory store. Live PG only — no Kafka, no stubs.
+run_ts "edge-gateway: shared rate-limit store (rls/0024 — shared, lossless, fail-closed)" services/edge-gateway/selfcheck/verify-rate-limit-store.ts
 
 # ── 2. The service & backbone selfchecks, in dependency order ──────
 # Deterministic crypto proofs first — no infra, fastest signal.
@@ -177,6 +182,11 @@ run_ts "iam-service: token issuer (mint → officer endpoint accepts)" services/
 run_ts "iam-service: service tokens (client-credentials → system route accepts)" services/iam-service/selfcheck/verify-service-token-slice.ts
 run_ts "identity-service: applicant auth (OTP → session → own applications)" services/identity-service/selfcheck/verify-applicant-auth-slice.ts
 run_ts "identity-service: applicant self-service (withdraw own + erasure intake, ADR-020)" services/identity-service/selfcheck/verify-applicant-self-service-slice.ts
+# ADR-027 follow-up: the submit bridge (POST /v1/applicants/me/applications).
+# Zero infrastructure — a stub front door over a real socket proves the
+# bridge forwards exactly the Idempotency-Key, uses its OWN system token,
+# never the browser's credential, and maps the integrity answers verbatim.
+run_ts "identity-service: applicant submit gateway (bridge → front door, own system token)" services/identity-service/selfcheck/verify-applicant-submit-gateway.ts
 run_ts "identity-service: retention sweep (dry-run safe → gated tombstones)" services/identity-service/selfcheck/verify-retention-sweep-slice.ts
 # The BROWSER BOUNDARY. Runs after the two credential issuers above because it
 # asserts what happens to the credentials THEY mint: that neither ever crosses

@@ -228,6 +228,53 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public_core.edge_rate_limit_buckets": {
+      "name": "edge_rate_limit_buckets",
+      "schema": "public_core",
+      "columns": {
+        "bucket_key_hash": {
+          "name": "bucket_key_hash",
+          "type": "varchar(64)",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "count": {
+          "name": "count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "window_started_at": {
+          "name": "window_started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "idx_pc_edge_rate_limit_buckets_expired": {
+          "name": "idx_pc_edge_rate_limit_buckets_expired",
+          "columns": [
+            {
+              "expression": "window_started_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public_core.edge_sessions": {
       "name": "edge_sessions",
       "schema": "public_core",

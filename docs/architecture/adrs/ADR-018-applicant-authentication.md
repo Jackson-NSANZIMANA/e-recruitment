@@ -66,6 +66,19 @@ state stays inside its single-writer service (ADR-006); the citizen door
 never widens an officer's view (an officer token on that route → 403, and
 `listByApplicant` refuses non-system principals in the use case too).
 
+### The submit me-route reuses the same lane (ADR-027)
+
+`POST /v1/applicants/me/applications` is the same dogfooding pattern, now
+for a WRITE: the citizen session is validated the same way, then
+identity-service — still as a machine client with its OWN client-credentials
+token, never the browser's — calls application-service's front door
+`POST /v1/applications` (ADR-027's ledger) with the subject re-derived from
+the session and `channel: 'WEB'` pinned server-side. The browser reaches it
+only through the edge's `POST /edge/v1/me/applications`, which forwards
+exactly one narrow header (the `Idempotency-Key`) and reads exactly one back
+(`Idempotency-Replayed`); everything else about the contract lives in
+ADR-027.
+
 ### Erasure integration (ADR-015)
 
 Sessions were already hard-deleted on erasure; OTP challenges now go with

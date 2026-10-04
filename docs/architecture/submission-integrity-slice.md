@@ -29,6 +29,16 @@ npx tsx services/application-service/selfcheck/verify-submission-integrity.ts
 It is registered in `scripts/run-selfchecks.sh` immediately after the
 front-door proof, so `pnpm verify` (and therefore CI) runs it.
 
+**Who calls it, end to end.** The browser never touches
+`POST /v1/applications` directly: the citizen-facing route is the edge's
+`POST /edge/v1/me/applications`, fronting the identity-service submit bridge
+(`POST /v1/applicants/me/applications`, ADR-018's me-lane for writes), which
+calls this front door with its own system token. The edge forwards exactly
+one narrow header in (`Idempotency-Key`) and reads exactly one back
+(`Idempotency-Replayed` → a `200` replay), preserving this slice's answers
+verbatim across the boundary; rate limiting per applicant session sits in
+front of the write on the edge tier (ADR-027, `rls/0024`).
+
 ## What each section establishes
 
 | § | Section | Establishes |

@@ -212,18 +212,21 @@
     {
       "id": "citizen-submit-readiness",
       "path": "services/edge-gateway/citizen-submit-readiness.json",
-      "role": "Machine-readable release signal remains BLOCKED while browser submission idempotency is deferred.",
+      "role": "Machine-readable release signal: the browser-boundary half of ADR-027 is delivered, and the signal says READY only while every listed proof stays registered and runnable.",
       "mustContain": [
         "citizen-facing-application-submission-integrity",
-        "BLOCKED",
+        "READY",
         "Idempotency-Key",
-        "Idempotency-Replayed"
-      ]
+        "Idempotency-Replayed",
+        "verify-rate-limit-store.ts",
+        "verify-applicant-submit-gateway.ts"
+      ],
+      "note": "READY means every structural condition below is verified by this gate AND each listed proof exists and is registered in the quality gate. The live proofs themselves run in scripts/run-selfchecks.sh; if any of them cannot run (infrastructure unavailable), the release signal reverts to BLOCKED — a skipped proof is not a passing one. Public contract: the browser sends Idempotency-Key; the edge answers 201, or 200 with Idempotency-Replayed: true on replay."
     },
     {
       "id": "citizen-submit-readiness-gate",
       "path": "services/edge-gateway/selfcheck/verify-citizen-submit-readiness.ts",
-      "role": "The quality gate proves the deferred browser-boundary capability is not silently marked complete.",
+      "role": "The quality gate verifies every load-bearing piece of the citizen submit front door stays wired: the identity bridge, the edge operation, the narrow idempotency plumbing, CORS exposure, the rate limit and its shared store, the OpenAPI entry, and the registration of every gating proof.",
       "mustContain": [
         "FRONT-DOOR READINESS",
         "/v1/applications",
@@ -236,7 +239,11 @@
       "path": "scripts/run-selfchecks.sh",
       "role": "The proof runs in the quality gate — an unregistered proof never runs.",
       "mustContain": [
-        "verify-submission-integrity.ts"
+        "verify-submission-integrity.ts",
+        "verify-citizen-submit-readiness.ts",
+        "verify-rate-limit-store.ts",
+        "verify-applicant-submit-gateway.ts",
+        "verify-edge-security.ts"
       ]
     },
     {
@@ -250,12 +257,13 @@
     {
       "id": "adr",
       "path": "docs/architecture/adrs/ADR-027-submission-integrity-and-idempotency.md",
-      "role": "The decision, its alternatives and what is deliberately NOT done.",
+      "role": "The decision, its alternatives, and the honest ledger of what was deferred then delivered.",
       "mustContain": [
         "Idempotency-Replayed",
         "KEY_REUSED",
         "ALREADY_APPLIED",
-        "live-intent"
+        "live-intent",
+        "DELIVERED"
       ]
     },
     {
@@ -270,7 +278,184 @@
       "id": "walk-in-outbox-migration",
       "path": "packages/shared-database/src/rls/0023_walk_in_outbox.sql",
       "role": "Grants the officer roles INSERT on the outbox — and only INSERT, with no USING clause and a producer-pinned WITH CHECK — so the walk-in write can stage its own events without the transaction ever escalating to the system role.",
-      "mustContain": ["GRANT INSERT ON public_core.event_outbox", "pc_event_outbox_officer_stage", "usrp_rdf_officer"]
+      "mustContain": [
+        "GRANT INSERT ON public_core.event_outbox",
+        "pc_event_outbox_officer_stage",
+        "usrp_rdf_officer"
+      ]
+    },
+    {
+      "id": "identity-submit-bridge-port",
+      "path": "services/identity-service/src/ports/applications-gateway.ts",
+      "role": "The typed port identity-service exposes to itself for citizen submits: the subject, the campaign, the key — and the three integrity answers.",
+      "mustContain": [
+        "submitForApplicant",
+        "ApplicantSubmitResult",
+        "KEY_REUSED",
+        "REPLAYED"
+      ]
+    },
+    {
+      "id": "identity-submit-bridge-adapter",
+      "path": "services/identity-service/src/adapters/applications.http-gateway.ts",
+      "role": "The bridge's HTTP leg: calls application-service's POST /v1/applications with identity-service's OWN system token, pins channel WEB, forwards exactly the Idempotency-Key.",
+      "mustContain": [
+        "idempotency-key",
+        "/v1/applications",
+        "#systemToken"
+      ]
+    },
+    {
+      "id": "identity-submit-bridge-route",
+      "path": "services/identity-service/src/adapters/http/applicant-auth.controller.ts",
+      "role": "The me-route for writes: re-derives the subject from the opaque session, refuses a body applicantId/channel, maps REPLAYED to the Idempotency-Replayed header.",
+      "mustContain": [
+        "IDEMPOTENCY_REPLAYED_HEADER",
+        "INVALID_IDEMPOTENCY_KEY",
+        "applicants/me/applications"
+      ]
+    },
+    {
+      "id": "identity-submit-bridge-proof",
+      "path": "services/identity-service/selfcheck/verify-applicant-submit-gateway.ts",
+      "role": "The bridge proven end-to-end with zero infrastructure: a stub front door over a real socket — key forwarded as the ONLY extra header, system token minted per call, replay/duplicate/refusal mapping, no credential on the bus.",
+      "mustContain": [
+        "APPLICANT SUBMIT GATEWAY GREEN",
+        "idempotency-key"
+      ]
+    },
+    {
+      "id": "edge-submit-operation",
+      "path": "services/edge-gateway/src/domain/edge-operations.ts",
+      "role": "The citizen-facing operation: POST /edge/v1/me/applications, applicant session, CSRF, never retried by the edge.",
+      "mustContain": [
+        "submitMyApplication"
+      ]
+    },
+    {
+      "id": "edge-upstream-catalogue",
+      "path": "services/edge-gateway/src/domain/upstream-operations.ts",
+      "role": "The edge fronts the identity BRIDGE, never application-service's front door directly.",
+      "mustContain": [
+        "mySubmit",
+        "/v1/applicants/me/applications"
+      ]
+    },
+    {
+      "id": "edge-upstream-adapter",
+      "path": "services/edge-gateway/src/adapters/upstream.http-gateway.ts",
+      "role": "The narrow idempotency plumbing: one typed idempotencyKey field in (validated UUID, emitted as the single Idempotency-Key header), one allowlisted replayed flag out — still no generic header forwarding.",
+      "mustContain": [
+        "IDEMPOTENCY_KEY_UUID_RE",
+        "headers['idempotency-key'] = input.idempotencyKey",
+        "idempotency-replayed"
+      ]
+    },
+    {
+      "id": "edge-submit-controller",
+      "path": "services/edge-gateway/src/adapters/http/citizen.controller.ts",
+      "role": "The public contract: 201 first; replay 200 + Idempotency-Replayed; duplicate 409 ALREADY_APPLIED (ids kept); key reuse 422 KEY_REUSED (identifier-free); 503 dependency; audit lines without key material; per-session rate limit in front of the write.",
+      "mustContain": [
+        "submitMyApplicationHandler",
+        "EDGE_IDEMPOTENT_REPLAY",
+        "EDGE_IDEMPOTENCY_KEY_REUSED",
+        "applicantSubmitPerMinute"
+      ]
+    },
+    {
+      "id": "edge-submit-route-binding",
+      "path": "services/edge-gateway/src/routes.ts",
+      "role": "The operation is actually bound to the router (this binding silently no-op'd once; it is pinned now).",
+      "mustContain": [
+        "submitMyApplication"
+      ]
+    },
+    {
+      "id": "edge-submit-config",
+      "path": "services/edge-gateway/src/config.ts",
+      "role": "The submission rate limit is configured, not hard-coded: EDGE_APPLICANT_SUBMIT_RATE_LIMIT_PER_MINUTE.",
+      "mustContain": [
+        "applicantSubmitPerMinute",
+        "EDGE_APPLICANT_SUBMIT_RATE_LIMIT_PER_MINUTE"
+      ]
+    },
+    {
+      "id": "rate-limit-store-migration",
+      "path": "packages/shared-database/src/rls/0024_edge_rate_limit_buckets.sql",
+      "role": "The shared store: hashed bucket keys, RLS forced, sole grantee usrp_edge_gateway — no officer or system role can read a window.",
+      "mustContain": [
+        "edge_rate_limit_buckets",
+        "usrp_edge_gateway",
+        "FORCE ROW LEVEL SECURITY"
+      ]
+    },
+    {
+      "id": "rate-limit-store-mirror",
+      "path": "packages/shared-database/src/schemas/edge-rate-limit-buckets.schema.ts",
+      "role": "Readable mirror of the rate-limit table; keeps the drift gate green.",
+      "mustContain": [
+        "edgeRateLimitBuckets",
+        "edge_rate_limit_buckets"
+      ]
+    },
+    {
+      "id": "rate-limit-store-mirror-export",
+      "path": "packages/shared-database/src/index.ts",
+      "role": "The mirror is exported, so drizzle-kit and consumers both see it.",
+      "mustContain": [
+        "edge-rate-limit-buckets.schema.js",
+        "EdgeRateLimitBucket"
+      ]
+    },
+    {
+      "id": "rate-limit-store-adapter",
+      "path": "services/edge-gateway/src/adapters/rate-limiter.pg.ts",
+      "role": "The shared limiter: one atomic INSERT…ON CONFLICT DO UPDATE decides and increments (no lost increments across replicas); aged windows reset; any store fault fails closed.",
+      "mustContain": [
+        "ON CONFLICT",
+        "RateLimiterUnavailableError",
+        "ratelimit:bucket:"
+      ]
+    },
+    {
+      "id": "edge-composition-root",
+      "path": "services/edge-gateway/src/index.ts",
+      "role": "Production requires the shared store (memory refuses to boot); CORS allows Idempotency-Key in and exposes Idempotency-Replayed out.",
+      "mustContain": [
+        "assertRateLimitStoreAllowed",
+        "PgRateLimiter",
+        "Idempotency-Replayed"
+      ]
+    },
+    {
+      "id": "edge-openapi-submit",
+      "path": "services/edge-gateway/openapi/edge-v1.yaml",
+      "role": "The public contract is published: request headers, the replay response header, and every answer the edge can give.",
+      "mustContain": [
+        "operationId: submitMyApplication",
+        "Idempotency-Replayed",
+        "KEY_REUSED"
+      ]
+    },
+    {
+      "id": "edge-security-proof",
+      "path": "services/edge-gateway/selfcheck/verify-edge-security.ts",
+      "role": "The browser-boundary proof's submit section: key forwarded as the only extra header, replay preserved, CORS exposure, self-binding, no arbitrary header forwarding, the rate limit, and one-attempt-only on failure.",
+      "mustContain": [
+        "EDGE_IDEMPOTENT_REPLAY",
+        "submitCalls",
+        "idempotency-key"
+      ]
+    },
+    {
+      "id": "rate-limit-store-proof",
+      "path": "services/edge-gateway/selfcheck/verify-rate-limit-store.ts",
+      "role": "The shared store proven against live Postgres: two instances share one window, concurrent increments are lossless, windows expire, faults fail closed, production refuses memory, and only hashes are stored.",
+      "mustContain": [
+        "RATE-LIMIT STORE GREEN",
+        "RateLimiterUnavailableError",
+        "assertRateLimitStoreAllowed"
+      ]
     }
   ]
 }

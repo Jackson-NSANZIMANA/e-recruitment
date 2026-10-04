@@ -31,6 +31,7 @@ export type { DrainResult, OutboxEvent, OutboxPublisher, OutboxRelayOptions } fr
 
 export * from './schemas/public-core.schema.js';
 export * from './schemas/edge-sessions.schema.js';
+export * from './schemas/edge-rate-limit-buckets.schema.js';
 export * from './schemas/event-outbox.schema.js';
 export * from './schemas/slot-reservations.schema.js';
 export * from './schemas/submission-requests.schema.js';
@@ -46,6 +47,7 @@ import {
   campaignVenueAssignments,
 } from './schemas/public-core.schema.js';
 import { edgeSessions } from './schemas/edge-sessions.schema.js';
+import { edgeRateLimitBuckets } from './schemas/edge-rate-limit-buckets.schema.js';
 import { eventOutbox } from './schemas/event-outbox.schema.js';
 import { slotReservations } from './schemas/slot-reservations.schema.js';
 import { submissionRequests } from './schemas/submission-requests.schema.js';
@@ -80,6 +82,8 @@ export type CampaignVenueAssignment = InferSelectModel<typeof campaignVenueAssig
 export type NewCampaignVenueAssignment = InferInsertModel<typeof campaignVenueAssignments>;
 export type EdgeSession = InferSelectModel<typeof edgeSessions>;
 export type NewEdgeSession = InferInsertModel<typeof edgeSessions>;
+export type EdgeRateLimitBucket = InferSelectModel<typeof edgeRateLimitBuckets>;
+export type NewEdgeRateLimitBucket = InferInsertModel<typeof edgeRateLimitBuckets>;
 export type OutboxEntry = InferSelectModel<typeof eventOutbox>;
 export type NewOutboxEntry = InferInsertModel<typeof eventOutbox>;
 export type SlotReservation = InferSelectModel<typeof slotReservations>;

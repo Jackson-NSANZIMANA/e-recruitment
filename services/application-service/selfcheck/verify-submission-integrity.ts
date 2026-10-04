@@ -95,6 +95,25 @@ const EXPECTED_ARTEFACT_IDS = [
   'adr',
   'slice-doc',
   'walk-in-outbox-migration',
+  // ── The citizen submit front door (ADR-027 delivered half) ──
+  'identity-submit-bridge-port',
+  'identity-submit-bridge-adapter',
+  'identity-submit-bridge-route',
+  'identity-submit-bridge-proof',
+  'edge-submit-operation',
+  'edge-upstream-catalogue',
+  'edge-upstream-adapter',
+  'edge-submit-controller',
+  'edge-submit-route-binding',
+  'edge-submit-config',
+  'rate-limit-store-migration',
+  'rate-limit-store-mirror',
+  'rate-limit-store-mirror-export',
+  'rate-limit-store-adapter',
+  'edge-composition-root',
+  'edge-openapi-submit',
+  'edge-security-proof',
+  'rate-limit-store-proof',
 ] as const;
 
 const ADMIN_URL =

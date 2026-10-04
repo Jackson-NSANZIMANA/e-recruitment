@@ -41,6 +41,14 @@ export const G2G_ERROR_CODES: ReadonlySet<string> = new Set([
   'UPSTREAM_UNAVAILABLE',
 ]);
 
+/**
+ * The shape an `idempotencyKey` must already have when it reaches this
+ * adapter (the submit controller validates first; this is the backstop that
+ * keeps the "narrowly typed, validated field" property true by construction).
+ */
+const IDEMPOTENCY_KEY_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -112,6 +120,12 @@ export class UpstreamClient implements UpstreamGateway {
     if (operation.credential !== 'none' && (input.credential === undefined || input.credential === '')) {
       throw new Error(`Upstream ${operation.id} requires a ${operation.credential} credential.`);
     }
+    if (input.idempotencyKey !== undefined && !IDEMPOTENCY_KEY_UUID_RE.test(input.idempotencyKey)) {
+      // The controller validated this before the call; reaching here with a
+      // non-UUID means a future caller bypassed that validation — refuse
+      // rather than forward an unvalidated value upstream.
+      throw new Error(`Upstream ${operation.id} requires a UUID idempotency key.`);
+    }
 
     const url = new URL(operation.path, this.#baseUrl(operation.service));
     if (input.query !== undefined) {
@@ -121,6 +135,8 @@ export class UpstreamClient implements UpstreamGateway {
     }
 
     // Built from scratch. Nothing from the browser's header set appears here.
+    // The ONE narrow exception is below: a validated Idempotency-Key, sent as
+    // a typed field by the submit controller — never a forwarded header.
     const headers: Record<string, string> = {
       accept: 'application/json',
       'x-correlation-id': input.correlationId,
@@ -130,6 +146,9 @@ export class UpstreamClient implements UpstreamGateway {
     }
     if (input.body !== undefined) {
       headers['content-type'] = 'application/json';
+    }
+    if (input.idempotencyKey !== undefined) {
+      headers['idempotency-key'] = input.idempotencyKey;
     }
 
     // An explicit controller rather than AbortSignal.timeout: one deadline, one
@@ -179,6 +198,14 @@ export class UpstreamClient implements UpstreamGateway {
       throw new UpstreamUnavailableError(code, operation.id);
     }
 
-    return { status: response.status, body };
+    // The ONE response header this tier ever reads (ADR-027): the submit
+    // path's replay marker, surfaced as a boolean so no other upstream header
+    // can ever reach a controller.
+    const replayed = response.headers.get('idempotency-replayed');
+    return {
+      status: response.status,
+      body,
+      ...(replayed === 'true' ? { replayed: true } : {}),
+    };
   }
 }

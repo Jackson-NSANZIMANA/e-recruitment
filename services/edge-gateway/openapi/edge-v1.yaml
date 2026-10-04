@@ -4,7 +4,7 @@ info:
   description: |
     The EDGE RUNTIME CONTRACT — the single trusted browser boundary.
     
-    All 26 operations mount under `/edge/v1/**`. The browser never calls service
+    All 27 operations mount under `/edge/v1/**`. The browser never calls service
     ports directly, never holds upstream credentials, and never declares agency:
     the edge serves opaque session cookies and derives agency from the verified
     officer session.
@@ -320,6 +320,98 @@ paths:
           description: My applications
         '401':
           description: Unauthorized
+    post:
+      operationId: submitMyApplication
+      summary: |
+        Submit my application. The subject is the applicant session; agency is
+        derived from the category server-side. The request must carry exactly
+        one UUID `Idempotency-Key` header — the citizen's retry identity — and
+        a retry with the same key and body replays the first answer (200 with
+        `Idempotency-Replayed: true`, exposed to scripts by CORS) instead of
+        filing again. NOT retried by this tier: the key, not a hidden proxy
+        retry, is what makes the browser's own retry safe.
+      tags: [citizen]
+      x-usrp-session: applicant
+      x-usrp-csrf: true
+      x-usrp-retry-on-g2g: false
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [category]
+              additionalProperties: false
+              properties:
+                category:
+                  type: string
+                  description: A real application category; the agency is derived from it server-side.
+                nesaIndexNumber:
+                  type: string
+                  maxLength: 64
+                  description: A-Level NESA index number, when the category's academic path is NESA.
+                hecRegistrationNumber:
+                  type: string
+                  maxLength: 64
+                  description: HEC registration number, when the category's academic path is HEC.
+            examples:
+              submit:
+                value:
+                  category: GENERAL_ENLISTMENT
+                  nesaIndexNumber: 'RW2026/1001'
+      responses:
+        '201':
+          description: Filed — the first submission under this key.
+          headers:
+            Idempotency-Replayed:
+              schema:
+                type: string
+                enum: ['true']
+              description: Absent on a first submission.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [SUBMITTED]
+                  applicationId:
+                    type: string
+                    format: uuid
+                  processingCode:
+                    type: string
+                  agency:
+                    type: string
+        '200':
+          description: |
+            Replay — the same key and body were already answered; the first
+            submission's identifiers are returned again, with
+            Idempotency-Replayed: true.
+          headers:
+            Idempotency-Replayed:
+              schema:
+                type: string
+                enum: ['true']
+        '400':
+          description: Invalid request (bad key, unknown category, forbidden identity/channel field).
+        '401':
+          description: No applicant session.
+        '409':
+          description: |
+            ALREADY_APPLIED (a live application for this campaign+category
+            already exists, with its identifiers so the citizen can be pointed
+            at it), or a business conflict (IDENTITY_NOT_VERIFIED,
+            NO_OPEN_CAMPAIGN).
+        '422':
+          description: |
+            KEY_REUSED (the key was spent on a materially different request —
+            no application identifiers are returned), or an academic-input
+            validation failure with its reason.
+        '429':
+          description: The applicant-session submission rate limit was exceeded.
+        '503':
+          description: Dependency failure (fail closed).
 
   /edge/v1/me/applications/withdraw:
     post:

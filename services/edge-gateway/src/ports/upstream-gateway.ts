@@ -31,6 +31,14 @@ export interface UpstreamCallInput {
    * route.
    */
   readonly credential?: string;
+  /**
+   * The caller's VALIDATED UUID retry identity (ADR-027), for the submit
+   * operation only. This is a deliberately NARROW typed field — not a
+   * headers map — so "the edge forwards an idempotency key" can never widen
+   * into "the edge forwards headers". The adapter emits it as exactly one
+   * `Idempotency-Key` header; everything else it builds itself.
+   */
+  readonly idempotencyKey?: string;
 }
 
 /**
@@ -41,6 +49,13 @@ export interface UpstreamResult {
   readonly status: number;
   /** Parsed JSON body, or null for empty responses. */
   readonly body: unknown;
+  /**
+   * The allowlisted representation of the upstream `Idempotency-Replayed`
+   * header (ADR-027): true only when the upstream answered a stored result
+   * rather than filing again. This is the ONE response header the edge ever
+   * reads — everything else upstream returns is discarded by design.
+   */
+  readonly replayed?: boolean;
 }
 
 /**
