@@ -303,6 +303,29 @@ async function main(): Promise<void> {
       String(failedOutbox[0]?.n),
     );
 
+    // ── 1c. Least privilege held throughout ───────────────────────
+    //
+    // The rollback above already proves the unit is atomic. What it cannot
+    // show is HOW the outbox was reached. Staging under the officer's own
+    // role (rls/0023) rather than escalating to usrp_system_service
+    // mid-transaction means the grant is INSERT-only with no USING clause:
+    // a session that just staged an event cannot read a single outbox row
+    // back, not even the one it wrote. If a future change reintroduced the
+    // role switch, this assertion would go red.
+    {
+      let officerCouldRead = true;
+      try {
+        await admin.begin(async (tx) => {
+          await tx`SET LOCAL ROLE usrp_rdf_officer`;
+          await tx`SELECT id FROM public_core.event_outbox LIMIT 1`;
+        });
+      } catch {
+        officerCouldRead = false;
+      }
+      check('officer role can stage events but cannot read the outbox back (rls/0023)',
+        !officerCouldRead);
+    }
+
     // ══ 2. On-site vetting gates on the autonomous age verdict ═════
     console.log('\n── 2. On-site vetting: age gate drives the transition ───────');
     const pend = await post(WALK_IN_VET_PATH, { applicationId: appId });

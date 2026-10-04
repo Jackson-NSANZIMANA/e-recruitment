@@ -94,6 +94,7 @@ const EXPECTED_ARTEFACT_IDS = [
   'ci-registration',
   'adr',
   'slice-doc',
+  'walk-in-outbox-migration',
 ] as const;
 
 const ADMIN_URL =

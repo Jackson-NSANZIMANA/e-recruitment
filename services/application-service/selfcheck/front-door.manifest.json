@@ -33,9 +33,10 @@
     {
       "id": "bootstrap-registration",
       "path": "scripts/bootstrap-db.sh",
-      "role": "The migration runs on every bootstrap, in the canonical order.",
+      "role": "Both migrations run on every bootstrap, in the canonical order.",
       "mustContain": [
-        "0022_submission_integrity.sql"
+        "0022_submission_integrity.sql",
+        "0023_walk_in_outbox.sql"
       ]
     },
     {
@@ -161,9 +162,7 @@
       "mustContain": [
         "isLiveIntentViolation",
         "ALREADY_APPLIED",
-        "stageEvents",
-        "RESET ROLE",
-        "usrp_system_service"
+        "stageEvents"
       ]
     },
     {
@@ -266,6 +265,12 @@
       "mustContain": [
         "verify-submission-integrity.ts"
       ]
+    },
+    {
+      "id": "walk-in-outbox-migration",
+      "path": "packages/shared-database/src/rls/0023_walk_in_outbox.sql",
+      "role": "Grants the officer roles INSERT on the outbox — and only INSERT, with no USING clause and a producer-pinned WITH CHECK — so the walk-in write can stage its own events without the transaction ever escalating to the system role.",
+      "mustContain": ["GRANT INSERT ON public_core.event_outbox", "pc_event_outbox_officer_stage", "usrp_rdf_officer"]
     }
   ]
 }

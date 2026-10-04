@@ -32,8 +32,6 @@ import { findLiveApplication, isLiveIntentViolation } from './application-insert
 import { stageEvents } from './outbox/pg-event-outbox.js';
 import type { StageEvents } from '../ports/event-outbox.js';
 
-const SYSTEM_ROLE = 'usrp_system_service';
-
 export class PgWalkInRepository implements WalkInRepository {
   async createWalkInApplication(
     input: CreateWalkInInput,
@@ -90,12 +88,16 @@ export class PgWalkInRepository implements WalkInRepository {
           processingCode: row.processing_code,
         };
 
-        // The officer role owns the application/history writes but deliberately
-        // has no outbox grant. Switch to the system role only after all state
-        // writes, and stage LAST so any staging failure rolls the entire unit
-        // back (application, history, and both announcements).
-        await tx`RESET ROLE`;
-        await tx`SET LOCAL ROLE ${sql(SYSTEM_ROLE)}`;
+        // Stage LAST, still as the OFFICER role, so any staging failure rolls
+        // the entire unit back (application, history, and both announcements).
+        //
+        // rls/0023 is what makes this reachable: it grants the officer roles
+        // INSERT on the outbox — and only INSERT, under a producer-pinned
+        // policy with no USING clause. Escalating to usrp_system_service here
+        // instead would also work, but it would leave the transaction running
+        // as the system role for its remaining lifetime, so any write added
+        // after this line would silently lose the engine-enforced
+        // cross-agency isolation that the officer role exists to provide.
         await stageEvents(tx, stage(created));
 
         return { kind: 'REGISTERED' as const, ...created };
@@ -204,8 +206,7 @@ export class PgWalkInRepository implements WalkInRepository {
           ageStatus: age,
         };
 
-        await tx`RESET ROLE`;
-        await tx`SET LOCAL ROLE ${sql(SYSTEM_ROLE)}`;
+        // As above: staged last, under the officer's own role (rls/0023).
         await stageEvents(tx, stage(applied));
         return applied;
       });

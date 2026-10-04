@@ -105,11 +105,20 @@ there, on that topic, for as long as the message exists.
 ## Not done here (mechanical follow-up, same pattern)
 
 Walk-in registration and on-site-vetting audit events now follow this pattern:
-the officer-role application/history writes switch to the system role and
-stage their events last in the same transaction, then the dispatcher provides
-the post-commit fast path. `verify-walk-in-slice.ts` proves both successful
-outbox rows and rollback of application, history, audit, and outbox on injected
-staging failure.
+the officer-role application/history writes stage their events last in the
+same transaction, then the dispatcher provides the post-commit fast path.
+`verify-walk-in-slice.ts` proves both successful outbox rows and rollback of
+application, history, audit, and outbox on injected staging failure.
+
+Note that the walk-in lane stages under the **officer's own role**, not the
+system role: `rls/0023` grants the three officer roles INSERT on the outbox
+(INSERT only, no `USING` clause, producer pinned by `WITH CHECK`). Escalating
+to `usrp_system_service` before staging would be simpler and needs no
+migration, but leaves the transaction running as the system role for its
+remaining lifetime — see ADR-027, "Why the officer role, and not an
+escalation". Any other lane converted to this pattern from an agency role
+needs the same grant, or it will fail with a permission error at the staging
+call.
 
 The remaining dual writes in application-service (slot / notification /
 physical-test / forensics projectors, officer transitions, self-withdrawal,
