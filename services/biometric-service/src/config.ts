@@ -12,6 +12,7 @@
 
 import { createPublicKey } from 'node:crypto';
 import {
+  EnvValidationError,
   loadAuthVerifyConfig,
   loadEnv,
   loadRuntimeConfig,
@@ -48,13 +49,27 @@ export function loadBiometricConfig(source: EnvSource = process.env): BiometricS
   const qrInvitationPublicKeyPem = Buffer.from(env.QR_INVITATION_PUBLIC_KEY_B64, 'base64').toString('utf8');
   createPublicKey(qrInvitationPublicKeyPem); // fail loud at boot if invalid
 
+  const livenessThreshold = Number(env.BIOMETRIC_LIVENESS_THRESHOLD);
+  const faceMatchThreshold = Number(env.BIOMETRIC_FACE_MATCH_THRESHOLD);
+
+  const issues: string[] = [];
+  if (Number.isNaN(livenessThreshold) || livenessThreshold < 0 || livenessThreshold > 1) {
+    issues.push('BIOMETRIC_LIVENESS_THRESHOLD must be a number between 0.0 and 1.0');
+  }
+  if (Number.isNaN(faceMatchThreshold) || faceMatchThreshold < 0 || faceMatchThreshold > 100) {
+    issues.push('BIOMETRIC_FACE_MATCH_THRESHOLD must be a number between 0.0 and 100.0');
+  }
+  if (issues.length > 0) {
+    throw new EnvValidationError(issues);
+  }
+
   return {
     runtime: loadRuntimeConfig('biometric-service', source),
     auth: loadAuthVerifyConfig(source),
     qrInvitationPublicKeyPem,
     thresholds: {
-      livenessThreshold: Number(env.BIOMETRIC_LIVENESS_THRESHOLD),
-      faceMatchThreshold: Number(env.BIOMETRIC_FACE_MATCH_THRESHOLD),
+      livenessThreshold,
+      faceMatchThreshold,
     },
   };
 }

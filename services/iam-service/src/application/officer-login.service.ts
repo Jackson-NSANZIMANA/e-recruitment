@@ -43,6 +43,13 @@ export interface OfficerLoginConfig {
   readonly tokenTtlSeconds: number;
 }
 
+/**
+ * Standard scrypt dummy hash with parameters matching hashPassword (N=16384, r=8, p=1).
+ * Used when an account is absent or inactive to prevent timing-based user enumeration.
+ */
+const DUMMY_SCRYPT_DIGEST =
+  'scrypt$16384$8$1$c2FsdHNhbHNhbHNhbHQ=$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaGFzaGg=';
+
 export class OfficerLoginService {
   readonly #accounts: OfficerAccountRepository;
   readonly #eventBus: EventBus;
@@ -65,10 +72,10 @@ export class OfficerLoginService {
     const account = await this.#accounts.findByHandle(command.loginHandle);
 
     // One indistinguishable rejection for unknown handle / wrong password /
-    // disabled account — no user-enumeration signal. (We still verify a bogus
-    // password shape below only when an account exists; a timing oracle on
-    // existence is out of scope for this slice and flagged with rate-limiting.)
+    // disabled account — no user-enumeration signal. Constant-time dummy verification
+    // eliminates the timing oracle between existing and non-existing accounts (F9 fix).
     if (account === null || account.status !== 'active') {
+      verifyPassword(command.password, DUMMY_SCRYPT_DIGEST);
       return { kind: 'INVALID_CREDENTIALS' };
     }
     if (!verifyPassword(command.password, account.credential)) {

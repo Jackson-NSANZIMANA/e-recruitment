@@ -58,6 +58,9 @@ export interface UpstreamResult {
   readonly replayed?: boolean;
 }
 
+/** Alias for UpstreamResult used by application services. */
+export type UpstreamResponse = UpstreamResult;
+
 /**
  * Upstream gateway port. The application layer uses this to call backend
  * microservices without coupling to HTTP, fetch(), or any transport.

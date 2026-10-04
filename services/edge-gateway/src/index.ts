@@ -70,6 +70,7 @@ export type { UpstreamGateway } from './ports/upstream-gateway.js';
 export type { RateLimiter } from './ports/rate-limiter.js';
 export type { CredentialCipher } from './ports/credential-cipher.js';
 export type { AuditLogger, EdgeAuditRecord, EdgeFaultRecord } from './ports/audit-logger.js';
+export * from './application/index.js';
 
 export interface EdgeGateway {
   readonly deps: EdgeDeps;
