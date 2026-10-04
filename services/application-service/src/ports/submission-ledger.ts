@@ -82,7 +82,38 @@ export type RecordSubmissionOutcome =
    */
   | ({ readonly kind: 'ALREADY_APPLIED' } & SubmissionIdentifiers);
 
+/**
+ * What a previously-answered key implies, with no write attempted.
+ *
+ * `null` means unseen — the caller must go on and file the submission.
+ */
+export type ResolveKeyOutcome =
+  | ({ readonly kind: 'REPLAYED'; readonly firstSeenAt: Date } & SubmissionIdentifiers)
+  | { readonly kind: 'KEY_REUSED' };
+
 export interface SubmissionLedger {
+  /**
+   * Answer a key we have already answered, WITHOUT touching anything mutable.
+   *
+   * This exists because of an ordering defect. `recordSubmission` also
+   * resolves a re-presented key, but only after the use case has already read
+   * the applicant's identity and resolved an OPEN campaign — so a retry that
+   * arrived after the registration window closed was answered
+   * `NO_OPEN_CAMPAIGN`, and a citizen whose first response was lost on a
+   * dropped connection was told they had never applied. The retry contract has
+   * to be independent of state that moves underneath it.
+   *
+   * Read-only and keyed on the ledger's primary key, so it is one index probe.
+   * It does NOT replace the in-transaction check in `recordSubmission`: that
+   * one is the serialisation point for concurrent same-key deliveries, which
+   * no pre-check can close.
+   */
+  resolveKey(input: {
+    readonly applicantId: string;
+    readonly idempotencyKey: string;
+    readonly requestHash: string;
+  }): Promise<ResolveKeyOutcome | null>;
+
   /**
    * Record + file + announce, atomically (see the header). `stage` is invoked
    * INSIDE the transaction and ONLY for a RECORDED outcome — a replay, a

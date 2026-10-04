@@ -439,6 +439,76 @@ async function main(): Promise<void> {
     check('…still writes a ledger row (server-minted key)', (await countLedger(KEYLESS_APPLICANT)) === 1);
 
     // ══════════════════════════════════════════════════════════════
+    console.log('\n── 3b. The retry contract outlives the state it was made in ─');
+    // The defect this section exists for: the ledger lookup used to sit AFTER
+    // the identity and campaign reads, so the answer to "what did you tell me
+    // last time?" depended on state that moves. A citizen whose 201 was lost
+    // on a dropped connection — the entire scenario this slice is built for —
+    // retried after the registration window closed and was told
+    // NO_OPEN_CAMPAIGN: that they had never applied, while their application
+    // sat filed in the database.
+    //
+    // A retry is a question about the PAST. It must be answerable from the
+    // ledger alone.
+    await admin`
+      UPDATE public_core.recruitment_campaigns
+      SET registration_closes_at = now() - interval '1 day' WHERE id = ${CAMPAIGN}`;
+    const closed = await admin<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM public_core.recruitment_campaigns
+      WHERE id = ${CAMPAIGN} AND registration_closes_at < now()`;
+    check('(the campaign really is closed now)', closed[0]?.n === 1);
+
+    const lateRetry = await submit(digitalBody, KEY);
+    check(
+      'same key, campaign now CLOSED → still the original 201',
+      lateRetry.status === 201,
+      lateRetry.text,
+    );
+    check('…still flagged Idempotency-Replayed', lateRetry.replayed === 'true', String(lateRetry.replayed));
+    check('…still the SAME applicationId', lateRetry.json['applicationId'] === appId, lateRetry.text);
+    check('…still the SAME processingCode', lateRetry.json['processingCode'] === code, lateRetry.text);
+
+    const lateReuse = await submit({ ...digitalBody, nesaIndexNumber: 'RW2024SC08888' }, KEY);
+    check(
+      'same key + different body under a closed campaign → KEY_REUSED, not NO_OPEN_CAMPAIGN',
+      lateReuse.status === 409 && lateReuse.json['status'] === 'KEY_REUSED',
+      lateReuse.text,
+    );
+
+    // The identity moving is the same class of problem.
+    await admin`
+      UPDATE public_core.applicant_identities
+      SET identity_status = 'PENDING' WHERE id = ${DIGITAL_APPLICANT}`;
+    const unverifiedRetry = await submit(digitalBody, KEY);
+    check(
+      'same key, identity no longer VERIFIED → still the original 201',
+      unverifiedRetry.status === 201 && unverifiedRetry.json['applicationId'] === appId,
+      unverifiedRetry.text,
+    );
+    await admin`
+      UPDATE public_core.applicant_identities
+      SET identity_status = 'VERIFIED' WHERE id = ${DIGITAL_APPLICANT}`;
+
+    // The boundary of the fix: an UNSEEN key is a NEW submission and still
+    // faces the preconditions. Only a key already answered is exempt.
+    //
+    // Deliberately NOT asserted here. Trying to pin it down showed why: with
+    // this campaign closed, findOpenCampaign selects whatever OTHER open RDF
+    // campaign exists, and the live-intent index is keyed per campaign, so
+    // the submission succeeds as a second application in a different
+    // campaign. That is the cross-campaign duplicate-intent question ADR-027
+    // records as an owner policy decision, not a technical one — and the
+    // answer here depends on which other campaigns happen to be open, so an
+    // assertion would be pinning down an accident of fixture ordering rather
+    // than a property of this slice.
+
+    await admin`
+      UPDATE public_core.recruitment_campaigns
+      SET registration_closes_at = now() + interval '30 days' WHERE id = ${CAMPAIGN}`;
+    check('nothing new was written throughout', (await countApplications(DIGITAL_APPLICANT)) === 1);
+    check('…and no ledger row was spent', (await countLedger(DIGITAL_APPLICANT)) === 1);
+
+    // ══════════════════════════════════════════════════════════════
     console.log('\n── 4. One transaction: row, trail, ledger, announcement ─────');
     const hist = await admin<{ from_status: string | null; to_status: string }[]>`
       SELECT from_status::text, to_status::text FROM rdf_ops.application_status_history
@@ -580,6 +650,22 @@ async function main(): Promise<void> {
       (await countApplications(WITHDRAWN_APPLICANT)) === 2,
       String(await countApplications(WITHDRAWN_APPLICANT)),
     );
+    // ══════════════════════════════════════════════════════════════
+    console.log('\n── 7b. REJECTED does NOT free the intent ───────────────────');
+    // The index predicate spares only WITHDRAWN, so a rejected application
+    // still occupies the citizen's one live intent. That is a policy choice
+    // with real consequences for a rejected candidate, so it is asserted
+    // rather than left to be inferred from the SQL.
+    await admin`UPDATE rdf_ops.applications SET status = 'REJECTED' WHERE id = ${appId}`;
+    const afterReject = await submit(digitalBody, randomUUID());
+    check(
+      'a REJECTED application still blocks a new one',
+      afterReject.status === 409 && afterReject.json['status'] === 'ALREADY_APPLIED',
+      afterReject.text,
+    );
+    check('…naming the rejected application', afterReject.json['applicationId'] === appId, afterReject.text);
+    check('…and writing nothing', (await countApplications(DIGITAL_APPLICANT)) === 1);
+    await admin`UPDATE rdf_ops.applications SET status = 'SUBMITTED' WHERE id = ${appId}`;
   } finally {
     await server.stop();
     await cleanup();

@@ -11,7 +11,8 @@
 // applicant is referenced by opaque id, and the event carries only the
 // stored national_id_hash.
 //
-// Ordering is deliberate: verify identity → validate academic inputs →
+// Ordering is deliberate: validate the request → hash it → ANSWER A KNOWN KEY
+// FROM THE LEDGER → verify identity →
 // resolve the open campaign → persist + stage → dispatch.
 //
 // ATOMIC ANNOUNCEMENT (ADR-025). APPLICANT_SUBMITTED is staged in the outbox
@@ -116,7 +117,64 @@ export class SubmitApplicationService {
   async submit(command: SubmitApplicationCommand): Promise<SubmitApplicationOutcome> {
     const agency = agencyForCategory(command.category);
 
-    // 1. Identity precondition — identity-service owns NIDA; we only confirm
+    // 1. Academic inputs — the category fixes which credential is required.
+    //    PURE: a function of the request alone. It runs first because the
+    //    request hash is built from its resolved values, and because a
+    //    malformed request has no stable identity to look up.
+    const academic = resolveAcademicInputs(command.category, {
+      nesaIndexNumber: command.nesaIndexNumber ?? null,
+      hecRegistrationNumber: command.hecRegistrationNumber ?? null,
+    });
+    if (!academic.ok) {
+      return { kind: 'INVALID_ACADEMIC_INPUT', reason: academic.reason };
+    }
+
+    // 2. The request's identity. Covers ONLY what the citizen chose (see
+    //    domain/request-hash.ts) — not the campaign, which the server
+    //    resolves, and not the trace, which differs on every retry. Every
+    //    input is already in hand, which is what makes step 3 possible.
+    const requestHash = canonicalRequestHash({
+      applicantId: command.applicantId,
+      category: command.category,
+      channel: command.channel,
+      nesaIndexNumber: academic.resolved.nesaIndexNumber,
+      hecRegistrationNumber: academic.resolved.hecRegistrationNumber,
+    });
+
+    // 3. ANSWER A KEY WE HAVE ALREADY ANSWERED — before anything mutable is
+    //    read. This ordering is the whole point.
+    //
+    //    It used to sit after the identity and campaign reads below, inside
+    //    recordSubmission. That made the retry contract depend on state that
+    //    moves: a citizen whose 201 was lost on a dropped connection, retrying
+    //    after the registration window closed, was told NO_OPEN_CAMPAIGN —
+    //    that they had never applied — while their application sat filed in
+    //    the database. Same for an identity whose status changed between the
+    //    submission and the retry.
+    //
+    //    A retry is a question about the PAST ("what did you answer me?"), so
+    //    it must be answered from the ledger, which is immutable, and not from
+    //    the present. Only an UNSEEN key is a new submission and has to face
+    //    the preconditions.
+    if (command.idempotencyKey !== undefined) {
+      const prior = await this.deps.ledger.resolveKey({
+        applicantId: command.applicantId,
+        idempotencyKey: command.idempotencyKey,
+        requestHash,
+      });
+      if (prior !== null) {
+        if (prior.kind === 'KEY_REUSED') return { kind: 'KEY_REUSED' };
+        return {
+          kind: 'REPLAYED',
+          applicationId: prior.applicationId,
+          processingCode: prior.processingCode,
+          agency,
+          firstSeenAt: prior.firstSeenAt,
+        };
+      }
+    }
+
+    // 4. Identity precondition — identity-service owns NIDA; we only confirm
     //    the applicant is a known, VERIFIED identity and lift its hash.
     const identity = await this.deps.identityReader.findApplicantById(command.applicantId);
     if (identity === null) {
@@ -126,16 +184,7 @@ export class SubmitApplicationService {
       return { kind: 'IDENTITY_NOT_VERIFIED' };
     }
 
-    // 2. Academic inputs — the category fixes which credential is required.
-    const academic = resolveAcademicInputs(command.category, {
-      nesaIndexNumber: command.nesaIndexNumber ?? null,
-      hecRegistrationNumber: command.hecRegistrationNumber ?? null,
-    });
-    if (!academic.ok) {
-      return { kind: 'INVALID_ACADEMIC_INPUT', reason: academic.reason };
-    }
-
-    // 3. Resolve the open campaign for this agency+category (server-side).
+    // 5. Resolve the open campaign for this agency+category (server-side).
     const campaign = await this.deps.campaignReader.findOpenCampaign(agency, command.category);
     if (campaign === null) {
       return { kind: 'NO_OPEN_CAMPAIGN', agency };
@@ -164,19 +213,11 @@ export class SubmitApplicationService {
       hecRegistrationNumber,
     });
 
-    // 4. The request's identity. The hash covers ONLY what the citizen chose
-    //    (see domain/request-hash.ts) — not the campaign, which the server
-    //    resolved, and not the trace, which differs on every retry.
+    // A keyless caller still gets a ledger row, so the write stays uniform and
+    // the row is there if the same body is ever replayed under a real key.
     const idempotencyKey = command.idempotencyKey ?? randomUUID();
-    const requestHash = canonicalRequestHash({
-      applicantId: command.applicantId,
-      category: command.category,
-      channel: command.channel,
-      nesaIndexNumber,
-      hecRegistrationNumber,
-    });
 
-    // 5. Record + persist into the owning agency's isolated ops schema
+    // 6. Record + persist into the owning agency's isolated ops schema
     //    (+ history), and stage APPLICANT_SUBMITTED, in ONE transaction.
     const recorded = await this.deps.ledger.recordSubmission(
       {
@@ -216,7 +257,7 @@ export class SubmitApplicationService {
       };
     }
 
-    // 6. Fast-path dispatch. Never throws for a transport fault: the event is
+    // 7. Fast-path dispatch. Never throws for a transport fault: the event is
     //    already durable and the outbox relay will deliver it.
     const event = announce(recorded);
     await this.deps.events.dispatch([event]);

@@ -211,6 +211,57 @@ does not provide.
   needs the index as a backstop. The partial unique index gives exactly the
   scope the rule has.
 
+## A defect found in review: the retry contract must outlive its state
+
+The first implementation resolved a re-presented key *inside*
+`recordSubmission` — which runs after the use case has already read the
+applicant's identity and resolved an **open** campaign. The replay was
+therefore conditional on state that moves underneath it.
+
+The failure is the exact scenario this slice exists for. A citizen submits,
+the 201 is lost on a dropped mobile connection, and they retry later — after
+the registration window has closed. They were answered `NO_OPEN_CAMPAIGN`:
+told they had never applied, while their application sat filed in the
+database. An identity whose status changed between submission and retry
+produced the same class of lie.
+
+A retry is a question about the **past** — *"what did you answer me?"* — so it
+must be answerable from the ledger, which is immutable, and never from the
+present. The ledger port therefore gained a read-only `resolveKey`, and the
+use case now runs:
+
+```
+validate the request (pure)  →  hash it (pure)  →  ANSWER A KNOWN KEY
+    →  identity  →  campaign  →  record
+```
+
+Only an **unseen** key is a new submission and faces the preconditions. The
+in-transaction check inside `recordSubmission` stays exactly as it was: it is
+the serialisation point for concurrent same-key deliveries, which no
+pre-check can close.
+
+§3b of `verify-submission-integrity.ts` holds this, and it is load-bearing —
+disabling the pre-check turns it red. Note that of its two assertions only the
+**identity** one is environment-independent: with this campaign closed,
+`findOpenCampaign` may select a *different* open RDF campaign, in which case
+the submission proceeds and the in-transaction check replays it anyway. Which
+leads to the next point.
+
+### What trying to assert the boundary revealed
+
+The obvious companion assertion — *"a brand-new key under a closed campaign is
+refused"* — is deliberately **not** made. Attempting it showed that when the
+citizen's campaign is closed and another RDF campaign is open,
+`findOpenCampaign` selects that other campaign and the submission succeeds as
+a **second application in a different campaign**. The live-intent index is
+keyed per campaign, so nothing stops it.
+
+That is item 2 below — cross-campaign duplicate intent — demonstrated
+concretely rather than hypothetically. It is an owner policy question, and the
+answer currently depends on which other campaigns happen to be open, so
+asserting it would pin down an accident of fixture ordering rather than a
+property of this slice.
+
 ## Not done here
 
 1. **Ledger retention.** Rows are permanent today. They are PII-free

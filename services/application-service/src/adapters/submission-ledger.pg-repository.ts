@@ -38,6 +38,7 @@ import { sql, type SqlTransaction } from '@usrp/shared-database';
 import type {
   RecordSubmissionInput,
   RecordSubmissionOutcome,
+  ResolveKeyOutcome,
   SubmissionIdentifiers,
   SubmissionLedger,
 } from '../ports/submission-ledger.js';
@@ -89,6 +90,43 @@ function replayOrRefuse(entry: LedgerRow, requestHash: string): RecordSubmission
 }
 
 export class PgSubmissionLedger implements SubmissionLedger {
+  /**
+   * The pre-check. See the port docs for why it exists: a retry must be
+   * answerable from the ledger alone, before any mutable read can contradict
+   * it. Read-only, one probe on the ledger's primary key.
+   */
+  async resolveKey(input: {
+    readonly applicantId: string;
+    readonly idempotencyKey: string;
+    readonly requestHash: string;
+  }): Promise<ResolveKeyOutcome | null> {
+    try {
+      return await sql.begin(async (tx): Promise<ResolveKeyOutcome | null> => {
+        await tx`SET LOCAL ROLE ${sql(SYSTEM_ROLE)}`;
+        await tx`SET LOCAL TRANSACTION READ ONLY`;
+        const seen = await ledgerEntry(tx, input.applicantId, input.idempotencyKey);
+        if (seen === undefined) return null;
+        // replayOrRefuse is shared with recordSubmission so the two paths can
+        // never disagree about what a stored entry means. A STORED entry only
+        // ever implies one of these two.
+        const outcome = replayOrRefuse(seen, input.requestHash);
+        if (outcome.kind === 'REPLAYED') {
+          return {
+            kind: 'REPLAYED',
+            applicationId: outcome.applicationId,
+            processingCode: outcome.processingCode,
+            firstSeenAt: outcome.firstSeenAt,
+          };
+        }
+        return { kind: 'KEY_REUSED' };
+      });
+    } catch (err) {
+      throw new ApplicationPersistenceError('Could not read the submission ledger', {
+        cause: err,
+      });
+    }
+  }
+
   async recordSubmission(
     input: RecordSubmissionInput,
     stage: StageEvents<SubmissionIdentifiers>,
