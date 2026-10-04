@@ -1,5 +1,5 @@
 // ══════════════════════════════════════════════════════════════════
-// edge-gateway — The EDGE OPERATION REGISTRY
+// edge-gateway — The EDGE OPERATION REGISTRY (domain)
 //
 // The single declaration of the browser boundary: 26 operations, each naming its
 // exact path, method, required session kind, CSRF obligation, body cap, retry
@@ -12,6 +12,11 @@
 // Route composition in src/routes.ts is keyed by `Record<EdgeOperationId, …>`,
 // so adding an operation here and forgetting its handler is a TYPE ERROR, not a
 // 404 discovered in production.
+//
+// THIS IS THE ONLY COPY. Until the edge homogenisation there were two
+// byte-identical frozen registries (src/registry/ and src/domain/): routes.ts
+// mounted one while guards.ts enforced CSRF/session rules from the other. They
+// agreed only by coincidence of content, never by construction.
 //
 // THREE THINGS ARE DELIBERATELY NOT EXPRESSIBLE HERE:
 //

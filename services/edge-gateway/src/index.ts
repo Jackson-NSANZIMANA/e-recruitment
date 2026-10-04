@@ -1,25 +1,39 @@
 // ══════════════════════════════════════════════════════════════════
 // edge-gateway — Composition root
 //
-// Wires the hexagonal architecture layers: creates infrastructure adapters,
-// injects them into application services, and assembles the dependency bundle
-// for HTTP controllers. This is the single place where the entire object graph
-// is composed, making dependencies explicit and testable.
+// The ONLY file that knows which adapter implements which port. Guards,
+// controllers and use cases are typed on ports (EdgeDeps, declared once in
+// adapters/http/guards.ts).
 //
-// Hexagonal architecture layers (dependency direction: inward):
-//   adapters → ports → application → domain
+// LAYERING (dependency arrows point inward, and the hygiene proof pins them):
+//
+//   adapters/http/*   → ports, domain, crypto      (driving side)
+//   adapters/*.ts     → ports, domain, crypto      (driven side; never adapters/http)
+//   application/*     → ports, domain              (only where there is real orchestration)
+//   domain/*, crypto/ → nothing in this service
+//
+// A simple brokered operation is controller → UpstreamGateway port. Only an
+// operation with orchestration of its own gets an application-layer use case.
+// That is a deliberate rule, not an omission: a pass-through "service" for every
+// route is ceremony that hides where the decisions actually are.
 //
 // Keeping this separate from main.ts is what lets selfchecks build the same
 // object graph without a process, a signal handler, or a listening socket.
 // ══════════════════════════════════════════════════════════════════
 
 import type { CorsPolicy, Route } from '@usrp/shared-http';
-import { CSRF_HEADER } from './security/csrf.js';
-import { cookiePolicy, type CookiePolicy } from './security/cookies.js';
+import { CSRF_HEADER } from './adapters/http/csrf.js';
+import { cookiePolicy } from './adapters/http/cookies.js';
+import type { EdgeDeps } from './adapters/http/guards.js';
 import { edgeRoutes } from './routes.js';
-import { EDGE_SERVICE_NAME, loadEdgeGatewayConfig, type EdgeGatewayConfig } from './config.js';
+import { loadEdgeGatewayConfig, type EdgeGatewayConfig } from './config.js';
+import { PgEdgeSessionStore } from './adapters/session-store.pg-repository.js';
+import { UpstreamClient } from './adapters/upstream.http-gateway.js';
+import { InMemoryRateLimiter } from './adapters/rate-limiter.memory.js';
+import { createCredentialCipher } from './adapters/credential-cipher.adapter.js';
+import { createAuditLogger } from './adapters/audit-logger.adapter.js';
+import type { AuditLogger } from './ports/audit-logger.js';
 
-// Domain
 export {
   EDGE_SERVICE_NAME,
   loadEdgeGatewayConfig,
@@ -41,63 +55,18 @@ export {
   type UpstreamOperationId,
 } from './domain/upstream-operations.js';
 export { toSessionView, type EdgeSession, type SessionView } from './domain/session.types.js';
-
-// Application Services
-export type { SessionManagementService } from './application/session-management.service.js';
-export type { OfficerAuthService } from './application/officer-auth.service.js';
-export type { ApplicantAuthService } from './application/applicant-auth.service.js';
-export type { UpstreamProxyService } from './application/upstream-proxy.service.js';
-
-// Adapters (exports for external use)
+export { edgeHandlers, edgeRoutes } from './routes.js';
+export { redact, summariseError, StdoutAuditLogger, createAuditLogger } from './adapters/audit-logger.adapter.js';
 export { PgEdgeSessionStore } from './adapters/session-store.pg-repository.js';
 export { UpstreamClient } from './adapters/upstream.http-gateway.js';
-export { FixedWindowRateLimiter } from './adapters/fixed-window-rate-limiter.js';
+export { InMemoryRateLimiter } from './adapters/rate-limiter.memory.js';
 export { createCredentialCipher, deriveCredentialKey } from './adapters/credential-cipher.adapter.js';
-export { createAuditLogger, redact, auditEdge, auditEdgeStats } from './adapters/audit-logger.adapter.js';
-
-// Routes
-export { edgeHandlers, edgeRoutes } from './routes.js';
-
-// Ports (for testing and extension)
-export type { SessionRepository } from './ports/session-repository.js';
+export type { EdgeDeps } from './adapters/http/guards.js';
+export type { SessionRepository, RotatedSession } from './ports/session-repository.js';
 export type { UpstreamGateway } from './ports/upstream-gateway.js';
 export type { RateLimiter } from './ports/rate-limiter.js';
 export type { CredentialCipher } from './ports/credential-cipher.js';
-export type { AuditLogger } from './ports/audit-logger.js';
-
-// Import implementations
-import { SessionManagementService } from './application/session-management.service.js';
-import { OfficerAuthService } from './application/officer-auth.service.js';
-import { ApplicantAuthService } from './application/applicant-auth.service.js';
-import { UpstreamProxyService } from './application/upstream-proxy.service.js';
-
-import { PgEdgeSessionStore } from './adapters/session-store.pg-repository.js';
-import { UpstreamClient } from './adapters/upstream.http-gateway.js';
-import { FixedWindowRateLimiter } from './adapters/fixed-window-rate-limiter.js';
-import { createCredentialCipher } from './adapters/credential-cipher.adapter.js';
-import { createAuditLogger } from './adapters/audit-logger.adapter.js';
-
-/**
- * The dependency bundle every edge route closes over. Contains both application
- * services (for business logic) and infrastructure (for guards and middleware).
- */
-export interface EdgeDeps {
-  readonly config: EdgeGatewayConfig;
-  readonly cookies: CookiePolicy;
-
-  // Application Services
-  readonly sessionManagement: SessionManagementService;
-  readonly officerAuth: OfficerAuthService;
-  readonly applicantAuth: ApplicantAuthService;
-  readonly upstreamProxy: UpstreamProxyService;
-
-  // Infrastructure (for guards, middleware, and backwards compatibility)
-  readonly sessions: PgEdgeSessionStore;
-  readonly upstream: UpstreamClient;
-  readonly limiter: FixedWindowRateLimiter;
-
-  readonly now: () => Date;
-}
+export type { AuditLogger, EdgeAuditRecord, EdgeFaultRecord } from './ports/audit-logger.js';
 
 export interface EdgeGateway {
   readonly deps: EdgeDeps;
@@ -108,22 +77,16 @@ export interface EdgeGateway {
 /**
  * The cross-origin policy.
  *
- * EXACT-MATCH ORIGINS ONLY, and `credentials: true` — which is exactly why a
- * wildcard is impossible here: browsers refuse `*` on a credentialed request,
- * and the whole point of this tier is that the credential travels as a cookie.
- *
- * `x-csrf-token` must be in allowedHeaders or every unsafe request fails
- * preflight, and `x-correlation-id` must be there or one click stops being one
- * trace. Both are exposed back so the SPA can read the ids off a response it is
- * reporting on.
+ * EXACT-MATCH ORIGINS ONLY, and `credentials: true`: browsers refuse `*` on a
+ * credentialed request, and the credential here travels as a cookie.
+ * `x-csrf-token` must be allowed or every unsafe request fails preflight, and
+ * `x-correlation-id` must be allowed or one click stops being one trace.
  */
 export function edgeCorsPolicy(config: EdgeGatewayConfig): CorsPolicy {
   return {
     origins: config.cors.origins,
     credentials: true,
-    // No PATCH, no DELETE. Not an omission — no route in this platform accepts
-    // either verb, and advertising them would invite the generic status write
-    // ADR-021 rejects.
+    // No PATCH, no DELETE: no route in this platform accepts either verb.
     allowedMethods: ['GET', 'POST', 'OPTIONS'],
     allowedHeaders: ['content-type', CSRF_HEADER, 'x-correlation-id'],
     exposedHeaders: ['x-request-id', 'x-correlation-id'],
@@ -131,97 +94,44 @@ export function edgeCorsPolicy(config: EdgeGatewayConfig): CorsPolicy {
   };
 }
 
-/**
- * Compose the edge gateway: wire adapters → application services → controllers.
- *
- * This is the hexagonal architecture's composition root. Every dependency is
- * created here and injected, making the architecture explicit and testable.
- *
- * @param config Edge gateway configuration (defaults to loadEdgeGatewayConfig)
- * @param now Clock function for testing (defaults to () => new Date())
- * @returns Composed EdgeGateway with routes and CORS policy
- */
+export interface EdgeGatewayOverrides {
+  /** Inject a recording sink in proofs. Defaults to the redacting stdout logger. */
+  readonly audit?: AuditLogger;
+}
+
+/** Compose the edge gateway: adapters → (use cases) → controllers. */
 export function createEdgeGateway(
   config: EdgeGatewayConfig = loadEdgeGatewayConfig(),
   now: () => Date = () => new Date(),
+  overrides: EdgeGatewayOverrides = {},
 ): EdgeGateway {
-  // ──────────────────────────────────────────────────────────────────
-  // Layer 1: Infrastructure Adapters (Ports Implementations)
-  // ──────────────────────────────────────────────────────────────────
-
-  const cipher = createCredentialCipher(config.session.handleHmacKey);
+  const hmacKey = config.session.handleHmacKey;
+  const audit = overrides.audit ?? createAuditLogger();
+  const cipher = createCredentialCipher(hmacKey);
 
   const sessions = new PgEdgeSessionStore(
     {
-      handleHmacKey: config.session.handleHmacKey,
+      handleHmacKey: hmacKey,
       idleTtlSeconds: config.session.idleTtlSeconds,
       absoluteTtlSeconds: config.session.absoluteTtlSeconds,
     },
     cipher,
+    audit,
   );
-
   const upstream = new UpstreamClient(config.upstream);
-  const limiter = new FixedWindowRateLimiter();
-  const audit = createAuditLogger();
-
-  // ──────────────────────────────────────────────────────────────────
-  // Layer 2: Application Services (Use Cases)
-  // ──────────────────────────────────────────────────────────────────
-
-  const sessionManagement = new SessionManagementService({
-    repository: sessions,
-    cipher,
-    audit,
-  });
-
-  const officerAuth = new OfficerAuthService({
-    sessions,
-    upstream,
-    limiter,
-    audit,
-    cipher,
-    config: {
-      authPublicKeyPem: config.auth.authPublicKeyPem,
-      jwtIssuer: config.auth.jwtIssuer,
-      jwtAudience: config.auth.jwtAudience,
-      handleHmacKey: config.session.handleHmacKey,
-      loginRateLimit: config.rateLimits.loginPerMinute,
-    },
-  });
-
-  const applicantAuth = new ApplicantAuthService({
-    sessions,
-    upstream,
-    limiter,
-    audit,
-    config: {
-      otpRequestRateLimit: config.rateLimits.otpPerMinute,
-      otpVerifyRateLimit: config.rateLimits.otpPerMinute,
-    },
-  });
-
-  const upstreamProxy = new UpstreamProxyService({ upstream });
-
-  // ──────────────────────────────────────────────────────────────────
-  // Layer 3: HTTP Layer Dependencies (Controllers)
-  // ──────────────────────────────────────────────────────────────────
+  // Per-process in this PR, behind the async port. The shared Postgres limiter
+  // lands in PR-4 together with its migration and its proof.
+  const limiter = new InMemoryRateLimiter(() => now().getTime());
 
   const deps: EdgeDeps = {
     config,
     cookies: cookiePolicy(config.session.secureCookies),
-    sessionManagement,
-    officerAuth,
-    applicantAuth,
-    upstreamProxy,
     sessions,
     upstream,
     limiter,
+    audit,
     now,
   };
 
-  return {
-    deps,
-    routes: edgeRoutes(deps),
-    cors: edgeCorsPolicy(config),
-  };
+  return { deps, routes: edgeRoutes(deps), cors: edgeCorsPolicy(config) };
 }

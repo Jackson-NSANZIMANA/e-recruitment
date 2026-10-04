@@ -17,47 +17,38 @@
 //      two credentials are simply not interchangeable (ADR-016 vs ADR-018). A
 //      401 would send the SPA into a login loop it can never win.
 //
-// A dead or unknown handle always ships CLEARED COOKIES with its 401. Leaving a
-// stale handle in the jar means every later request pays a database lookup to be
-// told the same thing.
+// A dead or unknown handle always ships CLEARED COOKIES with its 401.
+//
+// EdgeDeps IS DECLARED HERE, ONCE, AND IS TYPED ON PORTS. It used to be
+// declared twice (here and in index.ts) and typed on the concrete
+// PgEdgeSessionStore / UpstreamClient / FixedWindowRateLimiter classes, which
+// made every controller depend on Postgres and fetch by type.
 // ══════════════════════════════════════════════════════════════════
 
 import { HttpError, type HttpResult, type RequestContext, type RouteHandler } from '@usrp/shared-http';
 import type { Agency } from '@usrp/shared-types';
-import { auditEdge } from '../../adapters/audit-logger.adapter.js';
 import { edgeOperation, type EdgeOperationId } from '../../domain/edge-operations.js';
-import { anonymousProbeCookies, clearedCookies, type CookiePolicy } from '../../security/cookies.js';
-import { assertCsrf, newCsrfToken, type CsrfBinding } from '../../security/csrf.js';
 import type { EdgeSession, SessionEndedReason } from '../../domain/session.types.js';
 import { UpstreamUnavailableError } from '../../domain/edge.errors.js';
 import type { EdgeGatewayConfig } from '../../config.js';
+import type { AuditLogger } from '../../ports/audit-logger.js';
+import type { RateLimiter } from '../../ports/rate-limiter.js';
+import type { SessionRepository } from '../../ports/session-repository.js';
+import type { UpstreamGateway } from '../../ports/upstream-gateway.js';
+import { anonymousProbeCookies, clearedCookies, type CookiePolicy } from './cookies.js';
+import { assertCsrf, newCsrfToken, type CsrfBinding } from './csrf.js';
 import { ForbiddenFieldError } from './validation.js';
 
-// Import infrastructure types
-import type { PgEdgeSessionStore } from '../../adapters/session-store.pg-repository.js';
-import type { UpstreamClient } from '../../adapters/upstream.http-gateway.js';
-import type { FixedWindowRateLimiter } from '../../adapters/fixed-window-rate-limiter.js';
-
-// Import application services
-import type { SessionManagementService } from '../../application/session-management.service.js';
-import type { OfficerAuthService } from '../../application/officer-auth.service.js';
-import type { ApplicantAuthService } from '../../application/applicant-auth.service.js';
-import type { UpstreamProxyService } from '../../application/upstream-proxy.service.js';
-
+/** The dependency bundle every edge route closes over. Ports only. */
 export interface EdgeDeps {
   readonly config: EdgeGatewayConfig;
   readonly cookies: CookiePolicy;
 
-  // Application Services
-  readonly sessionManagement: SessionManagementService;
-  readonly officerAuth: OfficerAuthService;
-  readonly applicantAuth: ApplicantAuthService;
-  readonly upstreamProxy: UpstreamProxyService;
-
-  // Infrastructure (for guards and backward compatibility)
-  readonly sessions: PgEdgeSessionStore;
-  readonly upstream: UpstreamClient;
-  readonly limiter: FixedWindowRateLimiter;
+  // Driven ports (secondary adapters)
+  readonly sessions: SessionRepository;
+  readonly upstream: UpstreamGateway;
+  readonly limiter: RateLimiter;
+  readonly audit: AuditLogger;
 
   readonly now: () => Date;
 }
@@ -93,9 +84,11 @@ export function sessionEnded(deps: EdgeDeps, reason: SessionEndedReason): HttpRe
  *
  * UpstreamUnavailableError becomes the contract's G2GError — body `{ error }`
  * and nothing else, because "the national ID registry is unavailable" is
- * actionable while an upstream stack detail is a leak.
+ * actionable while an upstream stack detail is a leak. The edge's OWN stores
+ * (the rate limiter) fail CLOSED as a 503 too, never open.
  */
 async function guarded(
+  deps: EdgeDeps,
   operationId: EdgeOperationId,
   ctx: RequestContext,
   run: () => Promise<HttpResult>,
@@ -104,7 +97,7 @@ async function guarded(
     return await run();
   } catch (err) {
     if (err instanceof UpstreamUnavailableError) {
-      auditEdge({
+      deps.audit.log({
         action: 'EDGE_UPSTREAM_UNAVAILABLE',
         operationId,
         correlationId: ctx.correlationId,
@@ -114,7 +107,7 @@ async function guarded(
       return { status: 503, body: { error: err.code } };
     }
     if (err instanceof ForbiddenFieldError) {
-      auditEdge({
+      deps.audit.log({
         action: 'EDGE_FORBIDDEN_FIELD_REJECTED',
         operationId,
         correlationId: ctx.correlationId,
@@ -124,9 +117,15 @@ async function guarded(
     }
     if (err instanceof HttpError) {
       if (err.code === 'CSRF_REJECTED') {
-        auditEdge({ action: 'EDGE_CSRF_REJECTED', operationId, correlationId: ctx.correlationId });
+        deps.audit.log({ action: 'EDGE_CSRF_REJECTED', operationId, correlationId: ctx.correlationId });
       } else if (err.code === 'RATE_LIMITED') {
-        auditEdge({ action: 'EDGE_RATE_LIMITED', operationId, correlationId: ctx.correlationId });
+        deps.audit.log({ action: 'EDGE_RATE_LIMITED', operationId, correlationId: ctx.correlationId });
+      } else if (err.code === 'RATE_LIMITER_UNAVAILABLE') {
+        deps.audit.log({
+          action: 'EDGE_RATE_LIMITER_UNAVAILABLE',
+          operationId,
+          correlationId: ctx.correlationId,
+        });
       }
       throw err;
     }
@@ -142,8 +141,7 @@ async function resolveSession(deps: EdgeDeps, ctx: RequestContext): Promise<Reso
   const handle = ctx.cookies.get(deps.cookies.sessionCookieName);
   if (handle === undefined || handle.length === 0) {
     // No cookie at all reports as `revoked`: an absent handle and a destroyed
-    // one are the same fact from the browser's side, and a fourth reason for
-    // "you never had one" tells the UI nothing it can act on.
+    // one are the same fact from the browser's side.
     return { kind: 'ENDED', reason: 'revoked' };
   }
   const lookup = await deps.sessions.findByHandle(handle, deps.now());
@@ -154,12 +152,13 @@ async function resolveSession(deps: EdgeDeps, ctx: RequestContext): Promise<Reso
 }
 
 function wrongKind(
+  deps: EdgeDeps,
   operationId: EdgeOperationId,
   ctx: RequestContext,
   actual: string,
   required: string,
 ): HttpResult {
-  auditEdge({
+  deps.audit.log({
     action: 'EDGE_WRONG_SESSION_KIND',
     operationId,
     correlationId: ctx.correlationId,
@@ -181,7 +180,7 @@ export function withAnonymous(
 ): RouteHandler {
   const operation = edgeOperation(operationId);
   return async (ctx: RequestContext): Promise<HttpResult> =>
-    guarded(operationId, ctx, async () => {
+    guarded(deps, operationId, ctx, async () => {
       if (operation.csrf) {
         assertCsrf(ctx, deps.cookies.csrfCookieName, deps.config.session.handleHmacKey, null);
       }
@@ -196,10 +195,10 @@ export function withOfficerSession(
 ): RouteHandler {
   const operation = edgeOperation(operationId);
   return async (ctx: RequestContext): Promise<HttpResult> =>
-    guarded(operationId, ctx, async () => {
+    guarded(deps, operationId, ctx, async () => {
       const resolved = await resolveSession(deps, ctx);
       if (resolved.kind === 'ENDED') {
-        auditEdge({
+        deps.audit.log({
           action: 'EDGE_SESSION_REJECTED',
           operationId,
           correlationId: ctx.correlationId,
@@ -209,13 +208,13 @@ export function withOfficerSession(
       }
       const { session } = resolved;
       if (session.kind !== 'officer') {
-        return wrongKind(operationId, ctx, session.kind, 'officer');
+        return wrongKind(deps, operationId, ctx, session.kind, 'officer');
       }
       const { agency } = session;
       if (agency === null) {
         // Structurally impossible (DB CHECK + create() guard). Treated as a dead
-        // session rather than a 500: whatever produced it, the officer's correct
-        // next action is to log in again.
+        // session rather than a 500: the officer's correct next action is to
+        // log in again.
         return sessionEnded(deps, 'revoked');
       }
       if (operation.csrf) {
@@ -237,10 +236,10 @@ export function withApplicantSession(
 ): RouteHandler {
   const operation = edgeOperation(operationId);
   return async (ctx: RequestContext): Promise<HttpResult> =>
-    guarded(operationId, ctx, async () => {
+    guarded(deps, operationId, ctx, async () => {
       const resolved = await resolveSession(deps, ctx);
       if (resolved.kind === 'ENDED') {
-        auditEdge({
+        deps.audit.log({
           action: 'EDGE_SESSION_REJECTED',
           operationId,
           correlationId: ctx.correlationId,
@@ -250,7 +249,7 @@ export function withApplicantSession(
       }
       const { session } = resolved;
       if (session.kind !== 'applicant') {
-        return wrongKind(operationId, ctx, session.kind, 'applicant');
+        return wrongKind(deps, operationId, ctx, session.kind, 'applicant');
       }
       if (operation.csrf) {
         assertCsrf(
@@ -265,13 +264,11 @@ export function withApplicantSession(
 }
 
 /**
- * For the two operations that must behave sanely WITHOUT a session:
+ * For the operations that must behave sanely WITHOUT a session:
  *
  *   readSession  a 401 is a normal, expected answer — the SPA must be able to
- *                tell `checking` from `anonymous` so it does not flash a login
- *                screen at a signed-in user. It also seeds the CSRF cookie.
- *   logout       idempotent by contract: a client retrying a logout must never
- *                be told it failed, so "no session" is a 204, not a 401.
+ *                tell `checking` from `anonymous`. It also seeds the CSRF cookie.
+ *   logout       idempotent by contract: "no session" is a 204, not a 401.
  *
  * CSRF still applies when the registry demands it, bound to the session when
  * there is one and double-submit only when there is not.
@@ -283,7 +280,7 @@ export function withOptionalSession(
 ): RouteHandler {
   const operation = edgeOperation(operationId);
   return async (ctx: RequestContext): Promise<HttpResult> =>
-    guarded(operationId, ctx, async () => {
+    guarded(deps, operationId, ctx, async () => {
       const resolved = await resolveSession(deps, ctx);
       const session = resolved.kind === 'ACTIVE' ? resolved.session : null;
       if (operation.csrf && (session !== null || !operation.idempotentWithoutSession)) {

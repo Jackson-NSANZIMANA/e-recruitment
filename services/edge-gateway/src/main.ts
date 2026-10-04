@@ -7,55 +7,38 @@
 //
 //   1. assertProductionSecrets() first, before any other statement. A process
 //      carrying a published dev key refuses to start under NODE_ENV=production.
-//   2. A SECOND, edge-specific refusal: insecure cookies in production. The
-//      __Host- prefix requires Secure, so shared-http would refuse to serialize
-//      the session cookie — auth would fail invisibly on every request instead
-//      of loudly at boot. This is the one misconfiguration that breaks
-//      everything while every probe stays green.
+//   2. Edge-specific refusals (insecure cookies in production; see below).
 //   3. configureDatabase() with the ALREADY-VALIDATED config, so the lazy pool
 //      never re-reads process.env behind the config layer's back.
 //
-// READINESS DISTINGUISHES EDGE READINESS FROM DEPENDENCY HEALTH:
+// READINESS: the session store and iam-service gate readiness; every other
+// upstream surfaces as a 503 on the affected operation instead.
 //
-//   session store  HARD. Without it no handle resolves, so the process cannot
-//                  serve a single authenticated request. Not ready.
-//   iam-service    also gates readiness, because login is the door to
-//                  everything else — an edge that cannot authenticate anyone is
-//                  not ready to take traffic, even though it is alive.
-//   everything else NOT a readiness input. application-service being down must
-//                  surface as a 503 on the affected operation, not as an edge
-//                  that removes itself from the load balancer and takes the
-//                  citizen portal down with it.
-//
-// The result is cached briefly: /ready is polled every 2s by
-// scripts/verify-dev-boot.sh and by every orchestrator probe, and a probe that
-// opens a socket to iam on each poll makes the health check a load source.
+// LOGGING: every line written after boot goes through deps.audit (redacting).
+// The only direct console writes are the start/stop/startup-failure lines
+// below, which carry no request data. verify-edge-hygiene.ts pins that.
 // ══════════════════════════════════════════════════════════════════
 
 import { assertProductionSecrets } from '@usrp/shared-config';
 import { configureDatabase, sql } from '@usrp/shared-database';
 import { startHttpServer } from '@usrp/shared-http';
-import { auditEdgeStats } from './observability/audit-log.js';
 import { createEdgeGateway } from './index.js';
 import { loadEdgeGatewayConfig } from './config.js';
 
 /** How long a readiness verdict is reused. Shorter than any sane probe interval. */
 const READINESS_CACHE_MS = 3_000;
-/** How often expired session rows are swept. */
+/** How often expired session rows and rate-limit windows are swept. */
 const SWEEP_INTERVAL_MS = 15 * 60 * 1_000;
 /** How long a dead session row is kept before deletion. */
 const SWEEP_GRACE_MS = 24 * 60 * 60 * 1_000;
-/** How often the aggregate session counters are emitted. */
+/** How often the aggregate counters are emitted. */
 const STATS_INTERVAL_MS = 60 * 1_000;
 
 async function iamReachable(baseUrl: string): Promise<boolean> {
   const controller = new AbortController();
   const deadline = setTimeout(() => controller.abort(), 2_000);
   try {
-    const response = await fetch(new URL('/health', baseUrl), {
-      method: 'GET',
-      signal: controller.signal,
-    });
+    const response = await fetch(new URL('/health', baseUrl), { method: 'GET', signal: controller.signal });
     return response.ok;
   } catch {
     return false;
@@ -77,12 +60,10 @@ async function main(): Promise<void> {
     );
   }
 
-  configureDatabase({
-    url: config.database.url,
-    maxConnections: config.database.maxConnections,
-  });
+  configureDatabase({ url: config.database.url, maxConnections: config.database.maxConnections });
 
   const gateway = createEdgeGateway(config);
+  const { audit } = gateway.deps;
 
   let cachedReadiness = { at: 0, ready: false };
   const readiness = async (): Promise<boolean> => {
@@ -98,51 +79,41 @@ async function main(): Promise<void> {
     }
     const iamReady = storeReady ? await iamReachable(config.upstream.iamBaseUrl) : false;
     const ready = storeReady && iamReady;
-
     if (!ready) {
-      // A 503 from a readiness callback means "the process is up and declaring
-      // itself unfit", which is exactly the state an operator must be able to
-      // diagnose — so it says WHICH half failed.
-      console.warn(
-        JSON.stringify({
-          msg: 'edge_not_ready',
-          sessionStore: storeReady ? 'ok' : 'unreachable',
-          iamService: iamReady ? 'ok' : 'unreachable',
-        }),
-      );
+      audit.stats({ notReady: 1, sessionStoreReady: storeReady ? 1 : 0, iamServiceReady: iamReady ? 1 : 0 });
     }
     cachedReadiness = { at: now, ready };
     return ready;
   };
 
   const sweeper = setInterval(() => {
+    const now = new Date();
     void gateway.deps.sessions
-      .deleteExpired(new Date(Date.now() - SWEEP_GRACE_MS))
+      .deleteExpired(new Date(now.getTime() - SWEEP_GRACE_MS))
       .then((deleted) => {
-        if (deleted > 0) auditEdgeStats({ sessionsSwept: deleted });
+        if (deleted > 0) audit.stats({ sessionsSwept: deleted });
       })
-      .catch((err: unknown) => {
-        console.error(JSON.stringify({ msg: 'edge_session_sweep_failed' }), err);
-      });
+      .catch((err: unknown) => audit.fault({ event: 'EDGE_SESSION_SWEEP_FAILED' }, err));
+    void gateway.deps.limiter
+      .sweep(now)
+      .catch((err: unknown) => audit.fault({ event: 'EDGE_RATE_LIMITER_SWEEP_FAILED' }, err));
   }, SWEEP_INTERVAL_MS);
   // unref so a pending timer never holds the process open during shutdown.
   sweeper.unref();
 
   const statsTimer = setInterval(() => {
-    void gateway.deps.sessions
-      .stats(new Date())
-      .then((stats) => {
-        auditEdgeStats({
+    const now = new Date();
+    void Promise.all([gateway.deps.sessions.stats(now), gateway.deps.limiter.activeBuckets(now)])
+      .then(([stats, buckets]) => {
+        audit.stats({
           activeOfficerSessions: stats.activeOfficer,
           activeApplicantSessions: stats.activeApplicant,
           revokedSessions: stats.revoked,
           expiredSessions: stats.expired,
-          rateLimitBuckets: gateway.deps.limiter.size(),
+          rateLimitBuckets: buckets,
         });
       })
-      .catch((err: unknown) => {
-        console.error(JSON.stringify({ msg: 'edge_session_stats_failed' }), err);
-      });
+      .catch((err: unknown) => audit.fault({ event: 'EDGE_STATS_FAILED' }, err));
   }, STATS_INTERVAL_MS);
   statsTimer.unref();
 
@@ -169,12 +140,16 @@ async function main(): Promise<void> {
       env: config.runtime.nodeEnv,
       operations: gateway.routes.length,
       corsOrigins: config.cors.origins.length,
+      rateLimitStore: gateway.deps.limiter.store,
       cookies: config.session.secureCookies ? '__Host- (Secure)' : 'dev names (insecure http)',
     }),
   );
 }
 
 main().catch((err: unknown) => {
-  console.error(JSON.stringify({ msg: 'startup_failed', service: 'edge-gateway' }), err);
+  // Name and message, never the stack or the raw object. Boot errors are written
+  // by the config loaders and the refusals above, which never echo a value.
+  const error = err instanceof Error ? { name: err.name, message: err.message } : { name: typeof err };
+  console.error(JSON.stringify({ msg: 'startup_failed', service: 'edge-gateway', error }));
   process.exit(1);
 });

@@ -29,7 +29,7 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { HttpError, type RouteHandler } from '@usrp/shared-http';
-import { UPSTREAM } from '../../registry/upstream-operations.js';
+import { UPSTREAM } from '../../domain/upstream-operations.js';
 import { field } from './projections.js';
 import { FORBIDDEN, NOT_FOUND, conflictResult } from './outcomes.js';
 import { withOfficerSession, type EdgeDeps } from './guards.js';
@@ -180,7 +180,7 @@ export function syncFieldScoresHandler(deps: EdgeDeps): RouteHandler {
       const results = field(upstream.body, 'results') ?? [];
       // The one payload on this boundary without an explicit projection — see
       // leak-guard.ts. It fails closed rather than being trusted.
-      assertNoLeakedFields(results, ctx.correlationId);
+      assertNoLeakedFields(results, ctx.correlationId, deps.audit);
       return { status: 200, body: { status: 'SYNCED', results } };
     }
     if (upstream.status === 403) return FORBIDDEN;

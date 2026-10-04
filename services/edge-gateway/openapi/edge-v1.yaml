@@ -10,7 +10,7 @@ info:
     officer session.
     
     NEVER HAND-EDIT THIS DOCUMENT. It is generated from the registry
-    (services/edge-gateway/src/registry/edge-operations.ts) and reconciled by
+    (services/edge-gateway/src/domain/edge-operations.ts) and reconciled by
     selfcheck/verify-edge-contract.ts. Edit the registry; run the proof; the
     document follows.
   version: "2026-09-13"

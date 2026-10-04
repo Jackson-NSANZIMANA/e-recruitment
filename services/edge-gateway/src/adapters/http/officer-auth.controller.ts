@@ -5,32 +5,26 @@
 // POST /edge/v1/auth/officer/logout                            → 204
 //
 // `loginHandle`, NOT `email`. `officer_accounts.login_handle` is a varchar(128)
-// and there is no email column anywhere in the credential store; the old
-// frontend sent `{ email, password }`, which could never have worked against any
-// schema.
+// and there is no email column anywhere in the credential store.
 //
 // THE JWT NEVER REACHES THE BROWSER. It is verified once here — to read the
 // agency and roles the session view needs — then sealed into the session row.
 // The 204 carries no body at all: the session is read back through
-// GET /edge/v1/session so there is exactly ONE shape describing a session rather
-// than two that can disagree.
+// GET /edge/v1/session so there is exactly ONE shape describing a session.
 //
 // LOGOUT IS THE ONLY REVOCATION AN OFFICER HAS. Per ADR-016 the Ed25519 token is
-// non-revocable until expiry, so if the handle outlives the logout there is
-// nothing to fall back on. The session row is destroyed server-side; clearing
-// the cookie alone is not logout.
+// non-revocable until expiry, so the session row is destroyed server-side;
+// clearing the cookie alone is not logout.
+//
+// RATE LIMITS ARE SHARED ACROSS REPLICAS in production (rate-limiter.pg.ts), so
+// "10 attempts per minute per account" now means 10, not 10 × replica count.
 // ══════════════════════════════════════════════════════════════════
 
 import type { HttpResult, RouteHandler } from '@usrp/shared-http';
 import { verifyAuthToken } from '@usrp/shared-auth';
-import { auditEdge } from '../../observability/audit-log.js';
-import { UPSTREAM } from '../../registry/upstream-operations.js';
-import { clearedCookies, sessionCookies } from '../../security/cookies.js';
-import {
-  assertWithinLimit,
-  clientBucketKey,
-  targetBucketKey,
-} from '../../security/rate-limiter.js';
+import { UPSTREAM } from '../../domain/upstream-operations.js';
+import { clearedCookies, sessionCookies } from './cookies.js';
+import { clientBucketKey, enforceRateLimit, targetBucketKey } from './rate-limit.js';
 import { field } from './projections.js';
 import { CREDENTIAL_REJECTED } from './outcomes.js';
 import { withAnonymous, withOptionalSession, type EdgeDeps } from './guards.js';
@@ -49,17 +43,15 @@ export function officerLoginHandler(deps: EdgeDeps): RouteHandler {
     // stuffing against one account expensive regardless of where it comes from.
     const limits = deps.config.rateLimits;
     const key = deps.config.session.handleHmacKey;
-    assertWithinLimit(
-      deps.limiter.check(
-        targetBucketKey(key, 'officerLogin', loginHandle.toLowerCase()),
-        limits.loginPerMinute,
-      ),
+    await enforceRateLimit(
+      deps.limiter,
+      targetBucketKey(key, 'officerLogin', loginHandle.toLowerCase()),
+      limits.loginPerMinute,
     );
-    assertWithinLimit(
-      deps.limiter.check(
-        `${clientBucketKey(ctx, limits.trustedProxyHops)}:officerLogin`,
-        limits.loginPerMinute,
-      ),
+    await enforceRateLimit(
+      deps.limiter,
+      `${clientBucketKey(ctx, limits.trustedProxyHops)}:officerLogin`,
+      limits.loginPerMinute,
     );
 
     const upstream = await deps.upstream.call({
@@ -87,13 +79,8 @@ export function officerLoginHandler(deps: EdgeDeps): RouteHandler {
       expectedAudience: deps.config.auth.jwtAudience,
     });
     if (principal === null || principal.kind !== 'officer') {
-      console.error(
-        JSON.stringify({
-          msg: 'edge_login_token_unverifiable',
-          correlationId: ctx.correlationId,
-          detail: 'iam-service returned a token this edge cannot verify as an officer principal.',
-        }),
-      );
+      // iam-service returned a token this edge cannot verify as an officer principal.
+      deps.audit.fault({ event: 'EDGE_LOGIN_TOKEN_UNVERIFIABLE', correlationId: ctx.correlationId });
       return { status: 502, body: { error: 'UPSTREAM_CONTRACT_MISMATCH' } };
     }
 
@@ -109,7 +96,7 @@ export function officerLoginHandler(deps: EdgeDeps): RouteHandler {
       deps.now(),
     );
 
-    auditEdge({
+    deps.audit.log({
       action: 'EDGE_SESSION_ISSUED',
       operationId: 'officerLogin',
       correlationId: ctx.correlationId,
@@ -127,16 +114,14 @@ export function officerLoginHandler(deps: EdgeDeps): RouteHandler {
 }
 
 /**
- * Logout. Declared `anonymous` in the registry because the contract makes it
- * IDEMPOTENT: logging out without a session is also a 204, since a client
- * retrying a logout must never be told it failed. It destroys whatever session
- * the presented handle names, or nothing.
+ * Logout. IDEMPOTENT by contract: logging out without a session is also a 204,
+ * since a client retrying a logout must never be told it failed.
  */
 export function officerLogoutHandler(deps: EdgeDeps): RouteHandler {
   return withOptionalSession(deps, 'officerLogout', async (ctx, session) => {
     if (session !== null) {
       await deps.sessions.revoke(session.sessionId, 'officer_logout', deps.now());
-      auditEdge({
+      deps.audit.log({
         action: 'EDGE_SESSION_DESTROYED',
         operationId: 'officerLogout',
         correlationId: ctx.correlationId,

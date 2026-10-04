@@ -1,9 +1,7 @@
 // ══════════════════════════════════════════════════════════════════
 // edge-gateway — Session store adapter (PostgreSQL, rls/0019)
 //
-// Implements the SessionRepository port using PostgreSQL. This is the adapter
-// layer of hexagonal architecture: concrete implementation behind an abstract
-// interface.
+// Implements the SessionRepository port.
 //
 // SHARED AND DURABLE, not in-process. An in-memory map would mean every deploy
 // logs out every officer mid-shift, a second replica cannot serve a session the
@@ -23,33 +21,31 @@
 //   upstream_credential AES-256-GCM sealed (credential-cipher.adapter.ts).
 //
 // ROTATION WITH A GRACE WINDOW. Refresh mints a new handle and a new CSRF
-// token; the previous pair stays valid for GRACE_MS. Without that, an SPA that
-// refreshes while three fetches are in flight would 401/403 its own requests
-// and the bug would be indistinguishable from a broken session store.
+// token; the previous pair stays valid for ROTATION_GRACE_MS. Without that, an
+// SPA that refreshes while three fetches are in flight would 401/403 its own
+// requests and the bug would be indistinguishable from a broken session store.
 //
 // Runs as usrp_edge_gateway — the ONLY role granted on this table, under FORCE'd
 // RLS. No officer role and no system role can read live credentials, so a
 // compromise of any other service does not yield officer sessions.
-//
-// Part of hexagonal architecture refactoring - adapter layer.
 // ══════════════════════════════════════════════════════════════════
 
-import { randomBytes } from 'node:crypto';
 import { sql } from '@usrp/shared-database';
-import { hmacSha256Hex } from '@usrp/shared-security';
 import type { Agency } from '@usrp/shared-types';
 import type {
   SessionRepository,
   CreateSessionInput,
   CreateSessionResult,
+  RotatedSession,
   SessionLookupResult,
   SessionStats,
 } from '../ports/session-repository.js';
+import type { AuditLogger } from '../ports/audit-logger.js';
 import type { EdgeSession, SessionKind } from '../domain/session.types.js';
-import { csrfTokenHash, newCsrfToken } from '../security/csrf.js';
+import { csrfTokenHash, newCsrfToken, newSessionHandle, sessionHandleHash } from '../crypto/tokens.js';
 
-/** The CredentialCipher interface subset needed by this adapter. */
-interface CredentialCipher {
+/** The CredentialCipher subset this adapter needs (see credential-cipher.adapter.ts). */
+interface SealingCipher {
   seal(plaintext: string): string;
   open(ciphertext: string): string;
 }
@@ -102,26 +98,21 @@ export class EdgeSessionStoreError extends Error {
   }
 }
 
-/** A fresh opaque handle. base64url is always valid cookie-octets. */
-function newHandle(): string {
-  return randomBytes(32).toString('base64url');
-}
+const newHandle = newSessionHandle;
 
-/**
- * PostgreSQL implementation of SessionRepository port.
- * Stores sessions in public_core.edge_sessions table.
- */
 export class PgEdgeSessionStore implements SessionRepository {
   readonly #config: SessionStoreConfig;
-  readonly #cipher: CredentialCipher;
+  readonly #cipher: SealingCipher;
+  readonly #faults: Pick<AuditLogger, 'fault'> | null;
 
-  constructor(config: SessionStoreConfig, cipher: CredentialCipher) {
+  constructor(config: SessionStoreConfig, cipher: SealingCipher, faults: Pick<AuditLogger, 'fault'> | null = null) {
     this.#config = config;
     this.#cipher = cipher;
+    this.#faults = faults;
   }
 
   #handleHash(handle: string): string {
-    return hmacSha256Hex(this.#config.handleHmacKey, `handle:${handle}`);
+    return sessionHandleHash(this.#config.handleHmacKey, handle);
   }
 
   #idleDeadline(now: Date, absolute: Date): Date {
@@ -131,9 +122,9 @@ export class PgEdgeSessionStore implements SessionRepository {
     return sliding.getTime() > absolute.getTime() ? absolute : sliding;
   }
 
-  #toSession(row: SessionRow, credential: string, idleExpiresAt: Date): EdgeSession {
+  #toSession(row: SessionRow, credential: string, idleExpiresAt: Date, now: Date): EdgeSession {
     const graceLive =
-      row.previous_valid_until !== null && row.previous_valid_until.getTime() > Date.now();
+      row.previous_valid_until !== null && row.previous_valid_until.getTime() > now.getTime();
     return {
       sessionId: row.session_id,
       kind: row.kind as SessionKind,
@@ -201,7 +192,7 @@ export class PgEdgeSessionStore implements SessionRepository {
       return {
         handle,
         csrfToken,
-        session: this.#toSession(row, input.upstreamCredential, idleExpiresAt),
+        session: this.#toSession(row, input.upstreamCredential, idleExpiresAt, now),
       };
     } catch (err) {
       if (err instanceof EdgeSessionStoreError) throw err;
@@ -210,15 +201,11 @@ export class PgEdgeSessionStore implements SessionRepository {
   }
 
   /**
-   * Look up a session by handle. Returns ACTIVE if the session exists and has
-   * not expired; ENDED if it exists but is expired or revoked; UNKNOWN if no
-   * such handle.
-   *
-   * The expired row is read rather than filtered out on purpose: `idle` earns
-   * "you were away too long", `absolute` earns "sessions end after 12 hours",
-   * `revoked` earns "this session was ended". Telling a user the wrong one makes
-   * the product look broken. An UNKNOWN handle is reported to the caller with
-   * the same body as a revoked one — the distinction stays server-side.
+   * Resolve a cleartext handle. The expired row is read rather than filtered
+   * out on purpose: `idle` earns "you were away too long", `absolute` earns
+   * "sessions end after 12 hours", `revoked` earns "this session was ended".
+   * An UNKNOWN handle is reported to the browser with the same body as a
+   * revoked one — the distinction stays server-side.
    */
   async findByHandle(handle: string, now: Date = new Date()): Promise<SessionLookupResult> {
     const hash = this.#handleHash(handle);
@@ -258,15 +245,12 @@ export class PgEdgeSessionStore implements SessionRepository {
         // A row that will not decrypt is unusable and suspicious (wrong key, or
         // tampering GCM caught). Fail as ENDED rather than 500: the browser's
         // correct next move is to log in again either way.
-        console.error(
-          JSON.stringify({ msg: 'edge_session_credential_undecryptable', sessionId: row.session_id }),
-          err,
-        );
+        this.#faults?.fault({ event: 'EDGE_SESSION_CREDENTIAL_UNDECRYPTABLE', sessionId: row.session_id }, err);
         return { kind: 'ENDED', reason: 'revoked' };
       }
 
       const idleExpiresAt = await this.#touchIfStale(row, now);
-      return { kind: 'ACTIVE', session: this.#toSession(row, credential, idleExpiresAt) };
+      return { kind: 'ACTIVE', session: this.#toSession(row, credential, idleExpiresAt, now) };
     } catch (err) {
       throw new EdgeSessionStoreError('Failed to resolve an edge session.', { cause: err });
     }
@@ -289,12 +273,6 @@ export class PgEdgeSessionStore implements SessionRepository {
     return next;
   }
 
-  /**
-   * Advance the session's idle TTL (lastActivityAt and idleExpiresAt). Called
-   * on every authenticated request to keep active sessions alive.
-   *
-   * Port interface method: touch(sessionId, now)
-   */
   async touch(sessionId: string, now: Date = new Date()): Promise<void> {
     const next = new Date(now.getTime() + this.#config.idleTtlSeconds * 1_000);
     try {
@@ -313,18 +291,13 @@ export class PgEdgeSessionStore implements SessionRepository {
   }
 
   /**
-   * Rotate both session secrets (handle and CSRF token) and advance the idle TTL.
-   * Used by refresh endpoint. The old handle remains valid for a grace period
-   * (30 seconds) to allow in-flight requests to complete.
-   *
-   * SECURITY: Rotation means a stolen handle dies the next time the real client
-   * refreshes. Without rotation, a stolen handle stays valid for the whole
-   * absolute window.
-   *
-   * Port interface method: rotate(sessionId, now)
+   * Rotate both secrets and advance the idle window. Returns null when no LIVE
+   * row was updated — previously this returned a fresh handle even when the
+   * session had been revoked a moment earlier, so the browser was handed a
+   * cookie that had never been stored.
    */
-  async rotate(sessionId: string, now: Date = new Date()): Promise<{ handle: string; csrfToken: string }> {
-    const handle = randomBytes(32).toString('base64url');
+  async rotate(sessionId: string, now: Date = new Date()): Promise<RotatedSession | null> {
+    const handle = newHandle();
     const handleHash = this.#handleHash(handle);
     const csrfToken = newCsrfToken();
     const tokenHash = csrfTokenHash(this.#config.handleHmacKey, csrfToken);
@@ -332,9 +305,9 @@ export class PgEdgeSessionStore implements SessionRepository {
     const next = new Date(now.getTime() + this.#config.idleTtlSeconds * 1_000);
 
     try {
-      await sql.begin(async (tx) => {
+      const updated = await sql.begin(async (tx) => {
         await tx`SET LOCAL ROLE ${sql(EDGE_DB_ROLE)}`;
-        await tx`
+        const rows = await tx<{ readonly idle_expires_at: Date; readonly absolute_expires_at: Date }[]>`
           UPDATE public_core.edge_sessions
           SET previous_handle_hash = handle_hash,
               previous_csrf_token_hash = csrf_token_hash,
@@ -343,10 +316,24 @@ export class PgEdgeSessionStore implements SessionRepository {
               csrf_token_hash = ${tokenHash},
               idle_expires_at = LEAST(${next}, absolute_expires_at),
               last_seen_at = ${now}
-          WHERE session_id = ${sessionId} AND revoked_at IS NULL
+          WHERE session_id = ${sessionId}
+            AND revoked_at IS NULL
+            AND absolute_expires_at > ${now}
+          RETURNING idle_expires_at, absolute_expires_at
         `;
+        return rows[0] ?? null;
       });
-      return { handle, csrfToken };
+      // The deadlines come from the row the UPDATE wrote, not from the caller's
+      // pre-rotate copy: the refresh response must describe the session the new
+      // cookie actually names.
+      return updated === null
+        ? null
+        : {
+            handle,
+            csrfToken,
+            idleExpiresAt: updated.idle_expires_at,
+            absoluteExpiresAt: updated.absolute_expires_at,
+          };
     } catch (err) {
       throw new EdgeSessionStoreError('Failed to rotate edge session secrets.', { cause: err });
     }

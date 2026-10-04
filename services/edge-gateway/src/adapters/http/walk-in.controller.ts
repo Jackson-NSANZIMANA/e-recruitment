@@ -26,7 +26,7 @@
 
 import type { RouteHandler } from '@usrp/shared-http';
 import { ALL_CATEGORIES } from '@usrp/shared-types';
-import { UPSTREAM } from '../../registry/upstream-operations.js';
+import { UPSTREAM } from '../../domain/upstream-operations.js';
 import { field } from './projections.js';
 import {
   FORBIDDEN,

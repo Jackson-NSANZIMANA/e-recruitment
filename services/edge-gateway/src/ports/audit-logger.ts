@@ -1,74 +1,87 @@
 // ══════════════════════════════════════════════════════════════════
 // edge-gateway — Audit logger port
 //
-// The abstract interface for structured audit logging. The application layer
-// uses this to emit security-relevant events (session issued, session destroyed,
-// authentication attempts) without coupling to console.log, Winston, or any
-// concrete logger.
+// WHY THE EDGE DOES NOT PUBLISH AUDIT_ENTRY EVENTS.
 //
-// Implementations: adapters/audit-logger.adapter.ts
+// Every business action the edge brokers is ALREADY audited by the service that
+// performs it, from the same `x-correlation-id` this tier forwards. A second
+// author of the same event produces two records of one action that can
+// disagree, and the edge is the tier furthest from the decision. It would also
+// make the browser boundary depend on a Kafka broker: a bus outage would take
+// down login for every officer in the country to preserve a duplicate record.
+//
+// So the edge audits exactly the events NO upstream can see — the lifecycle of
+// the browser boundary itself — as structured stdout lines, collected by the
+// same pipeline as every other service's access log.
+//
+// THE VOCABULARY IS CLOSED. Before the homogenisation there were two loggers:
+// guards.ts wrote through an adapter that did NO redaction, while the
+// controllers wrote through one that did. The port now fixes the record shape,
+// and the single adapter redacts every line structurally.
+//
+// Implementation: adapters/audit-logger.adapter.ts
 // ══════════════════════════════════════════════════════════════════
 
+/** The closed vocabulary of edge-owned audit events. */
+export type EdgeAuditAction =
+  | 'EDGE_SESSION_ISSUED'
+  | 'EDGE_SESSION_REFRESHED'
+  | 'EDGE_SESSION_DESTROYED'
+  | 'EDGE_SESSION_REJECTED'
+  | 'EDGE_CSRF_REJECTED'
+  | 'EDGE_RATE_LIMITED'
+  | 'EDGE_RATE_LIMITER_UNAVAILABLE'
+  | 'EDGE_WRONG_SESSION_KIND'
+  | 'EDGE_UPSTREAM_UNAVAILABLE'
+  | 'EDGE_FORBIDDEN_FIELD_REJECTED'
+  | 'EDGE_IDEMPOTENT_REPLAY'
+  | 'EDGE_IDEMPOTENCY_KEY_REUSED';
+
 /**
- * A structured audit event. The shape is intentionally loose (Record<string, unknown>)
- * because different events have different fields (session issued has sessionId,
- * rate limit exceeded has bucketKey, etc.). The adapter ensures all events
- * are logged as valid JSON.
+ * The closed vocabulary of OPERATIONAL faults: things that went wrong inside the
+ * edge that an operator must see, but that are not boundary events. These used
+ * to be raw console.error calls, which bypassed redaction entirely (a postgres
+ * error message can carry bound parameter values). They now go through the same
+ * redacting sink, and the error itself is reduced to its name and code.
  */
-export interface AuditEvent extends Record<string, unknown> {
-  /** The action being logged (e.g., 'EDGE_SESSION_ISSUED'). */
-  readonly action: string;
-  /** Operation id (e.g., 'officerLogin'). */
-  readonly operationId?: string;
-  /** Correlation id for distributed tracing. */
+export type EdgeFaultEvent =
+  | 'EDGE_LOGIN_TOKEN_UNVERIFIABLE'
+  | 'EDGE_APPLICANT_UPSTREAM_REVOKE_FAILED'
+  | 'EDGE_SESSION_CREDENTIAL_UNDECRYPTABLE'
+  | 'EDGE_SESSION_SWEEP_FAILED'
+  | 'EDGE_RATE_LIMITER_SWEEP_FAILED'
+  | 'EDGE_STATS_FAILED';
+
+export interface EdgeFaultRecord {
+  readonly event: EdgeFaultEvent;
   readonly correlationId?: string;
-  /** Session id (if applicable). */
+  /** Opaque edge session id only. */
   readonly sessionId?: string;
-  /** Subject id (officer or applicant id). */
+  readonly detail?: Readonly<Record<string, unknown>>;
+}
+
+export interface EdgeAuditRecord {
+  readonly action: EdgeAuditAction;
+  readonly operationId?: string;
+  readonly correlationId: string;
+  /** Opaque ids only: an officer UUID or an edge session id. Never a name. */
+  readonly sessionId?: string;
   readonly subjectId?: string;
-  /** Agency (officer only). */
   readonly agency?: string;
-  /** Session kind ('officer' | 'applicant'). */
   readonly sessionKind?: string;
-  /** Timestamp (defaults to now if not provided). */
-  readonly timestamp?: Date;
+  readonly reason?: string;
+  readonly detail?: Readonly<Record<string, unknown>>;
 }
 
-/**
- * Session statistics for periodic emission. These are aggregate counts with
- * no per-session detail, so they are safe to log and emit as metrics.
- */
-export interface SessionStatsEvent {
-  readonly activeOfficerSessions?: number;
-  readonly activeApplicantSessions?: number;
-  readonly revokedSessions?: number;
-  readonly expiredSessions?: number;
-  readonly rateLimitBuckets?: number;
-  readonly sessionsSwept?: number;
-}
-
-/**
- * Audit logger port. The application layer uses this to emit structured logs
- * without coupling to console.log, pino, Winston, or any concrete logger.
- *
- * All events are logged as JSON (the adapter ensures this). The port does not
- * dictate log levels (info, warn, error) — the adapter decides based on the
- * event's `action` field.
- */
 export interface AuditLogger {
+  /** One boundary event. The adapter redacts structurally before it is written. */
+  log(record: EdgeAuditRecord): void;
+  /** Aggregate, PII-free operational counters, emitted on a timer by main(). */
+  stats(counters: Readonly<Record<string, number>>): void;
   /**
-   * Log a structured audit event. The event is serialized to JSON and emitted
-   * to the configured log sink (stdout in production, file in dev).
-   *
-   * @param event Audit event
+   * One operational fault. `error` is summarised to { name, code } and never
+   * serialised whole: messages and stacks are where bound SQL values and
+   * upstream bodies hide.
    */
-  log(event: AuditEvent): void;
-
-  /**
-   * Log session statistics (periodic aggregate counts). Emitted every minute
-   * in production for observability.
-   *
-   * @param stats Session statistics
-   */
-  logStats(stats: SessionStatsEvent): void;
+  fault(record: EdgeFaultRecord, error?: unknown): void;
 }

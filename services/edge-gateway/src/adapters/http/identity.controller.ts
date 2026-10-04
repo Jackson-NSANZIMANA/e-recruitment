@@ -3,33 +3,22 @@
 //
 // The upstream operation is `service-internal`; ADR-012 D1 widened its withAuth
 // to accept officer principals so a field officer at an exam venue can establish
-// a walk-in candidate's identity with the tablet online. It is therefore named in
-// exactly one place in this service — BROKERED_SERVICE_INTERNAL in the upstream
+// a walk-in candidate's identity with the tablet online. It is named in exactly
+// one place in this service — BROKERED_SERVICE_INTERNAL in the upstream
 // catalogue — so the exception is an auditable line of code rather than a rule.
 //
 // OFFICER SESSION ONLY. An applicant-reachable NIDA check is a national identity
-// enumeration oracle; citizens authenticate by OTP instead, where the 202 reveals
-// nothing. Rate-limited per National ID for the same reason.
+// enumeration oracle. Rate-limited per National ID AND per session.
 //
-// THE RESPONSE IS THE RUNNING CONTROLLER'S, NOT THE STALE CONTRACT'S. The
-// document described `{ verified, fullName }`. The controller returns
-// `{ status: CREATED | ALREADY_EXISTS, applicantId }`. Restoring the old shape
-// would put a citizen's full name in a browser payload for every NID an officer
-// types — PII the walk-in lane does not need, since the next step consumes the
-// opaque applicantId. The submitted National ID is never echoed back.
+// THE RESPONSE IS THE RUNNING CONTROLLER'S: `{ status, applicantId }`. No full
+// name reaches the browser, and the submitted National ID is never echoed back.
 //
-// CHANNEL IS SERVER-SET to WALK_IN. This route exists for the on-site lane, and
-// the registration channel recorded against a new identity is a fact about how
-// the platform met that person — not a claim a client gets to make.
+// CHANNEL IS SERVER-SET to WALK_IN.
 // ══════════════════════════════════════════════════════════════════
 
 import type { RouteHandler } from '@usrp/shared-http';
-import { UPSTREAM } from '../../registry/upstream-operations.js';
-import {
-  assertWithinLimit,
-  clientBucketKey,
-  targetBucketKey,
-} from '../../security/rate-limiter.js';
+import { UPSTREAM } from '../../domain/upstream-operations.js';
+import { enforceRateLimit, sessionBucketKey, targetBucketKey } from './rate-limit.js';
 import { field } from './projections.js';
 import { FORBIDDEN } from './outcomes.js';
 import { withOfficerSession, type EdgeDeps } from './guards.js';
@@ -44,22 +33,18 @@ export function verifyIdentityHandler(deps: EdgeDeps): RouteHandler {
 
     const limits = deps.config.rateLimits;
     const key = deps.config.session.handleHmacKey;
-    assertWithinLimit(
-      deps.limiter.check(
-        targetBucketKey(key, 'verifyIdentity', nationalId),
-        limits.verifyIdentityPerMinute,
-      ),
+    await enforceRateLimit(
+      deps.limiter,
+      targetBucketKey(key, 'verifyIdentity', nationalId),
+      limits.verifyIdentityPerMinute,
     );
     // The per-SESSION bucket, not the per-client one: an officer session is a
-    // strong identifier the caller cannot spoof, which makes it a better key
-    // than an ingress-supplied address for an authenticated route.
-    assertWithinLimit(
-      deps.limiter.check(
-        `session:${session.sessionId}:verifyIdentity`,
-        limits.verifyIdentityPerMinute,
-      ),
+    // strong identifier the caller cannot spoof.
+    await enforceRateLimit(
+      deps.limiter,
+      sessionBucketKey(session.sessionId, 'verifyIdentity'),
+      limits.verifyIdentityPerMinute,
     );
-    void clientBucketKey;
 
     const upstream = await deps.upstream.call({
       operation: UPSTREAM.verifyIdentity,
@@ -68,9 +53,8 @@ export function verifyIdentityHandler(deps: EdgeDeps): RouteHandler {
       body: { nationalId, channel: WALK_IN_CHANNEL },
     });
 
-    // 201 CREATED and 200 ALREADY_EXISTS are both a successful resolution as far
-    // as the console is concerned — one status code, with the distinction in the
-    // body, so a caller cannot branch on HTTP codes for a business difference.
+    // 201 CREATED and 200 ALREADY_EXISTS are both a successful resolution: one
+    // status code, with the distinction in the body.
     if (upstream.status === 201 || upstream.status === 200) {
       const status = field(upstream.body, 'status');
       const applicantId = field(upstream.body, 'applicantId');
@@ -80,10 +64,9 @@ export function verifyIdentityHandler(deps: EdgeDeps): RouteHandler {
       return { status: 200, body: { status, applicantId } };
     }
     if (upstream.status === 404) {
-      // An officer typed a National ID NIDA does not know. Distinguishable here
-      // and only here: the caller is an authenticated, rate-limited officer
-      // performing an on-site identity check, and "not found in NIDA" is the
-      // answer the lane exists to obtain.
+      // Distinguishable here and only here: the caller is an authenticated,
+      // rate-limited officer and "not found in NIDA" is the answer the lane
+      // exists to obtain.
       return { status: 404, body: { error: 'NOT_FOUND_IN_NIDA' } };
     }
     if (upstream.status === 422) {

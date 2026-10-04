@@ -16,27 +16,21 @@
 //
 // A previous hash is honoured inside a bounded grace window. Refresh rotates
 // the token, and an SPA has requests in flight while it does; without the
-// window, rotation would 403 the app's own concurrent writes and look exactly
-// like a CSRF bug.
+// window, rotation would 403 the app's own concurrent writes.
 //
-// Missing or mismatched is a 403, always. A forgotten token must break visibly
-// in development rather than silently weaken CSRF in production.
+// Missing or mismatched is a 403, always.
+//
+// (Moved from src/security/csrf.ts. The token PRIMITIVES live in
+// src/crypto/tokens.ts so the session store never imports an HTTP adapter.)
 // ══════════════════════════════════════════════════════════════════
 
-import { randomBytes } from 'node:crypto';
 import { HttpError, type RequestContext } from '@usrp/shared-http';
-import { hmacSha256Hex, timingSafeEqualHex } from '@usrp/shared-security';
+import { timingSafeEqualHex } from '@usrp/shared-security';
+import { csrfTokenHash } from '../../crypto/tokens.js';
+
+export { newCsrfToken } from '../../crypto/tokens.js';
 
 export const CSRF_HEADER = 'x-csrf-token';
-
-/** 32 bytes of hex — always valid cookie-octets, so shared-http never refuses it. */
-export function newCsrfToken(): string {
-  return randomBytes(32).toString('hex');
-}
-
-export function csrfTokenHash(hmacKey: string, token: string): string {
-  return hmacSha256Hex(hmacKey, `csrf:${token}`);
-}
 
 function firstHeader(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -68,8 +62,7 @@ export function assertCsrf(
     reject();
   }
   // timingSafeEqualHex returns false on any length mismatch and on non-hex
-  // input (the decoded buffers differ in length), so a garbage header cannot
-  // short-circuit into a true.
+  // input, so a garbage header cannot short-circuit into a true.
   if (!timingSafeEqualHex(header, cookie)) {
     reject();
   }
