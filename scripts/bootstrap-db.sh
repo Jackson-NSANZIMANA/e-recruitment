@@ -187,8 +187,18 @@ apply_sql "${RLS_DIR}/0023_walk_in_outbox.sql" "rls/0023 (walk-in transactional 
 #     FORCE'd RLS.
 apply_sql "${RLS_DIR}/0024_edge_rate_limit_buckets.sql" "rls/0024 (shared edge rate-limit buckets)"
 
+# 23d. Required extensions, through the canonical path (rls/0025). pgcrypto
+#     was previously created ONLY by the compose container's init script —
+#     which runs once, on an empty data directory. Any other target (fresh
+#     database on an existing cluster, managed Postgres, restored backup)
+#     silently lacked it and the PII envelope (pgp_sym_encrypt) failed at
+#     runtime with 42883. Declared here so the database provisions its own
+#     dependency, idempotently.
+apply_sql "${RLS_DIR}/0025_required_extensions.sql" "rls/0025 (required extensions: pgcrypto)"
+
 printf '\n'
-ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts + applicant auth + erasure requests + stored contact + edge sessions + event outbox + slot reservations + submission integrity + walk-in outbox grant + shared rate-limit buckets in place"
+
+ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts + applicant auth + erasure requests + stored contact + edge sessions + event outbox + slot reservations + submission integrity + walk-in outbox grant + shared rate-limit buckets + required extensions in place"
 
 # 24. Dev officer accounts (one per agency). A CONVENIENCE seed so the officer
 #     console / manual login smoke tests have real credentials to drive —

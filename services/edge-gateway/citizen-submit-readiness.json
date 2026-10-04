@@ -29,5 +29,5 @@
     }
   ],
   "gate": "services/edge-gateway/selfcheck/verify-citizen-submit-readiness.ts",
-  "note": "READY means every structural condition below is verified by this gate AND each listed proof exists and is registered in the quality gate. The live proofs themselves run in scripts/run-selfchecks.sh; if any of them cannot run (infrastructure unavailable), the release signal reverts to BLOCKED — a skipped proof is not a passing one. Public contract: the browser sends Idempotency-Key; the edge answers 201, or 200 with Idempotency-Replayed: true on replay."
+    "note": "READY means every structural condition below is verified by this gate AND each listed proof exists and is registered in the quality gate. It is a statement about the CITIZEN SUBMIT FRONT DOOR only — it is NOT a statement of overall production readiness: the wider platform's proofs (Kafka behaviour, dead-letter/outbox delivery, MinIO/ClamAV forensics, the full isolation SQL, the multi-service dev boot) run in scripts/run-selfchecks.sh and are out of this gate's scope. The live proofs themselves run there too; if any of them cannot run (infrastructure unavailable), this signal reverts to BLOCKED — a skipped proof is not a passing one. Public contract: the browser sends Idempotency-Key; the edge answers 201, or 200 with Idempotency-Replayed: true on replay."
 }

@@ -188,10 +188,12 @@ require(
   'rate limit: the rls/0024 migration is missing or not edge-role-scoped',
 );
 const bootstrap = read('scripts/bootstrap-db.sh');
-require(
-  bootstrap.includes('0024_edge_rate_limit_buckets.sql'),
-  'bootstrap: the rate-limit migration must run on every bootstrap',
-);
+require(bootstrap.includes(
+  "0024_edge_rate_limit_buckets.sql",
+), "bootstrap: the rate-limit migration must run on every bootstrap");
+require(bootstrap.includes(
+  "0025_required_extensions.sql",
+), "bootstrap: pgcrypto must be provisioned by the canonical path (rls/0025), not only by the compose container init");
 
 // ── 7. The OpenAPI document ────────────────────────────────────────────
 const openapi = read('services/edge-gateway/openapi/edge-v1.yaml');

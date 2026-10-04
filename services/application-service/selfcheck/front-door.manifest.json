@@ -36,7 +36,9 @@
       "role": "Both migrations run on every bootstrap, in the canonical order.",
       "mustContain": [
         "0022_submission_integrity.sql",
-        "0023_walk_in_outbox.sql"
+        "0023_walk_in_outbox.sql",
+        "0024_edge_rate_limit_buckets.sql",
+        "0025_required_extensions.sql"
       ]
     },
     {
@@ -53,18 +55,13 @@
       "id": "drizzle-mirror-export",
       "path": "packages/shared-database/src/index.ts",
       "role": "The mirror is exported, so drizzle-kit and consumers both see it.",
-      "mustContain": [
-        "submission-requests.schema.js",
-        "SubmissionRequest"
-      ]
+      "mustContain": ["submission-requests.schema.js", "SubmissionRequest"]
     },
     {
       "id": "drizzle-snapshot",
       "path": "packages/shared-database/src/migrations/meta/0001_snapshot.json",
       "role": "Drizzle's belief about the post-bootstrap world includes the ledger.",
-      "mustContain": [
-        "submission_requests"
-      ]
+      "mustContain": ["submission_requests"]
     },
     {
       "id": "request-hash",
@@ -139,10 +136,7 @@
       "id": "composition-root",
       "path": "services/application-service/src/index.ts",
       "role": "The ledger is actually WIRED — an adapter nobody constructs is dead code.",
-      "mustContain": [
-        "PgSubmissionLedger",
-        "ledger: new PgSubmissionLedger()"
-      ]
+      "mustContain": ["PgSubmissionLedger", "ledger: new PgSubmissionLedger()"]
     },
     {
       "id": "walk-in-port",
@@ -159,11 +153,7 @@
       "id": "walk-in-adapter",
       "path": "services/application-service/src/adapters/walk-in.pg-repository.ts",
       "role": "Classifies live-intent refusal and stages registration/vetting events in the state transaction.",
-      "mustContain": [
-        "isLiveIntentViolation",
-        "ALREADY_APPLIED",
-        "stageEvents"
-      ]
+      "mustContain": ["isLiveIntentViolation", "ALREADY_APPLIED", "stageEvents"]
     },
     {
       "id": "walk-in-use-case",
@@ -180,34 +170,25 @@
       "id": "walk-in-http",
       "path": "services/application-service/src/adapters/http/walk-in.controller.ts",
       "role": "409 ALREADY_APPLIED with the existing processing code for the tablet.",
-      "mustContain": [
-        "ALREADY_APPLIED",
-        "processingCode"
-      ]
+      "mustContain": ["ALREADY_APPLIED", "processingCode"]
     },
     {
       "id": "ops-mirror-note-rdf",
       "path": "packages/shared-database/src/schemas/rdf-ops.schema.ts",
       "role": "The unmodelled live-intent index is documented where a reader will look.",
-      "mustContain": [
-        "uq_rdf_applications_live_intent"
-      ]
+      "mustContain": ["uq_rdf_applications_live_intent"]
     },
     {
       "id": "ops-mirror-note-rnp",
       "path": "packages/shared-database/src/schemas/rnp-ops.schema.ts",
       "role": "Same note for RNP.",
-      "mustContain": [
-        "uq_rnp_applications_live_intent"
-      ]
+      "mustContain": ["uq_rnp_applications_live_intent"]
     },
     {
       "id": "ops-mirror-note-rcs",
       "path": "packages/shared-database/src/schemas/rcs-ops.schema.ts",
       "role": "Same note for RCS.",
-      "mustContain": [
-        "uq_rcs_applications_live_intent"
-      ]
+      "mustContain": ["uq_rcs_applications_live_intent"]
     },
     {
       "id": "citizen-submit-readiness",
@@ -250,9 +231,7 @@
       "id": "ci-registration",
       "path": ".github/workflows/ci-backend.yml",
       "role": "CI runs the same gate, so a regression cannot merge. The workflow invokes `pnpm verify`, which is scripts/run-selfchecks.sh (see the root package.json) — asserting on the command rather than the script path keeps this file out of the diff of every proof that is added.",
-      "mustContain": [
-        "pnpm verify"
-      ]
+      "mustContain": ["pnpm verify"]
     },
     {
       "id": "adr",
@@ -270,9 +249,7 @@
       "id": "slice-doc",
       "path": "docs/architecture/submission-integrity-slice.md",
       "role": "How to run the proof and what each section establishes.",
-      "mustContain": [
-        "verify-submission-integrity.ts"
-      ]
+      "mustContain": ["verify-submission-integrity.ts"]
     },
     {
       "id": "walk-in-outbox-migration",
@@ -299,11 +276,7 @@
       "id": "identity-submit-bridge-adapter",
       "path": "services/identity-service/src/adapters/applications.http-gateway.ts",
       "role": "The bridge's HTTP leg: calls application-service's POST /v1/applications with identity-service's OWN system token, pins channel WEB, forwards exactly the Idempotency-Key.",
-      "mustContain": [
-        "idempotency-key",
-        "/v1/applications",
-        "#systemToken"
-      ]
+      "mustContain": ["idempotency-key", "/v1/applications", "#systemToken"]
     },
     {
       "id": "identity-submit-bridge-route",
@@ -319,27 +292,19 @@
       "id": "identity-submit-bridge-proof",
       "path": "services/identity-service/selfcheck/verify-applicant-submit-gateway.ts",
       "role": "The bridge proven end-to-end with zero infrastructure: a stub front door over a real socket — key forwarded as the ONLY extra header, system token minted per call, replay/duplicate/refusal mapping, no credential on the bus.",
-      "mustContain": [
-        "APPLICANT SUBMIT GATEWAY GREEN",
-        "idempotency-key"
-      ]
+      "mustContain": ["APPLICANT SUBMIT GATEWAY GREEN", "idempotency-key"]
     },
     {
       "id": "edge-submit-operation",
       "path": "services/edge-gateway/src/domain/edge-operations.ts",
       "role": "The citizen-facing operation: POST /edge/v1/me/applications, applicant session, CSRF, never retried by the edge.",
-      "mustContain": [
-        "submitMyApplication"
-      ]
+      "mustContain": ["submitMyApplication"]
     },
     {
       "id": "edge-upstream-catalogue",
       "path": "services/edge-gateway/src/domain/upstream-operations.ts",
       "role": "The edge fronts the identity BRIDGE, never application-service's front door directly.",
-      "mustContain": [
-        "mySubmit",
-        "/v1/applicants/me/applications"
-      ]
+      "mustContain": ["mySubmit", "/v1/applicants/me/applications"]
     },
     {
       "id": "edge-upstream-adapter",
@@ -366,9 +331,7 @@
       "id": "edge-submit-route-binding",
       "path": "services/edge-gateway/src/routes.ts",
       "role": "The operation is actually bound to the router (this binding silently no-op'd once; it is pinned now).",
-      "mustContain": [
-        "submitMyApplication"
-      ]
+      "mustContain": ["submitMyApplication"]
     },
     {
       "id": "edge-submit-config",
@@ -393,10 +356,7 @@
       "id": "rate-limit-store-mirror",
       "path": "packages/shared-database/src/schemas/edge-rate-limit-buckets.schema.ts",
       "role": "Readable mirror of the rate-limit table; keeps the drift gate green.",
-      "mustContain": [
-        "edgeRateLimitBuckets",
-        "edge_rate_limit_buckets"
-      ]
+      "mustContain": ["edgeRateLimitBuckets", "edge_rate_limit_buckets"]
     },
     {
       "id": "rate-limit-store-mirror-export",
@@ -455,6 +415,15 @@
         "RATE-LIMIT STORE GREEN",
         "RateLimiterUnavailableError",
         "assertRateLimitStoreAllowed"
+      ]
+    },
+    {
+      "id": "required-extensions-migration",
+      "path": "packages/shared-database/src/rls/0025_required_extensions.sql",
+      "role": "Found by review: pgcrypto was provisioned ONLY by the compose container's entrypoint init script, so every non-compose target (fresh DB on an existing cluster, managed Postgres, restored backup) failed at runtime on pgp_sym_encrypt with 42883. The database now provisions its own dependency through the canonical path, idempotently.",
+      "mustContain": [
+        "CREATE EXTENSION IF NOT EXISTS pgcrypto",
+        "pgp_sym_encrypt"
       ]
     }
   ]
