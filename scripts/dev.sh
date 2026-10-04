@@ -40,7 +40,21 @@ set -a
 source "./$ENV_FILE"
 set +a
 
-printf '\033[0;36m▶ loaded %s — starting services\033[0m\n' "$ENV_FILE"
+printf '\033[0;36m▶ loaded %s\033[0m\n' "$ENV_FILE"
+
+# A service imports its @usrp/* dependencies through their exports map, whose
+# RUNTIME half is dist/ — gitignored, developer-local state. `tsx watch src/main.ts`
+# can therefore start a service against a build from another branch and die at
+# import with "does not provide an export named X", which reads as a broken service.
+# `dev` also dependsOn ^build in turbo.json (so Turbo compiles what it launches),
+# but this check runs FIRST and names the offending package instead of burying it
+# in interleaved service output. It is ~100ms and needs no environment.
+if ! node "$REPO_ROOT/scripts/check-workspace-build.mjs"; then
+  printf '\033[0;31m✗ refusing to start services against a build that does not match src/.\033[0m\n' >&2
+  exit 1
+fi
+
+printf '\033[0;36m▶ starting services\033[0m\n'
 
 # Every runnable service has a persistent `dev` task (`tsx watch`). Turbo's
 # default concurrency can be smaller than that set, which leaves the excess

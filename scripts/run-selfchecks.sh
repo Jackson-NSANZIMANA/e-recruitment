@@ -102,6 +102,23 @@ hdr()  { printf '\n\033[1;36m══ %s\033[0m\n' "$*"; }
 ok()   { printf '\033[0;32m✓ PASS — %s\033[0m\n' "$*"; pass=$((pass+1)); }
 bad()  { printf '\033[0;31m✗ FAIL — %s\033[0m\n' "$*"; fail=$((fail+1)); FAILED+=("$1"); }
 
+# ── Preflight: the workspace must be BUILT *from this source* ──────────────
+# @usrp/* packages resolve their TYPES to src/ and their RUNTIME to dist/, and
+# dist/ is gitignored — developer-local state. Switch branch or pull, and you
+# keep a build from another commit: `pnpm typecheck` stays green (it never reads
+# dist) while every proof that imports a symbol added since that build dies with
+#   SyntaxError: The requested module '@usrp/shared-database' does not provide
+#                an export named 'stageOutboxEvents'
+# That is a stale artefact, not a regression — but it reads as ~5 unrelated proof
+# failures. Check it FIRST, with the fix, instead of 40 proofs later.
+#
+# The check is SEMANTIC (declared exports vs imported namespace), never
+# mtime-based: a turbo cache hit legitimately leaves dist/ untouched, so a
+# timestamp comparison reports false staleness right after `pnpm build`.
+# `pnpm verify` builds first (CI parity), so this normally never fires; it
+# protects direct `bash scripts/run-selfchecks.sh` callers.
+if ! node scripts/check-workspace-build.mjs; then exit 1; fi
+
 # Run a tsx selfcheck; $1 = human label, $2 = path.
 run_ts() {
   local label="$1" path="$2"
