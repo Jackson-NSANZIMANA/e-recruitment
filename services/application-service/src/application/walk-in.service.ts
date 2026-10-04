@@ -12,9 +12,10 @@
 //     clean UNSUPPORTED_AGENCY (the medical-501 divergence pattern), never a
 //     raw DB enum error.
 //   • agency/dbRole/officerId come from the VERIFIED principal, never the body.
-//   • registration emits APPLICANT_SUBMITTED (channel WALK_IN) AFTER durable
-//     persistence — the SAME event the digital front door emits, so the
-//     autonomous gates (age/academic/criminal) fire unchanged; the age verdict
+//   • registration stages APPLICANT_SUBMITTED (channel WALK_IN) and its audit
+//     in the SAME transaction as application + history, then uses the outbox
+//     dispatcher after commit — the SAME event the digital front door emits,
+//     so the autonomous gates (age/academic/criminal) fire unchanged; the age verdict
 //     is what on-site vetting reads minutes later (owner decision D2).
 //   • the walk-in campaign is resolved server-side by the EXAMINATION window
 //     + allows_walk_in — registration windows are closed on exam day.
@@ -22,7 +23,7 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { randomBytes } from 'node:crypto';
-import { newCorrelationContext, newEnvelope, type EventBus, type EventContext } from '@usrp/shared-events';
+import { newCorrelationContext, newEnvelope, type EventContext } from '@usrp/shared-events';
 import {
   agencyForCategory,
   type Agency,
@@ -32,7 +33,6 @@ import {
 } from '@usrp/shared-types';
 import { dbRoleForPrincipal, type Principal } from '@usrp/shared-auth';
 import { resolveAcademicInputs } from '../domain/academic-input.js';
-import type { EventDispatcher } from '../ports/event-outbox.js';
 import type { IdentityReader } from '../ports/identity-reader.js';
 import type { CampaignReader } from '../ports/campaign-reader.js';
 import type {
@@ -41,6 +41,7 @@ import type {
   WalkInRepository,
 } from '../ports/walk-in-repository.js';
 import type { OfficerActor } from '../ports/officer-transition-repository.js';
+import type { EventDispatcher } from '../ports/event-outbox.js';
 
 /** Agencies whose ops schema models the walk-in lane (rdf_ops only, verified). */
 const WALK_IN_AGENCIES: ReadonlySet<Agency> = new Set<Agency>(['RDF']);
@@ -97,16 +98,8 @@ export interface WalkInDeps {
   readonly identityReader: IdentityReader;
   readonly campaignReader: CampaignReader;
   readonly repository: WalkInRepository;
-  /**
-   * Post-commit dispatch of events the WRITE already staged in the outbox
-   * (ADR-025). A latency optimisation only — the relay is the guarantee.
-   */
+  /** Post-commit fast path for events already durable in the outbox. */
   readonly events: EventDispatcher;
-  /**
-   * Direct bus publish, still used by vetOnSite, whose writes do not yet
-   * stage. Registration no longer uses it.
-   */
-  readonly eventBus: EventBus;
 }
 
 export class WalkInService {
@@ -150,28 +143,17 @@ export class WalkInService {
     const context = command.context ?? newCorrelationContext();
     const actor = toActor(command.actor, context);
 
-    // 4. Persist at WALK_IN_REGISTERED as the officer's DB role, minting the
-    //    on-site ticket the physical-test capture will bind scores to (same
-    //    opaque shape as the scheduled lane's QR ticket id).
-    const qrInvitationCode = randomBytes(32).toString('base64url');
-
-    // Envelopes are minted HERE, before the write, because a StageEvents
-    // callback must be pure: the row staged inside the transaction and the
-    // object dispatched after commit have to be the same event with the same
-    // eventId, or the relay and the fast path would deliver two.
+    // 4. Mint every envelope BEFORE opening the transaction. The stage
+    //    callback below is therefore pure: it only combines immutable request
+    //    data with identifiers returned by the INSERT.
     const submittedEnvelope = newEnvelope(context);
     const auditEnvelope = newEnvelope(context);
-
-    const buildEvents = (
-      result: CreateWalkInResult,
-    ): { submitted: ApplicantSubmittedEvent; audit: AuditEvent } => ({
-      // The SAME event as the digital front door (channel WALK_IN), so the
-      // autonomous age/academic/criminal gates fire unchanged.
-      submitted: {
+    const eventsFor = (created: CreateWalkInResult): readonly [ApplicantSubmittedEvent, AuditEvent] => [
+      {
         ...submittedEnvelope,
         eventType: 'APPLICANT_SUBMITTED',
         applicantId: command.applicantId,
-        applicationId: result.applicationId,
+        applicationId: created.applicationId,
         nationalIdHash: identity.nationalIdHash,
         agency,
         category: command.category,
@@ -179,19 +161,23 @@ export class WalkInService {
         nesaIndexNumber: academic.resolved.nesaIndexNumber,
         hecRegistrationNumber: academic.resolved.hecRegistrationNumber,
       },
-      audit: {
+      {
         ...auditEnvelope,
         eventType: 'AUDIT_ENTRY',
         entityType: 'APPLICATION',
-        entityId: result.applicationId,
+        entityId: created.applicationId,
         action: 'WALK_IN_REGISTERED',
         performedBy: command.actor.subjectId,
         agency,
         newStatus: 'WALK_IN_REGISTERED',
-        metadata: { category: command.category, processingCode: result.processingCode },
+        metadata: { category: command.category, processingCode: created.processingCode },
       },
-    });
+    ];
 
+    // Persist application + history + both events as one atomic unit. The
+    // opaque ticket is generated before the attempted INSERT, but on a
+    // duplicate it is neither persisted nor returned.
+    const qrInvitationCode = randomBytes(32).toString('base64url');
     const created = await this.#deps.repository.createWalkInApplication(
       {
         actor,
@@ -202,14 +188,12 @@ export class WalkInService {
         hecRegistrationNumber: academic.resolved.hecRegistrationNumber,
         qrInvitationCode,
       },
-      (result) => {
-        const { submitted, audit } = buildEvents(result);
-        return [submitted, audit];
-      },
+      eventsFor,
     );
 
-    // Duplicate: no row, no ticket, no event, no audit of a registration that
-    // did not happen. The officer is handed the application already on file.
+    // Duplicate: no row, no ticket persisted or returned, no event, and no
+    // audit of a registration that did not happen. The officer is handed the
+    // application already on file.
     if (created.kind === 'ALREADY_APPLIED') {
       return {
         kind: 'ALREADY_APPLIED',
@@ -218,20 +202,17 @@ export class WalkInService {
       };
     }
 
-    // 5. Announce it. Both events are ALREADY durable — they were staged in
-    //    the outbox by the transaction that created the application. This
-    //    dispatch is the latency fast path, not the delivery guarantee: if
-    //    the process dies right here, the relay picks the rows up and the
-    //    candidate still enters the vetting pipeline.
-    const { submitted: event, audit } = buildEvents(created);
-    await this.#deps.events.dispatch([event, audit]);
+    // 5. Post-commit fast path only. These exact envelopes are already durable
+    //    in event_outbox; a broker fault cannot make registration look failed.
+    const durableEvents = eventsFor(created);
+    await this.#deps.events.dispatch(durableEvents);
 
     return {
       kind: 'REGISTERED',
       applicationId: created.applicationId,
       processingCode: created.processingCode,
       qrInvitationCode,
-      event,
+      event: durableEvents[0],
     };
   }
 
@@ -241,14 +222,11 @@ export class WalkInService {
       return { kind: 'UNSUPPORTED_AGENCY', agency: command.actor.agency };
     }
     const actor = toActor(command.actor, command.context);
-    const outcome = await this.#deps.repository.vetOnSite({
-      actor,
-      applicationId: command.applicationId,
-    });
-
-    if (outcome.kind === 'APPLIED') {
-      const audit: AuditEvent = {
-        ...newEnvelope(command.context),
+    const auditEnvelope = newEnvelope(command.context);
+    const eventsFor = (outcome: VetOnSiteOutcome): readonly AuditEvent[] => {
+      if (outcome.kind !== 'APPLIED') return [];
+      return [{
+        ...auditEnvelope,
         eventType: 'AUDIT_ENTRY',
         entityType: 'APPLICATION',
         entityId: command.applicationId,
@@ -256,13 +234,20 @@ export class WalkInService {
           outcome.toStatus === 'WALK_IN_REJECTED'
             ? 'APPLICATION_REJECTED'
             : 'APPLICATION_STATUS_ADVANCED',
-        performedBy: command.actor.subjectId,
-        agency: command.actor.agency,
+        performedBy: actor.officerId,
+        agency: actor.agency,
         previousStatus: outcome.fromStatus,
         newStatus: outcome.toStatus,
         metadata: { stage: 'WALK_IN_ON_SITE_VETTING', ageStatus: outcome.ageStatus },
-      };
-      await this.#deps.eventBus.publish(audit);
+      }];
+    };
+    const outcome = await this.#deps.repository.vetOnSite(
+      { actor, applicationId: command.applicationId },
+      eventsFor,
+    );
+
+    if (outcome.kind === 'APPLIED') {
+      await this.#deps.events.dispatch(eventsFor(outcome));
     }
     return outcome;
   }

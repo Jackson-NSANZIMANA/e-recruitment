@@ -20,8 +20,8 @@ import { sql } from '@usrp/shared-database';
 import type { AgeEligibilityStatus, ApplicationStatus } from '@usrp/shared-types';
 import type {
   CreateWalkInInput,
-  CreateWalkInResult,
   CreateWalkInOutcome,
+  CreateWalkInResult,
   VetOnSiteInput,
   VetOnSiteOutcome,
   WalkInRepository,
@@ -83,17 +83,21 @@ export class PgWalkInRepository implements WalkInRepository {
           )
         `;
 
-        const created = {
+        const created: CreateWalkInResult = {
           applicationId: row.id,
           processingCode: row.processing_code,
         };
 
-        // ADR-025/027: stage LAST, inside the officer's own transaction. The
-        // application, its history row and the event that announces it now
-        // commit together or not at all. rls/0023 is what lets the officer
-        // role reach the outbox at all; before it, this line was a permission
-        // error and the event had to be published after commit — the window
-        // in which a registered candidate could be lost to the pipeline.
+        // Stage LAST, still as the OFFICER role, so any staging failure rolls
+        // the entire unit back (application, history, and both announcements).
+        //
+        // rls/0023 is what makes this reachable: it grants the officer roles
+        // INSERT on the outbox — and only INSERT, under a producer-pinned
+        // policy with no USING clause. Escalating to usrp_system_service here
+        // instead would also work, but it would leave the transaction running
+        // as the system role for its remaining lifetime, so any write added
+        // after this line would silently lose the engine-enforced
+        // cross-agency isolation that the officer role exists to provide.
         await stageEvents(tx, stage(created));
 
         return { kind: 'REGISTERED' as const, ...created };
@@ -136,7 +140,10 @@ export class PgWalkInRepository implements WalkInRepository {
     }
   }
 
-  async vetOnSite(input: VetOnSiteInput): Promise<VetOnSiteOutcome> {
+  async vetOnSite(
+    input: VetOnSiteInput,
+    stage: StageEvents<VetOnSiteOutcome>,
+  ): Promise<VetOnSiteOutcome> {
     const { actor, applicationId } = input;
     const schema = sql(AGENCY_TARGET[actor.agency].schema);
 
@@ -192,12 +199,16 @@ export class PgWalkInRepository implements WalkInRepository {
           )
         `;
 
-        return {
+        const applied: VetOnSiteOutcome = {
           kind: 'APPLIED',
           fromStatus: 'WALK_IN_REGISTERED',
           toStatus: targetStatus,
           ageStatus: age,
         };
+
+        // As above: staged last, under the officer's own role (rls/0023).
+        await stageEvents(tx, stage(applied));
+        return applied;
       });
     } catch (cause) {
       if (cause instanceof ApplicationPersistenceError) throw cause;

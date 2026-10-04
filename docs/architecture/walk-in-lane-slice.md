@@ -43,8 +43,8 @@ fail-close to `WALK_IN_REJECTED` — now a TERMINAL status in the lifecycle.
 | `shared-auth/src/http.ts` | `PrincipalRequirement.kind` accepts any-of lists; withAuth 401/403 semantics unchanged |
 | `identity-service · verify-identity.controller.ts` | verify route accepts system OR officer (walk-in on-site NIDA, D1) |
 | `application-service · domain/lifecycle.ts` | `WALK_IN_REJECTED` terminal; lane-local early/late hard-fail routing |
-| `application-service · ports/walk-in-repository.ts` + `adapters/walk-in.pg-repository.ts` | officer-role INSERT at `WALK_IN_REGISTERED` + on-site vet transition |
-| `application-service · application/walk-in.service.ts` | policy: RDF-only 501, category-agency 422, campaign by exam window, event + audit emission |
+| `application-service · ports/walk-in-repository.ts` + `adapters/walk-in.pg-repository.ts` | officer-role INSERT/transition + history, then system-role event staging in the same transaction |
+| `application-service · application/walk-in.service.ts` | policy: RDF-only 501, category-agency 422, campaign by exam window, pre-minted envelopes + post-commit outbox dispatch |
 | `application-service · adapters/http/walk-in.controller.ts` | the two officer routes |
 | `application-service · ports/campaign-reader.ts` + `adapters/campaign.pg-reader.ts` | `findWalkInCampaign` (examination window + allows_walk_in) |
 | `application-service · adapters/application.pg-repository.ts` | `applyPhysicalTestComplete` walk-in branch (row-truth `is_walk_in`, biometric waiver, conflict hold kept) |

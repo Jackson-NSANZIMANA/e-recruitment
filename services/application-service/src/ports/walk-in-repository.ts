@@ -36,7 +36,7 @@ export interface CreateWalkInInput {
   readonly category: ApplicationCategory;
   readonly nesaIndexNumber: string | null;
   readonly hecRegistrationNumber: string | null;
-  /** Minted by the use case (opaque, unique) — returned to the tablet. */
+  /** Minted by the use case (opaque, unique) — persisted/returned only when registration wins. */
   readonly qrInvitationCode: string;
 }
 
@@ -94,5 +94,8 @@ export interface WalkInRepository {
     input: CreateWalkInInput,
     stage: StageEvents<CreateWalkInResult>,
   ): Promise<CreateWalkInOutcome>;
-  vetOnSite(input: VetOnSiteInput): Promise<VetOnSiteOutcome>;
+  vetOnSite(
+    input: VetOnSiteInput,
+    stage: StageEvents<VetOnSiteOutcome>,
+  ): Promise<VetOnSiteOutcome>;
 }

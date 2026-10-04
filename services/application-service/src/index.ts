@@ -105,10 +105,7 @@ export function createApplicationService(
       identityReader,
       campaignReader,
       repository: new PgWalkInRepository(),
-      // ADR-025/027: registration stages its events in the officer's own
-      // transaction and dispatches them here; eventBus remains for vetOnSite.
       events,
-      eventBus,
     }),
     projector: new ProjectVettingResultService({ repository, events }),
     slotProjector: new ProjectSlotAssignmentService({ repository, eventBus }),
@@ -214,13 +211,6 @@ export type {
 } from './application/submit-application.service.js';
 // Submission integrity (ADR-027).
 export { PgSubmissionLedger } from './adapters/submission-ledger.pg-repository.js';
-// Exported for the walk-in atomicity proof, which must drive the adapter
-// WITHOUT the post-commit dispatcher in the way (see verify-walk-in-slice §1b).
-export { PgWalkInRepository } from './adapters/walk-in.pg-repository.js';
-export type {
-  CreateWalkInInput,
-  CreateWalkInResult,
-} from './ports/walk-in-repository.js';
 export type {
   SubmissionLedger,
   RecordSubmissionInput,

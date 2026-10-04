@@ -34,37 +34,59 @@
       "id": "bootstrap-registration",
       "path": "scripts/bootstrap-db.sh",
       "role": "Both migrations run on every bootstrap, in the canonical order.",
-      "mustContain": ["0022_submission_integrity.sql", "0023_walk_in_outbox.sql"]
+      "mustContain": [
+        "0022_submission_integrity.sql",
+        "0023_walk_in_outbox.sql"
+      ]
     },
     {
       "id": "drizzle-mirror",
       "path": "packages/shared-database/src/schemas/submission-requests.schema.ts",
       "role": "Readable mirror of the ledger table; keeps the drift gate green.",
-      "mustContain": ["submissionRequests", "submission_requests", "submission_requests_application_unique"]
+      "mustContain": [
+        "submissionRequests",
+        "submission_requests",
+        "submission_requests_application_unique"
+      ]
     },
     {
       "id": "drizzle-mirror-export",
       "path": "packages/shared-database/src/index.ts",
       "role": "The mirror is exported, so drizzle-kit and consumers both see it.",
-      "mustContain": ["submission-requests.schema.js", "SubmissionRequest"]
+      "mustContain": [
+        "submission-requests.schema.js",
+        "SubmissionRequest"
+      ]
     },
     {
       "id": "drizzle-snapshot",
       "path": "packages/shared-database/src/migrations/meta/0001_snapshot.json",
       "role": "Drizzle's belief about the post-bootstrap world includes the ledger.",
-      "mustContain": ["submission_requests"]
+      "mustContain": [
+        "submission_requests"
+      ]
     },
     {
       "id": "request-hash",
       "path": "services/application-service/src/domain/request-hash.ts",
       "role": "Canonical, order-independent, length-prefixed request fingerprint.",
-      "mustContain": ["canonicalRequestHash", "canonicalRequestString", "FIELD_ORDER"]
+      "mustContain": [
+        "canonicalRequestHash",
+        "canonicalRequestString",
+        "FIELD_ORDER"
+      ]
     },
     {
       "id": "ledger-port",
       "path": "services/application-service/src/ports/submission-ledger.ts",
       "role": "The port: RECORDED / REPLAYED / KEY_REUSED / ALREADY_APPLIED.",
-      "mustContain": ["SubmissionLedger", "recordSubmission", "REPLAYED", "KEY_REUSED", "ALREADY_APPLIED"]
+      "mustContain": [
+        "SubmissionLedger",
+        "recordSubmission",
+        "REPLAYED",
+        "KEY_REUSED",
+        "ALREADY_APPLIED"
+      ]
     },
     {
       "id": "ledger-adapter",
@@ -82,103 +104,173 @@
       "id": "insert-primitives",
       "path": "services/application-service/src/adapters/application-insert.ts",
       "role": "One copy of the front-door INSERT, shared by both write paths.",
-      "mustContain": ["insertSubmittedApplication", "insertOpeningHistory", "isLiveIntentViolation", "findLiveApplication"]
+      "mustContain": [
+        "insertSubmittedApplication",
+        "insertOpeningHistory",
+        "isLiveIntentViolation",
+        "findLiveApplication"
+      ]
     },
     {
       "id": "use-case",
       "path": "services/application-service/src/application/submit-application.service.ts",
       "role": "The front door files through the ledger and surfaces its outcomes.",
-      "mustContain": ["ledger.recordSubmission", "idempotencyKey", "canonicalRequestHash", "REPLAYED", "KEY_REUSED", "ALREADY_APPLIED"]
+      "mustContain": [
+        "ledger.recordSubmission",
+        "idempotencyKey",
+        "canonicalRequestHash",
+        "REPLAYED",
+        "KEY_REUSED",
+        "ALREADY_APPLIED"
+      ]
     },
     {
       "id": "http-adapter",
       "path": "services/application-service/src/adapters/http/submit-application.controller.ts",
       "role": "Idempotency-Key in, Idempotency-Replayed out, 409s for the refusals.",
-      "mustContain": ["IDEMPOTENCY_KEY_HEADER", "IDEMPOTENCY_REPLAYED_HEADER", "KEY_REUSED", "ALREADY_APPLIED"]
+      "mustContain": [
+        "IDEMPOTENCY_KEY_HEADER",
+        "IDEMPOTENCY_REPLAYED_HEADER",
+        "KEY_REUSED",
+        "ALREADY_APPLIED"
+      ]
     },
     {
       "id": "composition-root",
       "path": "services/application-service/src/index.ts",
       "role": "The ledger is actually WIRED — an adapter nobody constructs is dead code.",
-      "mustContain": ["PgSubmissionLedger", "ledger: new PgSubmissionLedger()"]
+      "mustContain": [
+        "PgSubmissionLedger",
+        "ledger: new PgSubmissionLedger()"
+      ]
     },
     {
       "id": "walk-in-port",
       "path": "services/application-service/src/ports/walk-in-repository.ts",
-      "role": "The on-site lane answers duplicates instead of faulting, and its write takes a StageEvents callback.",
-      "mustContain": ["CreateWalkInOutcome", "ALREADY_APPLIED", "StageEvents"]
+      "role": "The on-site lane accepts an in-transaction event stage callback and answers duplicates.",
+      "mustContain": [
+        "CreateWalkInOutcome",
+        "ALREADY_APPLIED",
+        "StageEvents<CreateWalkInResult>",
+        "StageEvents<VetOnSiteOutcome>"
+      ]
     },
     {
       "id": "walk-in-adapter",
       "path": "services/application-service/src/adapters/walk-in.pg-repository.ts",
-      "role": "Classifies the live-intent refusal on the officer's write path, and stages the lane's events inside that same transaction.",
-      "mustContain": ["isLiveIntentViolation", "ALREADY_APPLIED", "stageEvents"]
+      "role": "Classifies live-intent refusal and stages registration/vetting events in the state transaction.",
+      "mustContain": [
+        "isLiveIntentViolation",
+        "ALREADY_APPLIED",
+        "stageEvents"
+      ]
+    },
+    {
+      "id": "walk-in-use-case",
+      "path": "services/application-service/src/application/walk-in.service.ts",
+      "role": "Mints envelopes before the transaction and dispatches only after durable staging.",
+      "mustContain": [
+        "eventsFor",
+        "createWalkInApplication",
+        "events.dispatch",
+        "no ticket persisted or returned"
+      ]
     },
     {
       "id": "walk-in-http",
       "path": "services/application-service/src/adapters/http/walk-in.controller.ts",
       "role": "409 ALREADY_APPLIED with the existing processing code for the tablet.",
-      "mustContain": ["ALREADY_APPLIED", "processingCode"]
+      "mustContain": [
+        "ALREADY_APPLIED",
+        "processingCode"
+      ]
     },
     {
       "id": "ops-mirror-note-rdf",
       "path": "packages/shared-database/src/schemas/rdf-ops.schema.ts",
       "role": "The unmodelled live-intent index is documented where a reader will look.",
-      "mustContain": ["uq_rdf_applications_live_intent"]
+      "mustContain": [
+        "uq_rdf_applications_live_intent"
+      ]
     },
     {
       "id": "ops-mirror-note-rnp",
       "path": "packages/shared-database/src/schemas/rnp-ops.schema.ts",
       "role": "Same note for RNP.",
-      "mustContain": ["uq_rnp_applications_live_intent"]
+      "mustContain": [
+        "uq_rnp_applications_live_intent"
+      ]
     },
     {
       "id": "ops-mirror-note-rcs",
       "path": "packages/shared-database/src/schemas/rcs-ops.schema.ts",
       "role": "Same note for RCS.",
-      "mustContain": ["uq_rcs_applications_live_intent"]
+      "mustContain": [
+        "uq_rcs_applications_live_intent"
+      ]
+    },
+    {
+      "id": "citizen-submit-readiness",
+      "path": "services/edge-gateway/citizen-submit-readiness.json",
+      "role": "Machine-readable release signal remains BLOCKED while browser submission idempotency is deferred.",
+      "mustContain": [
+        "citizen-facing-application-submission-integrity",
+        "BLOCKED",
+        "Idempotency-Key",
+        "Idempotency-Replayed"
+      ]
+    },
+    {
+      "id": "citizen-submit-readiness-gate",
+      "path": "services/edge-gateway/selfcheck/verify-citizen-submit-readiness.ts",
+      "role": "The quality gate proves the deferred browser-boundary capability is not silently marked complete.",
+      "mustContain": [
+        "FRONT-DOOR READINESS",
+        "/v1/applications",
+        "Idempotency-Key",
+        "Idempotency-Replayed"
+      ]
     },
     {
       "id": "gate-registration",
       "path": "scripts/run-selfchecks.sh",
       "role": "The proof runs in the quality gate — an unregistered proof never runs.",
-      "mustContain": ["verify-submission-integrity.ts"]
+      "mustContain": [
+        "verify-submission-integrity.ts"
+      ]
     },
     {
       "id": "ci-registration",
       "path": ".github/workflows/ci-backend.yml",
       "role": "CI runs the same gate, so a regression cannot merge. The workflow invokes `pnpm verify`, which is scripts/run-selfchecks.sh (see the root package.json) — asserting on the command rather than the script path keeps this file out of the diff of every proof that is added.",
-      "mustContain": ["pnpm verify"]
+      "mustContain": [
+        "pnpm verify"
+      ]
     },
     {
       "id": "adr",
       "path": "docs/architecture/adrs/ADR-027-submission-integrity-and-idempotency.md",
       "role": "The decision, its alternatives and what is deliberately NOT done.",
-      "mustContain": ["Idempotency-Replayed", "KEY_REUSED", "ALREADY_APPLIED", "live-intent"]
+      "mustContain": [
+        "Idempotency-Replayed",
+        "KEY_REUSED",
+        "ALREADY_APPLIED",
+        "live-intent"
+      ]
     },
     {
       "id": "slice-doc",
       "path": "docs/architecture/submission-integrity-slice.md",
       "role": "How to run the proof and what each section establishes.",
-      "mustContain": ["verify-submission-integrity.ts"]
+      "mustContain": [
+        "verify-submission-integrity.ts"
+      ]
     },
     {
       "id": "walk-in-outbox-migration",
       "path": "packages/shared-database/src/rls/0023_walk_in_outbox.sql",
-      "role": "Grants the officer roles INSERT on the outbox so the walk-in write can stage its own events. Without it the staging call is a permission error and the lane silently reverts to announcing after commit.",
+      "role": "Grants the officer roles INSERT on the outbox — and only INSERT, with no USING clause and a producer-pinned WITH CHECK — so the walk-in write can stage its own events without the transaction ever escalating to the system role.",
       "mustContain": ["GRANT INSERT ON public_core.event_outbox", "pc_event_outbox_officer_stage", "usrp_rdf_officer"]
-    },
-    {
-      "id": "walk-in-service-staging",
-      "path": "services/application-service/src/application/walk-in.service.ts",
-      "role": "Mints both envelopes BEFORE the write so the staged row and the dispatched object are one event, then dispatches post-commit through the outbox dispatcher rather than the bare bus.",
-      "mustContain": ["buildEvents", "submittedEnvelope", "events.dispatch"]
-    },
-    {
-      "id": "walk-in-atomicity-proof",
-      "path": "services/application-service/selfcheck/verify-walk-in-slice.ts",
-      "role": "Proves the application row and its outbox row share one transaction id, and that an injected staging failure rolls the entire write back.",
-      "mustContain": ["outboxRowsFor", "applicationXmin", "injected staging failure"]
     }
   ]
 }

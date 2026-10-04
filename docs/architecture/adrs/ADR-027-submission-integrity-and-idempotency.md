@@ -152,9 +152,11 @@ The on-site lane files into the same `applications` table, so the index
 governs it too. `PgWalkInRepository` classifies the refusal and returns
 `ALREADY_APPLIED` with the existing processing code, so the officer can pull
 up the application the candidate already holds. A duplicate registration
-writes no row, mints no ticket, and — importantly — **emits no second
-`APPLICANT_SUBMITTED`**, which would otherwise re-run the autonomous gates
-against an application already in vetting.
+writes no row, persists or returns no ticket, and — importantly — **stages or
+emits no second `APPLICANT_SUBMITTED`**, which would otherwise re-run the
+autonomous gates against an application already in vetting. The implementation
+currently creates an opaque candidate value before attempting the insert;
+duplicate detection discards that in-memory value.
 
 ### 7. A completeness manifest for the front door
 
@@ -305,27 +307,45 @@ The obvious assertion — "the outbox rows exist after registering" — is
 satisfied by the very design being replaced: commit, then stage in a second
 transaction. It cannot tell *announced* from *announced atomically*.
 
-The first instrument tried was `xmin`: Postgres stamps every row with the id
-of the transaction that wrote it, so equal `xmin` across two tables means one
-transaction wrote both. The assertion failed on correct code. The reason is
-that the post-commit fast path `UPDATE`s each row to stamp `published_at`, and
-an `UPDATE` creates a new row version with a new `xmin` — the instrument was
-measuring the dispatcher, not the write. Two probes in §1b of
-`verify-walk-in-slice.ts` now drive `PgWalkInRepository` directly, with no
-dispatcher in the way:
+What does distinguish them is a **rollback probe**: make staging fail after
+every state write has already succeeded, and assert the application, its
+history row and the outbox rows all go to zero. §1b of
+`verify-walk-in-slice.ts` does this by staging the same event twice, so the
+duplicate `event_id` makes the second INSERT fail. If the write and the
+staging were in separate transactions, the application would survive. It does
+not.
 
-- **Rollback.** A `StageEvents` callback that throws. Staging runs *last*, so
-  every state write has already succeeded; if the two were in separate
-  transactions the application would survive. The probe asserts it does not,
-  and asserts the failure it caught is *its own injected one* — an earlier
-  revision passed an invalid category enum by mistake, threw for that reason,
-  and went green without exercising staging at all. A rollback proof that
-  cannot name the failure that rolled the write back is not a rollback proof.
-- **`xmin` equality**, now valid because nothing has rewritten the rows.
+An earlier attempt reached for `xmin` instead: Postgres stamps every row with
+the id of the transaction that wrote it, so equal `xmin` across two tables
+means one transaction wrote both. **The assertion failed on correct code.**
+The post-commit fast path `UPDATE`s each row to stamp `published_at`, and an
+`UPDATE` creates a new row version with a new `xmin` — the instrument was
+measuring the dispatcher, not the write. Narrowing it to rows the dispatcher
+had not yet reached made it *skip* on every run instead, which is worse than
+having no check: a permanently-skipped assertion reads as coverage. It was
+removed. The rollback probe already proves the property directly, and the
+lesson is kept here rather than in a check that never runs.
 
-Both were confirmed load-bearing by disabling the `stageEvents` call and
-watching them turn red — the rollback probe reporting the orphaned application
-directly.
+Both the rollback probe and the least-privilege assertion below were confirmed
+load-bearing by breaking the thing they guard and watching them turn red.
+
+### Why the officer role, and not an escalation
+
+Two mechanisms were implemented independently for this fix. The one that
+shipped keeps the officer's role for the whole transaction and relies on the
+`rls/0023` grant. The alternative — `RESET ROLE; SET LOCAL ROLE
+usrp_system_service` immediately before staging — also produces an atomic
+unit, needs no migration, and was briefly on `main`.
+
+It was replaced because of what it leaves behind rather than what it does:
+the transaction then *ends* in the system role. Staging is last today, so
+nothing is affected; but any write appended after that line would silently
+run with the one role that can reach every agency's schema, and the loss of
+isolation would be invisible at the call site. The grant costs eight lines of
+SQL and keeps least privilege true for the transaction's entire lifetime.
+`verify-walk-in-slice.ts` §1c pins it: the officer may INSERT and, because the
+policy carries no `USING` clause, cannot read back a single outbox row — not
+even the one it just wrote. Reintroducing the role switch turns that red.
 
 ### The manifest could delete its own questions
 
