@@ -221,11 +221,35 @@ does not provide.
    citizen may hold live applications in two different campaigns of the same
    agency. Whether that is legitimate is an owner policy question, not a
    technical one.
-3. **Edge-tier passthrough of `Idempotency-Key`.** The browser boundary
-   (ADR-021) does not yet forward the header or expose
-   `Idempotency-Replayed`, so citizen-facing retries are currently caught by
-   §4 as `ALREADY_APPLIED` rather than replayed. The service contract is
-   ready; the edge mapping is the follow-up.
+3. **Edge-tier passthrough of `Idempotency-Key`.** The service contract is
+   ready; the browser boundary (ADR-021) is not. Stated precisely, because
+   "the edge does not forward the header yet" undersells it:
+
+   - `POST /v1/applications` is **not exposed through the edge gateway at
+     all**. There is no `submitApplication` entry in
+     `edge-gateway/src/domain/upstream-operations.ts`; the citizen online
+     front door is still system-credentialed only. So there is nothing to
+     forward *yet* — but the header is the first thing that must be wired
+     when that operation is added, not an afterthought.
+   - **Both directions are trapped by design.** `upstream.http-gateway.ts`
+     builds the upstream header set from scratch, under the comment
+     *"Nothing from the browser's header set appears here"* — a deliberate
+     and correct default that will silently drop `Idempotency-Key`. And
+     `UpstreamResult` is `{ status, body }`: response headers are discarded,
+     so `Idempotency-Replayed: true` cannot reach the browser either. Both
+     need an explicit, narrow exception; neither should be solved by
+     relaxing the default.
+   - `EDGE_IDEMPOTENCY_KEY_REUSED` already exists in the audit event union of
+     `edge-gateway/src/ports/audit-logger.ts` and is **never emitted**, and
+     `idempotencykey` is already in the audit redaction set. Someone began
+     this and stopped. The follow-up should either emit that event or delete
+     it — dead vocabulary invites the reader to assume a mechanism that is
+     not there.
+
+   What *does* work today: `walkInRegister` **is** exposed through the edge,
+   and the gateway returns `{ status, body }` verbatim for anything that is
+   not 3xx or 502/503/504. The new `409 ALREADY_APPLIED` therefore reaches
+   the officer's tablet intact, application id and all.
 4. **Idempotency for the other write endpoints.** Officer transitions,
    adjudication and self-withdrawal are all state-machine guarded (a repeat
    is `NO_CHANGE`), so they are safe but not *replayable*. Extending the
