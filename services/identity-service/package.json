@@ -18,7 +18,7 @@
     "start:dev": "tsx src/main.ts",
     "dev": "tsx watch src/main.ts",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src/**/*.ts",
+    "lint": "eslint 'src/**/*.ts'",
     "selfcheck": "tsx selfcheck/verify-slice.ts",
     "selfcheck:http": "tsx selfcheck/verify-http-slice.ts",
     "selfcheck:erasure": "tsx selfcheck/verify-erasure-slice.ts",

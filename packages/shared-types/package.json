@@ -14,7 +14,7 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src/**/*.ts"
+    "lint": "eslint 'src/**/*.ts'"
   },
   "devDependencies": {
     "typescript": "^5.8.3"

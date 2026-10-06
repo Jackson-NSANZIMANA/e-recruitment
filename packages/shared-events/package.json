@@ -15,7 +15,7 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src/**/*.ts",
+    "lint": "eslint 'src/**/*.ts'",
     "selfcheck:kafka": "tsx selfcheck/verify-kafka-roundtrip.ts",
     "selfcheck:dlq": "tsx selfcheck/verify-dead-letter.ts",
     "dlq:replay": "tsx scripts/replay-dead-letters.ts"

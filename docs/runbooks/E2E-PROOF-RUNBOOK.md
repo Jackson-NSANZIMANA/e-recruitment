@@ -165,19 +165,22 @@ Checked on the unified `main` (all branches merged, 2026-10-06):
     against real tier1+tier2 Docker infra on Node 24 and is green — so the
     early return does not stall or break any consumer against a real broker.
     That is ALL a green gate proves here.
-  * **NOT proven: the warning's absence.** A `TimeoutNegativeWarning` prints to
-    stderr and the process still exits 0; `set -euo pipefail` cannot see it.
-    The full-infra gate was 53/53 green on UNPATCHED `866be34` (Node 24, real
-    Docker) with all 8 warnings firing — a green gate cannot distinguish
-    warned from unwarned. Closing this needs one grep on a full-infra run on
-    Node ≥ 23:
+  * **CONFIRMED: the warning is gone (owner-verified, 2026-10-06).** A
+    `TimeoutNegativeWarning` prints to stderr and the process still exits 0, so
+    `set -euo pipefail` cannot see it — a green gate alone could never close
+    this (the full-infra gate was 53/53 green on UNPATCHED `866be34`, Node 24,
+    real Docker, with all 8 warnings firing). The closing evidence is the grep,
+    run on real hardware against `main` @ `9c35abe` on Node v24.21.0 with full
+    Docker infra:
 
     ```
     bash scripts/prove-e2e.sh 2>&1 | tee /tmp/patched.log
-    grep -c TimeoutNegativeWarning /tmp/patched.log   # expect 0, was 8
+    grep -c TimeoutNegativeWarning /tmp/patched.log   # 0  (was 8 on 866be34)
     ```
 
-    The grep is the proof; the exit code is not.
+    Result: **54/54 proofs, 15/15 phases, `grep -c TimeoutNegativeWarning` = 0.**
+    Symptom gone, non-regression proven, guard (check 0c) in the gate. The grep
+    is the proof; the exit code is not.
 
   If a future kafkajs release embeds the fix, drop the patch file, the
   `pnpm.patchedDependencies` entry in `package.json`, and the 0c guard proof
