@@ -136,6 +136,17 @@ run_ts() {
 # fail at once and the cause would be far from obvious.
 run_ts "shared-config: production boot guard (dev secrets / placeholders / loopback / mocks)" packages/shared-config/selfcheck/verify-production-guard.ts
 
+# ── 0a. Deployment hygiene — zero infrastructure, pure file reads ─────
+# Sits beside the production guard because it polices the same thing from the
+# other end: the guard proves the ENVIRONMENT a service boots into is sane,
+# this proves the IMAGE it boots as is. EXPOSE is a hand-written second copy of
+# `.env.example`'s canonical PORT_<SERVICE>, and it had already rotated one
+# position across biometric- / document-forensics- / background-vetting-service
+# (4003→4004→4005→4003). EXPOSE publishes nothing, so the drift was invisible to
+# review and to every green test run — it only bites `docker run -P`, Compose
+# port inference, service meshes and k8s tooling that trusts image metadata.
+run_ts "deployment hygiene (EXPOSE ↔ .env.example port map, non-root, exec-form CMD)" packages/shared-config/selfcheck/verify-deployment-hygiene.ts
+
 # ── 0b. Edge contract drift — also zero infrastructure ────────────────
 # Placed beside the production guard for the same reason: it opens no socket and
 # touches no database, so contract drift between the operation registry, the

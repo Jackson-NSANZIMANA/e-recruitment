@@ -70,7 +70,7 @@ export async function withStartupTimeout<T>(
     return await Promise.race([
       operation,
       new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new StartupTimeoutError(step, timeoutMs)), timeoutMs);
+        timer = setTimeout(() => { reject(new StartupTimeoutError(step, timeoutMs)); }, timeoutMs);
       }),
     ]);
   } finally {

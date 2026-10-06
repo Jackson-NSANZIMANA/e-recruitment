@@ -195,7 +195,9 @@ export class PgFieldScoreStore implements FieldScoreStore {
         >`
           SELECT device_id, capturing_officer_id, vector_clock, signed_payload_hash
           FROM ${schema}.physical_test_scores
-          WHERE id = ${input.scoreId} AND application_id = ${input.applicationId}
+          WHERE id = ${input.scoreId}
+            AND application_id = ${input.applicationId}
+            AND sync_conflict_detected = true
         `;
         const rec = chosen[0];
         if (!rec) return { kind: 'SCORE_NOT_FOUND' };

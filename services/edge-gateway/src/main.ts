@@ -36,7 +36,7 @@ const STATS_INTERVAL_MS = 60 * 1_000;
 
 async function iamReachable(baseUrl: string): Promise<boolean> {
   const controller = new AbortController();
-  const deadline = setTimeout(() => controller.abort(), 2_000);
+  const deadline = setTimeout(() => { controller.abort(); }, 2_000);
   try {
     const response = await fetch(new URL('/health', baseUrl), { method: 'GET', signal: controller.signal });
     return response.ok;
@@ -93,10 +93,10 @@ async function main(): Promise<void> {
       .then((deleted) => {
         if (deleted > 0) audit.stats({ sessionsSwept: deleted });
       })
-      .catch((err: unknown) => audit.fault({ event: 'EDGE_SESSION_SWEEP_FAILED' }, err));
+      .catch((err: unknown) => { audit.fault({ event: 'EDGE_SESSION_SWEEP_FAILED' }, err); });
     void gateway.deps.limiter
       .sweep(now)
-      .catch((err: unknown) => audit.fault({ event: 'EDGE_RATE_LIMITER_SWEEP_FAILED' }, err));
+      .catch((err: unknown) => { audit.fault({ event: 'EDGE_RATE_LIMITER_SWEEP_FAILED' }, err); });
   }, SWEEP_INTERVAL_MS);
   // unref so a pending timer never holds the process open during shutdown.
   sweeper.unref();
@@ -113,7 +113,7 @@ async function main(): Promise<void> {
           rateLimitBuckets: buckets,
         });
       })
-      .catch((err: unknown) => audit.fault({ event: 'EDGE_STATS_FAILED' }, err));
+      .catch((err: unknown) => { audit.fault({ event: 'EDGE_STATS_FAILED' }, err); });
   }, STATS_INTERVAL_MS);
   statsTimer.unref();
 

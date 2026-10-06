@@ -82,7 +82,7 @@ export class NidaHttpGateway implements NidaGateway {
     requestId: string,
   ): Promise<Response> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    const timer = setTimeout(() => { controller.abort(); }, this.timeoutMs);
     try {
       return await this.fetchImpl(`${this.baseUrl}${LOOKUP_PATH}`, {
         method: 'POST',

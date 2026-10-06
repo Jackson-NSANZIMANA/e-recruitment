@@ -366,10 +366,13 @@ export function startHttpServer(options: HttpServerOptions): Promise<HttpServer>
         // Release idle keep-alive sockets so close() can settle; in-flight
         // requests drain until the force-close timeout.
         server.closeIdleConnections();
-        const forced = setTimeout(() => server.closeAllConnections(), shutdownTimeoutMs);
+        const forced = setTimeout(() => { server.closeAllConnections(); }, shutdownTimeoutMs);
         forced.unref();
         await new Promise<void>((resolve, reject) => {
-          server.close((err) => (err ? reject(err) : resolve()));
+          server.close((err) => {
+            if (err) reject(err);
+            else resolve();
+          });
         });
         clearTimeout(forced);
         if (onShutdown) await onShutdown();
@@ -379,13 +382,13 @@ export function startHttpServer(options: HttpServerOptions): Promise<HttpServer>
   }
 
   return new Promise<HttpServer>((resolve, reject) => {
-    const onListenError = (err: Error): void => reject(err);
+    const onListenError = (err: Error): void => { reject(err); };
     server.once('error', onListenError);
     server.listen(port, host, () => {
       server.removeListener('error', onListenError);
       const address = server.address();
       const resolvedPort =
-        address !== null && typeof address === 'object' ? (address as AddressInfo).port : port;
+        address !== null && typeof address === 'object' ? address.port : port;
       const reachableHost = host === '0.0.0.0' || host === '::' ? '127.0.0.1' : host;
 
       if (handleSignals) {

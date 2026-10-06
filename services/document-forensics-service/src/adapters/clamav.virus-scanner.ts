@@ -56,8 +56,8 @@ export class ClamavVirusScanner implements VirusScanner {
         reject(err);
       };
 
-      socket.setTimeout(timeoutMs, () => fail(new Error(`clamd timeout after ${timeoutMs}ms`)));
-      socket.on('error', (err) => fail(err));
+      socket.setTimeout(timeoutMs, () => { fail(new Error(`clamd timeout after ${timeoutMs}ms`)); });
+      socket.on('error', (err) => { fail(err); });
       socket.on('data', (chunk) => received.push(chunk));
       socket.on('close', () => {
         if (settled) return;

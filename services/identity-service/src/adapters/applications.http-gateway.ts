@@ -227,7 +227,7 @@ export class HttpApplicationsGateway implements ApplicationsGateway {
       // submission and echoing that submission's ids would leak across
       // requests. Only the static reason text survives.
       return typeof parsed?.['reason'] === 'string'
-        ? { kind: 'KEY_REUSED', reason: parsed['reason'] as string }
+        ? { kind: 'KEY_REUSED', reason: parsed['reason'] }
         : { kind: 'KEY_REUSED', reason: 'This Idempotency-Key was already used for a different submission.' };
     }
     if (res.status === 409 && status === 'ALREADY_APPLIED' && identifiersOk) {
@@ -247,7 +247,7 @@ export class HttpApplicationsGateway implements ApplicationsGateway {
       status === 'INVALID_ACADEMIC_INPUT' &&
       typeof parsed?.['reason'] === 'string'
     ) {
-      return { kind: 'INVALID_ACADEMIC_INPUT', reason: parsed['reason'] as string };
+      return { kind: 'INVALID_ACADEMIC_INPUT', reason: parsed['reason'] };
     }
 
     // Anything else — wrong status for the body's status string, a missing
