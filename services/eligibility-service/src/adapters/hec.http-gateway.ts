@@ -73,7 +73,7 @@ export class HecHttpGateway implements HecGateway {
 
   private async post(body: string, signed: G2GSignedHeaders, requestId: string): Promise<Response> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    const timer = setTimeout(() => { controller.abort(); }, this.timeoutMs);
     try {
       return await this.fetchImpl(`${this.baseUrl}${VERIFY_PATH}`, {
         method: 'POST',

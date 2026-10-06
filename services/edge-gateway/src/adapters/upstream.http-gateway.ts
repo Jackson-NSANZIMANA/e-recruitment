@@ -155,7 +155,7 @@ export class UpstreamClient implements UpstreamGateway {
     // call, no ambient state, and cleared in `finally` so a fast response does
     // not leave a timer holding the event loop.
     const controller = new AbortController();
-    const deadline = setTimeout(() => controller.abort(), this.#config.timeoutMs);
+    const deadline = setTimeout(() => { controller.abort(); }, this.#config.timeoutMs);
 
     let response: Response;
     try {

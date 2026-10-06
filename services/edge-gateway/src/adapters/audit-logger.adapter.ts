@@ -95,9 +95,9 @@ export class StdoutAuditLogger implements AuditLogger {
   readonly #now: () => Date;
 
   constructor(
-    sink: Sink = (line) => console.log(line),
+    sink: Sink = (line) => { console.log(line); },
     now: () => Date = () => new Date(),
-    faultSink: Sink = (line) => console.error(line),
+    faultSink: Sink = (line) => { console.error(line); },
   ) {
     this.#sink = sink;
     this.#now = now;

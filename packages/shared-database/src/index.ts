@@ -40,37 +40,37 @@ export * from './schemas/rnp-ops.schema.js';
 export * from './schemas/rcs-ops.schema.js';
 export * from './schemas/audit-log.schema.js';
 
-import {
+import type {
   applicantIdentities,
   applicantSessions,
   recruitmentCampaigns,
   campaignVenueAssignments,
 } from './schemas/public-core.schema.js';
-import { edgeSessions } from './schemas/edge-sessions.schema.js';
-import { edgeRateLimitBuckets } from './schemas/edge-rate-limit-buckets.schema.js';
-import { eventOutbox } from './schemas/event-outbox.schema.js';
-import { slotReservations } from './schemas/slot-reservations.schema.js';
-import { submissionRequests } from './schemas/submission-requests.schema.js';
+import type { edgeSessions } from './schemas/edge-sessions.schema.js';
+import type { edgeRateLimitBuckets } from './schemas/edge-rate-limit-buckets.schema.js';
+import type { eventOutbox } from './schemas/event-outbox.schema.js';
+import type { slotReservations } from './schemas/slot-reservations.schema.js';
+import type { submissionRequests } from './schemas/submission-requests.schema.js';
 
-import {
+import type {
   rdfApplications,
   rdfApplicationStatusHistory,
   rdfDocumentRecords,
   rdfPhysicalTestScores,
 } from './schemas/rdf-ops.schema.js';
-import {
+import type {
   rnpApplications,
   rnpApplicationStatusHistory,
   rnpDocumentRecords,
   rnpPhysicalTestScores,
 } from './schemas/rnp-ops.schema.js';
-import {
+import type {
   rcsApplications,
   rcsApplicationStatusHistory,
   rcsDocumentRecords,
   rcsPhysicalTestScores,
 } from './schemas/rcs-ops.schema.js';
-import { auditEntries } from './schemas/audit-log.schema.js';
+import type { auditEntries } from './schemas/audit-log.schema.js';
 
 export type ApplicantIdentity = InferSelectModel<typeof applicantIdentities>;
 export type NewApplicantIdentity = InferInsertModel<typeof applicantIdentities>;
@@ -118,14 +118,14 @@ export type NewRcsPhysicalTestScore = InferInsertModel<typeof rcsPhysicalTestSco
 export type AuditEntry = InferSelectModel<typeof auditEntries>;
 export type NewAuditEntry = InferInsertModel<typeof auditEntries>;
 
-import {
+import type {
   applicationChannelEnum,
   identityVerificationStatusEnum,
   genderEnum,
   campaignStatusEnum,
   agencyEnum,
 } from './schemas/public-core.schema.js';
-import {
+import type {
   rdfCategoryEnum,
   rdfApplicationStatusEnum,
   rdfAcademicStatusEnum,
@@ -133,7 +133,7 @@ import {
   rdfDocumentLaneEnum,
   rdfDocumentTypeEnum,
 } from './schemas/rdf-ops.schema.js';
-import {
+import type {
   rnpCategoryEnum,
   rnpApplicationStatusEnum,
   rnpAcademicStatusEnum,
@@ -141,7 +141,7 @@ import {
   rnpDocumentLaneEnum,
   rnpDocumentTypeEnum,
 } from './schemas/rnp-ops.schema.js';
-import {
+import type {
   rcsCategoryEnum,
   rcsApplicationStatusEnum,
   rcsAcademicStatusEnum,
@@ -150,7 +150,7 @@ import {
   rcsDocumentTypeEnum,
   rcsUrProgramEnum,
 } from './schemas/rcs-ops.schema.js';
-import { auditEntityTypeEnum, auditAgencyEnum } from './schemas/audit-log.schema.js';
+import type { auditEntityTypeEnum, auditAgencyEnum } from './schemas/audit-log.schema.js';
 
 export type ApplicationChannel = typeof applicationChannelEnum.enumValues[number];
 export type IdentityVerificationStatus = typeof identityVerificationStatusEnum.enumValues[number];

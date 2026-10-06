@@ -79,7 +79,7 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
  * field-sync score records).
  */
 export async function readJsonBody(ctx: RequestContext): Promise<Record<string, unknown>> {
-  const parsed = await ctx.json<unknown>();
+  const parsed = await ctx.json();
   if (!isRecord(parsed)) {
     throw new HttpError(400, 'INVALID_REQUEST', 'A JSON object body is required.');
   }
