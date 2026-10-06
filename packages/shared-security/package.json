@@ -14,6 +14,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "test": "tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/**/*.ts"
   },

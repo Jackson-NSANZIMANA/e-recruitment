@@ -140,10 +140,9 @@ export const OFFICIAL_CAMPAIGNS = [
     examinationStartDate: '2026-06-30',
     examinationEndDate: '2026-07-02',
     examinationReportingHour: 9,
-    allowsWalkIn: false,      // "Those who do not get to register will be able to 
+    allowsWalkIn: true,       // "Those who do not get to register will be able to 
                                // do so on the day of the exam" — 2026 announcement
-                               // NOTE: RCS 2026 officer announcement DOES allow walk-in
-                               // This is an exception — correcting:
+                               // NOTE: RCS 2026 officer announcement DOES allow walk-in (F14 fix)
     contactWebsite: 'https://www.rcs.gov.rw',
     contactPhoneNumbers: ['0737627676', '0737626200', '0737626188'],
   },

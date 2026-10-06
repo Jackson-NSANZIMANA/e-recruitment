@@ -1,7 +1,7 @@
 -- 0019 — RLS policy and grants for edge_sessions (ADR-021)
 --
--- Table creation now lives in migrations/0001_create_edge_sessions.sql,
--- tracked by drizzle-kit. This file only sets up the role, grants, and
+-- Table creation lives in migrations/0000_grey_the_stranger.sql,
+-- tracked by drizzle-kit. This file sets up the role, grants, and
 -- row-level security policy — it assumes the table already exists.
 BEGIN;
 

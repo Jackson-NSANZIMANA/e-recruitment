@@ -32,6 +32,8 @@ export interface EvaluateAgeEligibilityCommand {
    * the ad-hoc HTTP age-check → audit-only, no result event (backward compatible).
    */
   readonly applicationId?: string;
+  /** Explicit reference / cutoff date for deterministic evaluation (F1 fix). */
+  readonly referenceDate?: string | Date;
   /** Inbound correlation context; a fresh chain starts when omitted. */
   readonly context?: EventContext;
 }
@@ -76,7 +78,9 @@ export class EvaluateAgeEligibilityService {
       };
     }
 
-    const asOf = (this.deps.clock ?? (() => new Date()))();
+    const asOf = command.referenceDate
+      ? new Date(command.referenceDate)
+      : (this.deps.clock ?? (() => new Date()))();
     const result = evaluateAgeEligibility(command.category, applicant.dateOfBirth, asOf);
     const agency = agencyForCategory(command.category);
     const context = command.context ?? newCorrelationContext();
