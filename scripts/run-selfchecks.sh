@@ -164,14 +164,18 @@ run_ts "edge-gateway: source hygiene (layering, redaction, no raw console)" serv
 # reinstall or dependency bump that dropped it — the symptom it fixes is a
 # stderr PROCESS WARNING that exits 0, so a green gate cannot tell warned from
 # unwarned. This proof drives the REAL RequestQueue class (the copy this
-# workspace resolves; it prints the path) and asserts both directions of the
-# early return: an ACTIVE client-side throttle with an empty queue still arms
-# its re-check timer (the branch a dropped wakeup would break — a silently
-# stalled consumer), and an idle queue with no active throttle arms nothing
-# (the fix itself; unpatched kafkajs arms a negative delay here, i.e. the ~1kHz
-# busy loop). Verified by drill: reverting the patch makes this proof fail,
-# restoring makes it pass — so a dropped patch turns the gate red, not silent.
-run_ts "shared-events: kafkajs timer patch (active throttle still arms; idle never arms)" packages/shared-events/selfcheck/verify-kafka-timer-patch.ts
+# workspace resolves; it prints the path) and covers the patch's full spec:
+# an ACTIVE client-side throttle with an empty queue still arms its re-check
+# timer (the branch a dropped wakeup would break — a silently stalled
+# consumer); an idle queue arms nothing whether the throttle is expired or
+# never existed (the unpatched bug arms a negative delay here — the ~1kHz busy
+# loop); a saturated queue still drains with pending work scheduled at the 10
+# ms clamp; and a drained queue performs zero wakeups in a 300 ms idle sample
+# (unpatched: ~890/sec — measured behaviourally, so it fails on ANY Node
+# version, including Node 22 where the warning never prints). Verified by
+# drill: reverting the patch makes this proof fail on four checks, restoring
+# makes it pass — so a dropped patch turns the gate red, not silent.
+run_ts "shared-events: kafkajs timer patch (throttle arms; idle never arms; queue drains; zero idle wakeups)" packages/shared-events/selfcheck/verify-kafka-timer-patch.ts
 
 run_ts "edge-gateway: session refresh persistence" services/edge-gateway/selfcheck/verify-edge-session-refresh.ts
 

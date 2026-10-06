@@ -68,34 +68,49 @@ Checked on the unified `main` (all branches merged, 2026-10-06):
   time and is reporting real, pre-existing debt. **CI does not run lint**, so
   this gates nothing — do not treat it as a regression and do not let it block
   the infra run. The step-4 inventory, re-measured 2026-10-06 on a BUILT tree
-  (method matters — see the first two bullets):
-  * **Error count, full recursive `*/src/**/*.ts`** (glob quoted so eslint does
-    its own `**`): **117–119 errors, 0 warnings** in this sandbox (119 error
-    lines; eslint's per-run summaries total 117). Earlier notes said ~126 —
-    same order, not the same number; re-measure on the target machine when
-    step 4 starts and let that figure govern.
+  and rule-by-rule reconciled with an independent measurement — both land on
+  the same numbers (method matters — see the bullets below):
+  * **Error count, full recursive `*/src/**/*.ts`: 126 errors, 0 warnings** —
+    `restrict-template-expressions` 56, `no-console` 19, `no-unused-vars` 14,
+    `explicit-function-return-type` 12, `consistent-type-imports` 8,
+    `require-await` 7, rest ≤2 each. Nothing suppressed, no rule weakened.
+    (A naive per-package loop undercounts to 119 — see the next bullet for why.)
+  * **`shared-database` has no `lint` script at all** — the only one of the 20
+    workspace packages — so `pnpm lint` never lints it. Its 7 errors (6
+    `no-unused-vars` + the raw `console.log` at `src/outbox.ts:313`) are
+    invisible to every existing lint path. Add the script (with a QUOTED glob)
+    as part of step 4.
   * **The per-package scripts as written undercount.** `eslint src/**/*.ts`
     runs through sh, which has no globstar: in any package with subdirectories
     the unquoted glob expands to `src/*/*.ts` — two-level files only. Example:
     edge-gateway's script lints 16 of its 37 source files, missing `src/main.ts`
     and all 17 files of `src/adapters/http/`. Scripts-as-written report ~86
-    errors vs 117–119 recursive. Quote the glob in every `lint` script as part
+    errors vs 126 recursive. Quote the glob in every `lint` script as part
     of step 4.
   * **`pnpm lint` (turbo) fail-fasts** — one failing package aborts the run and
     hides the rest (`Tasks: 0 successful, 19 total`). For a full count use
-    `pnpm -r --no-bail run lint`.
+    `pnpm -r --no-bail run lint`, plus shared-database manually until it has a
+    script.
   * **A missing/stale `dist/` poisons the number**: `@usrp/*` types resolve to
     `dist/index.d.ts`, so linting an unbuilt tree inflates type-aware rules to
     ~1200 "could not be resolved" errors. Always `pnpm build` first.
-  * **Raw `console.*` outside the deliberate exemptions** (`src/main.ts`
-    composition roots and audit-logger adapters are exempt; `warn`/`error`
-    allowed) is **19 files — 14 `*.consumer.ts` adapters plus 5 package
-    files**: `shared-database/src/outbox.ts`, `shared-events/src/kafka-bus.ts`,
+  * **Raw `console.*`**: the 19-file inventory is the 5 package files
+    `shared-database/src/outbox.ts`, `shared-events/src/kafka-bus.ts`,
     `shared-events/src/startup.ts`, `shared-http/src/server.ts`,
-    `shared-sms/src/log-sms.channel.ts`.
+    `shared-sms/src/log-sms.channel.ts` plus 14 `*.consumer.ts` adapters. Of
+    those 19 files, **18 carry actual raw violations (19 statements —
+    `academic-vetting.consumer.ts` has two, and `outbox.ts`'s is invisible to
+    `pnpm lint` until shared-database gets a script)**;
+    `kafka-bus.ts` uses only `console.warn`/`console.error`, which the config
+    deliberately allows — it stays on the inventory for the step-4
+    routing-through-the-redacting-sink decision, but it is not a lint error.
+    (`src/main.ts` composition roots and audit-logger adapters are exempt by
+    design; `warn`/`error` are allowed everywhere.) These log UUIDs, enums and
+    correlationIds only — no PII today; a consistency gap, not a live leak.
   * **`ADR-021` is a number collision**: stray
     `docs/architecture/adr/ADR-021-edge-tier.md` vs the canonical series'
-    `docs/architecture/adrs/ADR-021-contact-capture-and-delivery.md`.
+    `docs/architecture/adrs/ADR-021-contact-capture-and-delivery.md` — and the
+    `adr/` vs `adrs/` directory split is itself the deeper problem.
   * **`turbo.json` line 100** declares `"test": { "outputs": ["coverage/**"] }`
     although no task writes coverage.
   * **Structural gap: CI has no lint job at all** (`ci-backend.yml` is
@@ -131,16 +146,21 @@ Checked on the unified `main` (all branches merged, 2026-10-06):
     queue still drains (`sent: 3, resolved: 3, pending: 0, inflight: 0`).
   * **Patch guard (gate check 0c, zero infra):**
     `packages/shared-events/selfcheck/verify-kafka-timer-patch.ts` drives the
-    real `RequestQueue` — the exact copy this workspace resolves — and asserts
-    both directions of the early return: an ACTIVE 500 ms throttle with an
-    empty queue still arms its ~500 ms re-check timer (the one branch where a
-    dropped wakeup would mean a silently stalled consumer), and an idle queue
-    with no active throttle arms nothing. Run against unpatched kafkajs it
-    FAILS (one timer armed, negative delay) — verified by drill: reverting the
-    patch makes the proof red, restoring makes it green. Without this check
-    nothing in the gate would notice a reinstall or dependency bump silently
-    dropping the patch, because the symptom is a stderr process warning that
-    exits 0.
+    real `RequestQueue` — the exact copy this workspace resolves — and covers
+    every row of the patch's spec: an ACTIVE 500 ms throttle with an empty
+    queue still arms its ~500 ms re-check timer (the one branch where a
+    dropped wakeup would mean a silently stalled consumer); an idle queue
+    arms nothing whether the throttle is EXPIRED or NEVER EXISTED (the latter
+    is the exact state behind all eight warnings); a SATURATED queue still
+    drains (`sent: 3, resolved: 3, pending: 0, inflight: 0`) with pending work
+    scheduled at the 10 ms clamp; and a drained queue performs ZERO wakeups
+    in a 300 ms idle sample (unpatched: ~267 ≈ 890/sec — the busy loop
+    measured behaviourally, which catches it on ANY Node version, including
+    22 where the warning never prints). Run against unpatched kafkajs it
+    FAILS on four checks — verified by drill: reverting the patch makes the
+    proof red, restoring makes it green. Without this check nothing in the
+    gate would notice a reinstall or dependency bump silently dropping the
+    patch, because the symptom is a stderr process warning that exits 0.
   * **Non-regression (CI, live broker):** the Proofs job runs the full gate
     against real tier1+tier2 Docker infra on Node 24 and is green — so the
     early return does not stall or break any consumer against a real broker.
