@@ -26,14 +26,12 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import type { AddressInfo } from 'node:net';
 import { randomUUID } from 'node:crypto';
 import { HttpError } from './errors.js';
 import { parseCookieHeader, serializeSetCookie } from './cookies.js';
 import { corsPreflightHeaders, corsResponseHeaders, isAllowedOrigin } from './cors.js';
 import type {
   AccessLogRecord,
-  AccessLogger,
   HttpResult,
   HttpServer,
   HttpServerOptions,

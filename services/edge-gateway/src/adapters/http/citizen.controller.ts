@@ -23,7 +23,7 @@
 // key is what makes the CITIZEN'S retry safe.
 // ══════════════════════════════════════════════════════════════════
 
-import { HttpError, type HttpResult, type RouteHandler } from '@usrp/shared-http';
+import { HttpError, type RouteHandler } from '@usrp/shared-http';
 import { ALL_CATEGORIES } from '@usrp/shared-types';
 import { UPSTREAM } from '../../domain/upstream-operations.js';
 import { field, projectMyApplications } from './projections.js';

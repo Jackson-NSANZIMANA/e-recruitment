@@ -26,7 +26,7 @@
 
 import { HttpError } from '@usrp/shared-http';
 import type { EdgeUpstreamConfig } from '../config.js';
-import type { UpstreamOperation, UpstreamService } from '../domain/upstream-operations.js';
+import type { UpstreamService } from '../domain/upstream-operations.js';
 import type { UpstreamGateway, UpstreamCallInput, UpstreamResult } from '../ports/upstream-gateway.js';
 import { UpstreamUnavailableError } from '../domain/edge.errors.js';
 

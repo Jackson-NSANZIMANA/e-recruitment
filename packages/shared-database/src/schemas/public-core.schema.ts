@@ -13,7 +13,6 @@ import {
   timestamp,
   boolean,
   integer,
-  pgEnum,
   index,
   uniqueIndex,
   text,
