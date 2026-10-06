@@ -29,7 +29,7 @@ RUN pnpm install --frozen-lockfile --prod --filter @usrp/background-vetting-serv
  && pnpm store prune \
  && rm -rf /pnpm/.cache
 
-EXPOSE 4004
+EXPOSE 4005
 USER node
 
 WORKDIR /repo/services/background-vetting-service

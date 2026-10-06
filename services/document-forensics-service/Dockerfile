@@ -29,7 +29,7 @@ RUN pnpm install --frozen-lockfile --prod --filter @usrp/document-forensics-serv
  && pnpm store prune \
  && rm -rf /pnpm/.cache
 
-EXPOSE 4003
+EXPOSE 4004
 USER node
 
 WORKDIR /repo/services/document-forensics-service

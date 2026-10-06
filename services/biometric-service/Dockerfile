@@ -29,7 +29,7 @@ RUN pnpm install --frozen-lockfile --prod --filter @usrp/biometric-service... \
  && pnpm store prune \
  && rm -rf /pnpm/.cache
 
-EXPOSE 4005
+EXPOSE 4003
 USER node
 
 WORKDIR /repo/services/biometric-service
