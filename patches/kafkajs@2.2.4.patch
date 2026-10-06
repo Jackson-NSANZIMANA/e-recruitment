@@ -1,0 +1,24 @@
+diff --git a/src/network/requestQueue/index.js b/src/network/requestQueue/index.js
+index eee14d66c3869d90f7bac0ac755ecbad3f2a2741..ff4daea9d92818a677fe4205c68c63140cc56fe1 100644
+--- a/src/network/requestQueue/index.js
++++ b/src/network/requestQueue/index.js
+@@ -304,6 +304,19 @@ module.exports = class RequestQueue extends EventEmitter {
+    * the pending request queue eventually.
+    */
+   scheduleCheckPendingRequests() {
++    // Nothing pending and no client-side throttle active => checkPendingRequests
++    // would be a pure no-op. Returning here is what keeps idle connections idle:
++    // with the initial throttledUntil = -1, `throttledUntil - Date.now()` below
++    // is a large negative number, which Node clamps to a 1ms timeout — and since
++    // the timeout callback calls checkPendingRequests, which calls this method
++    // again, that becomes a permanent ~1kHz no-op timer loop on every broker
++    // connection that has ever sent a request (it also emits
++    // TimeoutNegativeWarning on Node >= 23). New work re-arms this via push();
++    // an active throttle (throttledUntil in the future) still schedules below.
++    if (this.pending.length === 0 && this.throttledUntil <= Date.now()) {
++      return
++    }
++
+     // If we're throttled: Schedule checkPendingRequests when the throttle
+     // should be resolved. If there is already something scheduled we assume that that
+     // will be fine, and potentially fix up a new timeout if needed at that time.

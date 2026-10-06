@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  kafkajs@2.2.4:
+    hash: 5ac6d2yd2k5lvn6witxt43mxna
+    path: patches/kafkajs@2.2.4.patch
+
 importers:
 
   .:
@@ -87,7 +92,7 @@ importers:
         version: link:../shared-types
       kafkajs:
         specifier: ^2.2.4
-        version: 2.2.4
+        version: 2.2.4(patch_hash=5ac6d2yd2k5lvn6witxt43mxna)
     devDependencies:
       '@types/node':
         specifier: ^24.0.0
@@ -2407,7 +2412,7 @@ snapshots:
 
   json-stable-stringify-without-jsonify@1.0.1: {}
 
-  kafkajs@2.2.4: {}
+  kafkajs@2.2.4(patch_hash=5ac6d2yd2k5lvn6witxt43mxna): {}
 
   keyv@4.5.4:
     dependencies:

@@ -69,6 +69,33 @@ Checked on the unified `main` (all branches merged, 2026-10-06):
   the infra run.
 * **`pnpm verify` builds first.** You do not need a separate `pnpm build`, but
   running one costs nothing and makes a stale-`dist` failure impossible.
+* **`kafkajs@2.2.4` is carried as a pnpm patch (`patches/kafkajs@2.2.4.patch`).**
+  A 53-proof run on Node 24 printed
+  `TimeoutNegativeWarning: -1791317736822 is a negative number. Timeout duration
+  was set to 1.` eight times — once per Kafka-touching proof process. That is
+  upstream `RequestQueue.scheduleCheckPendingRequests()` computing
+  `throttledUntil - Date.now()` while `throttledUntil` still sits at its initial
+  `-1`; the magnitude is exactly `Date.now()` at that millisecond, and the
+  positive clamp on the next line only runs when `pending.length > 0`. Node
+  clamps the negative delay to 1 ms, the callback calls `checkPendingRequests()`
+  unconditionally, which re-arms the same timer — a permanent **~900 no-op
+  wakeups/sec on every broker connection that has ever completed a request**
+  (13 consumers in this stack), pinning the event loop awake and inflating
+  container CPU. The warning is the harmless part: Node ≥ 23 merely made a
+  long-standing loop visible; on Node 22 it burns silently. kafkajs 2.2.4 is the
+  latest release (2023-02-27; upstream is dormant), so the fix is vendored:
+  return early when nothing is pending and no client-side throttle is active.
+  Safe by construction — `push()` re-arms the timer whenever a request is really
+  enqueued. Proven by driving the real `RequestQueue` class with no broker:
+  idle wakeups **870 → 0**, and a saturated queue still drains
+  (`sent: 3, resolved: 3, pending: 0, inflight: 0`, pending work still
+  scheduled at the 10 ms clamp). CI then closed the remaining gap: the Proofs
+  job on the patch commit brings up real tier1+tier2 Docker infra and runs the
+  full 53-proof `pnpm verify` on **Node 24** — the version that printed the
+  warnings — and passed with every Kafka proof green. The warning cannot recur
+  because the patched code path never requests a negative delay. If a future
+  kafkajs release embeds the fix, drop the patch file and the
+  `pnpm.patchedDependencies` entry in `package.json` together.
 * Evidence bundles land in `.prove-e2e/` and are gitignored. Attach the folder;
   do not commit it.
 
