@@ -56,19 +56,132 @@ pnpm verify                                # 6. THE GATE — 53 proofs
 
 Checked on the unified `main` (all branches merged, 2026-10-06):
 
-* **The gate holds 53 proofs. 10 need no infrastructure at all** and pass on a
-  bare checkout with no Docker — they are listed in Appendix A. If those 10 are
+* **The gate holds 54 proofs. 11 need no infrastructure at all** and pass on a
+  bare checkout with no Docker — they are listed in Appendix A. If those 11 are
   green and the other 43 are red, you are looking at missing/unhealthy infra,
-  not at broken code. That exact 10/43 split is the measured signature of
+  not at broken code. That exact 11/43 split is the measured signature of
   "Docker is not running".
-* **`pnpm lint` fails with ~126 errors, and that is expected.** The lint
+* **`pnpm lint` fails, and that is expected — but the count depends on HOW you
+  count, and the lint path itself has three enforcement gaps.** The lint
   toolchain was never installable before (eslint undeclared, config unreachable,
   `strictTypeChecked` set without `projectService`). It now runs for the first
   time and is reporting real, pre-existing debt. **CI does not run lint**, so
   this gates nothing — do not treat it as a regression and do not let it block
-  the infra run.
+  the infra run. The step-4 inventory, re-measured 2026-10-06 on a BUILT tree
+  and rule-by-rule reconciled with an independent measurement — both land on
+  the same numbers (method matters — see the bullets below):
+  * **Error count, full recursive `*/src/**/*.ts`: 126 errors, 0 warnings** —
+    `restrict-template-expressions` 56, `no-console` 19, `no-unused-vars` 14,
+    `explicit-function-return-type` 12, `consistent-type-imports` 8,
+    `require-await` 7, rest ≤2 each. Nothing suppressed, no rule weakened.
+    (A naive per-package loop undercounts to 119 — see the next bullet for why.)
+  * **`shared-database` has no `lint` script at all** — the only one of the 20
+    workspace packages — so `pnpm lint` never lints it. Its 7 errors (6
+    `no-unused-vars` + the raw `console.log` at `src/outbox.ts:313`) are
+    invisible to every existing lint path. Add the script (with a QUOTED glob)
+    as part of step 4.
+  * **The per-package scripts as written undercount.** `eslint src/**/*.ts`
+    runs through sh, which has no globstar: in any package with subdirectories
+    the unquoted glob expands to `src/*/*.ts` — two-level files only. Example:
+    edge-gateway's script lints 16 of its 37 source files, missing `src/main.ts`
+    and all 17 files of `src/adapters/http/`. Scripts-as-written report ~86
+    errors vs 126 recursive. Quote the glob in every `lint` script as part
+    of step 4.
+  * **`pnpm lint` (turbo) fail-fasts** — one failing package aborts the run and
+    hides the rest (`Tasks: 0 successful, 19 total`). For a full count use
+    `pnpm -r --no-bail run lint`, plus shared-database manually until it has a
+    script.
+  * **A missing/stale `dist/` poisons the number**: `@usrp/*` types resolve to
+    `dist/index.d.ts`, so linting an unbuilt tree inflates type-aware rules to
+    ~1200 "could not be resolved" errors. Always `pnpm build` first.
+  * **Raw `console.*`**: the 19-file inventory is the 5 package files
+    `shared-database/src/outbox.ts`, `shared-events/src/kafka-bus.ts`,
+    `shared-events/src/startup.ts`, `shared-http/src/server.ts`,
+    `shared-sms/src/log-sms.channel.ts` plus 14 `*.consumer.ts` adapters. Of
+    those 19 files, **18 carry actual raw violations (19 statements —
+    `academic-vetting.consumer.ts` has two, and `outbox.ts`'s is invisible to
+    `pnpm lint` until shared-database gets a script)**;
+    `kafka-bus.ts` uses only `console.warn`/`console.error`, which the config
+    deliberately allows — it stays on the inventory for the step-4
+    routing-through-the-redacting-sink decision, but it is not a lint error.
+    (`src/main.ts` composition roots and audit-logger adapters are exempt by
+    design; `warn`/`error` are allowed everywhere.) These log UUIDs, enums and
+    correlationIds only — no PII today; a consistency gap, not a live leak.
+  * **`ADR-021` is a number collision**: stray
+    `docs/architecture/adr/ADR-021-edge-tier.md` vs the canonical series'
+    `docs/architecture/adrs/ADR-021-contact-capture-and-delivery.md` — and the
+    `adr/` vs `adrs/` directory split is itself the deeper problem.
+  * **`turbo.json` line 100** declares `"test": { "outputs": ["coverage/**"] }`
+    although no task writes coverage.
+  * **Structural gap: CI has no lint job at all** (`ci-backend.yml` is
+    typecheck + verify + security-scan) while 19 packages define `lint` scripts
+    nothing runs — so a one-off cleanup would quietly undo itself. Plan: fix
+    the debt first, then add enforcement (ratchet or non-blocking job); do NOT
+    add a blocking lint job on top of known failures.
 * **`pnpm verify` builds first.** You do not need a separate `pnpm build`, but
   running one costs nothing and makes a stale-`dist` failure impossible.
+* **`kafkajs@2.2.4` is carried as a pnpm patch (`patches/kafkajs@2.2.4.patch`).**
+  A 53-proof run on Node 24 printed
+  `TimeoutNegativeWarning: -1791317736822 is a negative number. Timeout duration
+  was set to 1.` eight times — once per Kafka-touching proof process. That is
+  upstream `RequestQueue.scheduleCheckPendingRequests()` computing
+  `throttledUntil - Date.now()` while `throttledUntil` still sits at its initial
+  `-1`; the magnitude is exactly `Date.now()` at that millisecond, and the
+  positive clamp on the next line only runs when `pending.length > 0`. Node
+  clamps the negative delay to 1 ms, the callback calls `checkPendingRequests()`
+  unconditionally, which re-arms the same timer — a permanent **~900 no-op
+  wakeups/sec on every broker connection that has ever completed a request**
+  (13 consumers in this stack), pinning the event loop awake and inflating
+  container CPU. The warning is the harmless part: Node ≥ 23 merely made a
+  long-standing loop visible; on Node 22 it burns silently. kafkajs 2.2.4 is the
+  latest release (2023-02-27; upstream is dormant), so the fix is vendored:
+  return early when nothing is pending and no client-side throttle is active.
+  Safe by construction — `push()` re-arms the timer whenever a request is really
+  enqueued.
+
+  What is proven about this patch, and by what — keep these straight:
+
+  * **Unit level (any Node, no broker):** idle wakeups **870 → 0**; no negative
+    `setTimeout` delay is ever requested, including during drain; a saturated
+    queue still drains (`sent: 3, resolved: 3, pending: 0, inflight: 0`).
+  * **Patch guard (gate check 0c, zero infra):**
+    `packages/shared-events/selfcheck/verify-kafka-timer-patch.ts` drives the
+    real `RequestQueue` — the exact copy this workspace resolves — and covers
+    every row of the patch's spec: an ACTIVE 500 ms throttle with an empty
+    queue still arms its ~500 ms re-check timer (the one branch where a
+    dropped wakeup would mean a silently stalled consumer); an idle queue
+    arms nothing whether the throttle is EXPIRED or NEVER EXISTED (the latter
+    is the exact state behind all eight warnings); a SATURATED queue still
+    drains (`sent: 3, resolved: 3, pending: 0, inflight: 0`) with pending work
+    scheduled at the 10 ms clamp; and a drained queue performs ZERO wakeups
+    in a 300 ms idle sample (unpatched: ~267 ≈ 890/sec — the busy loop
+    measured behaviourally, which catches it on ANY Node version, including
+    22 where the warning never prints). Run against unpatched kafkajs it
+    FAILS on four checks — verified by drill: reverting the patch makes the
+    proof red, restoring makes it green. Without this check nothing in the
+    gate would notice a reinstall or dependency bump silently dropping the
+    patch, because the symptom is a stderr process warning that exits 0.
+  * **Non-regression (CI, live broker):** the Proofs job runs the full gate
+    against real tier1+tier2 Docker infra on Node 24 and is green — so the
+    early return does not stall or break any consumer against a real broker.
+    That is ALL a green gate proves here.
+  * **NOT proven: the warning's absence.** A `TimeoutNegativeWarning` prints to
+    stderr and the process still exits 0; `set -euo pipefail` cannot see it.
+    The full-infra gate was 53/53 green on UNPATCHED `866be34` (Node 24, real
+    Docker) with all 8 warnings firing — a green gate cannot distinguish
+    warned from unwarned. Closing this needs one grep on a full-infra run on
+    Node ≥ 23:
+
+    ```
+    bash scripts/prove-e2e.sh 2>&1 | tee /tmp/patched.log
+    grep -c TimeoutNegativeWarning /tmp/patched.log   # expect 0, was 8
+    ```
+
+    The grep is the proof; the exit code is not.
+
+  If a future kafkajs release embeds the fix, drop the patch file, the
+  `pnpm.patchedDependencies` entry in `package.json`, and the 0c guard proof
+  together.
 * Evidence bundles land in `.prove-e2e/` and are gitignored. Attach the folder;
   do not commit it.
 
@@ -341,7 +454,7 @@ triage.
 | **+ Kafka** (~8) | `verify-audit-slice`, `verify-event-driven`, `verify-vetting-slice`, `verify-slot-assignment`, `verify-pipeline-e2e`, `verify-vetting-projection`, `verify-dead-letter`, `verify-kafka-roundtrip` |
 | **+ MinIO** (3) | `verify-document-upload-slice`, `verify-forensics-slice`, `verify-amber-adjudication-slice` |
 | **+ ClamAV** (1) | `verify-forensics-slice` (also needs MinIO) |
-| **No infra at all** (10) | `verify-production-guard`, `verify-deployment-hygiene`, `verify-edge-contract`, `verify-citizen-submit-readiness`, `verify-edge-hygiene`, `verify-slot-invitation`, `verify-password-kdf`, `verify-auth-token`, `verify-applicant-submit-gateway`, `verify-lifecycle` |
+| **No infra at all** (11) | `verify-production-guard`, `verify-deployment-hygiene`, `verify-edge-contract`, `verify-citizen-submit-readiness`, `verify-edge-hygiene`, `verify-kafka-timer-patch`, `verify-slot-invitation`, `verify-password-kdf`, `verify-auth-token`, `verify-applicant-submit-gateway`, `verify-lifecycle` |
 
 ## Appendix B — signals already verified without Docker
 

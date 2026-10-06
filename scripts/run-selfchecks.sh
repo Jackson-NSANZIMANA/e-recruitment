@@ -156,6 +156,27 @@ run_ts "deployment hygiene (EXPOSE ↔ .env.example port map, non-root, exec-for
 run_ts "edge-gateway: contract drift (registry ↔ OpenAPI ↔ upstream catalogue)" services/edge-gateway/selfcheck/verify-edge-contract.ts
 run_ts "edge-gateway: citizen submit front-door readiness (the release signal)" services/edge-gateway/selfcheck/verify-citizen-submit-readiness.ts
 run_ts "edge-gateway: source hygiene (layering, redaction, no raw console)" services/edge-gateway/selfcheck/verify-edge-hygiene.ts
+
+# ── 0c. kafkajs timer-patch guard — zero infrastructure ─────────────
+# The kafkajs@2.2.4 idle-timer fix is carried as a pnpm patch (runbook
+# known-state notes have the full rationale). A patch with no proof guarding it
+# is a patch that quietly disappears: nothing else in this gate would notice a
+# reinstall or dependency bump that dropped it — the symptom it fixes is a
+# stderr PROCESS WARNING that exits 0, so a green gate cannot tell warned from
+# unwarned. This proof drives the REAL RequestQueue class (the copy this
+# workspace resolves; it prints the path) and covers the patch's full spec:
+# an ACTIVE client-side throttle with an empty queue still arms its re-check
+# timer (the branch a dropped wakeup would break — a silently stalled
+# consumer); an idle queue arms nothing whether the throttle is expired or
+# never existed (the unpatched bug arms a negative delay here — the ~1kHz busy
+# loop); a saturated queue still drains with pending work scheduled at the 10
+# ms clamp; and a drained queue performs zero wakeups in a 300 ms idle sample
+# (unpatched: ~890/sec — measured behaviourally, so it fails on ANY Node
+# version, including Node 22 where the warning never prints). Verified by
+# drill: reverting the patch makes this proof fail on four checks, restoring
+# makes it pass — so a dropped patch turns the gate red, not silent.
+run_ts "shared-events: kafkajs timer patch (throttle arms; idle never arms; queue drains; zero idle wakeups)" packages/shared-events/selfcheck/verify-kafka-timer-patch.ts
+
 run_ts "edge-gateway: session refresh persistence" services/edge-gateway/selfcheck/verify-edge-session-refresh.ts
 
 # ── 1. Cross-agency isolation — the system's first hard invariant ──
