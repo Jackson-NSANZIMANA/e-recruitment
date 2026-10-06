@@ -22,6 +22,7 @@ import {
   type AuditEvent,
   type EligibilityResult,
   type HECVerificationCompletedEvent,
+  type HECVerifiedPayload,
 } from '@usrp/shared-types';
 import type { IdentityReader } from '../ports/identity-reader.js';
 import type { HecGateway } from '../ports/hec.gateway.js';
@@ -170,7 +171,7 @@ export class VerifyHecEducationService {
     context: EventContext,
     asOf: Date,
     action: string,
-    payload?: import('@usrp/shared-types').HECVerifiedPayload,
+    payload?: HECVerifiedPayload,
   ): { event: HECVerificationCompletedEvent; audit: AuditEvent } {
     const eligibilityResult: EligibilityResult = {
       eligible: education.meetsRequirement,

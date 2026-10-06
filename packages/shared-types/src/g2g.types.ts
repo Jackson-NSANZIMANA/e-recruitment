@@ -1,3 +1,6 @@
+import type { Agency } from './agency.types';
+import type { EducationLevel, NESAVerifiedPayload } from './eligibility.types';
+
 // ── NIDA Integration Types ────────────────────────────────────────
 
 export type NIDACitizenshipStatus = 'RWANDAN_CITIZEN' | 'FOREIGN_RESIDENT';
@@ -35,7 +38,7 @@ export type NESALookupStatus = 'FOUND' | 'NOT_FOUND' | 'INVALID_INDEX';
 
 export interface NESALookupResponse {
   readonly status: NESALookupStatus;
-  readonly payload?: import('./eligibility.types').NESAVerifiedPayload;
+  readonly payload?: NESAVerifiedPayload;
   readonly requestId: string;
   readonly respondedAt: string;
 }
@@ -61,7 +64,7 @@ export interface HECDegreeVerifyResponse {
   readonly registrationNumber?: string;
   readonly institutionName?: string;
   readonly degreeTitle?: string;
-  readonly educationLevel?: import('./eligibility.types').EducationLevel;
+  readonly educationLevel?: EducationLevel;
   readonly specialistField?: string | null;
   readonly graduationYear?: number;
   readonly requestId: string;
@@ -75,7 +78,7 @@ export type RIBRecordStatus = 'CLEAR' | 'HAS_RECORDS' | 'UNDER_INVESTIGATION';
 export interface RIBVettingRequest {
   readonly nationalIdHash: string;
   readonly requestId: string;
-  readonly requestingAgency: import('./agency.types').Agency;
+  readonly requestingAgency: Agency;
   readonly requestedAt: string;
 }
 
