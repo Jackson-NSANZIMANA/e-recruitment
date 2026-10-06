@@ -71,7 +71,7 @@ async function main(): Promise<void> {
     // reachability is deliberately NOT gated here — a transient RIB outage
     // must not mark us unready; the consumer keeps the offset uncommitted and
     // retries, rather than dropping the service from rotation.
-    readiness: async (): Promise<boolean> => true,
+    readiness: (): Promise<boolean> => Promise.resolve(true),
     onShutdown: async (): Promise<void> => {
       console.log(JSON.stringify({ msg: 'service_stopping', service: config.runtime.serviceName }));
       await bus.disconnect();

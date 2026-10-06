@@ -14,7 +14,7 @@ export class LogSmsChannel implements SmsChannel {
   /** Messages "sent" this process — for dev inspection and proofs only. */
   readonly sent: OutboundSms[] = [];
 
-  async send(message: OutboundSms): Promise<SmsDeliveryOutcome> {
+  send(message: OutboundSms): Promise<SmsDeliveryOutcome> {
     this.sent.push(message);
     console.log(
       JSON.stringify({
@@ -25,6 +25,6 @@ export class LogSmsChannel implements SmsChannel {
         bodyLength: message.body.length,
       }),
     );
-    return 'ACCEPTED';
+    return Promise.resolve('ACCEPTED');
   }
 }
