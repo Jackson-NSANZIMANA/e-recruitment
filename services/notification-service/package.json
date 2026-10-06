@@ -23,6 +23,7 @@
     "selfcheck:contact": "tsx selfcheck/verify-contact-delivery-slice.ts"
   },
   "dependencies": {
+    "@usrp/shared-logging": "workspace:*",
     "@usrp/shared-config": "workspace:*",
     "@usrp/shared-database": "workspace:*",
     "@usrp/shared-events": "workspace:*",

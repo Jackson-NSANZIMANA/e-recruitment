@@ -28,6 +28,7 @@
     "retention:execute": "tsx scripts/retention-sweep.ts --execute"
   },
   "dependencies": {
+    "@usrp/shared-logging": "workspace:*",
     "@usrp/shared-auth": "workspace:*",
     "@usrp/shared-config": "workspace:*",
     "@usrp/shared-database": "workspace:*",

@@ -24,6 +24,7 @@
     "selfcheck:security": "tsx selfcheck/verify-edge-security.ts"
   },
   "dependencies": {
+    "@usrp/shared-logging": "workspace:*",
     "@usrp/shared-auth": "workspace:*",
     "@usrp/shared-config": "workspace:*",
     "@usrp/shared-database": "workspace:*",

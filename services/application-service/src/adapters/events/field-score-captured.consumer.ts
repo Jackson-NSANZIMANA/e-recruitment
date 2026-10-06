@@ -14,6 +14,7 @@
 // is a no-op once PHYSICAL_TEST_COMPLETE).
 // ══════════════════════════════════════════════════════════════════
 
+import { logInfo } from '@usrp/shared-logging';
 import { KAFKA_TOPICS } from '@usrp/shared-types';
 import { deriveContext, type EventBus, type EventHandler } from '@usrp/shared-events';
 import type { ProjectPhysicalTestCompleteService } from '../../application/project-physical-test-complete.service.js';
@@ -39,19 +40,16 @@ export async function startFieldScoreCapturedConsumer(
       context: deriveContext(event),
     });
 
-    console.log(
-      JSON.stringify({
-        msg: 'physical_test_capture_projected',
-        applicationId: event.applicationId,
-        agency: event.agency,
-        deviceId: event.deviceId,
-        outcome: outcome.kind,
-        ...(outcome.kind === 'APPLIED'
-          ? { fromStatus: outcome.fromStatus, toStatus: outcome.toStatus }
-          : {}),
-        correlationId: event.correlationId,
-      }),
-    );
+    logInfo('physical_test_capture_projected', {
+      applicationId: event.applicationId,
+      agency: event.agency,
+      deviceId: event.deviceId,
+      outcome: outcome.kind,
+      ...(outcome.kind === 'APPLIED'
+        ? { fromStatus: outcome.fromStatus, toStatus: outcome.toStatus }
+        : {}),
+      correlationId: event.correlationId,
+    });
   };
 
   await eventBus.subscribe(

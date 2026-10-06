@@ -12,6 +12,7 @@
 // use-case still guards that the identity is VERIFIED before evaluating.
 // ══════════════════════════════════════════════════════════════════
 
+import { logInfo } from '@usrp/shared-logging';
 import { KAFKA_TOPICS } from '@usrp/shared-types';
 import { deriveContext, type EventBus, type EventHandler } from '@usrp/shared-events';
 import type { EvaluateAgeEligibilityService } from '../../application/evaluate-age-eligibility.service.js';
@@ -42,15 +43,12 @@ export async function startApplicantSubmittedConsumer(
       context: deriveContext(event),
     });
 
-    console.log(
-      JSON.stringify({
-        msg: 'applicant_submitted_processed',
-        applicantId: event.applicantId,
-        category: event.category,
-        outcome: outcome.kind,
-        correlationId: event.correlationId,
-      }),
-    );
+    logInfo('applicant_submitted_processed', {
+      applicantId: event.applicantId,
+      category: event.category,
+      outcome: outcome.kind,
+      correlationId: event.correlationId,
+    });
   };
 
   await eventBus.subscribe([KAFKA_TOPICS.APPLICANT_SUBMITTED], ELIGIBILITY_CONSUMER_GROUP, handler);

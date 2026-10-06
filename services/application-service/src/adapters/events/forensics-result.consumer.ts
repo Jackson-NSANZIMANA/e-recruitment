@@ -12,6 +12,7 @@
 // the verdict is redelivered. Safe — the repository is idempotent.
 // ══════════════════════════════════════════════════════════════════
 
+import { logInfo } from '@usrp/shared-logging';
 import { KAFKA_TOPICS } from '@usrp/shared-types';
 import { deriveContext, type EventBus, type EventHandler } from '@usrp/shared-events';
 import type { ProjectForensicsResultService } from '../../application/project-forensics-result.service.js';
@@ -37,19 +38,16 @@ export async function startForensicsResultConsumer(
       context: deriveContext(event),
     });
 
-    console.log(
-      JSON.stringify({
-        msg: 'forensics_result_projected',
-        applicationId: event.applicationId,
-        agency: event.agency,
-        lane: event.lane,
-        outcome: outcome.kind,
-        ...(outcome.kind === 'APPLIED'
-          ? { fromStatus: outcome.fromStatus, toStatus: outcome.toStatus }
-          : {}),
-        correlationId: event.correlationId,
-      }),
-    );
+    logInfo('forensics_result_projected', {
+      applicationId: event.applicationId,
+      agency: event.agency,
+      lane: event.lane,
+      outcome: outcome.kind,
+      ...(outcome.kind === 'APPLIED'
+        ? { fromStatus: outcome.fromStatus, toStatus: outcome.toStatus }
+        : {}),
+      correlationId: event.correlationId,
+    });
   };
 
   await eventBus.subscribe(

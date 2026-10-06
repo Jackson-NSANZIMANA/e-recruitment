@@ -34,6 +34,7 @@
 // Every statement runs as usrp_system_service, the outbox's only grantee.
 // ══════════════════════════════════════════════════════════════════
 
+import { logError, logInfo, logWarn } from '@usrp/shared-logging';
 import { asJsonb, sql } from './client.js';
 import type { SqlTransaction } from './transaction.js';
 
@@ -121,15 +122,12 @@ export class PgOutboxDispatcher<E extends OutboxEvent> {
       } catch (error) {
         // Durable already. Stop here so this event's successors cannot be
         // published ahead of it; the relay delivers all of them in id order.
-        console.warn(
-          JSON.stringify({
-            msg: 'outbox_dispatch_deferred',
-            producer: this.#producer,
-            eventId: event.eventId,
-            eventType: event.eventType,
-            error: describeOutboxError(error),
-          }),
-        );
+        logWarn('outbox_dispatch_deferred', {
+          producer: this.#producer,
+          eventId: event.eventId,
+          eventType: event.eventType,
+          error: describeOutboxError(error),
+        });
         return;
       }
       try {
@@ -137,14 +135,11 @@ export class PgOutboxDispatcher<E extends OutboxEvent> {
       } catch (error) {
         // Published but not stamped: the relay will publish it once more.
         // At-least-once, by design; never worth failing the caller over.
-        console.warn(
-          JSON.stringify({
-            msg: 'outbox_mark_published_failed',
-            producer: this.#producer,
-            eventId: event.eventId,
-            error: describeOutboxError(error),
-          }),
-        );
+        logWarn('outbox_mark_published_failed', {
+          producer: this.#producer,
+          eventId: event.eventId,
+          error: describeOutboxError(error),
+        });
       }
     }
   }
@@ -239,9 +234,7 @@ export class PgOutboxRelay<E extends OutboxEvent> {
     } catch (error) {
       // A database outage lands here. Log and keep ticking: the rows are
       // durable, and the next tick resumes exactly where this one stopped.
-      console.error(
-        JSON.stringify({ msg: 'outbox_relay_error', producer: this.#producer, error: describeOutboxError(error) }),
-      );
+      logError('outbox_relay_error', { producer: this.#producer, error: describeOutboxError(error) });
     }
   }
 
@@ -277,7 +270,7 @@ export class PgOutboxRelay<E extends OutboxEvent> {
             SET attempts = attempts + 1, last_error = 'stored payload is not a valid USRP event envelope'
             WHERE id = ${row.id}
           `;
-          console.error(JSON.stringify({ msg: 'outbox_row_invalid', producer: this.#producer, eventId: row.event_id }));
+          logError('outbox_row_invalid', { producer: this.#producer, eventId: row.event_id });
           continue;
         }
 
@@ -289,15 +282,12 @@ export class PgOutboxRelay<E extends OutboxEvent> {
             SET attempts = attempts + 1, last_error = ${describeOutboxError(error)}
             WHERE id = ${row.id}
           `;
-          console.warn(
-            JSON.stringify({
-              msg: 'outbox_relay_blocked',
-              producer: this.#producer,
-              eventId: row.event_id,
-              publishedThisTick: published,
-              error: describeOutboxError(error),
-            }),
-          );
+          logWarn('outbox_relay_blocked', {
+            producer: this.#producer,
+            eventId: row.event_id,
+            publishedThisTick: published,
+            error: describeOutboxError(error),
+          });
           return { published, blocked: true };
         }
 
@@ -310,7 +300,7 @@ export class PgOutboxRelay<E extends OutboxEvent> {
       }
 
       if (published > 0) {
-        console.log(JSON.stringify({ msg: 'outbox_relayed', producer: this.#producer, published }));
+        logInfo('outbox_relayed', { producer: this.#producer, published });
       }
       return { published, blocked: false };
     });

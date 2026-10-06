@@ -25,6 +25,7 @@
     "selfcheck:detail-reads": "tsx selfcheck/verify-application-detail-reads.ts"
   },
   "dependencies": {
+    "@usrp/shared-logging": "workspace:*",
     "@usrp/shared-auth": "workspace:*",
     "@usrp/shared-config": "workspace:*",
     "@usrp/shared-database": "workspace:*",

@@ -14,6 +14,7 @@
 // (NO_VENUE / APPLICANT_NOT_FOUND) are logged and committed.
 // ══════════════════════════════════════════════════════════════════
 
+import { logInfo } from '@usrp/shared-logging';
 import { KAFKA_TOPICS } from '@usrp/shared-types';
 import { deriveContext, type EventBus, type EventHandler } from '@usrp/shared-events';
 import type { AssignSlotService } from '../../application/assign-slot.service.js';
@@ -36,15 +37,12 @@ export async function startApplicationClearedConsumer(
       context: deriveContext(event),
     });
 
-    console.log(
-      JSON.stringify({
-        msg: 'slot_assignment_processed',
-        applicationId: event.applicationId,
-        agency: event.agency,
-        outcome: outcome.kind,
-        correlationId: event.correlationId,
-      }),
-    );
+    logInfo('slot_assignment_processed', {
+      applicationId: event.applicationId,
+      agency: event.agency,
+      outcome: outcome.kind,
+      correlationId: event.correlationId,
+    });
   };
 
   await eventBus.subscribe([KAFKA_TOPICS.APPLICATION_CLEARED], SCHEDULING_CONSUMER_GROUP, handler);

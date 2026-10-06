@@ -29,6 +29,7 @@
 // completion event, so a missing record REJECTS downstream, never silently stalls.
 // ══════════════════════════════════════════════════════════════════
 
+import { logError, logInfo } from '@usrp/shared-logging';
 import { KAFKA_TOPICS } from '@usrp/shared-types';
 import { deriveContext, type EventBus, type EventHandler } from '@usrp/shared-events';
 import type { VerifyNesaEducationService } from '../../application/verify-nesa-education.service.js';
@@ -65,17 +66,14 @@ export async function startAcademicVettingConsumer(
         nesaIndexNumber: event.nesaIndexNumber,
         context,
       });
-      console.log(
-        JSON.stringify({
-          msg: 'academic_vetted',
-          path: 'NESA',
-          applicantId: event.applicantId,
-          applicationId: event.applicationId,
-          category: event.category,
-          outcome: outcome.kind,
-          correlationId: event.correlationId,
-        }),
-      );
+      logInfo('academic_vetted', {
+        path: 'NESA',
+        applicantId: event.applicantId,
+        applicationId: event.applicationId,
+        category: event.category,
+        outcome: outcome.kind,
+        correlationId: event.correlationId,
+      });
       return;
     }
 
@@ -87,32 +85,26 @@ export async function startAcademicVettingConsumer(
         hecRegistrationNumber: event.hecRegistrationNumber,
         context,
       });
-      console.log(
-        JSON.stringify({
-          msg: 'academic_vetted',
-          path: 'HEC',
-          applicantId: event.applicantId,
-          applicationId: event.applicationId,
-          category: event.category,
-          outcome: outcome.kind,
-          correlationId: event.correlationId,
-        }),
-      );
+      logInfo('academic_vetted', {
+        path: 'HEC',
+        applicantId: event.applicantId,
+        applicationId: event.applicationId,
+        category: event.category,
+        outcome: outcome.kind,
+        correlationId: event.correlationId,
+      });
       return;
     }
 
     // Neither credential present — the front door guarantees exactly one, so this
     // is a contract violation, not an expected path. Log and skip (committing the
     // offset); do not throw and spin on redelivery for a malformed submission.
-    console.error(
-      JSON.stringify({
-        msg: 'academic_vetting_skipped_no_credential',
-        applicantId: event.applicantId,
-        applicationId: event.applicationId,
-        category: event.category,
-        correlationId: event.correlationId,
-      }),
-    );
+    logError('academic_vetting_skipped_no_credential', {
+      applicantId: event.applicantId,
+      applicationId: event.applicationId,
+      category: event.category,
+      correlationId: event.correlationId,
+    });
   };
 
   await eventBus.subscribe([KAFKA_TOPICS.APPLICANT_SUBMITTED], ACADEMIC_CONSUMER_GROUP, handler);

@@ -17,6 +17,9 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint 'src/**/*.ts'"
   },
+  "dependencies": {
+    "@usrp/shared-logging": "workspace:*"
+  },
   "devDependencies": {
     "@types/node": "^24.0.0",
     "typescript": "^5.8.3"

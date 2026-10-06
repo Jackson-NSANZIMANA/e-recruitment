@@ -18,6 +18,7 @@
 // (NO_CHANGE on an already-applied verdict).
 // ══════════════════════════════════════════════════════════════════
 
+import { logInfo } from '@usrp/shared-logging';
 import { KAFKA_TOPICS } from '@usrp/shared-types';
 import { deriveContext, type EventBus, type EventHandler } from '@usrp/shared-events';
 import type { VettingResult } from '../../ports/application-repository.js';
@@ -99,19 +100,16 @@ export async function startVettingResultConsumer(
       context: deriveContext(event),
     });
 
-    console.log(
-      JSON.stringify({
-        msg: 'vetting_result_projected',
-        eventType: event.eventType,
-        applicationId: result.applicationId,
-        agency: event.agency,
-        outcome: outcome.kind,
-        ...(outcome.kind === 'APPLIED'
-          ? { fromStatus: outcome.fromStatus, toStatus: outcome.toStatus }
-          : {}),
-        correlationId: event.correlationId,
-      }),
-    );
+    logInfo('vetting_result_projected', {
+      eventType: event.eventType,
+      applicationId: result.applicationId,
+      agency: event.agency,
+      outcome: outcome.kind,
+      ...(outcome.kind === 'APPLIED'
+        ? { fromStatus: outcome.fromStatus, toStatus: outcome.toStatus }
+        : {}),
+      correlationId: event.correlationId,
+    });
   };
 
   await eventBus.subscribe(

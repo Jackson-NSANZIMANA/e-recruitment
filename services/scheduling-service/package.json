@@ -23,6 +23,7 @@
     "selfcheck:integrity": "tsx selfcheck/verify-slot-integrity.ts"
   },
   "dependencies": {
+    "@usrp/shared-logging": "workspace:*",
     "@usrp/shared-config": "workspace:*",
     "@usrp/shared-database": "workspace:*",
     "@usrp/shared-events": "workspace:*",

@@ -1,8 +1,8 @@
 {
-  "name": "@usrp/shared-http",
+  "name": "@usrp/shared-logging",
   "version": "1.0.0",
   "private": true,
-  "description": "Zero-dependency minimal HTTP transport (node:http) for all USRP services — ADR-005",
+  "description": "Zero-dependency redacting structured log sink shared by every service and package: redact(), summariseError(), and logInfo/logWarn/logError. The one place allowed to write to the process streams.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -17,12 +17,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint 'src/**/*.ts'"
   },
-  "dependencies": {
-    "@usrp/shared-logging": "workspace:*"
-  },
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "tsx": "^4.21.0",
     "typescript": "^5.8.3"
   }
 }

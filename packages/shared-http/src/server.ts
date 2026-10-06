@@ -25,6 +25,7 @@
 // probe traffic is no longer access-logged. See SILENT_WHEN_HEALTHY below.
 // ══════════════════════════════════════════════════════════════════
 
+import { logError, logInfo, summariseError } from '@usrp/shared-logging';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { HttpError } from './errors.js';
@@ -70,9 +71,12 @@ interface RouteEntry {
 }
 
 function defaultAccessLogger(record: AccessLogRecord): void {
-  const line = JSON.stringify({ msg: 'http_request', ...record });
-  if (record.status >= 500) console.error(line);
-  else console.log(line);
+  // 5xx keeps going to stderr, 2xx/4xx to stdout — the stream split operators
+  // already alert on. Both now pass through the redacting sink, so a future
+  // field added to AccessLogRecord cannot carry a handle or an NID into the
+  // access log.
+  if (record.status >= 500) logError('http_request', { ...record });
+  else logInfo('http_request', { ...record });
 }
 
 function firstHeader(value: string | string[] | undefined): string | undefined {
@@ -324,7 +328,23 @@ export function startHttpServer(options: HttpServerOptions): Promise<HttpServer>
       status = result.status;
       if (status >= 500) {
         // Server-side only — the client sees just the code (see errorToResult).
-        console.error(JSON.stringify({ msg: 'request_error', requestId, correlationId }), err);
+        //
+        // This line used to hand the raw `err` to console.error as a second
+        // argument, so Node inspected and printed the WHOLE error object on
+        // every 5xx. That is the most dangerous log line in the system:
+        // postgres.js puts bound parameter values into Error.message, so a
+        // failing INSERT could print a National ID into the access log. The
+        // error is now summarised to name+code (the project's existing
+        // position — see summariseError), and the stack is kept FRAME-ONLY:
+        // frame lines are file paths and function names, which carry no PII
+        // and are what an operator actually debugs with, while stack line 0
+        // ("Name: message") is exactly the part that can quote data. Nothing
+        // diagnostic is lost but the untrusted message.
+        const stack =
+          err instanceof Error && typeof err.stack === 'string'
+            ? err.stack.split('\n').slice(1).map((line) => line.trim())
+            : null;
+        logError('request_error', { requestId, correlationId, error: summariseError(err), stack });
       }
       send(res, result, requestId, correlationId, corsHeaders);
     } finally {

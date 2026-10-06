@@ -8,6 +8,7 @@
 // fault propagates → offset uncommitted → redelivery.
 // ══════════════════════════════════════════════════════════════════
 
+import { logInfo } from '@usrp/shared-logging';
 import { KAFKA_TOPICS } from '@usrp/shared-types';
 import { deriveContext, type EventBus, type EventHandler } from '@usrp/shared-events';
 import type { DeliverWithdrawalNoticeService } from '../../application/deliver-withdrawal-notice.service.js';
@@ -30,16 +31,13 @@ export async function startApplicationWithdrawnConsumer(
       context: deriveContext(event),
     });
 
-    console.log(
-      JSON.stringify({
-        msg: 'withdrawal_notice_processed',
-        applicantId: event.applicantId,
-        acceptedByAgency: event.acceptedByAgency,
-        withdrawnCount: event.withdrawn.length,
-        deliveryStatus,
-        correlationId: event.correlationId,
-      }),
-    );
+    logInfo('withdrawal_notice_processed', {
+      applicantId: event.applicantId,
+      acceptedByAgency: event.acceptedByAgency,
+      withdrawnCount: event.withdrawn.length,
+      deliveryStatus,
+      correlationId: event.correlationId,
+    });
   };
 
   await eventBus.subscribe(

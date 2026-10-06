@@ -21,6 +21,7 @@
 // a no-op once SLOT_ASSIGNED).
 // ══════════════════════════════════════════════════════════════════
 
+import { logInfo } from '@usrp/shared-logging';
 import { KAFKA_TOPICS } from '@usrp/shared-types';
 import { deriveContext, type EventBus, type EventHandler } from '@usrp/shared-events';
 import type { ProjectSlotAssignmentService } from '../../application/project-slot-assignment.service.js';
@@ -54,16 +55,13 @@ export async function startSlotAssignedConsumer(
       context: deriveContext(event),
     });
 
-    console.log(
-      JSON.stringify({
-        msg: 'slot_assignment_projected',
-        applicationId: event.applicationId,
-        agency: event.agency,
-        outcome: outcome.kind,
-        ...(outcome.kind === 'APPLIED' ? { fromStatus: outcome.fromStatus, toStatus: outcome.toStatus } : {}),
-        correlationId: event.correlationId,
-      }),
-    );
+    logInfo('slot_assignment_projected', {
+      applicationId: event.applicationId,
+      agency: event.agency,
+      outcome: outcome.kind,
+      ...(outcome.kind === 'APPLIED' ? { fromStatus: outcome.fromStatus, toStatus: outcome.toStatus } : {}),
+      correlationId: event.correlationId,
+    });
   };
 
   await eventBus.subscribe([KAFKA_TOPICS.SLOT_ASSIGNED], APPLICATION_SLOT_PROJECTION_GROUP, handler);

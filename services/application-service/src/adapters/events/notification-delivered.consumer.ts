@@ -13,6 +13,7 @@
 // uncommitted → redelivery (re-projection is a no-op once PHYSICAL_TEST_SCHEDULED).
 // ══════════════════════════════════════════════════════════════════
 
+import { logInfo } from '@usrp/shared-logging';
 import { KAFKA_TOPICS } from '@usrp/shared-types';
 import { deriveContext, type EventBus, type EventHandler } from '@usrp/shared-events';
 import type { ProjectNotificationDeliveryService } from '../../application/project-notification-delivery.service.js';
@@ -38,17 +39,14 @@ export async function startNotificationDeliveredConsumer(
       context: deriveContext(event),
     });
 
-    console.log(
-      JSON.stringify({
-        msg: 'notification_delivery_projected',
-        applicationId: event.applicationId,
-        agency: event.agency,
-        deliveryStatus: event.deliveryStatus,
-        outcome: outcome.kind,
-        ...(outcome.kind === 'APPLIED' ? { fromStatus: outcome.fromStatus, toStatus: outcome.toStatus } : {}),
-        correlationId: event.correlationId,
-      }),
-    );
+    logInfo('notification_delivery_projected', {
+      applicationId: event.applicationId,
+      agency: event.agency,
+      deliveryStatus: event.deliveryStatus,
+      outcome: outcome.kind,
+      ...(outcome.kind === 'APPLIED' ? { fromStatus: outcome.fromStatus, toStatus: outcome.toStatus } : {}),
+      correlationId: event.correlationId,
+    });
   };
 
   await eventBus.subscribe(

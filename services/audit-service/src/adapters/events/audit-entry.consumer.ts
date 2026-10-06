@@ -11,6 +11,7 @@
 // future one) writes here; this single sink durably records them all.
 // ══════════════════════════════════════════════════════════════════
 
+import { logInfo } from '@usrp/shared-logging';
 import { KAFKA_TOPICS } from '@usrp/shared-types';
 import type { EventBus, EventHandler } from '@usrp/shared-events';
 import type { AuditWriter } from '../../ports/audit-writer.js';
@@ -34,18 +35,15 @@ export async function startAuditEntryConsumer(
 
     const outcome = await writer.append(toAuditRecord(event));
 
-    console.log(
-      JSON.stringify({
-        msg: 'audit_entry_recorded',
-        outcome, // 'inserted' | 'duplicate'
-        action: event.action,
-        entityType: event.entityType,
-        entityId: event.entityId,
-        agency: event.agency,
-        correlationId: event.correlationId,
-        kafkaEventId: event.eventId,
-      }),
-    );
+    logInfo('audit_entry_recorded', {
+      outcome, // 'inserted' | 'duplicate'
+      action: event.action,
+      entityType: event.entityType,
+      entityId: event.entityId,
+      agency: event.agency,
+      correlationId: event.correlationId,
+      kafkaEventId: event.eventId,
+    });
   };
 
   await eventBus.subscribe([KAFKA_TOPICS.AUDIT_IMMUTABLE], AUDIT_CONSUMER_GROUP, handler);
