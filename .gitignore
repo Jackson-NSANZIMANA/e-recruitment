@@ -81,3 +81,8 @@ packages/shared-database/.drift-check/
 *.keystore
 *.pkcs12
 !infrastructure/docker/certs/.gitkeep
+
+# prove-e2e evidence bundles — per-run logs, RESULT.md and container state.
+# Developer-local proof output: regenerated on every run, never reviewed as
+# source. Share a bundle by attaching it, not by committing it.
+.prove-e2e/

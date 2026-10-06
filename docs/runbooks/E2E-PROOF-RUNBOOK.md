@@ -30,7 +30,7 @@ pnpm infra:up                              # 4. tier1 THEN tier2 (order matters:
                                            #    network is external to tier1's project)
 [ -f .env ] || pnpm generate:env           # 5a. .env — skip if you already have one
 pnpm bootstrap:db                          # 5b. schema + RLS + dev officers
-pnpm verify                                # 6. THE GATE — ~50 proofs
+pnpm verify                                # 6. THE GATE — 53 proofs
 ```
 
 > **Step 3 is not optional.** Each `@usrp/*` package resolves **types** to `src/` and
@@ -51,6 +51,26 @@ pnpm verify                                # 6. THE GATE — ~50 proofs
 > `bash scripts/generate-env.sh --force`. The gate does **not** read `.env` — it exports
 > its own dev environment — so an existing `.env` cannot invalidate a proof run. Only
 > `pnpm dev` (manual exploration in §9) reads it.
+
+### Known-state notes for the current `main`
+
+Checked on the unified `main` (all branches merged, 2026-10-06):
+
+* **The gate holds 53 proofs. 10 need no infrastructure at all** and pass on a
+  bare checkout with no Docker — they are listed in Appendix A. If those 10 are
+  green and the other 43 are red, you are looking at missing/unhealthy infra,
+  not at broken code. That exact 10/43 split is the measured signature of
+  "Docker is not running".
+* **`pnpm lint` fails with ~126 errors, and that is expected.** The lint
+  toolchain was never installable before (eslint undeclared, config unreachable,
+  `strictTypeChecked` set without `projectService`). It now runs for the first
+  time and is reporting real, pre-existing debt. **CI does not run lint**, so
+  this gates nothing — do not treat it as a regression and do not let it block
+  the infra run.
+* **`pnpm verify` builds first.** You do not need a separate `pnpm build`, but
+  running one costs nothing and makes a stale-`dist` failure impossible.
+* Evidence bundles land in `.prove-e2e/` and are gitignored. Attach the folder;
+  do not commit it.
 
 Or let the runner do all of it and write you an evidence bundle:
 
@@ -318,10 +338,10 @@ triage.
 | Needs | Proofs |
 |---|---|
 | **Postgres only** (majority, ~30) | identity (auth/self-service/erasure/retention/http/slice), iam (issuer/service-token), eligibility (age/education/degree), application (auth/detail/history/officer-lifecycle/outbox/submission-integrity/submit-http/walk-in/auto-withdrawal), notification (contact/notices/invitation), scheduling (slot-integrity), field-sync, biometric, edge (session refresh/rate-limit store), audit… |
-| **+ Kafka** (~7) | `verify-audit-slice`, `verify-event-driven`, `verify-vetting-slice`, `verify-slot-assignment`, `verify-pipeline-e2e`, `verify-vetting-projection`, `verify-dead-letter`, `verify-kafka-roundtrip` |
+| **+ Kafka** (~8) | `verify-audit-slice`, `verify-event-driven`, `verify-vetting-slice`, `verify-slot-assignment`, `verify-pipeline-e2e`, `verify-vetting-projection`, `verify-dead-letter`, `verify-kafka-roundtrip` |
 | **+ MinIO** (3) | `verify-document-upload-slice`, `verify-forensics-slice`, `verify-amber-adjudication-slice` |
 | **+ ClamAV** (1) | `verify-forensics-slice` (also needs MinIO) |
-| **No infra at all** | `verify-production-guard`, `verify-password-kdf`, `verify-slot-invitation`, `verify-auth-token`, `verify-edge-hygiene`, `verify-edge-contract`, `verify-citizen-submit-readiness`, `verify-applicant-submit-gateway` |
+| **No infra at all** (10) | `verify-production-guard`, `verify-deployment-hygiene`, `verify-edge-contract`, `verify-citizen-submit-readiness`, `verify-edge-hygiene`, `verify-slot-invitation`, `verify-password-kdf`, `verify-auth-token`, `verify-applicant-submit-gateway`, `verify-lifecycle` |
 
 ## Appendix B — signals already verified without Docker
 
