@@ -100,7 +100,7 @@ export class VerifyNesaEducationService {
     }
 
     const lookup = await this.deps.nesaGateway.lookupResults(command.nesaIndexNumber);
-    const asOf = (this.deps.clock ?? (() => new Date()))();
+    const asOf = (this.deps.clock ?? ((): Date => new Date()))();
     const agency = agencyForCategory(command.category);
     const context = command.context ?? newCorrelationContext();
 

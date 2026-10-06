@@ -111,7 +111,7 @@ export class VerifyHecEducationService {
     }
 
     const lookup = await this.deps.hecGateway.verifyDegree(command.hecRegistrationNumber, subject.nidaLookupHash);
-    const asOf = (this.deps.clock ?? (() => new Date()))();
+    const asOf = (this.deps.clock ?? ((): Date => new Date()))();
     const agency = agencyForCategory(command.category);
     const context = command.context ?? newCorrelationContext();
     const minLevel = EDUCATION_REQUIREMENTS[command.category].minLevel;

@@ -360,7 +360,7 @@ export function startHttpServer(options: HttpServerOptions): Promise<HttpServer>
   let stopping: Promise<void> | undefined;
   function stop(): Promise<void> {
     if (stopping === undefined) {
-      stopping = (async () => {
+      stopping = (async (): Promise<void> => {
         // Release idle keep-alive sockets so close() can settle; in-flight
         // requests drain until the force-close timeout.
         server.closeIdleConnections();
