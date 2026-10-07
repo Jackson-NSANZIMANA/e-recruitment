@@ -198,10 +198,21 @@ Checked on the unified `main` (all branches merged, 2026-10-06):
   deliberately not reused), the `adr/` directory is deleted, and
   `docs/architecture/adrs/` is the only home for ADRs. Note that `ADR-021`
   still appears throughout the tree and is CORRECT: those references mean
-  contact capture. Only the six that meant the edge tier were repointed —
-  `pnpm-workspace.yaml`, `scripts/bootstrap-db.sh` (×2),
+  contact capture. References were split BY MEANING, not by pattern — the 12
+  occurrences across 10 files that meant the edge tier were repointed:
+  `pnpm-workspace.yaml`, `.env.example`, `scripts/bootstrap-db.sh` (×2),
   `scripts/run-selfchecks.sh`, `edge-gateway/src/adapters/session-store.pg-repository.ts`,
-  `edge-gateway/src/config.ts`, and `APPLICATION-LAYER-PRUNE.md`.
+  `edge-gateway/src/config.ts`, `APPLICATION-LAYER-PRUNE.md` (×2),
+  `shared-database/src/migrations/0001_align_edge_session_kind.sql`,
+  `shared-database/src/rls/0019_edge_sessions.sql`, and
+  `shared-database/src/rls/0024_edge_rate_limit_buckets.sql`.
+
+  **A caution for whoever audits this next:** the first sweep MISSED four of
+  them because it grepped only `*.ts/*.sh/*.md/*.yaml` — `.env.example` and
+  the three `.sql` files sat outside the filter and were caught only on a
+  second, extension-less sweep. Grep the WHOLE tree when chasing a renumber.
+  Nothing hashes those SQL files (the drizzle journal records tag + timestamp,
+  with no content checksum), so editing their leading comments is safe.
 
 * **`turbo.json`'s dead `"test": { "outputs": ["coverage/**"] }` is removed.**
   No task writes coverage (all five `test` scripts are plain `tsx --test`), so

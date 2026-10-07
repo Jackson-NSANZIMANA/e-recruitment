@@ -1,5 +1,5 @@
 -- ══════════════════════════════════════════════════════════════════
--- 0024 — the shared rate-limit store (ADR-021 / ADR-027 follow-up)
+-- 0024 — the shared rate-limit store (ADR-028 / ADR-027 follow-up)
 --
 -- THE DEFECT: the edge's limiter was per-process (rate-limiter.memory.ts),
 -- so N replicas permitted N times the configured rate on exactly the

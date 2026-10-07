@@ -8,11 +8,16 @@
 > defect and is now gone: `docs/architecture/adrs/` (plural) is the ONLY home
 > for ADRs. This decision keeps its content unchanged and takes 028, the next
 > free number (023 and 024 are referenced elsewhere in the repo and are
-> deliberately not reused here). References that meant THIS document — the
-> workspace manifest, bootstrap-db.sh, run-selfchecks.sh, the edge-gateway
-> session store and config, and APPLICATION-LAYER-PRUNE.md — were updated to
-> ADR-028 in the same change; references that meant contact capture were left
-> pointing at ADR-021.
+> deliberately not reused here). References were split BY MEANING, not by
+> pattern: the 12 occurrences across 10 files that meant THIS document were
+> repointed — `pnpm-workspace.yaml`, `.env.example`,
+> `scripts/bootstrap-db.sh` (x2), `scripts/run-selfchecks.sh`,
+> `edge-gateway/src/adapters/session-store.pg-repository.ts`,
+> `edge-gateway/src/config.ts`, `APPLICATION-LAYER-PRUNE.md` (x2),
+> `shared-database/src/migrations/0001_align_edge_session_kind.sql`,
+> `shared-database/src/rls/0019_edge_sessions.sql` and
+> `shared-database/src/rls/0024_edge_rate_limit_buckets.sql`. Every other
+> `ADR-021` in the tree means contact capture and was deliberately left alone.
 
 **Status:** Accepted
 **Date:** 2026-09-04
