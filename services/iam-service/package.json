@@ -18,7 +18,7 @@
     "start:dev": "tsx src/main.ts",
     "dev": "tsx watch src/main.ts",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src/**/*.ts",
+    "lint": "eslint 'src/**/*.ts'",
     "seed:dev": "tsx scripts/seed-dev-officers.ts",
     "selfcheck": "tsx selfcheck/verify-iam-issuer-slice.ts",
     "selfcheck:service-token": "tsx selfcheck/verify-service-token-slice.ts"

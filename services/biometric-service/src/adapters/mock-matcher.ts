@@ -12,7 +12,7 @@ import type { BiometricScores } from '../domain/biometric.js';
 import type { BiometricMatcher, CaptureReference } from '../ports/biometric-matcher.js';
 
 export class MockBiometricMatcher implements BiometricMatcher {
-  async match(_capture: CaptureReference): Promise<BiometricScores> {
-    return { livenessScore: 0.95, faceMatchConfidence: 96.0 };
+  match(_capture: CaptureReference): Promise<BiometricScores> {
+    return Promise.resolve({ livenessScore: 0.95, faceMatchConfidence: 96.0 });
   }
 }

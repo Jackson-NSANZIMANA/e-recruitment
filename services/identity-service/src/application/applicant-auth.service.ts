@@ -103,7 +103,7 @@ export class ApplicantAuthService {
     // The ONLY component that sees the raw destination is the channel.
     await this.deps.sms.send({
       destination: lookup.citizen.registeredPhoneNumber,
-      body: `USRP verification code: ${otp}. Valid ${Math.round(this.deps.config.otpTtlSeconds / 60)} minutes. Never share this code.`,
+      body: `USRP verification code: ${otp}. Valid ${String(Math.round(this.deps.config.otpTtlSeconds / 60))} minutes. Never share this code.`,
     });
 
     await this.#audit(applicantId, 'APPLICANT_OTP_ISSUED', command.channel, context);

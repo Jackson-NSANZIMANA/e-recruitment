@@ -23,7 +23,7 @@
 // key is what makes the CITIZEN'S retry safe.
 // ══════════════════════════════════════════════════════════════════
 
-import { HttpError, type HttpResult, type RouteHandler } from '@usrp/shared-http';
+import { HttpError, type RouteHandler } from '@usrp/shared-http';
 import { ALL_CATEGORIES } from '@usrp/shared-types';
 import { UPSTREAM } from '../../domain/upstream-operations.js';
 import { field, projectMyApplications } from './projections.js';
@@ -237,7 +237,7 @@ function optionalBounded(value: unknown, field: string): string | undefined {
     throw new HttpError(
       400,
       'INVALID_REQUEST',
-      `Field "${field}" must be a string of 1–${MAX_ACADEMIC_REF} characters when present.`,
+      `Field "${field}" must be a string of 1–${String(MAX_ACADEMIC_REF)} characters when present.`,
     );
   }
   return value.trim();

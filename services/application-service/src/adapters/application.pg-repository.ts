@@ -22,7 +22,14 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { sql, asJsonb } from '@usrp/shared-database';
-import { APPLICATION_STATUSES, type ApplicationStatus } from '@usrp/shared-types';
+import {
+  APPLICATION_STATUSES,
+  type AcademicEligibilityStatus,
+  type AgeEligibilityStatus,
+  type ApplicationCategory,
+  type ApplicationStatus,
+  type CriminalClearanceStatus,
+} from '@usrp/shared-types';
 import type {
   ApplicationRepository,
   ApplyForensicsOutcome,
@@ -54,12 +61,12 @@ const SYSTEM_ROLE = 'usrp_system_service';
 /** The lifecycle columns the projection reads under FOR UPDATE. */
 interface ApplicationStateRow {
   readonly status: ApplicationStatus;
-  readonly age_eligibility_status: import('@usrp/shared-types').AgeEligibilityStatus;
-  readonly academic_status: import('@usrp/shared-types').AcademicEligibilityStatus;
-  readonly criminal_clearance_status: import('@usrp/shared-types').CriminalClearanceStatus;
+  readonly age_eligibility_status: AgeEligibilityStatus;
+  readonly academic_status: AcademicEligibilityStatus;
+  readonly criminal_clearance_status: CriminalClearanceStatus;
   readonly applicant_id: string;
   readonly campaign_id: string;
-  readonly category: import('@usrp/shared-types').ApplicationCategory;
+  readonly category: ApplicationCategory;
 }
 
 export class PgApplicationRepository implements ApplicationRepository {

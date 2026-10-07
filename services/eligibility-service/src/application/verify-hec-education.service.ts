@@ -22,6 +22,7 @@ import {
   type AuditEvent,
   type EligibilityResult,
   type HECVerificationCompletedEvent,
+  type HECVerifiedPayload,
 } from '@usrp/shared-types';
 import type { IdentityReader } from '../ports/identity-reader.js';
 import type { HecGateway } from '../ports/hec.gateway.js';
@@ -110,7 +111,7 @@ export class VerifyHecEducationService {
     }
 
     const lookup = await this.deps.hecGateway.verifyDegree(command.hecRegistrationNumber, subject.nidaLookupHash);
-    const asOf = (this.deps.clock ?? (() => new Date()))();
+    const asOf = (this.deps.clock ?? ((): Date => new Date()))();
     const agency = agencyForCategory(command.category);
     const context = command.context ?? newCorrelationContext();
     const minLevel = EDUCATION_REQUIREMENTS[command.category].minLevel;
@@ -170,7 +171,7 @@ export class VerifyHecEducationService {
     context: EventContext,
     asOf: Date,
     action: string,
-    payload?: import('@usrp/shared-types').HECVerifiedPayload,
+    payload?: HECVerifiedPayload,
   ): { event: HECVerificationCompletedEvent; audit: AuditEvent } {
     const eligibilityResult: EligibilityResult = {
       eligible: education.meetsRequirement,

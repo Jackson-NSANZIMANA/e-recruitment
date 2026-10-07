@@ -15,12 +15,13 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src/**/*.ts",
+    "lint": "eslint 'src/**/*.ts'",
     "selfcheck:kafka": "tsx selfcheck/verify-kafka-roundtrip.ts",
     "selfcheck:dlq": "tsx selfcheck/verify-dead-letter.ts",
     "dlq:replay": "tsx scripts/replay-dead-letters.ts"
   },
   "dependencies": {
+    "@usrp/shared-logging": "workspace:*",
     "@usrp/shared-types": "workspace:*",
     "kafkajs": "^2.2.4"
   },

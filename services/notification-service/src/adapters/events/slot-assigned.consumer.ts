@@ -10,6 +10,7 @@
 // the projection: NO_CHANGE once PHYSICAL_TEST_SCHEDULED).
 // ══════════════════════════════════════════════════════════════════
 
+import { logInfo } from '@usrp/shared-logging';
 import { KAFKA_TOPICS } from '@usrp/shared-types';
 import { deriveContext, type EventBus, type EventHandler } from '@usrp/shared-events';
 import type { DeliverInvitationService } from '../../application/deliver-invitation.service.js';
@@ -36,16 +37,13 @@ export async function startSlotAssignedConsumer(
       context: deriveContext(event),
     });
 
-    console.log(
-      JSON.stringify({
-        msg: 'slot_invitation_delivered',
-        applicationId: event.applicationId,
-        agency: event.agency,
-        channel: outcome.channel,
-        deliveryStatus: outcome.deliveryStatus,
-        correlationId: event.correlationId,
-      }),
-    );
+    logInfo('slot_invitation_delivered', {
+      applicationId: event.applicationId,
+      agency: event.agency,
+      channel: outcome.channel,
+      deliveryStatus: outcome.deliveryStatus,
+      correlationId: event.correlationId,
+    });
   };
 
   await eventBus.subscribe([KAFKA_TOPICS.SLOT_ASSIGNED], NOTIFICATION_CONSUMER_GROUP, handler);

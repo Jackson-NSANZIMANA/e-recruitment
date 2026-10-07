@@ -46,6 +46,13 @@ function isAgency(value: unknown): value is Agency {
 }
 
 /**
+ * A parsed-but-unverified token payload: the KEYS AuthTokenClaims defines, with
+ * every value still `unknown`. Deliberately not `AuthTokenClaims` — see the
+ * comment at the JSON.parse call site in verifyAuthToken.
+ */
+type UnverifiedClaims = { readonly [K in keyof AuthTokenClaims]?: unknown };
+
+/**
  * Verify a bearer token and return the trusted Principal, or null. Rejects
  * (→ null, never throws) on: malformed structure, wrong namespace/version,
  * bad signature, expired, issuer/audience mismatch, or a claim shape that
@@ -70,7 +77,18 @@ export function verifyAuthToken(
       return null;
     }
 
-    const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as AuthTokenClaims;
+    // UNTRUSTED. The signature proves the payload came from the issuer; it
+    // proves NOTHING about its shape. This used to be cast straight to
+    // AuthTokenClaims, which told the compiler that `v` was literally 1 and
+    // `kind` was a PrincipalKind before a single byte had been checked — so
+    // the real validation below read as dead code (and the linter correctly
+    // said so: "comparison is always false, since 1 !== 1"). Parsing into
+    // UnverifiedClaims keeps every field at `unknown` until it is checked,
+    // which makes these guards mean to the type system what they always
+    // meant at runtime.
+    const claims = JSON.parse(
+      Buffer.from(payload, 'base64url').toString('utf8'),
+    ) as UnverifiedClaims;
 
     if (claims.v !== 1) return null;
     if (typeof claims.sub !== 'string' || claims.sub.length === 0) return null;
@@ -79,30 +97,48 @@ export function verifyAuthToken(
       return null;
     }
 
+    // Previously `Date.parse(claims.expiresAt)` on an unchecked value: a token
+    // with a numeric or missing expiresAt reached Date.parse and relied on NaN
+    // to fail closed. Checked explicitly now — same verdict, stated.
+    if (typeof claims.expiresAt !== 'string') return null;
     const expiresAtMs = Date.parse(claims.expiresAt);
     if (Number.isNaN(expiresAtMs)) return null;
     const nowMs = (options.now ?? new Date()).getTime();
     if (expiresAtMs <= nowMs) return null;
 
-    return toPrincipal(claims);
+    return toPrincipal(claims, claims.sub);
   } catch {
     return null;
   }
 }
 
-/** Build a Principal from validated claims, or null on a shape violation. */
-function toPrincipal(claims: AuthTokenClaims): Principal | null {
+/**
+ * Build a Principal from UNVERIFIED claims, or null on any shape violation.
+ * `subjectId` is passed separately because the caller has already proven it is
+ * a non-empty string; everything else is validated here.
+ */
+function toPrincipal(claims: UnverifiedClaims, subjectId: string): Principal | null {
   if (claims.kind === 'system') {
-    return { kind: 'system', subjectId: claims.sub };
+    return { kind: 'system', subjectId };
   }
   if (claims.kind === 'officer') {
     if (!isAgency(claims.agency)) return null;
-    return {
-      kind: 'officer',
-      subjectId: claims.sub,
-      agency: claims.agency,
-      roles: claims.roles ?? [],
-    };
+    const roles = toRoles(claims.roles);
+    if (roles === null) return null;
+    return { kind: 'officer', subjectId, agency: claims.agency, roles };
   }
   return null;
+}
+
+/**
+ * `roles` is optional; when present it must be an array of strings. An absent
+ * value yields the empty list (what `claims.roles ?? []` did), but a malformed
+ * one now REJECTS the token instead of being cast into a Principal — a role
+ * list is an authorisation input, so a wrong-shaped one must not pass.
+ */
+function toRoles(value: unknown): readonly string[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) return null;
+  const roles: unknown[] = value;
+  return roles.every((role): role is string => typeof role === 'string') ? roles : null;
 }

@@ -39,6 +39,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "lint": "eslint 'src/**/*.ts'",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
@@ -47,6 +48,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@usrp/shared-logging": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "postgres": "^3.4.5"
   },

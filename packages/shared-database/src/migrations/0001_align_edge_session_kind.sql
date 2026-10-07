@@ -1,4 +1,4 @@
--- 0001 — create the edge_sessions table (ADR-021)
+-- 0001 — create the edge_sessions table (ADR-028)
 --
 -- Was previously a partial file containing only the "align kind to text"
 -- ALTER, which silently depended on rls/0019_edge_sessions.sql having

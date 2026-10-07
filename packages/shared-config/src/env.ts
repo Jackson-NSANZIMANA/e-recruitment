@@ -18,7 +18,7 @@ export class EnvValidationError extends Error {
 
   constructor(issues: readonly string[]) {
     super(
-      `Invalid environment configuration (${issues.length} issue${issues.length === 1 ? '' : 's'}):\n` +
+      `Invalid environment configuration (${String(issues.length)} issue${issues.length === 1 ? '' : 's'}):\n` +
         issues.map((i) => `  - ${i}`).join('\n'),
     );
     this.name = 'EnvValidationError';
@@ -74,13 +74,13 @@ export function string(opts: StringOpts = {}): EnvSpec<string> {
   const secret = opts.secret ?? false;
   return {
     secret,
-    parse: (key, raw) => {
+    parse: (key, raw): ParseResult<string> => {
       if (isEmpty(raw)) return fail(`${key} is required`);
       if (opts.minLength !== undefined && raw.length < opts.minLength) {
-        return fail(`${key} must be at least ${opts.minLength} characters`);
+        return fail(`${key} must be at least ${String(opts.minLength)} characters`);
       }
       if (opts.maxLength !== undefined && raw.length > opts.maxLength) {
-        return fail(`${key} must be at most ${opts.maxLength} characters`);
+        return fail(`${key} must be at most ${String(opts.maxLength)} characters`);
       }
       if (opts.pattern !== undefined && !opts.pattern.test(raw)) {
         return fail(`${key} does not match required format`);
@@ -93,12 +93,12 @@ export function string(opts: StringOpts = {}): EnvSpec<string> {
 export function integer(opts: { readonly min?: number; readonly max?: number } = {}): EnvSpec<number> {
   return {
     secret: false,
-    parse: (key, raw) => {
+    parse: (key, raw): ParseResult<number> => {
       if (isEmpty(raw)) return fail(`${key} is required`);
       const n = Number(raw);
       if (!Number.isInteger(n)) return fail(`${key} must be an integer, got "${raw}"`);
-      if (opts.min !== undefined && n < opts.min) return fail(`${key} must be >= ${opts.min}`);
-      if (opts.max !== undefined && n > opts.max) return fail(`${key} must be <= ${opts.max}`);
+      if (opts.min !== undefined && n < opts.min) return fail(`${key} must be >= ${String(opts.min)}`);
+      if (opts.max !== undefined && n > opts.max) return fail(`${key} must be <= ${String(opts.max)}`);
       return ok(n);
     },
   };
@@ -110,7 +110,7 @@ export const port = (): EnvSpec<number> => integer({ min: 1, max: 65535 });
 export function boolean(): EnvSpec<boolean> {
   return {
     secret: false,
-    parse: (key, raw) => {
+    parse: (key, raw): ParseResult<boolean> => {
       if (isEmpty(raw)) return fail(`${key} is required`);
       const v = raw.trim().toLowerCase();
       if (v === '1' || v === 'true' || v === 'yes' || v === 'on') return ok(true);
@@ -123,7 +123,7 @@ export function boolean(): EnvSpec<boolean> {
 export function url(opts: { readonly protocols?: readonly string[] } = {}): EnvSpec<string> {
   return {
     secret: false,
-    parse: (key, raw) => {
+    parse: (key, raw): ParseResult<string> => {
       if (isEmpty(raw)) return fail(`${key} is required`);
       let parsed: URL;
       try {
@@ -145,7 +145,7 @@ export function url(opts: { readonly protocols?: readonly string[] } = {}): EnvS
 export function oneOf<const T extends readonly string[]>(values: T): EnvSpec<T[number]> {
   return {
     secret: false,
-    parse: (key, raw) => {
+    parse: (key, raw): ParseResult<T[number]> => {
       if (isEmpty(raw)) return fail(`${key} is required`);
       if (!values.includes(raw)) {
         return fail(`${key} must be one of: ${values.join(' | ')}, got "${raw}"`);
@@ -162,14 +162,14 @@ export function list(
   const separator = opts.separator ?? ',';
   return {
     secret: false,
-    parse: (key, raw) => {
+    parse: (key, raw): ParseResult<readonly string[]> => {
       if (isEmpty(raw)) return fail(`${key} is required`);
       const items = raw
         .split(separator)
         .map((s) => s.trim())
         .filter((s) => s.length > 0);
       if (opts.minItems !== undefined && items.length < opts.minItems) {
-        return fail(`${key} must contain at least ${opts.minItems} item(s)`);
+        return fail(`${key} must contain at least ${String(opts.minItems)} item(s)`);
       }
       return ok(items);
     },

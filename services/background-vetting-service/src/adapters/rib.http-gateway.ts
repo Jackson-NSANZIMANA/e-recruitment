@@ -94,7 +94,7 @@ export class RibHttpGateway implements RibGateway {
 
   private async mapResponse(response: Response, requestId: string): Promise<RibCheckResult> {
     if (!response.ok) {
-      throw new RibUnavailableError(`RIB returned HTTP ${response.status}`, requestId);
+      throw new RibUnavailableError(`RIB returned HTTP ${String(response.status)}`, requestId);
     }
 
     let wire: RibCheckWire;

@@ -17,7 +17,6 @@ import {
   timestamp,
   integer,
   boolean,
-  pgEnum,
   jsonb,
   index,
   uniqueIndex,

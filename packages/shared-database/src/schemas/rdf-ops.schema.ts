@@ -10,8 +10,6 @@ import {
   timestamp,
   integer,
   boolean,
-  text,
-  pgEnum,
   jsonb,
   index,
   uniqueIndex,

@@ -60,9 +60,10 @@ isolation boundary.
 
 ## 4. It contradicted the stated architecture
 
-Per `EDGE-GATEWAY-ARCHITECTURE.md` (this directory) and ADR-021 *The Edge
-Tier* (`docs/architecture/adr/ADR-021-edge-tier.md` — note the repo currently
-carries two different accepted ADRs numbered 021, in `adr/` and `adrs/`) / ADR-027, edge-gateway is a security
+Per `EDGE-GATEWAY-ARCHITECTURE.md` (this directory) and ADR-028 *The Edge
+Tier* (`docs/architecture/adrs/ADR-028-edge-tier.md` — renumbered from 021 on
+2026-10-06, when the stray `adr/` directory that caused the number collision
+was folded into `adrs/`) / ADR-027, edge-gateway is a security
 barrier and reverse proxy. Simple brokered operations connect controllers
 directly to the `UpstreamGateway` port. A pass-through class per operation is an
 abstraction with no behaviour to hold, and — as §2 shows — one that drifts away

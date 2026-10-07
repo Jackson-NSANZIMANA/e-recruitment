@@ -97,7 +97,7 @@ export class NesaHttpGateway implements NesaGateway {
 
   private async mapResponse(response: Response, requestId: string): Promise<NesaLookupResult> {
     if (!response.ok) {
-      throw new NesaUnavailableError(`NESA returned HTTP ${response.status}`, requestId);
+      throw new NesaUnavailableError(`NESA returned HTTP ${String(response.status)}`, requestId);
     }
 
     let wire: NesaLookupWire;

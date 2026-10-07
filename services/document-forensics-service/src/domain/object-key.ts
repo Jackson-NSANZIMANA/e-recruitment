@@ -44,7 +44,7 @@ export function deriveObjectKey(
 ): string {
   const key = `${agency.toLowerCase()}/${applicationId}/${documentType.toLowerCase()}`;
   if (key.length > MAX_KEY_LENGTH) {
-    throw new Error(`Derived object key exceeds ${MAX_KEY_LENGTH} characters: ${key.length}`);
+    throw new Error(`Derived object key exceeds ${String(MAX_KEY_LENGTH)} characters: ${String(key.length)}`);
   }
   return key;
 }

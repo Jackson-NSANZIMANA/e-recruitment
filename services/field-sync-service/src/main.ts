@@ -50,7 +50,7 @@ async function checkDatabaseReadiness(): Promise<boolean> {
     try {
       await sql`SELECT 1`;
       return true;
-    } catch (err) {
+    } catch {
       if (attempt === maxRetries) {
         return false;
       }

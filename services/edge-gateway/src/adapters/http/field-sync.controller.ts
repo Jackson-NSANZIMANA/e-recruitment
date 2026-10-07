@@ -103,9 +103,9 @@ function vectorClockOf(value: unknown): Record<string, number> {
 }
 
 function scoreRecordOf(value: unknown, index: number): Record<string, unknown> {
-  const r = requireRecordObject(value, `records[${index}]`);
+  const r = requireRecordObject(value, `records[${String(index)}]`);
   return {
-    applicationId: requireUuid(r.applicationId, `records[${index}].applicationId`),
+    applicationId: requireUuid(r.applicationId, `records[${String(index)}].applicationId`),
     qrInvitationCode: requireBoundedString(r.qrInvitationCode, 'qrInvitationCode', MAX_HASH * 4),
     metrics: metricsOf(r.metrics),
     capturedAt: requireBoundedString(r.capturedAt, 'capturedAt', 64),
@@ -164,7 +164,7 @@ export function syncFieldScoresHandler(deps: EdgeDeps): RouteHandler {
       throw new HttpError(
         400,
         'INVALID_BATCH',
-        `A batch may carry at most ${MAX_RECORDS} records. Split the upload.`,
+        `A batch may carry at most ${String(MAX_RECORDS)} records. Split the upload.`,
       );
     }
     const forwarded = records.map((record, index) => scoreRecordOf(record, index));

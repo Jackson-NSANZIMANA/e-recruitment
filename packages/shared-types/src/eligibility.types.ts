@@ -4,12 +4,9 @@
 // ══════════════════════════════════════════════════════════════════
 
 import type {
-  Agency,
   RDFApplicationCategory,
   RNPApplicationCategory,
   RCSApplicationCategory,
-  RDFSpecialistField,
-  RCSSpecialistField,
   RCSFourYearURProgram,
 } from './agency.types';
 

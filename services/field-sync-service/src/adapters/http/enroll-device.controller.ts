@@ -24,7 +24,7 @@ function requireString(value: unknown, field: string, maxLen: number): string {
     throw new HttpError(400, 'INVALID_FIELD', `Field "${field}" is required.`);
   }
   if (value.length > maxLen) {
-    throw new HttpError(400, 'INVALID_FIELD', `Field "${field}" exceeds ${maxLen} characters.`);
+    throw new HttpError(400, 'INVALID_FIELD', `Field "${field}" exceeds ${String(maxLen)} characters.`);
   }
   return value;
 }

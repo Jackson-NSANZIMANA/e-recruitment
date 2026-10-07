@@ -146,7 +146,7 @@ export class PgEdgeSessionStore implements SessionRepository {
     }
     if (input.kind === 'applicant' && input.agency !== null) {
       // Not defensive noise: a citizen carrying an agency is the modelling error
-      // ADR-021 §2.1 rejects, and it would silently narrow a cross-agency read.
+      // ADR-028 §2.1 rejects, and it would silently narrow a cross-agency read.
       throw new EdgeSessionStoreError('An applicant session must not carry an agency.');
     }
 

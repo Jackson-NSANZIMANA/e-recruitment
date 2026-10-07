@@ -61,7 +61,7 @@ export function makeAuthVerifier(config: AuthVerifierConfig): AuthVerifier {
     const token = bearerToken(headers);
     if (token === null) return null;
     return verifyAuthToken(config.publicKeyPem, token, {
-      now: (config.now ?? (() => new Date()))(),
+      now: (config.now ?? ((): Date => new Date()))(),
       expectedIssuer: config.issuer,
       expectedAudience: config.audience,
     });

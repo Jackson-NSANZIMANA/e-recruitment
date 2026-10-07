@@ -74,7 +74,7 @@ export function s3Request(
   payload: Buffer,
 ): Promise<S3Reply> {
   const { endpoint, port, useSsl, accessKey, secretKey } = config;
-  const host = `${endpoint}:${port}`;
+  const host = `${endpoint}:${String(port)}`;
   const amzDate = toAmzDate(new Date());
   const dateStamp = amzDate.slice(0, 8);
   const payloadHash = createHash('sha256').update(payload).digest('hex');
@@ -135,7 +135,7 @@ export function s3Request(
     );
     req.on('timeout', () => {
       req.destroy(
-        new ObjectStoreUnavailableError(`object store timeout after ${REQUEST_TIMEOUT_MS}ms`),
+        new ObjectStoreUnavailableError(`object store timeout after ${String(REQUEST_TIMEOUT_MS)}ms`),
       );
     });
     req.on('error', (cause) => {

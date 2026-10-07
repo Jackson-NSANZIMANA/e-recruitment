@@ -26,7 +26,7 @@
 
 import { HttpError } from '@usrp/shared-http';
 import type { EdgeUpstreamConfig } from '../config.js';
-import type { UpstreamOperation, UpstreamService } from '../domain/upstream-operations.js';
+import type { UpstreamService } from '../domain/upstream-operations.js';
 import type { UpstreamGateway, UpstreamCallInput, UpstreamResult } from '../ports/upstream-gateway.js';
 import { UpstreamUnavailableError } from '../domain/edge.errors.js';
 
@@ -65,20 +65,26 @@ async function readBounded(response: Response, maxBytes: number): Promise<string
   }
   if (response.body === null) return '';
 
-  const reader = response.body.getReader();
+  // Annotated at the boundary. With `lib: ["ES2022"]` (no DOM), undici's
+  // Response types its body as ReadableStream<any>, so every chunk below —
+  // value.byteLength, the push, the concat — was operating on `any` inside the
+  // code whose whole job is to BOUND untrusted upstream bytes. Node's fetch
+  // always yields Uint8Array chunks; saying so restores the checks.
+  const reader: ReadableStreamDefaultReader<Uint8Array> = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
-    if (value !== undefined) {
-      total += value.byteLength;
-      if (total > maxBytes) {
-        await reader.cancel();
-        throw new HttpError(502, 'UPSTREAM_RESPONSE_TOO_LARGE', undefined, { expose: false });
-      }
-      chunks.push(value);
+    // No `value !== undefined` guard: with the reader typed, a non-done read
+    // is statically guaranteed to carry a chunk. The old guard was only ever
+    // load-bearing because `value` was `any`.
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel();
+      throw new HttpError(502, 'UPSTREAM_RESPONSE_TOO_LARGE', undefined, { expose: false });
     }
+    chunks.push(value);
   }
   return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString('utf8');
 }

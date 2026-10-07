@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# ══════════════════════════════════════════════════════════════
+# docker(1) shim for the no-Docker sandbox.
+#
+# This sandbox has no Docker daemon and the Debian mirrors are unreachable,
+# so the tier1 Postgres container cannot exist. A real PostgreSQL 16.14 is
+# instead running natively on 127.0.0.1:5432 with the same credentials the
+# compose file declares (usrp_admin / usrp_dev_password / usrp_db).
+#
+# This shim translates ONLY the Postgres-directed docker calls the repo
+# actually makes, so scripts/bootstrap-db.sh and scripts/run-selfchecks.sh
+# run UNMODIFIED against that native server:
+#
+#   docker info                         -> ok (a daemon is "present")
+#   docker ps --filter name=usrp-postgres --filter status=running
+#   docker compose version              -> ok
+#   docker exec [-i] usrp-postgres psql ...        -> local psql shim
+#   docker exec [-i] usrp-postgres pg_isready ...  -> real TCP connect
+#
+# Anything else — and in particular ANY container that is not usrp-postgres
+# (kafka, minio, clamav, the four G2G mocks) — exits non-zero and says so.
+# That is deliberate: those services genuinely are not running, and their
+# proofs MUST fail rather than be faked green.
+# ══════════════════════════════════════════════════════════════
+set -uo pipefail
+
+PSQL="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/psql"
+PGPORT_LOCAL=5432
+
+die_unsupported() {
+  echo "docker-shim: unsupported/absent service: $*" >&2
+  echo "docker-shim: only the native Postgres on 127.0.0.1:${PGPORT_LOCAL} is emulated." >&2
+  exit 1
+}
+
+cmd="${1:-}"; shift || true
+
+case "$cmd" in
+  info)
+    echo "Server Version: native-postgres-shim (no Docker daemon in this sandbox)"
+    exit 0
+    ;;
+
+  compose)
+    # `docker compose version` is used as a capability probe; ps is cosmetic.
+    case "${1:-}" in
+      version) echo "Docker Compose version v2.0.0-shim"; exit 0 ;;
+      *) echo "docker-shim: compose is not emulated (no container runtime)" >&2; exit 1 ;;
+    esac
+    ;;
+
+  ps)
+    # Report usrp-postgres as running iff the native server really answers.
+    if printf '' > /dev/tcp/127.0.0.1/${PGPORT_LOCAL} 2>/dev/null; then
+      echo "usrp-postgres"
+    fi
+    exit 0
+    ;;
+
+  logs)
+    echo "docker-shim: no container logs; Postgres runs natively (see the PostgreSQL 16 process log)" >&2
+    exit 0
+    ;;
+
+  exec)
+    # Strip exec flags (-i / -t / -it) to find the container name.
+    while [[ "${1:-}" == -* ]]; do shift; done
+    container="${1:-}"; shift || true
+    if [[ "$container" != "usrp-postgres" ]]; then
+      die_unsupported "$container"
+    fi
+    tool="${1:-}"; shift || true
+    case "$tool" in
+      psql)
+        exec "$PSQL" "$@"
+        ;;
+      pg_isready)
+        # Genuinely probe the server rather than asserting readiness.
+        if printf '' > /dev/tcp/127.0.0.1/${PGPORT_LOCAL} 2>/dev/null; then
+          echo "127.0.0.1:${PGPORT_LOCAL} - accepting connections"; exit 0
+        else
+          echo "127.0.0.1:${PGPORT_LOCAL} - no response"; exit 2
+        fi
+        ;;
+      *)
+        die_unsupported "exec $tool"
+        ;;
+    esac
+    ;;
+
+  *)
+    die_unsupported "$cmd"
+    ;;
+esac

@@ -65,6 +65,9 @@ importers:
 
   packages/shared-database:
     dependencies:
+      '@usrp/shared-logging':
+        specifier: workspace:*
+        version: link:../shared-logging
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(postgres@3.4.9)
@@ -87,6 +90,9 @@ importers:
 
   packages/shared-events:
     dependencies:
+      '@usrp/shared-logging':
+        specifier: workspace:*
+        version: link:../shared-logging
       '@usrp/shared-types':
         specifier: workspace:*
         version: link:../shared-types
@@ -105,6 +111,10 @@ importers:
         version: 5.9.3
 
   packages/shared-http:
+    dependencies:
+      '@usrp/shared-logging':
+        specifier: workspace:*
+        version: link:../shared-logging
     devDependencies:
       '@types/node':
         specifier: ^24.0.0
@@ -112,6 +122,15 @@ importers:
       tsx:
         specifier: ^4.21.0
         version: 4.23.0
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
+  packages/shared-logging:
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.2
       typescript:
         specifier: ^5.8.3
         version: 5.9.3
@@ -133,6 +152,10 @@ importers:
         version: 5.9.3
 
   packages/shared-sms:
+    dependencies:
+      '@usrp/shared-logging':
+        specifier: workspace:*
+        version: link:../shared-logging
     devDependencies:
       '@types/node':
         specifier: ^24.0.0
@@ -164,6 +187,9 @@ importers:
       '@usrp/shared-http':
         specifier: workspace:*
         version: link:../../packages/shared-http
+      '@usrp/shared-logging':
+        specifier: workspace:*
+        version: link:../../packages/shared-logging
       '@usrp/shared-security':
         specifier: workspace:*
         version: link:../../packages/shared-security
@@ -207,6 +233,9 @@ importers:
       '@usrp/shared-http':
         specifier: workspace:*
         version: link:../../packages/shared-http
+      '@usrp/shared-logging':
+        specifier: workspace:*
+        version: link:../../packages/shared-logging
       '@usrp/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
@@ -235,6 +264,9 @@ importers:
       '@usrp/shared-http':
         specifier: workspace:*
         version: link:../../packages/shared-http
+      '@usrp/shared-logging':
+        specifier: workspace:*
+        version: link:../../packages/shared-logging
       '@usrp/shared-security':
         specifier: workspace:*
         version: link:../../packages/shared-security
@@ -343,6 +375,9 @@ importers:
       '@usrp/shared-http':
         specifier: workspace:*
         version: link:../../packages/shared-http
+      '@usrp/shared-logging':
+        specifier: workspace:*
+        version: link:../../packages/shared-logging
       '@usrp/shared-security':
         specifier: workspace:*
         version: link:../../packages/shared-security
@@ -380,6 +415,9 @@ importers:
       '@usrp/shared-http':
         specifier: workspace:*
         version: link:../../packages/shared-http
+      '@usrp/shared-logging':
+        specifier: workspace:*
+        version: link:../../packages/shared-logging
       '@usrp/shared-security':
         specifier: workspace:*
         version: link:../../packages/shared-security
@@ -497,6 +535,9 @@ importers:
       '@usrp/shared-http':
         specifier: workspace:*
         version: link:../../packages/shared-http
+      '@usrp/shared-logging':
+        specifier: workspace:*
+        version: link:../../packages/shared-logging
       '@usrp/shared-security':
         specifier: workspace:*
         version: link:../../packages/shared-security
@@ -540,6 +581,9 @@ importers:
       '@usrp/shared-http':
         specifier: workspace:*
         version: link:../../packages/shared-http
+      '@usrp/shared-logging':
+        specifier: workspace:*
+        version: link:../../packages/shared-logging
       '@usrp/shared-sms':
         specifier: workspace:*
         version: link:../../packages/shared-sms
@@ -583,6 +627,9 @@ importers:
       '@usrp/shared-http':
         specifier: workspace:*
         version: link:../../packages/shared-http
+      '@usrp/shared-logging':
+        specifier: workspace:*
+        version: link:../../packages/shared-logging
       '@usrp/shared-security':
         specifier: workspace:*
         version: link:../../packages/shared-security

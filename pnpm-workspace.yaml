@@ -7,7 +7,7 @@ packages:
   # agency-bff is a DIRECTORY OF PACKAGES (rdf-bff / rnp-bff / rcs-bff).
   #
   # Both that glob and the three-deployments-of-one-codebase idea it was later
-  # replaced by are now retired. ADR-021 settled it: there is ONE edge for all
+  # replaced by are now retired. ADR-028 settled it: there is ONE edge for all
   # three agencies and for citizens, because agency is read from the verified
   # officer session on every request. A per-agency deployment would make agency a
   # property of the PROCESS — something an operator can point at the wrong

@@ -20,6 +20,7 @@
 // rather than silently dropping a required criminal check.
 // ══════════════════════════════════════════════════════════════════
 
+import { logInfo } from '@usrp/shared-logging';
 import { KAFKA_TOPICS } from '@usrp/shared-types';
 import { deriveContext, type EventBus, type EventHandler } from '@usrp/shared-events';
 import type { VerifyCriminalClearanceService } from '../../application/verify-criminal-clearance.service.js';
@@ -48,18 +49,15 @@ export async function startApplicantSubmittedConsumer(
       context: deriveContext(event),
     });
 
-    console.log(
-      JSON.stringify({
-        msg: 'criminal_clearance_vetted',
-        applicantId: event.applicantId,
-        applicationId: event.applicationId,
-        category: event.category,
-        clearanceStatus: outcome.decision.clearanceStatus,
-        appliedThreshold: outcome.decision.appliedThreshold,
-        ribRequestId: outcome.ribRequestId,
-        correlationId: event.correlationId,
-      }),
-    );
+    logInfo('criminal_clearance_vetted', {
+      applicantId: event.applicantId,
+      applicationId: event.applicationId,
+      category: event.category,
+      clearanceStatus: outcome.decision.clearanceStatus,
+      appliedThreshold: outcome.decision.appliedThreshold,
+      ribRequestId: outcome.ribRequestId,
+      correlationId: event.correlationId,
+    });
   };
 
   await eventBus.subscribe(

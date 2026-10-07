@@ -13,6 +13,7 @@
 // slot-assigned consumer header for the rebalance trap this avoids).
 // ══════════════════════════════════════════════════════════════════
 
+import { logInfo } from '@usrp/shared-logging';
 import { KAFKA_TOPICS } from '@usrp/shared-types';
 import { deriveContext, type EventBus, type EventHandler } from '@usrp/shared-events';
 import type { ProjectApplicationAcceptedService } from '../../application/project-application-accepted.service.js';
@@ -35,16 +36,13 @@ export async function startApplicationAcceptedConsumer(
       context: deriveContext(event),
     });
 
-    console.log(
-      JSON.stringify({
-        msg: 'auto_withdrawal_projected',
-        acceptedApplicationId: event.applicationId,
-        acceptedByAgency: event.agency,
-        withdrawnCount: withdrawn.length,
-        withdrawn: withdrawn.map((w) => ({ applicationId: w.applicationId, agency: w.agency, fromStatus: w.fromStatus })),
-        correlationId: event.correlationId,
-      }),
-    );
+    logInfo('auto_withdrawal_projected', {
+      acceptedApplicationId: event.applicationId,
+      acceptedByAgency: event.agency,
+      withdrawnCount: withdrawn.length,
+      withdrawn: withdrawn.map((w) => ({ applicationId: w.applicationId, agency: w.agency, fromStatus: w.fromStatus })),
+      correlationId: event.correlationId,
+    });
   };
 
   await eventBus.subscribe(

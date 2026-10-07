@@ -1,0 +1,24 @@
+{
+  "name": "@usrp/shared-logging",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Zero-dependency redacting structured log sink shared by every service and package: redact(), summariseError(), and logInfo/logWarn/logError. The one place allowed to write to the process streams.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint 'src/**/*.ts'"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.3"
+  }
+}

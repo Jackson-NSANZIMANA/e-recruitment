@@ -22,7 +22,7 @@ import {
   resolveEventTransport,
   type EventTransport,
 } from '@usrp/shared-config';
-import { startHttpServer } from '@usrp/shared-http';
+import { startHttpServer, type HttpResult } from '@usrp/shared-http';
 import { createSchedulingOutboxRelay, createSchedulingService } from './index.js';
 import { loadSchedulingConfig } from './config.js';
 import { startApplicationClearedConsumer } from './adapters/events/application-cleared.consumer.js';
@@ -75,7 +75,7 @@ async function main(): Promise<void> {
       {
         method: 'GET',
         path: '/v1/slots/invitation-key',
-        handler: () => ({
+        handler: (): HttpResult => ({
           status: 200,
           body: {
             keyId: config.signing.qrSigningKeyId,

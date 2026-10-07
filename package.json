@@ -17,6 +17,8 @@
     "test": "turbo run test",
     "test:e2e": "turbo run test:e2e",
     "lint": "turbo run lint",
+    "//lint:count": "Authoritative lint-debt measure. `pnpm lint` (turbo) stops at the first failing package and hides the rest; this counts every package. Always build first.",
+    "lint:count": "bash scripts/count-lint.sh",
     "typecheck": "turbo run typecheck",
     "bootstrap:db": "bash scripts/bootstrap-db.sh",
     "verify": "pnpm build && bash scripts/run-selfchecks.sh",

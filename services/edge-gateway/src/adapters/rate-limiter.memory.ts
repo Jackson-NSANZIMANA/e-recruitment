@@ -30,33 +30,33 @@ export class InMemoryRateLimiter implements RateLimiter {
     this.#now = now;
   }
 
-  async check(key: string, limitPerMinute: number): Promise<RateLimitCheck> {
+  check(key: string, limitPerMinute: number): Promise<RateLimitCheck> {
     const now = this.#now();
     if (this.#buckets.size > SWEEP_THRESHOLD) this.#sweepAt(now);
 
     const existing = this.#buckets.get(key);
     if (existing === undefined || now - existing.windowStartedAt >= WINDOW_MS) {
       this.#buckets.set(key, { count: 1, windowStartedAt: now });
-      return { allowed: true, remainingTokens: Math.max(0, limitPerMinute - 1), retryAfterSeconds: 0 };
+      return Promise.resolve({ allowed: true, remainingTokens: Math.max(0, limitPerMinute - 1), retryAfterSeconds: 0 });
     }
     existing.count += 1;
     if (existing.count > limitPerMinute) {
       const elapsed = now - existing.windowStartedAt;
-      return {
+      return Promise.resolve({
         allowed: false,
         remainingTokens: 0,
         retryAfterSeconds: Math.max(1, Math.ceil((WINDOW_MS - elapsed) / 1_000)),
-      };
+      });
     }
-    return { allowed: true, remainingTokens: limitPerMinute - existing.count, retryAfterSeconds: 0 };
+    return Promise.resolve({ allowed: true, remainingTokens: limitPerMinute - existing.count, retryAfterSeconds: 0 });
   }
 
-  async activeBuckets(): Promise<number> {
-    return this.#buckets.size;
+  activeBuckets(): Promise<number> {
+    return Promise.resolve(this.#buckets.size);
   }
 
-  async sweep(now: Date): Promise<number> {
-    return this.#sweepAt(now.getTime());
+  sweep(now: Date): Promise<number> {
+    return Promise.resolve(this.#sweepAt(now.getTime()));
   }
 
   #sweepAt(now: number): number {

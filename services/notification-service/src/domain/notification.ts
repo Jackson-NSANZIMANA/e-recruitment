@@ -42,7 +42,7 @@ export function buildWithdrawalNoticeBody(content: WithdrawalNoticeContent): str
   const plural = n === 1 ? 'application' : 'applications';
   return [
     `USRP recruitment: congratulations — you have been accepted by ${content.acceptedByAgency}.`,
-    `As a result, your ${n} other in-flight ${plural} (${content.withdrawnAgencies.join(', ')}) ${n === 1 ? 'has' : 'have'} been withdrawn.`,
+    `As a result, your ${String(n)} other in-flight ${plural} (${content.withdrawnAgencies.join(', ')}) ${n === 1 ? 'has' : 'have'} been withdrawn.`,
     'Details are available in the applicant portal.',
   ].join('\n');
 }

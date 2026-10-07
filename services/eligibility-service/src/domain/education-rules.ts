@@ -83,13 +83,13 @@ export function evaluateNesaEducation(
 
   const reason = meetsRequirement
     ? `Qualification ${evaluatedLevel} satisfies the ${requirement.minLevel} requirement for ${category}${
-        scienceApplies ? ` (science ${String(scienceScore)}% ≥ ${scoreThreshold}%)` : ''
+        scienceApplies ? ` (science ${String(scienceScore)}% ≥ ${String(scoreThreshold)}%)` : ''
       }.`
     : !meetsLevel
       ? `Qualification ${evaluatedLevel} does not meet the ${requirement.minLevel} minimum for ${category}.`
       : scienceScore === undefined
-        ? `Category ${category} requires a science score ≥ ${scoreThreshold}% but NESA returned none.`
-        : `Science score ${scienceScore}% is below the ${scoreThreshold}% minimum for ${category}.`;
+        ? `Category ${category} requires a science score ≥ ${String(scoreThreshold)}% but NESA returned none.`
+        : `Science score ${String(scienceScore)}% is below the ${String(scoreThreshold)}% minimum for ${category}.`;
 
   return {
     academicStatus: meetsRequirement ? 'ELIGIBLE' : 'INELIGIBLE',

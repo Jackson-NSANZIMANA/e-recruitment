@@ -10,7 +10,6 @@ import {
   uuid,
   varchar,
   timestamp,
-  pgEnum,
   jsonb,
   index,
 } from 'drizzle-orm/pg-core';

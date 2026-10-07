@@ -134,7 +134,7 @@ apply_sql "${RLS_DIR}/0017_erasure_requests.sql" "rls/0017 (erasure requests)"
 #     notification-service can deliver for real. NULLed on erasure.
 apply_sql "${RLS_DIR}/0018_stored_contact.sql" "rls/0018 (stored contact column)"
 
-# 20. Edge session store (ADR-021 / ADR-024): the browser boundary's own state.
+# 20. Edge session store (ADR-028 / ADR-024): the browser boundary's own state.
 #     New public_core.edge_sessions table + a new usrp_edge_gateway role that is
 #     the SOLE grantee, under FORCE'd RLS. Because an officer's Ed25519 JWT is
 #     non-revocable until expiry (ADR-016), this table IS the only revocation
@@ -178,7 +178,7 @@ apply_sql "${RLS_DIR}/0022_submission_integrity.sql" "rls/0022 (submission integ
 #     announced to the vetting pipeline.
 apply_sql "${RLS_DIR}/0023_walk_in_outbox.sql" "rls/0023 (walk-in transactional outbox grant)"
 
-# 23c. Shared rate-limit store (ADR-021/027). The edge's limiter was
+# 23c. Shared rate-limit store (ADR-028/027). The edge's limiter was
 #     per-process, so N replicas permitted N times every configured rate on
 #     exactly the operations where the limit is a correctness control — login,
 #     OTP, NIDA checks, and now citizen submission. rls/0024 creates

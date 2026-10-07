@@ -91,7 +91,7 @@ export class HecHttpGateway implements HecGateway {
 
   private async mapResponse(response: Response, requestId: string): Promise<HecLookupResult> {
     if (!response.ok) {
-      throw new HecUnavailableError(`HEC returned HTTP ${response.status}`, requestId);
+      throw new HecUnavailableError(`HEC returned HTTP ${String(response.status)}`, requestId);
     }
 
     let wire: HecVerifyWire;

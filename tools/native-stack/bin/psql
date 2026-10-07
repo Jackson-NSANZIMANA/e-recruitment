@@ -1,0 +1,240 @@
+#!/usr/bin/env node
+/*
+ * psql(1) stand-in for the no-Docker sandbox.
+ *
+ * The embedded-postgres distribution ships initdb/pg_ctl/postgres but NOT the
+ * psql client, and the Debian mirrors are unreachable from this sandbox. The
+ * repo applies its RLS files with
+ *   docker exec -i usrp-postgres psql -U .. -d .. -v ON_ERROR_STOP=1 -q
+ * so this reimplements the flags and behaviours the repo actually relies on,
+ * over the real Postgres wire protocol via postgres.js.
+ *
+ * WHY THIS IS NOT JUST "send the file to the server":
+ * psql's backslash commands (\set, \echo, ...) are CLIENT-side. Shipping them
+ * to the backend yields `syntax error at or near "\"`, which is exactly how
+ * verify-isolation.sql first failed here (its line 17 is `\set ON_ERROR_STOP on`).
+ * So the file is scanned, meta-commands are peeled off and handled locally, and
+ * the SQL between them is sent as simple-protocol batches.
+ *
+ * The scanner tracks single quotes, double quotes, dollar-quoted bodies ($$ and
+ * $tag$), line comments and block comments, so a backslash inside any of those
+ * is left alone. Only a backslash that opens a line in normal state is a
+ * meta-command — the same rule psql uses.
+ *
+ * Batches are sent with the simple query protocol, which is what `psql -f` does
+ * and what lets DO blocks, CREATE FUNCTION bodies and multi-statement files work
+ * without client-side statement splitting.
+ *
+ * ON_ERROR_STOP is always on: any error exits non-zero. Every caller in this
+ * repo passes -v ON_ERROR_STOP=1 anyway.
+ */
+const fs = require('fs');
+// Resolve the workspace's own postgres.js rather than pinning a pnpm path.
+const path = require('path');
+const REPO = path.resolve(__dirname, '..', '..', '..');
+const postgres = require(require.resolve('postgres', { paths: [path.join(REPO, 'packages', 'shared-database'), REPO] }));
+
+const argv = process.argv.slice(2);
+let user = process.env.PGUSER || 'usrp_admin';
+let db = process.env.PGDATABASE || 'usrp_db';
+let command = null;
+let file = null;
+let tuplesOnly = false;
+let unaligned = false;
+const vars = Object.create(null);
+
+for (let i = 0; i < argv.length; i++) {
+  const a = argv[i];
+  if (a === '-U' || a === '--username') user = argv[++i];
+  else if (a === '-d' || a === '--dbname') db = argv[++i];
+  else if (a === '-c' || a === '--command') command = argv[++i];
+  else if (a === '-f' || a === '--file') file = argv[++i];
+  else if (a === '-v' || a === '--set') { const kv = argv[++i] || ''; const eq = kv.indexOf('='); if (eq > 0) vars[kv.slice(0, eq)] = kv.slice(eq + 1); }
+  else if (a === '-q' || a === '--quiet') { /* no-op */ }
+  else if (a === '-t' || a === '--tuples-only') tuplesOnly = true;
+  else if (a === '-A' || a === '--no-align') unaligned = true;
+  else if (a === '-tA' || a === '-At') { tuplesOnly = true; unaligned = true; }
+  else if (a === '-X' || a === '--no-psqlrc') { /* no-op */ }
+  else if (a === '-P' || a === '--pset') i++;
+  else if (!a.startsWith('-')) { /* positional dbname already defaulted */ }
+}
+
+/**
+ * Split a psql script into an ordered list of
+ *   { kind: 'sql', text } | { kind: 'meta', text }
+ * honouring quoting/comment context so backslashes inside literals survive.
+ */
+function parseScript(src) {
+  const parts = [];
+  let buf = '';
+  let i = 0;
+  let atLineStart = true;           // only whitespace seen so far on this line
+  const n = src.length;
+
+  const pushSql = () => { if (buf.trim()) parts.push({ kind: 'sql', text: buf }); buf = ''; };
+
+  while (i < n) {
+    const c = src[i];
+    const rest = src.slice(i);
+
+    // Meta-command: a backslash opening a line, in normal state.
+    if (c === '\\' && atLineStart) {
+      pushSql();
+      let eol = src.indexOf('\n', i);
+      if (eol === -1) eol = n;
+      parts.push({ kind: 'meta', text: src.slice(i, eol).trim() });
+      i = eol + 1;
+      atLineStart = true;
+      continue;
+    }
+
+    // Line comment -- ... \n
+    if (c === '-' && src[i + 1] === '-') {
+      let eol = src.indexOf('\n', i);
+      if (eol === -1) eol = n;
+      buf += src.slice(i, eol);
+      i = eol;
+      continue;
+    }
+
+    // Block comment /* ... */ (Postgres allows nesting)
+    if (c === '/' && src[i + 1] === '*') {
+      let depth = 0, j = i;
+      while (j < n) {
+        if (src[j] === '/' && src[j + 1] === '*') { depth++; j += 2; }
+        else if (src[j] === '*' && src[j + 1] === '/') { depth--; j += 2; if (depth === 0) break; }
+        else j++;
+      }
+      buf += src.slice(i, j); i = j; atLineStart = false; continue;
+    }
+
+    // Dollar-quoted body: $$ ... $$ or $tag$ ... $tag$
+    if (c === '$') {
+      const m = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(rest);
+      if (m) {
+        const tag = m[0];
+        const end = src.indexOf(tag, i + tag.length);
+        const stop = end === -1 ? n : end + tag.length;
+        buf += src.slice(i, stop); i = stop; atLineStart = false; continue;
+      }
+    }
+
+    // Single-quoted literal (handles '' escape)
+    if (c === "'") {
+      let j = i + 1;
+      while (j < n) {
+        if (src[j] === "'" && src[j + 1] === "'") { j += 2; continue; }
+        if (src[j] === "'") { j++; break; }
+        j++;
+      }
+      buf += src.slice(i, j); i = j; atLineStart = false; continue;
+    }
+
+    // Double-quoted identifier (handles "" escape)
+    if (c === '"') {
+      let j = i + 1;
+      while (j < n) {
+        if (src[j] === '"' && src[j + 1] === '"') { j += 2; continue; }
+        if (src[j] === '"') { j++; break; }
+        j++;
+      }
+      buf += src.slice(i, j); i = j; atLineStart = false; continue;
+    }
+
+    if (c === '\n') { buf += c; i++; atLineStart = true; continue; }
+    if (c === ' ' || c === '\t' || c === '\r') { buf += c; i++; continue; }
+
+    buf += c; i++; atLineStart = false;
+  }
+  pushSql();
+  return parts;
+}
+
+/** Expand :var / :'var' references psql-style. */
+function expandVars(text) {
+  return text.replace(/:'([A-Za-z_][A-Za-z0-9_]*)'/g, (m, k) =>
+    k in vars ? "'" + String(vars[k]).replace(/'/g, "''") + "'" : m
+  ).replace(/:([A-Za-z_][A-Za-z0-9_]*)/g, (m, k) => (k in vars ? String(vars[k]) : m));
+}
+
+function printRows(res) {
+  if (!Array.isArray(res) || res.length === 0 || typeof res[0] !== 'object' || res[0] === null) return;
+  const cols = Object.keys(res[0]);
+  if (cols.length === 0) return;
+  const sep = unaligned ? '|' : ' | ';
+  if (!tuplesOnly) console.log(cols.join(sep));
+  for (const row of res) {
+    console.log(cols.map((c) => (row[c] === null ? '' : String(row[c]))).join(sep));
+  }
+}
+
+(async () => {
+  let src = command;
+  if (src === null) src = file ? fs.readFileSync(file, 'utf8') : (() => { try { return fs.readFileSync(0, 'utf8'); } catch { return ''; } })();
+  if (!src || !src.trim()) process.exit(0);
+
+  const sql = postgres({
+    host: process.env.PGHOST || '127.0.0.1',
+    port: Number(process.env.PGPORT || 5432),
+    user,
+    password: process.env.PGPASSWORD || 'usrp_dev_password',
+    database: db,
+    max: 1,
+    prepare: false,
+    connection: { application_name: 'psql-shim' },
+    onnotice: (nt) => {
+      // psql writes NOTICE/WARNING/EXCEPTION text to stderr. The isolation
+      // proof RAISEs its assertions as notices, so this must not be swallowed.
+      if (nt && nt.message) console.error(`${nt.severity || 'NOTICE'}:  ${nt.message}`);
+    },
+  });
+
+  const parts = parseScript(src);
+
+  try {
+    for (const part of parts) {
+      if (part.kind === 'meta') {
+        const text = part.text;
+        const [cmd, ...args] = text.split(/\s+/);
+        switch (cmd) {
+          case '\\echo':
+          case '\\qecho': {
+            // psql strips one layer of surrounding single quotes from the
+            // whole argument text, not from each whitespace-separated word —
+            // stripping per-word leaves `'ALL ISOLATION PASSED'` quoted.
+            const out = expandVars(args.join(' ')).replace(/^'(.*)'$/s, '$1');
+            console.log(out);
+            break;
+          }
+          case '\\set': {
+            if (args.length >= 1) vars[args[0]] = args.slice(1).join(' ').replace(/^'(.*)'$/s, '$1');
+            break;
+          }
+          case '\\unset': { delete vars[args[0]]; break; }
+          case '\\timing': case '\\pset': case '\\x': case '\\a': case '\\t':
+            break; // formatting only — irrelevant to pass/fail
+          default:
+            console.error(`psql-shim: ignoring unsupported meta-command: ${cmd}`);
+        }
+        continue;
+      }
+
+      const text = expandVars(part.text);
+      if (!text.trim()) continue;
+      const res = await sql.unsafe(text);
+      if (command) printRows(res);           // -c prints; -f stays quiet like -q
+      else if (tuplesOnly || unaligned) printRows(res);
+    }
+    await sql.end({ timeout: 5 });
+    process.exit(0);
+  } catch (err) {
+    const parts2 = ['ERROR:  ' + (err.message || String(err))];
+    if (err.detail) parts2.push('DETAIL:  ' + err.detail);
+    if (err.hint) parts2.push('HINT:  ' + err.hint);
+    if (err.where) parts2.push('CONTEXT:  ' + err.where);
+    if (err.position) parts2.push('POSITION: ' + err.position);
+    console.error(parts2.join('\n'));
+    try { await sql.end({ timeout: 2 }); } catch { /* already failing */ }
+    process.exit(1);
+  }
+})();

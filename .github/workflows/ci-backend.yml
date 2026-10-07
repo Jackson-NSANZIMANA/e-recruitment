@@ -43,6 +43,56 @@ jobs:
       # zero-error, across every package and service.
       - run: pnpm typecheck
 
+  lint:
+    name: Lint (ratchet, baseline 0)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # THE RULE THIS JOB OBEYS: never a blocking lint job on top of known
+    # failures. It is written as a RATCHET — it fails only when the error
+    # count EXCEEDS the baseline — and the baseline is 0 purely because the
+    # debt was driven to 0 first (126 -> 0, step 4). So today it is, in
+    # effect, blocking; the ratchet form is kept because it is what makes the
+    # 0 safe to hold: a regression names its own number instead of dumping an
+    # undifferentiated wall of errors, and if a future dependency bump ever
+    # introduces unavoidable findings, the baseline can be raised DELIBERATELY
+    # and visibly in one line rather than by switching the gate off.
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      # MANDATORY, not an optimisation. The rule set is type-aware; without
+      # dist/ the workspace imports do not resolve and the run reports ~1200
+      # phantom errors. A lint count on an unbuilt tree is meaningless.
+      - name: Build workspace (required before linting)
+        run: pnpm build
+      - name: Count lint errors and enforce the ratchet
+        env:
+          LINT_BASELINE: '0'
+        run: |
+          set -euo pipefail
+          export LINT_LOG="$PWD/lint.log"
+          count="$(bash scripts/count-lint.sh)"
+          echo "lint errors: $count   baseline: $LINT_BASELINE"
+          if [ "$count" -gt "$LINT_BASELINE" ]; then
+            echo "::error::Lint debt increased to $count (baseline $LINT_BASELINE). The offending errors are below and in the lint-log artifact."
+            grep -E '  (error|warning)  ' "$LINT_LOG" || true
+            exit 1
+          fi
+          if [ "$count" -lt "$LINT_BASELINE" ]; then
+            echo "::notice::Lint debt is down to $count (baseline $LINT_BASELINE). Lower LINT_BASELINE to lock the gain in."
+          fi
+      - name: Upload lint log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-log
+          path: lint.log
+          if-no-files-found: ignore
+
   verify:
     name: Proofs (RLS isolation + service selfchecks)
     runs-on: ubuntu-latest

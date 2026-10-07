@@ -128,7 +128,7 @@ export function requireBoundedString(value: unknown, field: string, maxLength: n
     throw new HttpError(
       400,
       'INVALID_REQUEST',
-      `Field "${field}" must be a string of 1–${maxLength} characters.`,
+      `Field "${field}" must be a string of 1–${String(maxLength)} characters.`,
     );
   }
   return value;
@@ -146,9 +146,15 @@ export function optionalBoundedString(
 export function requireOneOf<T extends string>(
   value: unknown,
   field: string,
-  allowed: ReadonlySet<string>,
+  allowed: ReadonlySet<T>,
 ): T {
-  if (typeof value !== 'string' || !allowed.has(value)) {
+  // `allowed` is now ReadonlySet<T> rather than ReadonlySet<string>, so T is
+  // inferred from (or checked against) the set the caller actually passes. It
+  // used to appear only in the return position, which meant a caller could
+  // write requireOneOf<'CLEAR' | 'REJECT'>(v, f, DECISIONS) and have the
+  // compiler agree while the set held SHORTLIST. Widened only for the
+  // membership test, which by definition asks about an arbitrary string.
+  if (typeof value !== 'string' || !(allowed as ReadonlySet<string>).has(value)) {
     throw new HttpError(400, 'INVALID_REQUEST', `Field "${field}" is not an accepted value.`);
   }
   return value as T;

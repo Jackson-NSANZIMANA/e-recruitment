@@ -65,8 +65,29 @@ const MAX_FIELD_BYTES = 4 * 1024;
 const MAX_PARTS = 8;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-/** Control characters in a filename are a log-injection / terminal-escape vector. */
-const CONTROL_CHAR_RE = /[-\u001f\u007f]/;
+/**
+ * Control characters in a filename are a log-injection / terminal-escape vector.
+ *
+ * THIS WAS A REAL BUG, not a style fix. The guard read `/[-\u001f\u007f]/`:
+ * the `\u0000` that opened the intended `\u0000-\u001f` range had been lost, so
+ * the leading `-` became a LITERAL hyphen. Measured behaviour of that regex:
+ *
+ *   report-2026.pdf   REJECTED  (an ordinary hyphenated filename)
+ *   "bad\u001bfile"    ACCEPTED  (ESC — terminal escape)
+ *   "bad\u0000file"    ACCEPTED  (NUL)
+ *   "bad\nfile"        ACCEPTED  (LF — log injection, the stated threat)
+ *
+ * It rejected the common case and admitted every vector below U+001F. Replaced
+ * with an explicit code-point scan: unambiguous, no control characters inside a
+ * regex literal, and it says exactly what it means.
+ */
+function hasControlCharacter(value: string): boolean {
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
+    if (code <= 0x1f || code === 0x7f) return true;
+  }
+  return false;
+}
 
 /**
  * Every document type any agency models — DERIVED from the per-agency sets, not
@@ -117,7 +138,7 @@ export function uploadDocumentRoute(
           `The file part must be named "${FILE_FIELD}", got "${file.fieldName}".`,
         );
       }
-      if (file.filename.length > MAX_FILENAME_LENGTH || CONTROL_CHAR_RE.test(file.filename)) {
+      if (file.filename.length > MAX_FILENAME_LENGTH || hasControlCharacter(file.filename)) {
         throw new HttpError(400, 'INVALID_FILENAME', 'The filename is too long or malformed.');
       }
       if (file.bytes.length === 0) {
@@ -127,7 +148,7 @@ export function uploadDocumentRoute(
         throw new HttpError(
           413,
           'FILE_TOO_LARGE',
-          `The file exceeds the ${options.maxFileSizeBytes}-byte limit.`,
+          `The file exceeds the ${String(options.maxFileSizeBytes)}-byte limit.`,
         );
       }
       if (!allowed.has(file.contentType)) {

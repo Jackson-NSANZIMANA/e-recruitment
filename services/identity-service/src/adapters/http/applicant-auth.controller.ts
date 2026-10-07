@@ -369,7 +369,7 @@ function optionalAcademicRef(value: unknown, field: string): string | null {
     throw new HttpError(
       400,
       'INVALID_REQUEST',
-      `Field "${field}" must be at most ${MAX_ACADEMIC_REF} characters.`,
+      `Field "${field}" must be at most ${String(MAX_ACADEMIC_REF)} characters.`,
     );
   }
   return trimmed;

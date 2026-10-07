@@ -80,7 +80,7 @@ export class EvaluateAgeEligibilityService {
 
     const asOf = command.referenceDate
       ? new Date(command.referenceDate)
-      : (this.deps.clock ?? (() => new Date()))();
+      : (this.deps.clock ?? ((): Date => new Date()))();
     const result = evaluateAgeEligibility(command.category, applicant.dateOfBirth, asOf);
     const agency = agencyForCategory(command.category);
     const context = command.context ?? newCorrelationContext();

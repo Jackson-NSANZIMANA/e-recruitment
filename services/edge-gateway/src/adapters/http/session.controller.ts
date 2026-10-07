@@ -19,11 +19,11 @@ import { clearedCookies, sessionCookies } from './cookies.js';
 import { anonymousProbeResult, withOptionalSession, type EdgeDeps } from './guards.js';
 
 export function readSessionHandler(deps: EdgeDeps): RouteHandler {
-  return withOptionalSession(deps, 'readSession', async (_ctx, session, endedReason) => {
+  return withOptionalSession(deps, 'readSession', (_ctx, session, endedReason) => {
     if (session === null) {
-      return anonymousProbeResult(deps, endedReason ?? 'revoked');
+      return Promise.resolve(anonymousProbeResult(deps, endedReason ?? 'revoked'));
     }
-    return { status: 200, body: toSessionView(session) };
+    return Promise.resolve({ status: 200, body: toSessionView(session) });
   });
 }
 

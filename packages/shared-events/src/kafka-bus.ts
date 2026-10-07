@@ -18,6 +18,7 @@
 // dead-lettering fails we rethrow so it is redelivered. Never dropped.
 // ══════════════════════════════════════════════════════════════════
 
+import { logError, logWarn } from '@usrp/shared-logging';
 import { Kafka, logLevel, type Consumer, type IHeaders, type Producer } from 'kafkajs';
 import type { KafkaTopic, USRPEvent } from '@usrp/shared-types';
 import { partitionKeyForEvent, topicForEvent } from './topics.js';
@@ -139,7 +140,13 @@ export class KafkaEventBus implements EventBus {
       // consumer.run() RESOLVES once the consumer loop is started; it does not
       // wait for a rebalance to settle, so it is not the step that hangs.
       await consumer.run({
-        eachMessage: async ({ topic, partition, message, heartbeat }): Promise<void> => {
+        eachMessage: async (payload): Promise<void> => {
+          const { topic, partition, message } = payload;
+          // Called through `payload` rather than destructured: kafkajs' own
+          // heartbeat happens to be a closure, but a method pulled off its
+          // object is a `this`-scoping bug waiting for the day it stops being
+          // one. The wrapper costs nothing and cannot come unbound.
+          const heartbeat = (): Promise<void> => payload.heartbeat();
           if (message.value === null) return;
           const source: ConsumedSource = {
             groupId,
@@ -207,21 +214,18 @@ export class KafkaEventBus implements EventBus {
           return;
         }
         const delayMs = backoffMs(policy, attempt);
-        console.warn(
-          JSON.stringify({
-            msg: 'event_handler_retry',
-            groupId: source.groupId,
-            topic: source.topic,
-            partition: source.partition,
-            offset: source.offset,
-            eventId: event.eventId,
-            eventType: event.eventType,
-            attempt,
-            maxAttempts: policy.maxHandlerAttempts,
-            nextDelayMs: delayMs,
-            error: describeError(error),
-          }),
-        );
+        logWarn('event_handler_retry', {
+          groupId: source.groupId,
+          topic: source.topic,
+          partition: source.partition,
+          offset: source.offset,
+          eventId: event.eventId,
+          eventType: event.eventType,
+          attempt,
+          maxAttempts: policy.maxHandlerAttempts,
+          nextDelayMs: delayMs,
+          error: describeError(error),
+        });
         // A heartbeat that throws (rebalance in progress) propagates: kafkajs
         // then hands the partition over and the message is redelivered to the
         // new owner. That is correct; finishing retries for a partition we no
@@ -262,20 +266,17 @@ export class KafkaEventBus implements EventBus {
       messages: [{ key: source.key, value: source.value, headers }],
     });
 
-    console.error(
-      JSON.stringify({
-        msg: 'event_dead_lettered',
-        reason,
-        groupId: source.groupId,
-        topic: source.topic,
-        partition: source.partition,
-        offset: source.offset,
-        attempts,
-        eventId,
-        deadLetterTopic: this.deadLetterPolicy.topic,
-        error: errorText,
-      }),
-    );
+    logError('event_dead_lettered', {
+      reason,
+      groupId: source.groupId,
+      topic: source.topic,
+      partition: source.partition,
+      offset: source.offset,
+      attempts,
+      eventId,
+      deadLetterTopic: this.deadLetterPolicy.topic,
+      error: errorText,
+    });
   }
 }
 

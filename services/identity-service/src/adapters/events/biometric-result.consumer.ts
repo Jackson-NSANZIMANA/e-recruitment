@@ -7,6 +7,7 @@
 // offset uncommitted → redelivery (the record is an idempotent UPDATE).
 // ══════════════════════════════════════════════════════════════════
 
+import { logInfo } from '@usrp/shared-logging';
 import { KAFKA_TOPICS } from '@usrp/shared-types';
 import type { EventBus, EventHandler } from '@usrp/shared-events';
 import type { ProjectBiometricResultService } from '../../application/project-biometric-result.service.js';
@@ -28,16 +29,13 @@ export async function startBiometricResultConsumer(
       faceMatchConfidence: event.faceMatchConfidence,
     });
 
-    console.log(
-      JSON.stringify({
-        msg: 'biometric_result_recorded',
-        applicantId: event.applicantId,
-        sessionId: event.sessionId,
-        verified: event.livenessPass && event.faceMatchPass,
-        outcome,
-        correlationId: event.correlationId,
-      }),
-    );
+    logInfo('biometric_result_recorded', {
+      applicantId: event.applicantId,
+      sessionId: event.sessionId,
+      verified: event.livenessPass && event.faceMatchPass,
+      outcome,
+      correlationId: event.correlationId,
+    });
   };
 
   await eventBus.subscribe([KAFKA_TOPICS.BIOMETRIC_RESULT], IDENTITY_BIOMETRIC_GROUP, handler);

@@ -31,6 +31,7 @@
 // holding a transport that may connect minutes later, or never.
 // ══════════════════════════════════════════════════════════════════
 
+import { logInfo } from '@usrp/shared-logging';
 /**
  * The line past which a bootstrap step has stopped being slow and started
  * being stuck. Overridable per call site, but the default is the contract.
@@ -48,7 +49,7 @@ export class StartupTimeoutError extends Error {
     readonly step: string,
     readonly timeoutMs: number,
   ) {
-    super(`startup timed out while ${step} after ${timeoutMs}ms`);
+    super(`startup timed out while ${step} after ${String(timeoutMs)}ms`);
     this.name = 'StartupTimeoutError';
   }
 }
@@ -94,5 +95,5 @@ export function logStartupPhase(
   phase: string,
   extra: Record<string, unknown> = {},
 ): void {
-  console.log(JSON.stringify({ msg: 'startup_phase', service, phase, ...extra }));
+  logInfo('startup_phase', { service, phase, ...extra });
 }
