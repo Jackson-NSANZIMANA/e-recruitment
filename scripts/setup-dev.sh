@@ -73,10 +73,17 @@ until docker exec usrp-postgres pg_isready -U "${POSTGRES_USER:-usrp_admin}" &>/
 done
 success "PostgreSQL is ready"
 
-# ── 5. Build Shared Packages ──────────────────────────────────────
-log "Building shared packages..."
-pnpm --filter @usrp/shared-types build
-success "Shared packages built"
+# ── 5. Build the workspace ────────────────────────────────────────
+# NOT `--filter @usrp/shared-types`. That built 1 of the 9 shared packages and
+# left the other 8 (plus every service) with no dist/index.js, so the very next
+# documented step — `pnpm dev` — was refused by scripts/check-workspace-build.mjs
+# with "never built" for the packages this script had just claimed to build.
+# Every @usrp/* package resolves TYPES to src/ and RUNTIME to dist/, and dist/
+# is gitignored, so setup is not finished until `pnpm build` has run over the
+# whole workspace — the same command the gate and CI run first.
+log "Building the workspace (all @usrp/* packages + services)..."
+pnpm build
+success "Workspace built"
 
 # ── 6. Verify Stack ───────────────────────────────────────────────
 echo ""
