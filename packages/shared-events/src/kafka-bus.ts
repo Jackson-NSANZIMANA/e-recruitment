@@ -140,7 +140,13 @@ export class KafkaEventBus implements EventBus {
       // consumer.run() RESOLVES once the consumer loop is started; it does not
       // wait for a rebalance to settle, so it is not the step that hangs.
       await consumer.run({
-        eachMessage: async ({ topic, partition, message, heartbeat }): Promise<void> => {
+        eachMessage: async (payload): Promise<void> => {
+          const { topic, partition, message } = payload;
+          // Called through `payload` rather than destructured: kafkajs' own
+          // heartbeat happens to be a closure, but a method pulled off its
+          // object is a `this`-scoping bug waiting for the day it stops being
+          // one. The wrapper costs nothing and cannot come unbound.
+          const heartbeat = (): Promise<void> => payload.heartbeat();
           if (message.value === null) return;
           const source: ConsumedSource = {
             groupId,

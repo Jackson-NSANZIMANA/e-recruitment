@@ -68,7 +68,7 @@ const FIELD_ORDER = [
 /** `<byteLength>:<value>` for a string, `-` for null. Boundaries cannot be forged. */
 function encodeValue(value: string | null): string {
   if (value === null) return '-';
-  return `${Buffer.byteLength(value, 'utf8')}:${value}`;
+  return `${String(Buffer.byteLength(value, 'utf8'))}:${value}`;
 }
 
 /**

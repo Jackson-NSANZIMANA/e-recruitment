@@ -124,7 +124,7 @@ export class OfficerTransitionsService {
         if (physicianName.length === 0 || physicianName.length > MAX_PHYSICIAN_NAME) {
           return {
             kind: 'INVALID_MEDICAL_INPUT',
-            reason: `CERT_VERIFIED requires physicianName (1-${MAX_PHYSICIAN_NAME} chars) — the signing government physician is the audit substance`,
+            reason: `CERT_VERIFIED requires physicianName (1-${String(MAX_PHYSICIAN_NAME)} chars) — the signing government physician is the audit substance`,
           };
         }
       } else if (physicianName.length > 0) {

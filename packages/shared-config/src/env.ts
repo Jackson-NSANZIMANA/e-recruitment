@@ -18,7 +18,7 @@ export class EnvValidationError extends Error {
 
   constructor(issues: readonly string[]) {
     super(
-      `Invalid environment configuration (${issues.length} issue${issues.length === 1 ? '' : 's'}):\n` +
+      `Invalid environment configuration (${String(issues.length)} issue${issues.length === 1 ? '' : 's'}):\n` +
         issues.map((i) => `  - ${i}`).join('\n'),
     );
     this.name = 'EnvValidationError';
@@ -77,10 +77,10 @@ export function string(opts: StringOpts = {}): EnvSpec<string> {
     parse: (key, raw): ParseResult<string> => {
       if (isEmpty(raw)) return fail(`${key} is required`);
       if (opts.minLength !== undefined && raw.length < opts.minLength) {
-        return fail(`${key} must be at least ${opts.minLength} characters`);
+        return fail(`${key} must be at least ${String(opts.minLength)} characters`);
       }
       if (opts.maxLength !== undefined && raw.length > opts.maxLength) {
-        return fail(`${key} must be at most ${opts.maxLength} characters`);
+        return fail(`${key} must be at most ${String(opts.maxLength)} characters`);
       }
       if (opts.pattern !== undefined && !opts.pattern.test(raw)) {
         return fail(`${key} does not match required format`);
@@ -97,8 +97,8 @@ export function integer(opts: { readonly min?: number; readonly max?: number } =
       if (isEmpty(raw)) return fail(`${key} is required`);
       const n = Number(raw);
       if (!Number.isInteger(n)) return fail(`${key} must be an integer, got "${raw}"`);
-      if (opts.min !== undefined && n < opts.min) return fail(`${key} must be >= ${opts.min}`);
-      if (opts.max !== undefined && n > opts.max) return fail(`${key} must be <= ${opts.max}`);
+      if (opts.min !== undefined && n < opts.min) return fail(`${key} must be >= ${String(opts.min)}`);
+      if (opts.max !== undefined && n > opts.max) return fail(`${key} must be <= ${String(opts.max)}`);
       return ok(n);
     },
   };
@@ -169,7 +169,7 @@ export function list(
         .map((s) => s.trim())
         .filter((s) => s.length > 0);
       if (opts.minItems !== undefined && items.length < opts.minItems) {
-        return fail(`${key} must contain at least ${opts.minItems} item(s)`);
+        return fail(`${key} must contain at least ${String(opts.minItems)} item(s)`);
       }
       return ok(items);
     },

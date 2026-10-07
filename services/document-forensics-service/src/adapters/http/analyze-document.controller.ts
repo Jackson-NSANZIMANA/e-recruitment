@@ -131,7 +131,7 @@ function requireString(value: unknown, field: string, maxLength: number): string
   }
   const trimmed = value.trim();
   if (trimmed.length > maxLength) {
-    throw new HttpError(400, 'FIELD_TOO_LONG', `${field} exceeds ${maxLength} chars`);
+    throw new HttpError(400, 'FIELD_TOO_LONG', `${field} exceeds ${String(maxLength)} chars`);
   }
   return trimmed;
 }

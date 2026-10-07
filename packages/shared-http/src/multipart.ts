@@ -102,9 +102,18 @@ function malformed(detail: string): HttpError {
  * is case-sensitive and `ctx.contentType` is lower-cased.
  */
 export function rawContentType(headers: IncomingHttpHeaders): string {
-  const value = headers['content-type'];
-  if (Array.isArray(value)) return value[0] ?? '';
-  return value ?? '';
+  // Narrowed explicitly rather than inferred. @types/node types `content-type`
+  // as a SINGLE string, so `Array.isArray(value)` narrowed to `any[]` and
+  // `value[0] ?? ''` returned `any` — an unsafe return hiding inside a
+  // defensive check, in the function that decides a multipart boundary. Node
+  // can still hand back an array for a repeated header, so the guard stays;
+  // every branch now proves it returns a string. Same three outcomes as
+  // before: the string itself, the first array entry, or ''.
+  const value: string | string[] | undefined = headers['content-type'];
+  if (typeof value === 'string') return value;
+  if (!Array.isArray(value)) return '';
+  const first: unknown = value[0];
+  return typeof first === 'string' ? first : '';
 }
 
 /** Extract and validate the boundary. 415 when the body is not multipart at all. */
@@ -224,7 +233,7 @@ export function parseMultipartFormData(
 
     parts += 1;
     if (parts > maxParts) {
-      throw malformed(`Too many parts (limit ${maxParts}).`);
+      throw malformed(`Too many parts (limit ${String(maxParts)}).`);
     }
 
     const headerEnd = scan.indexOf(CRLF_CRLF, partStart);
@@ -246,14 +255,14 @@ export function parseMultipartFormData(
         throw new HttpError(
           413,
           'FIELD_TOO_LARGE',
-          `Field "${fieldName}" exceeds the ${maxFieldBytes}-byte limit.`,
+          `Field "${fieldName}" exceeds the ${String(maxFieldBytes)}-byte limit.`,
         );
       }
       // First occurrence wins (see MultipartForm.fields).
       if (!fields.has(fieldName)) fields.set(fieldName, content.toString('utf8'));
     } else {
       if (files.length + 1 > maxFiles) {
-        throw malformed(`Too many file parts (limit ${maxFiles}).`);
+        throw malformed(`Too many file parts (limit ${String(maxFiles)}).`);
       }
       files.push({
         fieldName,

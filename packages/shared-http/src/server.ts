@@ -90,7 +90,7 @@ async function readBody(req: IncomingMessage, maxBytes: number): Promise<Buffer>
     const buf = chunk as Buffer;
     total += buf.length;
     if (total > maxBytes) {
-      throw new HttpError(413, 'PAYLOAD_TOO_LARGE', `Request body exceeds the ${maxBytes}-byte limit.`);
+      throw new HttpError(413, 'PAYLOAD_TOO_LARGE', `Request body exceeds the ${String(maxBytes)}-byte limit.`);
     }
     chunks.push(buf);
   }
@@ -419,7 +419,7 @@ export function startHttpServer(options: HttpServerOptions): Promise<HttpServer>
         process.once('SIGINT', shutdown);
       }
 
-      resolve({ url: `http://${reachableHost}:${resolvedPort}`, port: resolvedPort, stop });
+      resolve({ url: `http://${reachableHost}:${String(resolvedPort)}`, port: resolvedPort, stop });
     });
   });
 }

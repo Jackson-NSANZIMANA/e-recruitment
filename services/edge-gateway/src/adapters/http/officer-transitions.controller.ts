@@ -40,8 +40,8 @@ import {
 
 const FITNESS: ReadonlySet<string> = new Set(['FIT', 'UNFIT']);
 const CERT_VERDICTS: ReadonlySet<string> = new Set(['CERT_VERIFIED', 'CERT_REJECTED']);
-const DECISIONS: ReadonlySet<string> = new Set(['SHORTLIST', 'REJECT']);
-const ADJUDICATIONS: ReadonlySet<string> = new Set(['CLEAR', 'REJECT']);
+const DECISIONS: ReadonlySet<'SHORTLIST' | 'REJECT'> = new Set(['SHORTLIST', 'REJECT']);
+const ADJUDICATIONS: ReadonlySet<'CLEAR' | 'REJECT'> = new Set(['CLEAR', 'REJECT']);
 /** final_decision_notes is varchar(1000) upstream. */
 const MAX_NOTES = 1_000;
 const MAX_PHYSICIAN = 200;

@@ -121,7 +121,7 @@ export function erasureRequestRoutes(
         }
         const note = body.note;
         if (typeof note !== 'string' || note.trim().length === 0 || note.length > MAX_NOTE) {
-          throw new HttpError(400, 'INVALID_REQUEST', `Field "note" is required (max ${MAX_NOTE} chars).`);
+          throw new HttpError(400, 'INVALID_REQUEST', `Field "note" is required (max ${String(MAX_NOTE)} chars).`);
         }
         let outcome;
         try {

@@ -47,7 +47,7 @@ export class MinioObjectWriter implements ObjectStoreWrite {
     );
     if (!WRITE_OK.has(reply.status)) {
       throw new ObjectStoreUnavailableError(
-        `object store refused the write with ${reply.status} for ${bucket}/${key}`,
+        `object store refused the write with ${String(reply.status)} for ${bucket}/${key}`,
       );
     }
   }

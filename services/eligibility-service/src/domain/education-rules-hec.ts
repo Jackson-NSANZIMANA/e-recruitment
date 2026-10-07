@@ -88,7 +88,7 @@ export function evaluateHecEducation(
   const reason = meetsRequirement
     ? `Degree ${evaluatedLevel} satisfies the ${requirement.minLevel} requirement for ${category}${
         specialistApplies ? ` (specialist field ${String(payload.specialistField)} recognised)` : ''
-      }${ageExceptionApplies ? `; qualifies the relaxed maximum age of ${appliedMaxAge}` : ''}.`
+      }${ageExceptionApplies ? `; qualifies the relaxed maximum age of ${String(appliedMaxAge)}` : ''}.`
     : !meetsLevel
       ? `Degree level ${evaluatedLevel} does not meet the ${requirement.minLevel} minimum for ${category}.`
       : payload.specialistField === null

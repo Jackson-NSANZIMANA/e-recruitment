@@ -182,7 +182,7 @@ function requireNotes(value: unknown): string | null {
     throw new HttpError(400, 'INVALID_NOTES', 'Field "notes" must be a string when present.');
   }
   if (value.length > MAX_NOTES) {
-    throw new HttpError(400, 'INVALID_NOTES', `Field "notes" must be at most ${MAX_NOTES} characters.`);
+    throw new HttpError(400, 'INVALID_NOTES', `Field "notes" must be at most ${String(MAX_NOTES)} characters.`);
   }
   return value;
 }

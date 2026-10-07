@@ -87,7 +87,7 @@ export const DEFAULT_DEAD_LETTER_POLICY: DeadLetterPolicy = {
 export function resolveDeadLetterPolicy(overrides: Partial<DeadLetterPolicy> = {}): DeadLetterPolicy {
   const policy: DeadLetterPolicy = { ...DEFAULT_DEAD_LETTER_POLICY, ...overrides };
   if (!Number.isInteger(policy.maxHandlerAttempts) || policy.maxHandlerAttempts < 1) {
-    throw new RangeError(`deadLetter.maxHandlerAttempts must be an integer >= 1, got ${policy.maxHandlerAttempts}`);
+    throw new RangeError(`deadLetter.maxHandlerAttempts must be an integer >= 1, got ${String(policy.maxHandlerAttempts)}`);
   }
   if (!(policy.baseBackoffMs >= 0) || !(policy.maxBackoffMs >= policy.baseBackoffMs)) {
     throw new RangeError('deadLetter backoff must satisfy 0 <= baseBackoffMs <= maxBackoffMs');

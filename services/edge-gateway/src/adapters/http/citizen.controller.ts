@@ -237,7 +237,7 @@ function optionalBounded(value: unknown, field: string): string | undefined {
     throw new HttpError(
       400,
       'INVALID_REQUEST',
-      `Field "${field}" must be a string of 1–${MAX_ACADEMIC_REF} characters when present.`,
+      `Field "${field}" must be a string of 1–${String(MAX_ACADEMIC_REF)} characters when present.`,
     );
   }
   return value.trim();

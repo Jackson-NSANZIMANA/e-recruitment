@@ -61,7 +61,7 @@ export class DocumentEnvelopeError extends Error {
 export function deriveEnvelopeKey(secret: string): Buffer {
   if (secret.trim().length < MIN_SECRET_LENGTH) {
     throw new DocumentEnvelopeError(
-      `MINIO_ENCRYPTION_KEY must be at least ${MIN_SECRET_LENGTH} characters.`,
+      `MINIO_ENCRYPTION_KEY must be at least ${String(MIN_SECRET_LENGTH)} characters.`,
     );
   }
   return Buffer.from(

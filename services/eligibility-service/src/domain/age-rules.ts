@@ -50,10 +50,10 @@ export function evaluateAgeEligibility(
   const eligible = age >= criteria.minAge && age <= appliedMaxAge;
 
   const reason = eligible
-    ? `Age ${age} is within the ${criteria.minAge}–${appliedMaxAge} band for ${category}.`
+    ? `Age ${String(age)} is within the ${String(criteria.minAge)}–${String(appliedMaxAge)} band for ${category}.`
     : age < criteria.minAge
-      ? `Age ${age} is below the minimum age ${criteria.minAge} for ${category}.`
-      : `Age ${age} exceeds the maximum age ${appliedMaxAge} for ${category}.`;
+      ? `Age ${String(age)} is below the minimum age ${String(criteria.minAge)} for ${category}.`
+      : `Age ${String(age)} exceeds the maximum age ${String(appliedMaxAge)} for ${category}.`;
 
   return {
     eligible,

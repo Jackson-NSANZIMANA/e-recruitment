@@ -71,7 +71,7 @@ export class HttpApplicationsGateway implements ApplicationsGateway {
       this.#cached = null;
     }
     if (res.status !== 200) {
-      throw new UpstreamUnavailableError(`application-service responded ${res.status}`);
+      throw new UpstreamUnavailableError(`application-service responded ${String(res.status)}`);
     }
     const body = (await res.json()) as { applications?: ApplicantApplication[] };
     return body.applications ?? [];
@@ -114,7 +114,7 @@ export class HttpApplicationsGateway implements ApplicationsGateway {
     if (res.status === 409 && body.status === 'NOT_APPLICABLE' && body.agency && body.currentStatus) {
       return { kind: 'NOT_APPLICABLE', agency: body.agency, currentStatus: body.currentStatus };
     }
-    throw new UpstreamUnavailableError(`application-service withdraw-own responded ${res.status}`);
+    throw new UpstreamUnavailableError(`application-service withdraw-own responded ${String(res.status)}`);
   }
 
   /**
@@ -275,7 +275,7 @@ export class HttpApplicationsGateway implements ApplicationsGateway {
     }
     if (res.status !== 200) {
       // Never echo credentials — the status alone is the diagnostic.
-      throw new UpstreamUnavailableError(`iam-service token request responded ${res.status}`);
+      throw new UpstreamUnavailableError(`iam-service token request responded ${String(res.status)}`);
     }
     const body = (await res.json()) as { token?: string; expiresAt?: string };
     if (typeof body.token !== 'string' || typeof body.expiresAt !== 'string') {

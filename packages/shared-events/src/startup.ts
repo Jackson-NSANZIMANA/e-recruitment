@@ -49,7 +49,7 @@ export class StartupTimeoutError extends Error {
     readonly step: string,
     readonly timeoutMs: number,
   ) {
-    super(`startup timed out while ${step} after ${timeoutMs}ms`);
+    super(`startup timed out while ${step} after ${String(timeoutMs)}ms`);
     this.name = 'StartupTimeoutError';
   }
 }

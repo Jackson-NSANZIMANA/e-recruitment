@@ -124,7 +124,7 @@ export function serializeSetCookie(cookie: SetCookie): string {
     if (!Number.isInteger(cookie.maxAgeSeconds) || cookie.maxAgeSeconds < 0) {
       throw new Error(`Cookie "${cookie.name}": Max-Age must be a non-negative integer.`);
     }
-    parts.push(`Max-Age=${cookie.maxAgeSeconds}`);
+    parts.push(`Max-Age=${String(cookie.maxAgeSeconds)}`);
   }
   if (cookie.expires !== undefined) {
     parts.push(`Expires=${cookie.expires.toUTCString()}`);

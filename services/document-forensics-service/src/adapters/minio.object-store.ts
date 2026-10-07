@@ -51,7 +51,7 @@ export class MinioObjectStore implements ObjectStore {
     if (reply.status === 404) return null; // no such key (or bucket) — absence, not a fault
     if (reply.status !== 200) {
       throw new ObjectStoreUnavailableError(
-        `object store returned ${reply.status} for ${bucket}/${key}`,
+        `object store returned ${String(reply.status)} for ${bucket}/${key}`,
       );
     }
     // Unsealed → verbatim. Sealed → authenticated decryption bound to this path.

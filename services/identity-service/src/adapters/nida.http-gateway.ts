@@ -106,7 +106,7 @@ export class NidaHttpGateway implements NidaGateway {
     nidaLookupHash: string,
   ): Promise<NidaLookupResult> {
     if (!response.ok) {
-      throw new NidaUnavailableError(`NIDA returned HTTP ${response.status}`, requestId);
+      throw new NidaUnavailableError(`NIDA returned HTTP ${String(response.status)}`, requestId);
     }
 
     let wire: NidaLookupWire;
