@@ -209,6 +209,22 @@ Checked on the unified `main` (all branches merged, 2026-10-06):
   Measured: **5 warnings before, 0 after**, with `Tasks: 20 successful` either
   way.
 
+* **Step 4 was proven on full infra by CI, not just locally.** The branch's
+  `Proofs` job (GitHub Actions run 37550868400) ran `pnpm verify` — build +
+  all 54 proofs — against real tier1+tier2 Docker on Node 24 and **passed in
+  6m06s**. That exit code is load-bearing here: `scripts/run-selfchecks.sh`
+  exits 1 whenever `fail > 0`, so a green job means **54/54, zero failures**.
+  The three static jobs were green too (Lint ratchet 1m22s, Typecheck 50s,
+  Security scan 15s). Locally, without Docker, the signature was the expected
+  `Proofs: 11 passed, 43 failed` throughout.
+
+  *Caveat, left standing deliberately:* the raw CI log could not be downloaded
+  from this working environment, so the per-proof lines and a
+  `grep -c TimeoutNegativeWarning` on that run were NOT inspected. The 54/54
+  claim rests on the runner's exit contract above, which is sound; the
+  warning-absence claim for kafkajs continues to rest on the owner's
+  2026-10-06 run on `9c35abe`, which step 4 does not touch.
+
 * **`pnpm verify` builds first.** You do not need a separate `pnpm build`, but
   running one costs nothing and makes a stale-`dist` failure impossible.
 * **`kafkajs@2.2.4` is carried as a pnpm patch (`patches/kafkajs@2.2.4.patch`).**
