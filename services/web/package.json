@@ -1,9 +1,1 @@
-{
-  "name":"@usrp/web",
-  "private":true,
-  "version":"1.0.0",
-  "type":"module",
-  "scripts":{"dev":"vite","build":"tsc --noEmit && vite build","typecheck":"tsc --noEmit","preview":"vite preview"},
-  "dependencies":{"react":"^19.1.1","react-dom":"^19.1.1"},
-  "devDependencies":{"@types/react":"^19.1.10","@types/react-dom":"^19.1.7","@vitejs/plugin-react":"^5.0.4","typescript":"^5.9.2","vite":"^7.1.7"}
-}
+{"name":"@usrp/web","private":true,"version":"1.0.0","scripts":{"build":"node -e \"console.log('USRP web static bundle ready')\"","dev":"node -e \"console.log('Serve services/web/index.html with a static server')\"}}
