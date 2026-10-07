@@ -358,25 +358,37 @@ lockfile means the tree is not the commit you think it is.
 ## 4. Static gates (fast, no infra)
 
 ```bash
-pnpm turbo run build        # expect: Tasks: 20 successful, 20 total
-pnpm turbo run typecheck    # expect: Tasks: 34 successful, 34 total (0 errors)
-pnpm turbo run test         # expect: Tasks: 19 successful, 19 total
-node scripts/check-workspace-build.mjs   # expect: "✓ workspace build present — 19 package(s) …"
+pnpm turbo run build        # expect: Tasks: 21 successful, 21 total
+pnpm turbo run typecheck    # expect: Tasks: 36 successful, 36 total (0 errors)
+pnpm turbo run test         # expect: Tasks: 20 successful, 20 total (and 0 warnings)
+pnpm lint:count             # expect: 0        <- this is the CI gate, see below
+node scripts/check-workspace-build.mjs   # expect: "✓ workspace build present — 20 package(s) …"
 ```
 
-That last line is the guard against stale build output: it imports every workspace
+`pnpm lint:count` is `scripts/count-lint.sh`, and it is the gate CI enforces as a
+ratchet at baseline 0. **Run `pnpm build` first or the number is fiction** — the rule
+set is type-aware, and a single missing `dist/` was measured producing 270 phantom
+errors in one service. The script takes `--build` to do that for you. It prints one
+integer and exits 0; the *comparison against the baseline* lives in the CI step, so a
+local `0` and a green Lint job mean the same thing. Counts above the baseline make CI
+exit 1 and print the offending lines (drilled: an injected error produced
+`::error::Lint debt increased to 1 (baseline 0)` and job exit 1).
+
+`check-workspace-build.mjs` is the guard against stale build output: it imports every workspace
 package's `dist/` and asserts that every value name its `src/index.ts` declares is
 actually exported. It is **semantic, not timestamp-based** — a turbo cache hit
 legitimately leaves `dist/` untouched (verified: `pnpm build` can report `FULL TURBO` and
 not rewrite a single file), so mtime comparisons report false staleness. `pnpm verify` and
 `bash scripts/run-selfchecks.sh` now both run this check.
 
-Reality check on that last number, so you are not misled: only **5** of those 19 tasks
+Reality check on the test number, so you are not misled: only **5** of those 20 tasks
 actually run tests (`shared-security`, `eligibility-service`, `application-service`,
-`field-sync-service`, `edge-gateway` — 17 unit tests total). The other 14 are `build`
-dependencies, and 16 of the 21 packages have no `test` script at all (21 since
-step 4 added `@usrp/shared-logging`). The *behavioural*
-proofs are the selfchecks in §7, not these.
+`field-sync-service`, `edge-gateway` — 17 unit tests total). The other 15 are `build`
+dependencies, and **16 of the 21** packages have no `test` script at all (21 packages
+since step 4 added `@usrp/shared-logging`). The *behavioural* proofs are the selfchecks
+in §7, not these. Every one of the 21 packages does have a `lint` script — that is
+load-bearing, and `count-lint.sh` preflights it (exit 2) precisely so a package can
+never again go unlinted and invisible the way `shared-database` did.
 
 ## 5. Infrastructure up
 
