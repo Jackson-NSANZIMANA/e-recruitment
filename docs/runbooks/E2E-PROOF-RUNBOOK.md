@@ -672,3 +672,83 @@ What this leaves for **your** Docker run to close: the Kafka-dependent proofs
 `verify-dev-boot.sh` — i.e. exactly Appendix A's non-Postgres rows, plus the aggregation
 inside `pnpm verify`.
 
+
+---
+
+## Appendix E — running it live WITHOUT Docker (`tools/native-stack/`)
+
+**Measured 2026-10-07 on commit `076a9ff`: `11 passed / 43 failed` → `43 passed / 11 failed`,
+with zero logic failures among the remainder.** Docker is still the supported path and the
+one CI uses; this is the fallback for a machine or sandbox that has no container runtime.
+
+```bash
+bash tools/native-stack/up.sh                       # ~90s cold, ~6s warm, idempotent
+export PATH="$PWD/tools/native-stack/bin:$PATH"
+bash scripts/run-selfchecks.sh                      # 43 passed / 11 failed
+bash tools/native-stack/up.sh --stop
+```
+
+### What it really runs
+
+Nothing here is a stub of the system under test:
+
+* **PostgreSQL 16.14** — a real server. The Debian mirrors are unreachable in the target
+  sandbox but `registry.npmjs.org` is, and `@embedded-postgres/linux-x64` republishes real
+  PostgreSQL builds, so the server is fetched from npm and the major version is pinned to
+  match `postgres:16-alpine` in `docker-compose.tier1.yml`.
+* **The four G2G registry mocks** — the containers' *own* `server.js`, unchanged, on the
+  same ports (3100 NIDA / 3101 NESA / 3102 RIB / 3103 HEC) with the same data files and env
+  the compose file declares. These are already mocks by design; running them under `node`
+  instead of under Docker changes nothing about what they return.
+* **`scripts/bootstrap-db.sh`, unmodified** — all 25 RLS/migration files applied for real.
+  Result: 28 tables, 18 RLS policies, 11 FORCE'd-RLS tables, 3 officer accounts.
+
+### The two shims, and why they are not cheating
+
+`tools/native-stack/bin/` holds a `psql` and a `docker` that go on `PATH`.
+
+* **`psql`** — the embedded-postgres distribution ships `initdb`/`pg_ctl`/`postgres` but
+  **not** the client, and the repo applies its RLS files through `psql`. The shim speaks the
+  real wire protocol via the workspace's own `postgres.js`. It is not a SQL interpreter;
+  Postgres still parses and enforces everything.
+* **`docker`** — translates only the Postgres-directed calls the repo makes
+  (`docker exec -i usrp-postgres psql …`, `pg_isready`, `info`, `ps`) to that native server,
+  so `bootstrap-db.sh` and `run-selfchecks.sh` run **unmodified**. Any other container —
+  kafka, minio, clamav — makes it exit non-zero and say so. It deliberately cannot fake a
+  service into existence.
+
+> **Trap, found the hard way.** psql's backslash commands are **client-side**. Sending a
+> `.sql` file straight to the backend fails with ``syntax error at or near "\"`` — which is
+> exactly how `verify-isolation.sql` first failed here, on its line 17
+> `\set ON_ERROR_STOP on`. The shim therefore scans the file and peels off `\set` / `\echo`
+> before sending SQL, tracking single quotes, double quotes, dollar-quoted bodies, line
+> comments and block comments so a backslash inside any of those is left alone. With that
+> fixed the isolation proof passes on its own assertions: *RDF officer sees own applicant
+> (1), RNP applicant hidden (0); RDF officer denied `rnp_ops.applications`
+> (insufficient_privilege); system service sees both (2).*
+
+### What it cannot do, and why those 11 stay red
+
+The sandbox's egress allowlist is effectively npm only — `dl.min.io`, `api.adoptium.net`,
+`downloads.apache.org` and `objects.githubusercontent.com` all fail TLS, so no broker
+binary and no JRE can be obtained (`node-jre`/`java-jre` *download* a JRE at install time).
+
+Every remaining failure was attributed to an unreachable service; **none is a logic error**:
+
+| Failing proof | Blocked on |
+|---|---|
+| `shared-events: Kafka round-trip` | Kafka `localhost:29092` |
+| `shared-events: dead-letter + bounded retry` | Kafka |
+| `application-service: vetting projection` | Kafka |
+| `eligibility-service: event-driven age+academic` | Kafka |
+| `background-vetting: RIB criminal gate` | Kafka |
+| `scheduling-service: slot assignment` | Kafka |
+| `audit-service: immutable trail` | Kafka |
+| `pipeline: full chain → DOCUMENT_REVIEW_GREEN` | Kafka |
+| `document-forensics: bounded-real analyzer` | MinIO `:9000` + ClamAV `:3310` |
+| `document-forensics: upload ingress` | MinIO + ClamAV |
+| `dev boot: all 12 services` | aggregate of the above |
+
+That is **exactly** Appendix A's non-Postgres rows. ClamAV is left failing on purpose: a
+stub would fake the very thing the forensics proof exists to check. These 11 are the ones
+CI proves green on real Docker.
