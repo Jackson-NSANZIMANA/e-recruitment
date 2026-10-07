@@ -26,6 +26,13 @@
 // Exit 0 = build present and in agreement with src. Exit 1 = stale/missing,
 // with the fix. Wired into scripts/run-selfchecks.sh, so the gate refuses to
 // run 40 proofs against an artefact that cannot represent the source.
+//
+// A missing dist/index.js has TWO causes and they need different commands, so
+// they are reported separately: the tree was never installed (`pnpm install`;
+// the build then dies with `tsc: not found` before writing anything — the
+// normal state right after a pull that adds a package), or it was installed but
+// never built (`pnpm build`). Reporting the second when the first is true sends
+// the reader to a command that cannot succeed.
 // ══════════════════════════════════════════════════════════════════
 
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
@@ -34,7 +41,41 @@ import { pathToFileURL } from 'node:url';
 
 const ROOTS = ['packages', 'services'];
 const problems = [];
+const importFailures = [];
+const notInstalled = [];
 let checked = 0;
+
+/**
+ * Does this workspace package have a dependency tree in THIS checkout?
+ *
+ * A branch that adds a package (or a package that only exists after a pull)
+ * lands src/ and package.json immediately, but node_modules/ is created by
+ * `pnpm install` alone. `turbo run build` then tries to run the build tool from
+ * `node_modules/.bin` and dies with `sh: 1: tsc: not found` / `spawn ENOENT`
+ * BEFORE dist/ is ever written — which the missing-dist branch below would
+ * otherwise report as "never built", sending the reader to `pnpm build`, which
+ * cannot succeed. The two defects need different commands, so they are named
+ * differently.
+ *
+ * Signal: every package in this workspace declares at least one dependency, so
+ * an absent node_modules/ directory is unambiguous. A package that legitimately
+ * declares none is never reported.
+ */
+function hasDependencyTree(dir, pkg) {
+  let declared;
+  try {
+    declared = JSON.parse(readFileSync(pkg, 'utf8'));
+  } catch {
+    return true; // unreadable package.json is not this check's business
+  }
+  const deps = [
+    ...Object.keys(declared.dependencies ?? {}),
+    ...Object.keys(declared.devDependencies ?? {}),
+    ...Object.keys(declared.peerDependencies ?? {}),
+  ];
+  if (deps.length === 0) return true;
+  return existsSync(join(dir, 'node_modules'));
+}
 
 /**
  * Value names explicitly re-exported by an index file (`type X` entries excluded).
@@ -77,7 +118,14 @@ for (const root of ROOTS) {
 
     const distIndex = join(dir, 'dist', 'index.js');
     if (!existsSync(distIndex)) {
-      problems.push(`${dir} — never built (no dist/index.js)`);
+      if (!hasDependencyTree(dir, pkgPath)) {
+        notInstalled.push(dir);
+        problems.push(
+          `${dir} — dependencies NOT INSTALLED (no node_modules; 'pnpm build' fails here with 'tsc: not found')`,
+        );
+      } else {
+        problems.push(`${dir} — never built (no dist/index.js)`);
+      }
       continue;
     }
 
@@ -88,7 +136,10 @@ for (const root of ROOTS) {
     try {
       mod = await import(pathToFileURL(distIndex).href);
     } catch (error) {
-      problems.push(`${dir} — dist/index.js failed to import: ${error.message}`);
+      // A consequence, not a cause: this dist exists and was importable until
+      // something it depends on lost its dist/. Printed after the root causes
+      // so one missing build does not bury its own diagnosis in a cascade.
+      importFailures.push(`${dir} — dist/index.js failed to import: ${error.message}`);
       continue;
     }
 
@@ -105,9 +156,14 @@ for (const root of ROOTS) {
   }
 }
 
-if (problems.length > 0) {
+if (problems.length + importFailures.length > 0) {
   console.error('\u001b[1;31m✗ workspace build is missing or stale — proofs would fail on a module import, not on the invariant they prove.\u001b[0m');
-  for (const p of problems) console.error(`    ${p}`);
+  for (const p of [...problems, ...importFailures]) console.error(`    ${p}`);
+  if (notInstalled.length > 0) {
+    console.error(
+      `  Fix: \u001b[0;36mpnpm install\u001b[0m   (${notInstalled.length} package(s) above have no dependency tree in this checkout — a branch that adds a package needs an install before it can build)`,
+    );
+  }
   console.error('  Fix: \u001b[0;36mpnpm build\u001b[0m   (or: pnpm turbo run build --force; a cache hit usually makes this seconds)');
   process.exit(1);
 }
