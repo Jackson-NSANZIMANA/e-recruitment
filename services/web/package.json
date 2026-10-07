@@ -1,1 +1,1 @@
-{"name":"@usrp/web","private":true,"version":"1.0.0","scripts":{"build":"node -e \"console.log('USRP web static bundle ready')\"","dev":"node -e \"console.log('Serve services/web/index.html with a static server')\"}}
+{"name":"@usrp/web","private":true,"version":"1.0.0","scripts":{"dev":"node server.mjs","build":"node -e \"console.log('USRP web static bundle ready')\"}}
