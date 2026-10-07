@@ -42,16 +42,36 @@ fail() { printf '\033[0;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 
 # ── stop ──────────────────────────────────────────────────────────────
 if [[ "${1:-}" == "--stop" ]]; then
+  # Deliberately NOT pidfile-only. A second (idempotent) up.sh run truncates
+  # the pidfile and short-circuits start_mock when a port is already bound, so
+  # the pidfile can be empty while the mocks are very much alive — that bug
+  # once left all four registries running after a "successful" --stop. Stop by
+  # identity instead, and verify the ports actually freed.
   if [[ -f "$PIDFILE" ]]; then
     while read -r pid; do
-      kill -- "-$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
+      [[ -n "$pid" ]] && { kill -- "-$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true; }
     done < "$PIDFILE"
     rm -f "$PIDFILE"
   fi
+
+  # The four G2G mocks, matched on this repo's own mocks path so nothing
+  # unrelated on the box is touched.
+  pkill -f "$REPO_ROOT/infrastructure/docker/mocks/[a-z]*/server.js" 2>/dev/null || true
+
   if [[ -d "$PGDATA" && -x "$PGROOT/bin/pg_ctl" ]]; then
     LD_LIBRARY_PATH="$PGROOT/lib" "$PGROOT/bin/pg_ctl" -D "$PGDATA" stop -m fast >/dev/null 2>&1 || true
   fi
-  ok "native stack stopped"
+
+  sleep 1
+  leftover=""
+  for p in "${PGPORT}" 3100 3101 3102 3103; do
+    (printf '' > "/dev/tcp/127.0.0.1/$p") 2>/dev/null && leftover="$leftover $p"
+  done
+  if [[ -n "$leftover" ]]; then
+    warn "still listening after stop:$leftover"
+    exit 1
+  fi
+  ok "native stack stopped (5432, 3100-3103 all free)"
   exit 0
 fi
 
@@ -133,10 +153,16 @@ export NODE_PATH="$STACK_DIR/node_modules"
 start_mock() {
   local name="$1" port="$2" data="$3" secret="${4:-}"
   if (printf '' > "/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
-    warn "port $port already in use — assuming $name is up"; return
+    warn "port $port already in use — assuming $name is up"
+    # Re-adopt it so --stop can still find it after an idempotent re-run.
+    pgrep -f "$MOCKS/$name/server.js" 2>/dev/null >> "$PIDFILE" || true
+    return
   fi
+  # Launch via the ABSOLUTE script path: the process cmdline is what --stop
+  # matches on, and a relative "nida/server.js" is unmatchable once the shell
+  # that set the cwd is gone.
   ( cd "$MOCKS" && PORT="$port" MOCK_DATA_FILE="$MOCKS/$data" HMAC_SECRET="$secret" \
-      setsid nohup node "$name/server.js" > "$STACK_DIR/$name.log" 2>&1 < /dev/null &
+      setsid nohup node "$MOCKS/$name/server.js" > "$STACK_DIR/$name.log" 2>&1 < /dev/null &
     echo $! >> "$PIDFILE" )
 }
 log "starting the four G2G registry mocks"

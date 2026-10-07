@@ -30,7 +30,7 @@ pnpm infra:up                              # 4. tier1 THEN tier2 (order matters:
                                            #    network is external to tier1's project)
 [ -f .env ] || pnpm generate:env           # 5a. .env — skip if you already have one
 pnpm bootstrap:db                          # 5b. schema + RLS + dev officers
-pnpm verify                                # 6. THE GATE — 53 proofs
+pnpm verify                                # 6. THE GATE — 54 proofs
 ```
 
 > **Step 3 is not optional.** Each `@usrp/*` package resolves **types** to `src/` and
@@ -680,6 +680,13 @@ inside `pnpm verify`.
 **Measured 2026-10-07 on commit `076a9ff`: `11 passed / 43 failed` → `43 passed / 11 failed`,
 with zero logic failures among the remainder.** Docker is still the supported path and the
 one CI uses; this is the fallback for a machine or sandbox that has no container runtime.
+
+> **This appendix does NOT move the documented baseline.** `Proofs: 11 passed, 43 failed`
+> remains the expected signature of a checkout with **no** infrastructure, exactly as the
+> known-state notes say, and those 43 are still not to be "fixed" — they are infra-gated,
+> not broken. Everything here is opt-in: it changes what is *running*, never what the
+> proofs assert. Nothing in `tools/native-stack/` is on any default path, and no proof,
+> service or config was altered to make a red one go green.
 
 ```bash
 bash tools/native-stack/up.sh                       # ~90s cold, ~6s warm, idempotent
