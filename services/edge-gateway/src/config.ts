@@ -22,7 +22,7 @@
 // WHAT IS DELIBERATELY ABSENT:
 //
 //   • AGENCY. loadAgencyDeploymentConfig is NOT called. Agency comes from the
-//     verified session per request (ADR-021 §2.1); a deployment-scoped agency
+//     verified session per request (ADR-028 §2.1); a deployment-scoped agency
 //     makes it a property of the process, and a process is something an
 //     operator can point at the wrong agency.
 //   • KAFKA. The edge publishes no domain events — see the reasoning in

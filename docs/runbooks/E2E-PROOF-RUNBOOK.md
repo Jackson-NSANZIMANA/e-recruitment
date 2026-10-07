@@ -61,63 +61,154 @@ Checked on the unified `main` (all branches merged, 2026-10-06):
   green and the other 43 are red, you are looking at missing/unhealthy infra,
   not at broken code. That exact 11/43 split is the measured signature of
   "Docker is not running".
-* **`pnpm lint` fails, and that is expected — but the count depends on HOW you
-  count, and the lint path itself has three enforcement gaps.** The lint
-  toolchain was never installable before (eslint undeclared, config unreachable,
-  `strictTypeChecked` set without `projectService`). It now runs for the first
-  time and is reporting real, pre-existing debt. **CI does not run lint**, so
-  this gates nothing — do not treat it as a regression and do not let it block
-  the infra run. The step-4 inventory, re-measured 2026-10-06 on a BUILT tree
-  and rule-by-rule reconciled with an independent measurement — both land on
-  the same numbers (method matters — see the bullets below):
-  * **Error count, full recursive `*/src/**/*.ts`: 126 errors, 0 warnings** —
-    `restrict-template-expressions` 56, `no-console` 19, `no-unused-vars` 14,
-    `explicit-function-return-type` 12, `consistent-type-imports` 8,
-    `require-await` 7, rest ≤2 each. Nothing suppressed, no rule weakened.
-    (A naive per-package loop undercounts to 119 — see the next bullet for why.)
-  * **`shared-database` has no `lint` script at all** — the only one of the 20
-    workspace packages — so `pnpm lint` never lints it. Its 7 errors (6
-    `no-unused-vars` + the raw `console.log` at `src/outbox.ts:313`) are
-    invisible to every existing lint path. Add the script (with a QUOTED glob)
-    as part of step 4.
-  * **The per-package scripts as written undercount.** `eslint src/**/*.ts`
-    runs through sh, which has no globstar: in any package with subdirectories
-    the unquoted glob expands to `src/*/*.ts` — two-level files only. Example:
-    edge-gateway's script lints 16 of its 37 source files, missing `src/main.ts`
-    and all 17 files of `src/adapters/http/`. Scripts-as-written report ~86
-    errors vs 126 recursive. Quote the glob in every `lint` script as part
-    of step 4.
-  * **`pnpm lint` (turbo) fail-fasts** — one failing package aborts the run and
-    hides the rest (`Tasks: 0 successful, 19 total`). For a full count use
-    `pnpm -r --no-bail run lint`, plus shared-database manually until it has a
-    script.
-  * **A missing/stale `dist/` poisons the number**: `@usrp/*` types resolve to
-    `dist/index.d.ts`, so linting an unbuilt tree inflates type-aware rules to
-    ~1200 "could not be resolved" errors. Always `pnpm build` first.
-  * **Raw `console.*`**: the 19-file inventory is the 5 package files
-    `shared-database/src/outbox.ts`, `shared-events/src/kafka-bus.ts`,
-    `shared-events/src/startup.ts`, `shared-http/src/server.ts`,
-    `shared-sms/src/log-sms.channel.ts` plus 14 `*.consumer.ts` adapters. Of
-    those 19 files, **18 carry actual raw violations (19 statements —
-    `academic-vetting.consumer.ts` has two, and `outbox.ts`'s is invisible to
-    `pnpm lint` until shared-database gets a script)**;
-    `kafka-bus.ts` uses only `console.warn`/`console.error`, which the config
-    deliberately allows — it stays on the inventory for the step-4
-    routing-through-the-redacting-sink decision, but it is not a lint error.
-    (`src/main.ts` composition roots and audit-logger adapters are exempt by
-    design; `warn`/`error` are allowed everywhere.) These log UUIDs, enums and
-    correlationIds only — no PII today; a consistency gap, not a live leak.
-  * **`ADR-021` is a number collision**: stray
-    `docs/architecture/adr/ADR-021-edge-tier.md` vs the canonical series'
-    `docs/architecture/adrs/ADR-021-contact-capture-and-delivery.md` — and the
-    `adr/` vs `adrs/` directory split is itself the deeper problem.
-  * **`turbo.json` line 100** declares `"test": { "outputs": ["coverage/**"] }`
-    although no task writes coverage.
-  * **Structural gap: CI has no lint job at all** (`ci-backend.yml` is
-    typecheck + verify + security-scan) while 19 packages define `lint` scripts
-    nothing runs — so a one-off cleanup would quietly undo itself. Plan: fix
-    the debt first, then add enforcement (ratchet or non-blocking job); do NOT
-    add a blocking lint job on top of known failures.
+* **Lint is CLEAN and CI enforces it: 0 errors across all 21 packages.**
+  Step 4 (2026-10-06) took the count from **126 → 0** without weakening a
+  single rule and without editing `eslint.config.base.mjs`. The history is
+  kept here because the *measurement* was wrong in four ways before it was
+  right, and anyone re-measuring needs to reproduce the right number.
+
+  **How to measure (one command, and it is the same one CI runs):**
+
+  ```bash
+  pnpm build && pnpm lint:count      # -> 0   (scripts/count-lint.sh)
+  ```
+
+  `scripts/count-lint.sh` exists because the naive count was wrong four ways,
+  each of which hid real errors:
+
+  1. **`shared-database` had no `lint` script** — the only one of the then-20
+     packages — so `pnpm -r run lint` skipped it and its 7 errors (6
+     `no-unused-vars` + the raw `console.log` at `src/outbox.ts:313`) were
+     invisible to every lint path. It has one now, and the script's
+     **preflight fails loudly** if any package ever loses its lint script or
+     re-unquotes its glob — debt must not be able to "fall" by going
+     unmeasured.
+  2. **Unquoted globs undercounted.** `eslint src/**/*.ts` runs through sh,
+     which has no globstar, so it expanded to two levels only (edge-gateway
+     linted 16 of its 37 files, missing `src/main.ts` and all 17 files of
+     `src/adapters/http/`). Every package now quotes it: `eslint 'src/**/*.ts'`.
+  3. **`pnpm lint` (turbo) fail-fasts** — one failing package aborts the run
+     and hides the rest. The counter uses `pnpm -r --no-bail run lint`.
+  4. **The documented formula itself undercounted by 2.** ESLint prints the
+     SINGULAR `✖ 1 problem` when a package has exactly one error, so a
+     `[0-9]+ problems` regex silently dropped audit-service and
+     biometric-service. That — and nothing else — is why the handover's
+     documented 126 first measured as 124. The regex is `problems?` now.
+
+  **And always `pnpm build` first.** `@usrp/*` types resolve through `dist/`,
+  so linting an unbuilt tree inflates the type-aware rules to ~1200
+  "could not be resolved" errors. The script takes `--build` and CI does it
+  as its own step.
+
+  **What the 126 were, and how they were cleared** (cheapest first; each
+  landed as its own commit with its own re-measurement):
+
+  | Rule | n | How it was cleared |
+  |---|---|---|
+  | `consistent-type-imports` | 8 | inline `import('x').T` hoisted to `import type`. NOT auto-fixable despite the rule being "fixable" — the fixer does not cover the `import()`-annotation branch, so `eslint --fix` was a verified no-op. |
+  | `require-await` | 7 | async port impls with no `await`: `async` dropped, value wrapped in `Promise.resolve()` so the interface still returns a Promise. |
+  | `no-unused-vars` | 14 | 13 dead imports + 1 dead catch binding DELETED (nothing renamed to `_` to dodge the rule). |
+  | `explicit-function-return-type` | 12 | return types written out, each exactly what tsc already inferred. |
+  | `no-console` | 19 | routed through the new `@usrp/shared-logging` sink — see below. |
+  | `restrict-template-expressions` | 56 | numbers in template literals wrapped in `String()` — behaviour-identical to the implicit conversion. |
+  | tail | 10 | type-safety gaps; **two were real bugs** — see below. |
+
+  The tail was **10, not the "≤2" the step-4 handover estimated**. (Its 10th
+  error is an `unbound-method` whose rule name wraps onto the next output
+  line, so a per-rule grep under-reports it; the `✖` totals are authoritative.)
+
+* **`@usrp/shared-logging` is the one redacting log sink.** `no-console` was
+  not cleared by silencing it. The edge-gateway's `redact()` /
+  `summariseError()` — the existing control — were **lifted verbatim into a new
+  zero-dependency package**, and `edge-gateway/src/adapters/audit-logger.adapter.ts`
+  now imports and re-exports them, so there is ONE definition of "what may
+  never reach a log" and no second copy to drift. `verify-edge-hygiene` still
+  reports **95 checks ✓**, now driving the shared function.
+
+  Every rewritten call keeps its `msg` value, its field names and its
+  msg-first key order, so existing greps still match; the only change is that
+  fields pass through `redact()`.
+
+  **The sink writes to `process.stdout`/`process.stderr`, not `console.*`** —
+  deliberately. The alternatives were to allow-list the sink in the eslint
+  config or to add an `eslint-disable`, both of which soften `no-console` to
+  fit the implementation. A sink that has already serialised its line wants
+  the fd, not the formatter; the rule stays at full strength and the file
+  passes it honestly.
+
+  **DECISION, as step 4 required: the rule-ALLOWED `console.warn`/`console.error`
+  lines ROUTE, they do not stay raw** — including the `shared-events/kafka-bus.ts`
+  pair that was singled out. A warn line leaking a National ID is exactly as
+  unrecoverable as an info line, so the redaction guarantee must not depend on
+  severity. Stream assignment is unchanged (warn/error → stderr).
+
+  Exempt and still raw, by architecture: the `src/main.ts` composition roots
+  (they print boot/shutdown lines before any sink exists) and the edge audit
+  adapter (it IS a sink). Verified by grep, not by a green lint: the only
+  `console.` matches left under `packages/*/src` and `services/*/src` outside
+  those two classes are **two comments inside `sink.ts`**.
+
+* **Two of the lint findings were real bugs, not style.** This is the argument
+  for having done the cleanup at all:
+  * **Filename control-character guard (document-forensics upload).**
+    `CONTROL_CHAR_RE` was `/[-\u001f\u007f]/` — the `\u0000` opening the
+    intended `\u0000-\u001f` range had been lost, making the leading `-` a
+    LITERAL hyphen. Measured before the fix: `report-2026.pdf` **REJECTED**,
+    while ESC (`\u001b`), NUL (`\u0000`) and LF (`\u000a`) were all
+    **ACCEPTED** — i.e. it rejected the common case and admitted the exact
+    log-injection / terminal-escape vectors its own comment named. Replaced
+    with an explicit code-point scan; all five control characters now reject
+    and hyphenated filenames pass. `no-control-regex` found this.
+  * **Auth token typing lie (`shared-auth/src/token.ts`).** The payload was
+    `JSON.parse(...) as AuthTokenClaims`, which told the compiler `v` was
+    literally `1` and `kind` a `PrincipalKind` before a byte was validated —
+    so the genuine checks read as dead code ("comparison is always false,
+    since `1 !== 1`"). It parses as `UnverifiedClaims` (same keys, every value
+    `unknown`) now, so each guard means to the type system what it always
+    meant at runtime. Two hardenings fell out: `expiresAt` must be a string
+    (it had been relying on `Date.parse` → NaN), and a malformed `roles` now
+    REJECTS the token instead of being cast into a `Principal`.
+    `verify-auth-token` is unchanged and green.
+  * Also closed by the tail: the edge's upstream byte-cap loop was operating
+    on `any` (undici types `Response.body` as `ReadableStream<any>` under
+    `lib: ["ES2022"]`) — in the code whose whole job is to bound untrusted
+    upstream bytes; `requireOneOf<T>`'s `T` appeared only in the return
+    position, so `requireOneOf<'CLEAR'|'REJECT'>(v, f, DECISIONS)` type-checked
+    while `DECISIONS` held `SHORTLIST`; and `rawContentType` returned `any`
+    from its defensive branch, in the function that decides a multipart
+    boundary.
+
+* **CI now runs lint, as a ratchet with baseline 0** (`lint` job in
+  `ci-backend.yml`). It fails only when the count EXCEEDS the baseline, and
+  the baseline is 0 only because the debt was driven to 0 FIRST — the rule
+  "never a blocking lint job on top of known failures" was honoured. The
+  ratchet form is kept deliberately: a regression names its own number instead
+  of dumping an undifferentiated wall, and an unavoidable future finding can
+  raise the baseline in one visible line rather than switching the gate off.
+  Both directions are drilled: adding one `console.log` makes it fail with
+  `lint errors: 1   baseline: 0`, and deleting a package's lint script makes
+  the preflight fail with exit 2.
+
+* **ADR numbering: the `adr/` vs `adrs/` split is GONE.** The stray
+  `docs/architecture/adr/ADR-021-edge-tier.md` collided with the canonical
+  `docs/architecture/adrs/ADR-021-contact-capture-and-delivery.md` — two
+  different accepted decisions answering to one number. The edge-tier ADR is
+  now **`docs/architecture/adrs/ADR-028-edge-tier.md`** (028 is the next free
+  number; 023 and 024 are referenced elsewhere in the repo and were
+  deliberately not reused), the `adr/` directory is deleted, and
+  `docs/architecture/adrs/` is the only home for ADRs. Note that `ADR-021`
+  still appears throughout the tree and is CORRECT: those references mean
+  contact capture. Only the six that meant the edge tier were repointed —
+  `pnpm-workspace.yaml`, `scripts/bootstrap-db.sh` (×2),
+  `scripts/run-selfchecks.sh`, `edge-gateway/src/adapters/session-store.pg-repository.ts`,
+  `edge-gateway/src/config.ts`, and `APPLICATION-LAYER-PRUNE.md`.
+
+* **`turbo.json`'s dead `"test": { "outputs": ["coverage/**"] }` is removed.**
+  No task writes coverage (all five `test` scripts are plain `tsx --test`), so
+  turbo printed `WARNING no output files found` on every executed test task.
+  Measured: **5 warnings before, 0 after**, with `Tasks: 20 successful` either
+  way.
+
 * **`pnpm verify` builds first.** You do not need a separate `pnpm build`, but
   running one costs nothing and makes a stale-`dist` failure impossible.
 * **`kafkajs@2.2.4` is carried as a pnpm patch (`patches/kafkajs@2.2.4.patch`).**
@@ -256,7 +347,8 @@ not rewrite a single file), so mtime comparisons report false staleness. `pnpm v
 Reality check on that last number, so you are not misled: only **5** of those 19 tasks
 actually run tests (`shared-security`, `eligibility-service`, `application-service`,
 `field-sync-service`, `edge-gateway` — 17 unit tests total). The other 14 are `build`
-dependencies, and 14 of 20 packages have no `test` script at all. The *behavioural*
+dependencies, and 16 of the 21 packages have no `test` script at all (21 since
+step 4 added `@usrp/shared-logging`). The *behavioural*
 proofs are the selfchecks in §7, not these.
 
 ## 5. Infrastructure up

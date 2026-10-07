@@ -69,7 +69,7 @@ export CLAMAV_PORT="${CLAMAV_PORT:-3310}"
 export CLAMAV_TIMEOUT_MS="${CLAMAV_TIMEOUT_MS:-30000}"
 export QR_SIGNING_KEY_ID="${QR_SIGNING_KEY_ID:-selfcheck-qr-key-1}"
 
-# ── Edge tier (ADR-021 / ADR-024) ──────────────────────────────
+# ── Edge tier (ADR-028 / ADR-024) ──────────────────────────────
 # The edge proof boots the gateway in-process against a stub upstream, so it
 # needs the same names services/edge-gateway/src/config.ts reads. Two notes:
 #

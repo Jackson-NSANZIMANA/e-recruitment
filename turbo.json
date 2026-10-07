@@ -97,7 +97,6 @@
     },
     "test": {
       "dependsOn": ["^build"],
-      "outputs": ["coverage/**"],
       "env": ["NODE_ENV", "DATABASE_URL", "REDIS_URL"]
     },
     "test:e2e": {

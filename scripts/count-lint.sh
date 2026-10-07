@@ -75,6 +75,11 @@ fi
 pnpm -r --no-bail run lint >"$LINT_LOG" 2>&1 || true
 
 # `problems?` / `errors?` — see defect 4 above.
-grep -oE '[0-9]+ problems? \([0-9]+ errors?' "$LINT_LOG" \
-  | grep -oE '^[0-9]+' \
+#
+# The `|| true` is load-bearing: with zero errors grep matches nothing and
+# exits 1, and under `set -o pipefail` that would make THIS SCRIPT FAIL ON A
+# CLEAN TREE — i.e. the gate would go red exactly when the code is perfect.
+# Found by running it at 0. The count is printed by awk either way.
+{ grep -oE '[0-9]+ problems? \([0-9]+ errors?' "$LINT_LOG" || true; } \
+  | { grep -oE '^[0-9]+' || true; } \
   | awk '{ s += $1 } END { print s + 0 }'

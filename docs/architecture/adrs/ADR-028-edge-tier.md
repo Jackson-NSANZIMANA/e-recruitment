@@ -1,4 +1,18 @@
-# ADR-021 — The Edge Tier
+# ADR-028 — The Edge Tier
+
+> **Renumbered 2026-10-06 (was ADR-021).** This document was written into a
+> stray `docs/architecture/adr/` directory — singular — and so collided with
+> the canonical series' `ADR-021-contact-capture-and-delivery.md` without
+> either file knowing. Two different decisions answered to one number for as
+> long as the two directories existed. The directory split was the deeper
+> defect and is now gone: `docs/architecture/adrs/` (plural) is the ONLY home
+> for ADRs. This decision keeps its content unchanged and takes 028, the next
+> free number (023 and 024 are referenced elsewhere in the repo and are
+> deliberately not reused here). References that meant THIS document — the
+> workspace manifest, bootstrap-db.sh, run-selfchecks.sh, the edge-gateway
+> session store and config, and APPLICATION-LAYER-PRUNE.md — were updated to
+> ADR-028 in the same change; references that meant contact capture were left
+> pointing at ADR-021.
 
 **Status:** Accepted
 **Date:** 2026-09-04
