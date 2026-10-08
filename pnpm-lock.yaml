@@ -615,6 +615,9 @@ importers:
 
   services/scheduling-service:
     dependencies:
+      '@usrp/shared-auth':
+        specifier: workspace:*
+        version: link:../../packages/shared-auth
       '@usrp/shared-config':
         specifier: workspace:*
         version: link:../../packages/shared-config

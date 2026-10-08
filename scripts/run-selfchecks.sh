@@ -82,6 +82,7 @@ export QR_SIGNING_KEY_ID="${QR_SIGNING_KEY_ID:-selfcheck-qr-key-1}"
 #     upstream credentials, so it is one published dev secret rather than two.
 export IAM_BASE_URL="${IAM_BASE_URL:-http://localhost:4011}"
 export APPLICATION_SERVICE_BASE_URL="${APPLICATION_SERVICE_BASE_URL:-http://localhost:4006}"
+export SCHEDULING_SERVICE_BASE_URL="${SCHEDULING_SERVICE_BASE_URL:-http://localhost:4007}"
 export IDENTITY_SERVICE_BASE_URL="${IDENTITY_SERVICE_BASE_URL:-http://localhost:4001}"
 export FIELD_SYNC_SERVICE_BASE_URL="${FIELD_SYNC_SERVICE_BASE_URL:-http://localhost:4009}"
 export EDGE_SESSION_HMAC_KEY="${EDGE_SESSION_HMAC_KEY:-dev_edge_session_hmac_key_min_32_chars!!}"
@@ -154,6 +155,7 @@ run_ts "deployment hygiene (EXPOSE ↔ .env.example port map, non-root, exec-for
 # It is the check that would have caught the four BFF services that never
 # existed being read as fact for a month.
 run_ts "edge-gateway: contract drift (registry ↔ OpenAPI ↔ upstream catalogue)" services/edge-gateway/selfcheck/verify-edge-contract.ts
+run_ts "application-service: BUILD-001 domain, canonical policy, and coverage hashes (P1–P4)" services/application-service/selfcheck/verify-campaign-domain.ts
 run_ts "edge-gateway: citizen submit front-door readiness (the release signal)" services/edge-gateway/selfcheck/verify-citizen-submit-readiness.ts
 run_ts "edge-gateway: source hygiene (layering, redaction, no raw console)" services/edge-gateway/selfcheck/verify-edge-hygiene.ts
 
@@ -247,6 +249,7 @@ run_ts "application-service: vetting projection"   services/application-service/
 # ADR-025: a committed transition can no longer lose its event (the GREEN-but-
 # never-scheduled defect). Right after the projection proof it hardens.
 run_ts "application-service: transactional outbox (atomic stage → relay → no lost CLEARED)" services/application-service/selfcheck/verify-outbox-slice.ts
+run_ts "BUILD-001: campaign control-plane P5–P17 (RLS, idempotency, lifecycle, races, public projection, outbox/audit, legacy)" services/application-service/selfcheck/verify-campaign-control-plane.ts
 run_ts "application-service: history immutability" services/application-service/selfcheck/verify-history-immutability.ts
 run_ts "eligibility-service: age gate"            services/eligibility-service/selfcheck/verify-age-eligibility.ts
 run_ts "eligibility-service: NESA education gate" services/eligibility-service/selfcheck/verify-education-eligibility.ts

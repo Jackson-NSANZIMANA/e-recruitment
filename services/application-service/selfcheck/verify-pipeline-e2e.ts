@@ -156,21 +156,26 @@ async function seedIdentity(id: string, nationalIdHash: string): Promise<void> {
 }
 
 async function seedCampaign(): Promise<void> {
-  await admin`
-    INSERT INTO public_core.recruitment_campaigns
-      (id, campaign_label, agency, status, target_categories,
-       registration_opens_at, registration_closes_at,
-       examination_start_date, examination_end_date, examination_reporting_hour)
-    VALUES
-      (${RDF_CAMPAIGN}, 'Pipeline RDF', 'RDF', 'REGISTRATION_OPEN',
-       '["GENERAL_ENLISTMENT"]',
-       now() - interval '1 day', now() + interval '30 days', '2026-09-01','2026-09-15',7)`;
-  // The venue the GREEN applicant's home district (GASABO) reports to — so
-  // scheduling can resolve a slot after eligibility clears.
-  await admin`
-    INSERT INTO public_core.campaign_venue_assignments
-      (campaign_id, district, province, venue_name, exam_date, reporting_time_hour)
-    VALUES (${RDF_CAMPAIGN}, ${HOME_DISTRICT}, 'KIGALI_CITY', ${VENUE_NAME}, ${EXAM_DATE}, 8)`;
+  // This is a migrated legacy campaign plus its existing venue; the fixture
+  // bypasses BUILD-001 authoring/session guards like the upgrade did.
+  await admin.begin(async (tx) => {
+    await tx`SET LOCAL session_replication_role = replica`;
+    await tx`
+      INSERT INTO public_core.recruitment_campaigns
+        (id, public_code, campaign_label, agency, status, target_categories,
+         registration_opens_at, registration_closes_at,
+         examination_start_date, examination_end_date, examination_reporting_hour)
+      VALUES
+        (${RDF_CAMPAIGN}, ${`LEGACY-${RDF_CAMPAIGN.replaceAll('-', '').toUpperCase()}`},
+         'Pipeline RDF', 'RDF', 'REGISTRATION_OPEN', '["GENERAL_ENLISTMENT"]',
+         now() - interval '1 day', now() + interval '30 days', '2026-09-01','2026-09-15',7)`;
+    // The venue the GREEN applicant's home district (GASABO) reports to — so
+    // scheduling can resolve a slot after eligibility clears.
+    await tx`
+      INSERT INTO public_core.campaign_venue_assignments
+        (campaign_id, district, province, venue_name, exam_date, reporting_time_hour)
+      VALUES (${RDF_CAMPAIGN}, ${HOME_DISTRICT}, 'KIGALI_CITY', ${VENUE_NAME}, ${EXAM_DATE}, 8)`;
+  });
 }
 
 interface StateRow {

@@ -59,7 +59,8 @@ export interface CreateWalkInResult {
  */
 export type CreateWalkInOutcome =
   | ({ readonly kind: 'REGISTERED' } & CreateWalkInResult)
-  | ({ readonly kind: 'ALREADY_APPLIED' } & CreateWalkInResult);
+  | ({ readonly kind: 'ALREADY_APPLIED' } & CreateWalkInResult)
+  | { readonly kind: 'NO_WALK_IN_CAMPAIGN' };
 
 export interface VetOnSiteInput {
   readonly actor: OfficerActor;
@@ -88,7 +89,8 @@ export interface WalkInRepository {
   /**
    * Register an on-site candidate. Returns ALREADY_APPLIED (never throws)
    * when the engine's live-intent index refuses a second live application
-   * for this (applicant, campaign, category).
+   * for this (applicant, campaign, category), or NO_WALK_IN_CAMPAIGN when
+   * cancellation won the campaign-row lock race after the pre-check.
    */
   createWalkInApplication(
     input: CreateWalkInInput,

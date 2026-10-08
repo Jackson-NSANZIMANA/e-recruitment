@@ -215,13 +215,18 @@ async function seed(): Promise<void> {
            registration_channel, identity_status)
         VALUES (${id}, ${hash}, 'enc','enc','enc','enc','MALE','WEB','VERIFIED')`;
     }
+    // This is deliberately a pre-BUILD-001 campaign fixture. Bypass the new
+    // authoring triggers just as a migrated legacy row would, while supplying
+    // its deterministic legacy public code required by migration 0002.
+    await tx`SET LOCAL session_replication_role = replica`;
     await tx`
       INSERT INTO public_core.recruitment_campaigns
-        (id, campaign_label, agency, status, target_categories, registration_opens_at,
+        (id, public_code, campaign_label, agency, status, target_categories, registration_opens_at,
          registration_closes_at, examination_start_date, examination_end_date,
          examination_reporting_hour, allows_walk_in)
       VALUES
-        (${CAMPAIGN}, 'SUBMISSION-INTEGRITY', 'RDF', 'REGISTRATION_OPEN',
+        (${CAMPAIGN}, ${`LEGACY-${CAMPAIGN.replaceAll('-', '').toUpperCase()}`},
+         'SUBMISSION-INTEGRITY', 'RDF', 'REGISTRATION_OPEN',
          '["GENERAL_ENLISTMENT"]', now() - interval '1 day', now() + interval '30 days',
          ${today}, ${today}, 7, true)`;
   });
@@ -508,9 +513,12 @@ async function main(): Promise<void> {
     //
     // A retry is a question about the PAST. It must be answerable from the
     // ledger alone.
-    await admin`
-      UPDATE public_core.recruitment_campaigns
-      SET registration_closes_at = now() - interval '1 day' WHERE id = ${CAMPAIGN}`;
+    await admin.begin(async (tx) => {
+      await tx`SET LOCAL session_replication_role = replica`;
+      await tx`
+        UPDATE public_core.recruitment_campaigns
+        SET registration_closes_at = now() - interval '1 day' WHERE id = ${CAMPAIGN}`;
+    });
     const closed = await admin<{ n: number }[]>`
       SELECT count(*)::int AS n FROM public_core.recruitment_campaigns
       WHERE id = ${CAMPAIGN} AND registration_closes_at < now()`;
@@ -569,9 +577,12 @@ async function main(): Promise<void> {
     // assertion would be pinning down an accident of fixture ordering rather
     // than a property of this slice.
 
-    await admin`
-      UPDATE public_core.recruitment_campaigns
-      SET registration_closes_at = now() + interval '30 days' WHERE id = ${CAMPAIGN}`;
+    await admin.begin(async (tx) => {
+      await tx`SET LOCAL session_replication_role = replica`;
+      await tx`
+        UPDATE public_core.recruitment_campaigns
+        SET registration_closes_at = now() + interval '30 days' WHERE id = ${CAMPAIGN}`;
+    });
     check('nothing new was written throughout', (await countApplications(DIGITAL_APPLICANT)) === 1);
     check('…and no ledger row was spent', (await countLedger(DIGITAL_APPLICANT)) === 1);
 

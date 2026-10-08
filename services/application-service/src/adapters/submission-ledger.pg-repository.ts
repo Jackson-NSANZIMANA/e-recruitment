@@ -46,6 +46,7 @@ import type { StageEvents } from '../ports/event-outbox.js';
 import { ApplicationPersistenceError } from '../domain/application.errors.js';
 import { AGENCY_TARGET, type AgencyTarget } from '../domain/agency-schema.js';
 import {
+  CampaignUnavailableForApplicationError,
   findLiveApplication,
   insertOpeningHistory,
   insertSubmittedApplication,
@@ -206,6 +207,9 @@ export class PgSubmissionLedger implements SubmissionLedger {
         return { kind: 'RECORDED', ...identifiers };
       });
     } catch (cause) {
+      if (cause instanceof CampaignUnavailableForApplicationError) {
+        return { kind: 'NO_OPEN_CAMPAIGN' };
+      }
       // The engine refused a second live application. The transaction above is
       // already dead, so the answer is resolved in a fresh one.
       if (isLiveIntentViolation(cause)) {

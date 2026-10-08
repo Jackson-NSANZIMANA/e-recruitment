@@ -3,9 +3,8 @@
 //
 // Every upstream route this tier may reach, transcribed from the running
 // controllers. Path constants are duplicated here ON PURPOSE rather than
-// imported: importing application-service's constants would make the edge
-// depend on that service's package, and the whole point of a catalogue is that
-// adding a target is a reviewable edit to a named allowlist. The contract
+// imported: importing service constants would couple the edge to service
+// packages, and adding a target remains a reviewable named allowlist edit. The contract
 // selfcheck asserts these strings still match the controllers.
 //
 // An edge operation may reach NOTHING that is not in this file.
@@ -16,8 +15,8 @@
 // can approve an edit to the copy nothing reads.
 // ══════════════════════════════════════════════════════════════════
 
-/** The four upstream services the edge composes. There is no fifth. */
-export type UpstreamService = 'iam' | 'identity' | 'application' | 'field-sync';
+/** Explicitly allowlisted upstream services; no request-derived target is possible. */
+export type UpstreamService = 'iam' | 'identity' | 'application' | 'field-sync' | 'scheduling';
 
 export interface UpstreamOperation {
   readonly id: string;
@@ -87,6 +86,19 @@ export const UPSTREAM = Object.freeze({
   // application-service — walk-in.controller.ts
   walkInRegister: op('walkInRegister', 'application', 'POST', '/v1/applications/walk-in/register', 'officer-jwt'),
   walkInVet: op('walkInVet', 'application', 'POST', '/v1/applications/walk-in/vet', 'officer-jwt'),
+
+  // application-service — campaign-control / public-read controllers (BUILD-001)
+  campaignCreate: op('campaignCreate', 'application', 'POST', '/v1/campaigns', 'officer-jwt'),
+  campaignPolicy: op('campaignPolicy', 'application', 'POST', '/v1/campaigns/policy', 'officer-jwt'),
+  campaignPublish: op('campaignPublish', 'application', 'POST', '/v1/campaigns/publish', 'officer-jwt'),
+  campaignRegistrationClose: op('campaignRegistrationClose', 'application', 'POST', '/v1/campaigns/registration-close', 'officer-jwt'),
+  campaignComplete: op('campaignComplete', 'application', 'POST', '/v1/campaigns/complete', 'officer-jwt'),
+  campaignCancel: op('campaignCancel', 'application', 'POST', '/v1/campaigns/cancel', 'officer-jwt'),
+  publicCampaignList: op('publicCampaignList', 'application', 'GET', '/v1/campaigns', 'none'),
+  publicCampaignDetail: op('publicCampaignDetail', 'application', 'GET', '/v1/campaigns/detail', 'none'),
+
+  // scheduling-service — scheduling-owned session/coverage command (BUILD-001)
+  campaignSession: op('campaignSession', 'scheduling', 'POST', '/v1/campaigns/session', 'officer-jwt'),
 
   // field-sync-service — enroll-device / sync-scores / resolve-conflict controllers
   enrollDevice: op('enrollDevice', 'field-sync', 'POST', '/v1/field-sync/devices', 'officer-jwt'),

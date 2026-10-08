@@ -145,13 +145,17 @@ async function seed(encryptionKey: string): Promise<void> {
       cross_agency_lock_reason = 'ACCEPTED'
     WHERE id = ${E3}`;
 
-  await admin`
-    INSERT INTO public_core.recruitment_campaigns
-      (id, campaign_label, agency, status, target_categories,
-       registration_opens_at, registration_closes_at,
-       examination_start_date, examination_end_date, examination_reporting_hour)
-    VALUES (${CAMPAIGN}, 'Erasure-slice campaign', 'RDF', 'REGISTRATION_OPEN', '["GENERAL_ENLISTMENT"]',
-            now() - interval '1 day', now() + interval '30 days', '2026-10-01', '2026-10-15', 7)`;
+  await admin.begin(async (tx) => {
+    await tx`SET LOCAL session_replication_role = replica`;
+    await tx`
+      INSERT INTO public_core.recruitment_campaigns
+        (id, public_code, campaign_label, agency, status, target_categories,
+         registration_opens_at, registration_closes_at,
+         examination_start_date, examination_end_date, examination_reporting_hour)
+      VALUES (${CAMPAIGN}, ${`LEGACY-${CAMPAIGN.replaceAll('-', '').toUpperCase()}`},
+              'Erasure-slice campaign', 'RDF', 'REGISTRATION_OPEN', '["GENERAL_ENLISTMENT"]',
+              now() - interval '1 day', now() + interval '30 days', '2026-10-01', '2026-10-15', 7)`;
+  });
 
   // E1: both terminal states, across two agencies (WITHDRAWN seeded directly —
   // the enum value exists; the platform has no writer yet, deliberately).

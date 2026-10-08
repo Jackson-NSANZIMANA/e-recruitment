@@ -196,9 +196,16 @@ apply_sql "${RLS_DIR}/0024_edge_rate_limit_buckets.sql" "rls/0024 (shared edge r
 #     dependency, idempotently.
 apply_sql "${RLS_DIR}/0025_required_extensions.sql" "rls/0025 (required extensions: pgcrypto)"
 
+# 23e. BUILD-001 Campaign & Policy Control Plane. Campaign ownership stays in
+#     application-service; scheduling owns one session per district and the
+#     versioned coverage head. This adds narrow campaign roles, append-only
+#     policy/publication/history/idempotency facts, lifecycle/session guards,
+#     a safe public read view, and only the scheduling outbox insert policy.
+apply_sql "${RLS_DIR}/0026_campaign_control_plane.sql" "rls/0026 (campaign control plane)"
+
 printf '\n'
 
-ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts + applicant auth + erasure requests + stored contact + edge sessions + event outbox + slot reservations + submission integrity + walk-in outbox grant + shared rate-limit buckets + required extensions in place"
+ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts + applicant auth + erasure requests + stored contact + edge sessions + event outbox + slot reservations + submission integrity + walk-in outbox grant + shared rate-limit buckets + required extensions + campaign control plane in place"
 
 # 24. Dev officer accounts (one per agency). A CONVENIENCE seed so the officer
 #     console / manual login smoke tests have real credentials to drive —

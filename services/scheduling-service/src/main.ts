@@ -23,9 +23,11 @@ import {
   type EventTransport,
 } from '@usrp/shared-config';
 import { startHttpServer, type HttpResult } from '@usrp/shared-http';
+import { makeAuthVerifier } from '@usrp/shared-auth';
 import { createSchedulingOutboxRelay, createSchedulingService } from './index.js';
 import { loadSchedulingConfig } from './config.js';
 import { startApplicationClearedConsumer } from './adapters/events/application-cleared.consumer.js';
+import { campaignSessionRoutes } from './adapters/campaign-session.controller.js';
 
 function createEventBus(serviceName: string, transport: EventTransport): EventBus {
   if (transport.kind === 'kafka') {
@@ -52,6 +54,11 @@ async function main(): Promise<void> {
   await bus.connect();
 
   const service = createSchedulingService(config, bus);
+  const verify = makeAuthVerifier({
+    publicKeyPem: config.auth.authPublicKeyPem,
+    issuer: config.auth.jwtIssuer,
+    audience: config.auth.jwtAudience,
+  });
 
   // The delivery guarantee for everything the gate stages (ADR-025/026). Started
   // before the consumer so a backlog left by a previous crash drains at once.
@@ -68,10 +75,11 @@ async function main(): Promise<void> {
   const server = await startHttpServer({
     serviceName: config.runtime.serviceName,
     port: config.runtime.port,
-    // Scheduling runs off the event backbone; the ONLY read route publishes the
-    // Ed25519 public key so a venue/biometric/physical-test stage can verify a
-    // slot-invitation QR OFFLINE (ADR-009). No PII, no state — a public key.
+    // Scheduling runs off the event backbone. The public key route publishes
+    // only the Ed25519 verification key; the authenticated BUILD-001 command
+    // configures the scheduling-owned campaign session and coverage head.
     routes: [
+      ...campaignSessionRoutes(service.campaignSessions, verify),
       {
         method: 'GET',
         path: '/v1/slots/invitation-key',

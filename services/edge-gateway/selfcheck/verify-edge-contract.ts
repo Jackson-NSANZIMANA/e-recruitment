@@ -254,10 +254,10 @@ section('The public surface and the brokered exception are exactly as approved')
  * Anything reachable without a session. Growing this list costs a reviewer's
  * signature, which is the entire mechanism — so the proof pins it.
  *
- * readSession and refreshSession are declared anonymous by the frontend registry
- * because the SPA calls them before it knows whether it has a session. Neither
- * can DO anything without one: the probe answers 401 and refresh answers 401.
- * The three that can succeed unauthenticated are the credential doors.
+ * readSession and refreshSession are declared anonymous because the SPA calls
+ * them before it knows whether it has a session. They do not expose protected
+ * data. Credential doors and the safe published-campaign catalogue are the
+ * additional approved anonymous operations.
  */
 const APPROVED_PUBLIC: readonly EdgeOperationId[] = [
   'readSession',
@@ -265,6 +265,8 @@ const APPROVED_PUBLIC: readonly EdgeOperationId[] = [
   'officerLogin',
   'requestApplicantOtp',
   'verifyApplicantOtp',
+  'listCampaigns',
+  'getCampaignDetail',
 ];
 
 check(
@@ -300,9 +302,9 @@ for (const id of FIELD_SYNC) {
   check(`${id}: not automatically retryable`, !operation.retryOnG2G);
 }
 check(
-  'the score batch has a raised body cap and nothing else does',
+  'only the policy document and field-sync batch have raised body caps',
   EDGE_OPERATION_IDS.filter((id) => edgeOperation(id).maxBodyBytes > 8 * 1_024).join(',') ===
-    'syncFieldScores',
+    'createCampaignPolicy,syncFieldScores',
 );
 
 // ── Summary ──────────────────────────────────────────────────

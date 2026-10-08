@@ -10,7 +10,8 @@
 //   3. Apply the right eligibility rules for that year
 // ══════════════════════════════════════════════════════════════════
 
-import type { Agency, ApplicationCategory, District } from './agency.types';
+import type { Agency, ApplicationCategory, District, Province } from './agency.types';
+import type { DocumentType } from './eligibility.types';
 
 export type CampaignStatus =
   | 'DRAFT'               // Created by admin, not yet published
@@ -51,7 +52,67 @@ export interface RecruitmentCampaign {
   readonly updatedAt: string;
 }
 
-// ── Campaign Venue Assignment ─────────────────────────────────────
+/** The public, editable-once campaign root created by the BUILD-001 control plane. */
+export interface CampaignDraftInput {
+  readonly publicCode: string;
+  readonly campaignLabel: string;
+  readonly targetCategories: readonly ApplicationCategory[];
+  readonly targetDistricts: readonly District[];
+  readonly registrationOpensAt: string;
+  readonly registrationClosesAt: string;
+  readonly examinationStartDate: string;
+  readonly examinationEndDate: string;
+  readonly examinationReportingHour: number;
+  readonly allowsWalkIn: boolean;
+  readonly targetIntakeCount?: number | null;
+  readonly contactPhoneNumbers?: readonly string[];
+  readonly contactWebsite?: string | null;
+}
+
+/** A versioned policy document; values are supplied by an authorized officer. */
+export interface CampaignCategoryPolicy {
+  readonly age: {
+    readonly minimumAge: number;
+    readonly maximumAge: number;
+    readonly referenceDate: string;
+  };
+  readonly education: {
+    readonly mode: string;
+    readonly threshold: string | number;
+  };
+  readonly criminalThreshold: string;
+  readonly requiredDocumentTypes: readonly DocumentType[];
+  readonly medicalMode: string;
+  readonly legalBasis: {
+    readonly code: string;
+    readonly reference: string;
+  };
+}
+
+export type CampaignPolicyDocument = Readonly<
+  Partial<Record<ApplicationCategory, CampaignCategoryPolicy>>
+>;
+
+export interface CampaignPolicyInput {
+  readonly publicCode: string;
+  readonly policyDocument: Readonly<Record<string, CampaignCategoryPolicy>>;
+  readonly legalBasisCode: string;
+  readonly legalBasisReference: string;
+}
+
+/** Versioned scheduling-owned session/coverage input. */
+export interface CampaignSessionInput {
+  readonly publicCode: string;
+  readonly district: District;
+  readonly province: Province;
+  readonly venueName: string;
+  readonly examDate: string;
+  readonly reportingTimeHour: number;
+  readonly capacityLimit: number | null;
+  readonly isActive: boolean;
+}
+
+/** ── Campaign Venue Assignment ───────────────────────────────────── */
 // Links a campaign to specific exam venues per district
 
 export interface CampaignVenueAssignment {

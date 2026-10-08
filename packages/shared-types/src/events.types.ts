@@ -299,9 +299,74 @@ export interface DocumentForensicsCompletedEvent extends BaseEvent {
   readonly flags: ForensicsFlags;
 }
 
+// ── Topic: campaign.lifecycle ─────────────────────────────────────
+// Stable fact identity and publicCode let consumers deduplicate an immutable
+// publication/history fact without exposing campaign internals to browsers.
+// Campaign events carry no applicant or officer PII.
+
+interface CampaignLifecycleEventBase extends BaseEvent {
+  readonly schemaVersion: '1.0';
+  readonly piiClassification: 'NONE';
+  readonly factId: string;
+  readonly campaignId: string;
+  readonly publicCode: string;
+  readonly agency: Agency;
+}
+
+export interface CampaignDraftCreatedEvent extends CampaignLifecycleEventBase {
+  readonly eventType: 'CAMPAIGN_DRAFT_CREATED';
+  readonly createdAt: string;
+}
+
+export interface CampaignPolicyVersionCreatedEvent extends CampaignLifecycleEventBase {
+  readonly eventType: 'CAMPAIGN_POLICY_VERSION_CREATED';
+  readonly policyVersionId: string;
+  readonly policyVersionNumber: number;
+  readonly createdAt: string;
+}
+
+export interface CampaignSessionConfiguredEvent extends CampaignLifecycleEventBase {
+  readonly eventType: 'CAMPAIGN_SESSION_CONFIGURED';
+  readonly district: string;
+  readonly coverageVersion: number;
+  readonly coverageHash: string;
+  readonly configuredAt: string;
+}
+
+export interface CampaignPublishedEvent extends CampaignLifecycleEventBase {
+  readonly eventType: 'CAMPAIGN_PUBLISHED';
+  readonly publicationId: string;
+  readonly policyVersionId: string;
+  readonly policyVersionNumber: number;
+  readonly coverageVersion: number;
+  readonly coverageHash: string;
+  readonly publishedAt: string;
+}
+
+export interface CampaignRegistrationClosedEvent extends CampaignLifecycleEventBase {
+  readonly eventType: 'CAMPAIGN_REGISTRATION_CLOSED';
+  readonly lifecycleHistoryId: string;
+  readonly closedAt: string;
+}
+
+export interface CampaignCompletedEvent extends CampaignLifecycleEventBase {
+  readonly eventType: 'CAMPAIGN_COMPLETED';
+  readonly lifecycleHistoryId: string;
+  readonly completedAt: string;
+}
+
+export interface CampaignCancelledEvent extends CampaignLifecycleEventBase {
+  readonly eventType: 'CAMPAIGN_CANCELLED';
+  readonly lifecycleHistoryId: string;
+  readonly cancelledAt: string;
+}
+
 // ── Topic: audit.immutable ────────────────────────────────────────
 
 export interface AuditEvent extends BaseEvent {
+  /** Present on BUILD-001 audit envelopes; existing event producers remain compatible. */
+  readonly schemaVersion?: '1.0';
+  readonly piiClassification?: 'NONE';
   readonly eventType: 'AUDIT_ENTRY';
   readonly entityType: 'APPLICANT' | 'APPLICATION' | 'OFFICER' | 'SYSTEM' | 'CAMPAIGN';
   readonly entityId: string;
@@ -331,6 +396,13 @@ export type USRPEvent =
   | FieldScoreCapturedEvent
   | NotificationDeliveredEvent
   | DocumentForensicsCompletedEvent
+  | CampaignDraftCreatedEvent
+  | CampaignPolicyVersionCreatedEvent
+  | CampaignSessionConfiguredEvent
+  | CampaignPublishedEvent
+  | CampaignRegistrationClosedEvent
+  | CampaignCompletedEvent
+  | CampaignCancelledEvent
   | AuditEvent;
 
 // ── Kafka Topic Names ─────────────────────────────────────────────
@@ -350,6 +422,7 @@ export const KAFKA_TOPICS = {
   FIELD_SCORE_CAPTURED: 'field.score.captured',
   NOTIFICATION_DELIVERED: 'notification.delivered', // NEW — invitation delivery outcome → PHYSICAL_TEST_SCHEDULED
   DOCUMENT_FORENSICS: 'document.forensics', // NEW — forensics verdict → amber-lane routing
+  CAMPAIGN_LIFECYCLE: 'campaign.lifecycle',
   AUDIT_IMMUTABLE: 'audit.immutable',
 } as const;
 

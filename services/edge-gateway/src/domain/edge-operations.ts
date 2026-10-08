@@ -1,7 +1,7 @@
 // ══════════════════════════════════════════════════════════════════
 // edge-gateway — The EDGE OPERATION REGISTRY (domain)
 //
-// The single declaration of the browser boundary: 26 operations, each naming its
+// The single declaration of the browser boundary: each operation names its
 // exact path, method, required session kind, CSRF obligation, body cap, retry
 // disposition and the approved upstream operation(s) it fronts.
 //
@@ -57,6 +57,7 @@ export interface EdgeOperation {
 
 const KIB = 1_024;
 const SMALL_BODY = 8 * KIB;
+const CAMPAIGN_POLICY_BODY = 32 * KIB;
 const FIELD_SYNC_BATCH_BODY = 512 * KIB;
 
 export const EDGE_OPERATIONS = Object.freeze({
@@ -67,6 +68,15 @@ export const EDGE_OPERATIONS = Object.freeze({
   requestApplicantOtp: { operationId: 'requestApplicantOtp', method: 'POST', path: '/edge/v1/auth/applicant/otp/request', session: 'anonymous', csrf: true, maxBodyBytes: SMALL_BODY, retryOnG2G: true, publicAllowlist: true, upstream: [UPSTREAM.otpRequest], composition: 'single' },
   verifyApplicantOtp: { operationId: 'verifyApplicantOtp', method: 'POST', path: '/edge/v1/auth/applicant/otp/verify', session: 'anonymous', csrf: true, maxBodyBytes: SMALL_BODY, retryOnG2G: false, publicAllowlist: true, upstream: [UPSTREAM.otpVerify], composition: 'single' },
   logoutApplicant: { operationId: 'logoutApplicant', method: 'POST', path: '/edge/v1/auth/applicant/logout', session: 'applicant', csrf: true, maxBodyBytes: SMALL_BODY, retryOnG2G: false, publicAllowlist: false, idempotentWithoutSession: true, upstream: [UPSTREAM.applicantLogout], composition: 'single' },
+  createCampaign: { operationId: 'createCampaign', method: 'POST', path: '/edge/v1/campaigns', session: 'officer', csrf: true, maxBodyBytes: SMALL_BODY, retryOnG2G: false, publicAllowlist: false, upstream: [UPSTREAM.campaignCreate], composition: 'single' },
+  createCampaignPolicy: { operationId: 'createCampaignPolicy', method: 'POST', path: '/edge/v1/campaigns/policy', session: 'officer', csrf: true, maxBodyBytes: CAMPAIGN_POLICY_BODY, retryOnG2G: false, publicAllowlist: false, upstream: [UPSTREAM.campaignPolicy], composition: 'single' },
+  configureCampaignSession: { operationId: 'configureCampaignSession', method: 'POST', path: '/edge/v1/campaigns/session', session: 'officer', csrf: true, maxBodyBytes: SMALL_BODY, retryOnG2G: false, publicAllowlist: false, upstream: [UPSTREAM.campaignSession], composition: 'single' },
+  publishCampaign: { operationId: 'publishCampaign', method: 'POST', path: '/edge/v1/campaigns/publish', session: 'officer', csrf: true, maxBodyBytes: SMALL_BODY, retryOnG2G: false, publicAllowlist: false, upstream: [UPSTREAM.campaignPublish], composition: 'single' },
+  closeCampaignRegistration: { operationId: 'closeCampaignRegistration', method: 'POST', path: '/edge/v1/campaigns/registration-close', session: 'officer', csrf: true, maxBodyBytes: SMALL_BODY, retryOnG2G: false, publicAllowlist: false, upstream: [UPSTREAM.campaignRegistrationClose], composition: 'single' },
+  completeCampaign: { operationId: 'completeCampaign', method: 'POST', path: '/edge/v1/campaigns/complete', session: 'officer', csrf: true, maxBodyBytes: SMALL_BODY, retryOnG2G: false, publicAllowlist: false, upstream: [UPSTREAM.campaignComplete], composition: 'single' },
+  cancelCampaign: { operationId: 'cancelCampaign', method: 'POST', path: '/edge/v1/campaigns/cancel', session: 'officer', csrf: true, maxBodyBytes: SMALL_BODY, retryOnG2G: false, publicAllowlist: false, upstream: [UPSTREAM.campaignCancel], composition: 'single' },
+  listCampaigns: { operationId: 'listCampaigns', method: 'GET', path: '/edge/v1/campaigns', session: 'anonymous', csrf: false, maxBodyBytes: SMALL_BODY, retryOnG2G: true, publicAllowlist: true, upstream: [UPSTREAM.publicCampaignList], composition: 'single' },
+  getCampaignDetail: { operationId: 'getCampaignDetail', method: 'GET', path: '/edge/v1/campaigns/detail', session: 'anonymous', csrf: false, maxBodyBytes: SMALL_BODY, retryOnG2G: true, publicAllowlist: true, upstream: [UPSTREAM.publicCampaignDetail], composition: 'single' },
   listApplications: { operationId: 'listApplications', method: 'GET', path: '/edge/v1/applications', session: 'officer', csrf: false, maxBodyBytes: SMALL_BODY, retryOnG2G: true, publicAllowlist: false, upstream: [UPSTREAM.listApplications], composition: 'single' },
   listAmberQueue: { operationId: 'listAmberQueue', method: 'GET', path: '/edge/v1/applications/amber-queue', session: 'officer', csrf: false, maxBodyBytes: SMALL_BODY, retryOnG2G: true, publicAllowlist: false, upstream: [UPSTREAM.amberQueue], composition: 'single' },
   findApplicationById: { operationId: 'findApplicationById', method: 'GET', path: '/edge/v1/applications/by-id', session: 'officer', csrf: false, maxBodyBytes: SMALL_BODY, retryOnG2G: true, publicAllowlist: false, upstream: [UPSTREAM.applicationById], composition: 'single' },

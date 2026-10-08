@@ -19,13 +19,14 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { sql, type SqlTransaction } from '@usrp/shared-database';
-import type { ApplicationCategory } from '@usrp/shared-types';
+import type { Agency, ApplicationCategory } from '@usrp/shared-types';
 import type { AgencyTarget } from '../domain/agency-schema.js';
 import type { CreateApplicationResult } from '../ports/application-repository.js';
 import { ApplicationPersistenceError } from '../domain/application.errors.js';
 
 /** The columns the front door sets on a brand-new SUBMITTED application. */
 export interface FrontDoorApplicationRow {
+  readonly agency: Agency;
   readonly applicantId: string;
   readonly campaignId: string;
   readonly category: ApplicationCategory;
@@ -56,6 +57,40 @@ export async function mintProcessingCode(
   return code;
 }
 
+/** A campaign was cancelled before this application transaction acquired its row lock. */
+export class CampaignUnavailableForApplicationError extends Error {
+  constructor() {
+    super('Campaign is no longer accepting applications.');
+    this.name = 'CampaignUnavailableForApplicationError';
+  }
+}
+
+/**
+ * Serialize every application insert against BUILD-001 cancellation. `FOR SHARE`
+ * conflicts with both the campaign service's `FOR UPDATE` lock and a direct
+ * status UPDATE's row lock. If cancellation owns the row first, the READ
+ * COMMITTED locking read observes its committed status and the insert is
+ * refused; if this insert owns it first, cancellation waits and then sees the
+ * committed application. This is deliberately narrow: legacy open/examination
+ * statuses remain accepted by their existing campaign-reader preconditions.
+ */
+export async function lockCampaignForApplicationInsert(
+  tx: SqlTransaction,
+  agency: Agency,
+  campaignId: string,
+): Promise<void> {
+  const campaigns = await tx<{ status: string }[]>`
+    SELECT status
+    FROM public_core.lock_campaign_for_application_insert(
+      ${campaignId}::uuid,
+      ${agency}::public_core.agency
+    )
+  `;
+  if (campaigns[0] === undefined || campaigns[0].status === 'CANCELLED') {
+    throw new CampaignUnavailableForApplicationError();
+  }
+}
+
 /**
  * INSERT the applications row at SUBMITTED in the owning agency's ops schema.
  *
@@ -75,6 +110,7 @@ export async function insertSubmittedApplication(
   input: FrontDoorApplicationRow,
   identifiers?: CreateApplicationResult,
 ): Promise<CreateApplicationResult> {
+  await lockCampaignForApplicationInsert(tx, input.agency, input.campaignId);
   const schema = sql(target.schema); // quoted identifier fragment
   const seqName = `${target.schema}.processing_code_seq`;
 

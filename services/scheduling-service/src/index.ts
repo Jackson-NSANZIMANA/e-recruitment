@@ -21,10 +21,13 @@ import { PgHomeDistrictReader } from './adapters/identity.pg-reader.js';
 import { PgVenueReader } from './adapters/venue.pg-reader.js';
 import { PgSlotLedger, SCHEDULING_OUTBOX_PRODUCER } from './adapters/slot-ledger.pg-repository.js';
 import { AssignSlotService, type SlotInvitationSigner } from './application/assign-slot.service.js';
+import { CampaignSessionService } from './application/campaign-session.service.js';
+import { PgCampaignSessionRepository } from './adapters/campaign-session.pg-repository.js';
 import type { SchedulingServiceConfig } from './config.js';
 
 export interface SchedulingService {
   readonly assignSlot: AssignSlotService;
+  readonly campaignSessions: CampaignSessionService;
 }
 
 /** Assemble the slot-assignment use case from config + event transport. */
@@ -42,6 +45,7 @@ export function createSchedulingService(
   };
   return {
     assignSlot: new AssignSlotService({ districtReader, venueReader, ledger, events, invitationSigner }),
+    campaignSessions: new CampaignSessionService(new PgCampaignSessionRepository()),
   };
 }
 
@@ -62,6 +66,18 @@ export function createSchedulingOutboxRelay(
 
 // ── Re-exports ─────────────────────────────────────────────────────
 export { AssignSlotService } from './application/assign-slot.service.js';
+export { CampaignSessionService } from './application/campaign-session.service.js';
+export { PgCampaignSessionRepository } from './adapters/campaign-session.pg-repository.js';
+export { CONFIGURE_CAMPAIGN_SESSION_PATH, campaignSessionRoutes } from './adapters/campaign-session.controller.js';
+export type {
+  CampaignSessionCommand,
+  CampaignSessionCommit,
+  CampaignSessionRepository,
+  StageCampaignSessionEvents,
+} from './ports/campaign-session.repository.js';
+export { CampaignSessionCommandError } from './application/campaign-session.service.js';
+export { CampaignSessionInputError } from './domain/campaign-session-validation.js';
+export { campaignCoverageHash, CAMPAIGN_COVERAGE_HASH_VERSION } from './domain/campaign-coverage.js';
 export type {
   AssignSlotCommand,
   AssignSlotDeps,

@@ -18,7 +18,7 @@
 // filed a second application for the same citizen. Nothing in the system
 // said no.
 //
-// Four outcomes, and the distinction between the last three is the whole
+// Five outcomes, and the distinction between the last four is the whole
 // point:
 //
 //   RECORDED        first time this key is seen → filed + announced.
@@ -32,8 +32,10 @@
 //                   guarantees it (rls/0022's uq_*_live_intent partial unique
 //                   index); this is that guarantee surfaced as an answer
 //                   rather than a 500.
+//   NO_OPEN_CAMPAIGN cancellation won the campaign-row lock race after the
+//                   campaign reader's earlier pre-check; nothing was filed.
 //
-// Like every other business outcome in this service, all four are RETURN
+// Like every other business outcome in this service, all five are RETURN
 // VALUES. Only infrastructure faults throw.
 // ══════════════════════════════════════════════════════════════════
 
@@ -80,7 +82,9 @@ export type RecordSubmissionOutcome =
    * exists under a DIFFERENT request key. Its identifiers are returned so the
    * citizen can be told which application they already hold.
    */
-  | ({ readonly kind: 'ALREADY_APPLIED' } & SubmissionIdentifiers);
+  | ({ readonly kind: 'ALREADY_APPLIED' } & SubmissionIdentifiers)
+  /** Cancellation won the campaign row-lock race; the new submission is refused. */
+  | { readonly kind: 'NO_OPEN_CAMPAIGN' };
 
 /**
  * What a previously-answered key implies, with no write attempted.

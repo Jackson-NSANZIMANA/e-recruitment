@@ -43,8 +43,8 @@ export const G2G_ERROR_CODES: ReadonlySet<string> = new Set([
 
 /**
  * The shape an `idempotencyKey` must already have when it reaches this
- * adapter (the submit controller validates first; this is the backstop that
- * keeps the "narrowly typed, validated field" property true by construction).
+ * adapter (each write controller validates first; this backstop keeps the
+ * narrowly typed field valid by construction).
  */
 const IDEMPOTENCY_KEY_UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -108,6 +108,8 @@ export class UpstreamClient implements UpstreamGateway {
         return this.#config.identityBaseUrl;
       case 'application':
         return this.#config.applicationBaseUrl;
+      case 'scheduling':
+        return this.#config.schedulingBaseUrl;
       case 'field-sync':
         return this.#config.fieldSyncBaseUrl;
       default: {
@@ -142,7 +144,8 @@ export class UpstreamClient implements UpstreamGateway {
 
     // Built from scratch. Nothing from the browser's header set appears here.
     // The ONE narrow exception is below: a validated Idempotency-Key, sent as
-    // a typed field by the submit controller — never a forwarded header.
+    // a typed field by an explicitly idempotent write controller — never a
+    // general header passthrough.
     const headers: Record<string, string> = {
       accept: 'application/json',
       'x-correlation-id': input.correlationId,

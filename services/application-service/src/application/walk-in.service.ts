@@ -191,6 +191,10 @@ export class WalkInService {
       eventsFor,
     );
 
+    if (created.kind === 'NO_WALK_IN_CAMPAIGN') {
+      return { kind: 'NO_WALK_IN_CAMPAIGN', agency };
+    }
+
     // Duplicate: no row, no ticket persisted or returned, no event, and no
     // audit of a registration that did not happen. The officer is handed the
     // application already on file.
