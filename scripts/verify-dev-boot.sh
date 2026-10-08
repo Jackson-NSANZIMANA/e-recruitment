@@ -97,10 +97,10 @@ LOG_DIR="${USRP_BOOT_LOG_DIR:-$REPO_ROOT/.boot-logs}"
 BOOT_LOG="$LOG_DIR/dev-boot.log"
 INHERIT_ENV="${USRP_BOOT_INHERIT_ENV:-0}"
 
-# Every service's main() ends with a .catch() that logs this and exits. It is
-# therefore the one marker that means "this service is not coming up", for all
-# eleven, regardless of cause — bad config, invalid key, unreachable broker.
-FATAL_STARTUP_PATTERN='startup_failed'
+# Every service's main() logs startup_failed before exiting. EADDRINUSE is
+# also fatal: an old process can answer /ready as the expected service while
+# this boot failed to bind its own port, creating a false-green result.
+FATAL_STARTUP_PATTERN='startup_failed|EADDRINUSE'
 # How many of a service's OWN lines to show when it fails. Generous: these are
 # one service's lines, not eleven services' lines, so there is no flood to cap.
 EVIDENCE_LINES="${USRP_BOOT_EVIDENCE_LINES:-80}"
@@ -125,7 +125,6 @@ note_fail() { bad "$1"; fail=$((fail + 1)); FAILED+=("$1"); }
 command -v curl >/dev/null 2>&1 || { bad 'curl is required'; exit 1; }
 
 mkdir -p "$LOG_DIR"
-: >"$BOOT_LOG"
 
 # ── Service discovery ──────────────────────────────────────
 # DERIVED from the filesystem, not a hard-coded list: a service added later is
@@ -173,6 +172,34 @@ template_value() {
     raw="${raw:1:${#raw}-2}"
   fi
   printf '%s' "$raw"
+}
+
+# A listener left by an earlier dev run can fool an HTTP readiness probe if it
+# is the same service. Refuse to start over any occupied scoped port; show the
+# owner when lsof/ss is available instead of silently trusting its response.
+port_is_listening() {
+  local port="$1" listeners=''
+  if command -v ss >/dev/null 2>&1; then
+    listeners="$(ss -H -ltn "sport = :$port" 2>/dev/null || true)"
+    [[ -n "$listeners" ]] && return 0
+  fi
+  if command -v lsof >/dev/null 2>&1; then
+    listeners="$(lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null || true)"
+    [[ -n "$listeners" ]] && return 0
+  fi
+  (exec 9<>"/dev/tcp/127.0.0.1/$port") >/dev/null 2>&1
+}
+
+port_listener_details() {
+  local port="$1" details=''
+  if command -v lsof >/dev/null 2>&1; then
+    details="$(lsof -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | sed '1d' | tr '\n' '; ' || true)"
+  fi
+  if [[ -z "$details" ]] && command -v ss >/dev/null 2>&1; then
+    details="$(ss -H -ltnp "sport = :$port" 2>/dev/null | tr '\n' '; ' || true)"
+  fi
+  [[ -n "$details" ]] || details='process owner unavailable'
+  printf '%s' "$details"
 }
 
 # ── 1. Static: the template assigns every service its OWN port ─────
@@ -237,6 +264,28 @@ if [[ $port_conflict -ne 0 || $turbo_gap -ne 0 ]]; then
   printf '%s%d failed%s — port contract is broken; not booting services.\n' "$RED" "$fail" "$NC"
   exit 1
 fi
+
+# ── 2b. Runtime: scoped ports must be free before this proof starts ──
+# Otherwise an old same-service process could answer /ready and make a failed
+# bind look green. Never kill a developer's process; identify it and stop here.
+log 'service ports are free before boot'
+preflight_conflicts=0
+for svc in "${SERVICES[@]}"; do
+  p="${PORT_OF[$svc]}"
+  if port_is_listening "$p"; then
+    details="$(port_listener_details "$p")"
+    note_fail "$svc — :$p is already listening ($details); stop that process before rerunning"
+    preflight_conflicts=1
+  fi
+done
+if [[ $preflight_conflicts -ne 0 ]]; then
+  printf '\n%s%d failed%s — occupied service ports; not booting.\n' "$RED" "$fail" "$NC"
+  exit 1
+fi
+note_pass "all ${#SERVICES[@]} scoped service ports are free"
+
+# Keep a previous boot log intact when static checks or the port preflight fail.
+: >"$BOOT_LOG"
 
 # ── 3. Boot through the REAL entrypoint, in a SANITIZED environment ────
 # `pnpm dev` is `bash scripts/dev.sh`, which sources the env file and execs
@@ -335,17 +384,16 @@ while :; do
       all_ready=0
     fi
   done
-  [[ $all_ready -eq 1 ]] && break
 
-  # FAIL FAST on a service that has ALREADY given up. `tsx watch` outlives its
-  # child by design, so process.exit(1) in a service does NOT end the process
-  # group and the liveness check below stays true — which is how a crash that
-  # is known in two seconds used to cost the entire ten-minute deadline.
-  if grep -q "$FATAL_STARTUP_PATTERN" "$BOOT_LOG" 2>/dev/null; then
+  # Check fatal markers BEFORE accepting readiness. In particular, a stale
+  # same-service process can answer /ready while this boot logs EADDRINUSE.
+  # Also fail fast when tsx watch survives a child that already reported exit.
+  if grep -Eq "$FATAL_STARTUP_PATTERN" "$BOOT_LOG" 2>/dev/null; then
     fatal_startup=1
-    log 'a service reported startup_failed — not waiting out the deadline'
+    log 'a service reported startup_failed or EADDRINUSE — readiness is not trusted'
     break
   fi
+  [[ $all_ready -eq 1 ]] && break
 
   if ! kill -0 "-$BOOT_PGID" 2>/dev/null && ! kill -0 "$BOOT_PGID" 2>/dev/null; then
     boot_died=1
@@ -355,11 +403,23 @@ while :; do
   sleep 2
 done
 
+# Catch a startup marker written just after the last readiness poll as well.
+if grep -Eq "$FATAL_STARTUP_PATTERN" "$BOOT_LOG" 2>/dev/null; then
+  fatal_startup=1
+fi
+
 declare -a FAILED_SERVICES=()
+fatal_service_count=0
 for svc in "${SERVICES[@]}"; do
   p="${PORT_OF[$svc]}"
   state="${READY[$svc]:-}"
-  if [[ "$state" == 'ready' || "$state" == 'health' ]]; then
+  prefix="$(turbo_prefix_for "$svc")"
+  service_log="$(grep -F "$prefix" "$BOOT_LOG" 2>/dev/null || true)"
+  if grep -Eq "$FATAL_STARTUP_PATTERN" <<<"$service_log"; then
+    note_fail "$svc — startup_failed/EADDRINUSE logged; :$p is not trusted"
+    FAILED_SERVICES+=("$svc")
+    fatal_service_count=$((fatal_service_count + 1))
+  elif [[ "$state" == 'ready' || "$state" == 'health' ]]; then
     note_pass "$svc — $state on :$p"
   elif [[ "$state" == WRONG:* ]]; then
     note_fail "$svc — :$p answered as someone else: ${state#WRONG:}"
@@ -369,6 +429,10 @@ for svc in "${SERVICES[@]}"; do
     FAILED_SERVICES+=("$svc")
   fi
 done
+
+if [[ $fatal_startup -eq 1 && $fatal_service_count -eq 0 ]]; then
+  note_fail 'fatal startup marker was not attributed to a service; readiness is not trusted'
+fi
 
 [[ $boot_died -eq 1 ]] && note_fail 'scripts/dev.sh exited before every service was ready'
 
@@ -409,8 +473,8 @@ for f in "${FAILED[@]}"; do printf '  %s\u2717 %s%s\n' "$RED" "$f" "$NC"; done
 # discarded tmpdir is why the first red run could not be diagnosed; printing a
 # shared tail is why the next two could not be either.
 if [[ $fatal_startup -eq 1 ]]; then
-  printf '\n%s\u2500\u2500 startup_failed reported by ─\u2500%s\n' "$BOLD" "$NC"
-  grep "$FATAL_STARTUP_PATTERN" "$BOOT_LOG" 2>/dev/null | tail -n 20 | sed 's/^/    /'
+  printf '\n%s\u2500\u2500 startup_failed/EADDRINUSE reported in boot log ─\u2500%s\n' "$BOLD" "$NC"
+  grep -E "$FATAL_STARTUP_PATTERN" "$BOOT_LOG" 2>/dev/null | tail -n 20 | sed 's/^/    /'
 fi
 
 for svc in "${FAILED_SERVICES[@]}"; do

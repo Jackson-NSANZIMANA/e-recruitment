@@ -2,6 +2,8 @@
 // canonical serialization, and deterministic coverage hashing. No DB required.
 
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { KAFKA_TOPICS } from '@usrp/shared-types';
 import {
   campaignCoverageHash,
   canonicalCampaignJson,
@@ -165,6 +167,17 @@ function main(): void {
     '11111111-1111-4111-8111-111111111111',
     [{ ...session, capacityLimit: 101 }, secondSession],
   ) !== hash);
+
+  const kafkaCompose = readFileSync(
+    new URL('../../../infrastructure/docker/docker-compose.tier2.yml', import.meta.url),
+    'utf8',
+  );
+  const provisionedTopicSpec = kafkaCompose.match(/for spec in ([^\n]+); do/)?.[1] ?? '';
+  check(
+    'campaign lifecycle topic is provisioned with Kafka auto-creation disabled',
+    kafkaCompose.includes('KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"') &&
+      provisionedTopicSpec.split(/\s+/).includes(`${KAFKA_TOPICS.CAMPAIGN_LIFECYCLE}:6`),
+  );
 
   console.log('\n───────────────────────────────────────────────');
   if (failures === 0) console.log('BUILD-001 DOMAIN PROOFS P1–P4 PASSED ✓');

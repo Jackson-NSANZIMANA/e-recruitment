@@ -49,7 +49,12 @@ export class PgWalkInRepository implements WalkInRepository {
     try {
       return await sql.begin(async (tx) => {
         await tx`SET LOCAL ROLE ${sql(input.actor.dbRole)}`;
-        await lockCampaignForApplicationInsert(tx, input.actor.agency, input.campaignId);
+        await lockCampaignForApplicationInsert(
+          tx,
+          input.actor.agency,
+          input.campaignId,
+          ['REGISTRATION_OPEN', 'REGISTRATION_CLOSED', 'EXAMINATION_ACTIVE'],
+        );
 
         const inserted = await tx<{ id: string; processing_code: string }[]>`
           INSERT INTO ${schema}.applications

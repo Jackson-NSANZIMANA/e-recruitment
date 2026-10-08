@@ -378,21 +378,97 @@ async function main(): Promise<void> {
 
   // ── Scenario 1b: clearance triggers scheduling → SLOT_ASSIGNED ────────
   console.log('\n── 1b. Clearance auto-assigns an exam slot → SLOT_ASSIGNED ──');
-  const reachedSlot = await awaitStatus(
+  const reachedSlot = await awaitReached(
     greenApp,
     'SLOT_ASSIGNED',
     nudgeCleared(greenApp, GREEN_APPLICANT, RDF_CAMPAIGN),
-    'greenApp → SLOT_ASSIGNED',
+    'greenApp history reached SLOT_ASSIGNED',
   );
   {
     const s = await readState(greenApp);
-    check('status = SLOT_ASSIGNED (scheduling ran autonomously off clearance)', reachedSlot && s?.status === 'SLOT_ASSIGNED', s?.status);
+    const hist = await historyToStatuses(greenApp);
+    check('history reached SLOT_ASSIGNED (scheduling ran autonomously off clearance)', reachedSlot && hist.includes('SLOT_ASSIGNED'), hist.join('→'));
+    check(
+      'live status is SLOT_ASSIGNED or has advanced to PHYSICAL_TEST_SCHEDULED',
+      s?.status === 'SLOT_ASSIGNED' || s?.status === 'PHYSICAL_TEST_SCHEDULED',
+      s?.status,
+    );
     check('assigned_venue_name stamped', s?.assigned_venue_name === VENUE_NAME, String(s?.assigned_venue_name));
     check('assigned_district stamped', s?.assigned_district === HOME_DISTRICT, String(s?.assigned_district));
     check('qr_invitation_code minted', typeof s?.qr_invitation_code === 'string' && (s?.qr_invitation_code?.length ?? 0) >= 20);
     check('venue_assignment_id stamped', s?.venue_assignment_id != null);
-    const hist = await historyToStatuses(greenApp);
-    check('history extends DOCUMENT_REVIEW_GREEN → SLOT_ASSIGNED', hist.includes('SLOT_ASSIGNED'), hist.join('→'));
+    check(
+      'history extends DOCUMENT_REVIEW_GREEN → SLOT_ASSIGNED',
+      hist.indexOf('DOCUMENT_REVIEW_GREEN') >= 0 && hist.indexOf('DOCUMENT_REVIEW_GREEN') < hist.indexOf('SLOT_ASSIGNED'),
+      hist.join('→'),
+    );
+  }
+
+  // The scheduler re-announces its stored SLOT_ASSIGNED event on clearance
+  // retries. A concurrent notification projection can advance the live row
+  // first; replaying that identical assignment must still be an idempotent no-op.
+  {
+    const s = await readState(greenApp);
+    if (s?.venue_assignment_id && s.assigned_district && s.assigned_venue_name && s.qr_invitation_code) {
+      const notification = await app.notificationProjector.project({
+        result: {
+          applicationId: greenApp,
+          agency: 'RDF',
+          deliveryStatus: 'DELIVERED',
+          correlationId: randomUUID(),
+        },
+        context: newCorrelationContext(),
+        agency: 'RDF',
+      });
+      const scheduled = await readState(greenApp);
+      check(
+        'notification projection leaves the application at PHYSICAL_TEST_SCHEDULED',
+        (notification.kind === 'APPLIED' || notification.kind === 'NO_CHANGE') &&
+          scheduled?.status === 'PHYSICAL_TEST_SCHEDULED',
+        `${notification.kind}; ${scheduled?.status}`,
+      );
+
+      const slotReplay = {
+        applicationId: greenApp,
+        agency: 'RDF' as const,
+        venueAssignmentId: s.venue_assignment_id,
+        assignedDistrict: s.assigned_district,
+        assignedVenueName: s.assigned_venue_name,
+        examDate: EXAM_DATE,
+        qrInvitationCode: s.qr_invitation_code,
+        correlationId: randomUUID(),
+      };
+      const historyBeforeReplay = await historyToStatuses(greenApp);
+      const replayed = await app.slotProjector.project({
+        result: slotReplay,
+        context: newCorrelationContext(),
+        agency: 'RDF',
+      });
+      const historyAfterReplay = await historyToStatuses(greenApp);
+      check(
+        'same SLOT_ASSIGNED replay after notification progress → NO_CHANGE, no new history',
+        replayed.kind === 'NO_CHANGE' && historyAfterReplay.length === historyBeforeReplay.length,
+        `${replayed.kind}; history ${historyBeforeReplay.length} → ${historyAfterReplay.length}`,
+      );
+
+      const conflictingReplay = await app.slotProjector.project({
+        result: {
+          ...slotReplay,
+          venueAssignmentId: randomUUID(),
+          qrInvitationCode: randomBytes(32).toString('base64url'),
+          correlationId: randomUUID(),
+        },
+        context: newCorrelationContext(),
+        agency: 'RDF',
+      });
+      check(
+        'different slot replay after schedule progress remains NOT_ASSIGNABLE',
+        conflictingReplay.kind === 'NOT_ASSIGNABLE' && conflictingReplay.currentStatus === 'PHYSICAL_TEST_SCHEDULED',
+        conflictingReplay.kind === 'NOT_ASSIGNABLE' ? conflictingReplay.currentStatus : conflictingReplay.kind,
+      );
+    } else {
+      check('slot metadata available for idempotent replay proof', false, 'venue, district, or ticket missing');
+    }
   }
 
   // ── Scenario 2: the fail path — missing NESA record → REJECTED ────────

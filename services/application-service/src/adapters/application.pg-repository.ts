@@ -50,6 +50,7 @@ import { ApplicationPersistenceError } from '../domain/application.errors.js';
 import { AGENCY_TARGET } from '../domain/agency-schema.js';
 import { deriveApplicationStatus } from '../domain/lifecycle.js';
 import {
+  CampaignUnavailableForApplicationError,
   insertOpeningHistory,
   insertSubmittedApplication,
   isLiveIntentViolation,
@@ -94,7 +95,9 @@ export class PgApplicationRepository implements ApplicationRepository {
         return created;
       });
     } catch (cause) {
-      if (cause instanceof ApplicationPersistenceError) throw cause;
+      if (cause instanceof ApplicationPersistenceError || cause instanceof CampaignUnavailableForApplicationError) {
+        throw cause;
+      }
       // ADR-027: the live-intent index refuses a second live application for
       // one (applicant, campaign, category). This direct path has no request
       // ledger to answer from, so it reports the refusal as a persistence
@@ -251,13 +254,19 @@ export class PgApplicationRepository implements ApplicationRepository {
   async applySlotAssignment(result: SlotAssignmentResult): Promise<ApplySlotOutcome> {
     const target = AGENCY_TARGET[result.agency];
     const schema = sql(target.schema);
+    const slotAssignedRank = APPLICATION_STATUSES.indexOf('SLOT_ASSIGNED');
 
     try {
       return await sql.begin(async (tx): Promise<ApplySlotOutcome> => {
         await tx`SET LOCAL ROLE ${sql(SYSTEM_ROLE)}`;
 
-        const rows = await tx<{ status: ApplicationStatus; applicant_id: string }[]>`
-          SELECT status, applicant_id
+        const rows = await tx<{
+          status: ApplicationStatus;
+          applicant_id: string;
+          venue_assignment_id: string | null;
+          qr_invitation_code: string | null;
+        }[]>`
+          SELECT status, applicant_id, venue_assignment_id, qr_invitation_code
           FROM ${schema}.applications
           WHERE id = ${result.applicationId}
           FOR UPDATE
@@ -267,12 +276,26 @@ export class PgApplicationRepository implements ApplicationRepository {
         // ops applications, so assert it here rather than silently succeed.
         if (!current) return { kind: 'NOT_FOUND' };
 
-        // Already scheduled ⇒ idempotent redelivery, write nothing.
+        // Already at the assigned stage ⇒ idempotent redelivery, write nothing.
         if (current.status === 'SLOT_ASSIGNED') return { kind: 'NO_CHANGE' };
 
-        // A slot is only assignable from the positive eligibility terminal. Any
-        // other status (still vetting, rejected, withdrawn, further downstream)
-        // is a hold — never force a row backward or sideways into scheduling.
+        // Scheduling deliberately re-announces the same immutable assignment on
+        // a retry. Notification delivery may have advanced the application before
+        // that replay arrives, so recognize the stored venue + ticket identity as
+        // the same completed write instead of misclassifying it as unassignable.
+        const sameStoredAssignment =
+          current.venue_assignment_id === result.venueAssignmentId &&
+          current.qr_invitation_code === result.qrInvitationCode;
+        if (
+          sameStoredAssignment &&
+          APPLICATION_STATUSES.indexOf(current.status) > slotAssignedRank
+        ) {
+          return { kind: 'NO_CHANGE' };
+        }
+
+        // A new slot is only assignable from the positive eligibility terminal.
+        // Any other status (still vetting, rejected, withdrawn, or a conflicting
+        // assignment after progression) is a hold — never force a row backward.
         if (current.status !== 'DOCUMENT_REVIEW_GREEN') {
           return { kind: 'NOT_ASSIGNABLE', currentStatus: current.status };
         }

@@ -19,7 +19,7 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { sql, type SqlTransaction } from '@usrp/shared-database';
-import type { Agency, ApplicationCategory } from '@usrp/shared-types';
+import type { Agency, ApplicationCategory, CampaignStatus } from '@usrp/shared-types';
 import type { AgencyTarget } from '../domain/agency-schema.js';
 import type { CreateApplicationResult } from '../ports/application-repository.js';
 import { ApplicationPersistenceError } from '../domain/application.errors.js';
@@ -57,7 +57,7 @@ export async function mintProcessingCode(
   return code;
 }
 
-/** A campaign was cancelled before this application transaction acquired its row lock. */
+/** The campaign's locked state is no longer eligible for this application lane. */
 export class CampaignUnavailableForApplicationError extends Error {
   constructor() {
     super('Campaign is no longer accepting applications.');
@@ -66,27 +66,29 @@ export class CampaignUnavailableForApplicationError extends Error {
 }
 
 /**
- * Serialize every application insert against BUILD-001 cancellation. `FOR SHARE`
- * conflicts with both the campaign service's `FOR UPDATE` lock and a direct
- * status UPDATE's row lock. If cancellation owns the row first, the READ
- * COMMITTED locking read observes its committed status and the insert is
- * refused; if this insert owns it first, cancellation waits and then sees the
- * committed application. This is deliberately narrow: legacy open/examination
- * statuses remain accepted by their existing campaign-reader preconditions.
+ * Serialize application inserts against BUILD-001 lifecycle updates. `FOR SHARE`
+ * conflicts with the campaign service's `FOR UPDATE` lock. If registration
+ * close or cancellation commits first, the locking read observes that state;
+ * if this insert owns the row first, the lifecycle command waits for its commit.
+ * Each caller supplies the states its existing campaign reader admits: digital
+ * submission accepts only REGISTRATION_OPEN, while legacy walk-in stays valid
+ * during REGISTRATION_OPEN, REGISTRATION_CLOSED, and EXAMINATION_ACTIVE.
  */
 export async function lockCampaignForApplicationInsert(
   tx: SqlTransaction,
   agency: Agency,
   campaignId: string,
+  allowedStatuses: readonly CampaignStatus[],
 ): Promise<void> {
-  const campaigns = await tx<{ status: string }[]>`
+  const campaigns = await tx<{ status: CampaignStatus }[]>`
     SELECT status
     FROM public_core.lock_campaign_for_application_insert(
       ${campaignId}::uuid,
       ${agency}::public_core.agency
     )
   `;
-  if (campaigns[0] === undefined || campaigns[0].status === 'CANCELLED') {
+  const campaign = campaigns[0];
+  if (campaign === undefined || !allowedStatuses.includes(campaign.status)) {
     throw new CampaignUnavailableForApplicationError();
   }
 }
@@ -110,7 +112,7 @@ export async function insertSubmittedApplication(
   input: FrontDoorApplicationRow,
   identifiers?: CreateApplicationResult,
 ): Promise<CreateApplicationResult> {
-  await lockCampaignForApplicationInsert(tx, input.agency, input.campaignId);
+  await lockCampaignForApplicationInsert(tx, input.agency, input.campaignId, ['REGISTRATION_OPEN']);
   const schema = sql(target.schema); // quoted identifier fragment
   const seqName = `${target.schema}.processing_code_seq`;
 

@@ -140,11 +140,14 @@ export type ApplySlotOutcome =
       readonly toStatus: 'SLOT_ASSIGNED';
       readonly applicantId: string;
     }
-  /** Already SLOT_ASSIGNED — idempotent redelivery, nothing written. */
+  /**
+   * The slot is already assigned, or the same stored assignment is replayed
+   * after the application has advanced — idempotent, nothing written.
+   */
   | { readonly kind: 'NO_CHANGE' }
   /**
    * The row is not at DOCUMENT_REVIEW_GREEN (not yet cleared, already past this
-   * stage, or terminal) — a slot cannot be assigned now; nothing written.
+   * stage with a different assignment, or terminal) — nothing written.
    */
   | { readonly kind: 'NOT_ASSIGNABLE'; readonly currentStatus: ApplicationStatus }
   /** No such application in the agency's schema — the cross-agency write guard. */

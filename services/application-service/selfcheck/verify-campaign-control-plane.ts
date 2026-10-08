@@ -737,6 +737,28 @@ async function main(): Promise<void> {
     check('application insert that reaches the row lock after cancellation is refused',
       lateSubmissionError instanceof CampaignUnavailableForApplicationError);
 
+    const registrationClosed = await createReadyCampaign('CLOSED-SUBMISSION');
+    await campaign.publish(commandRequest(RDF_ACTOR, { publicCode: registrationClosed.code }));
+    await campaign.closeRegistration(commandRequest(RDF_ACTOR, { publicCode: registrationClosed.code }));
+    let lateClosedSubmissionError: unknown;
+    try {
+      await sql.begin(async (tx) => {
+        await tx`SET LOCAL ROLE usrp_system_service`;
+        await insertSubmittedApplication(tx, AGENCY_TARGET.RDF, {
+          agency: 'RDF',
+          applicantId: randomUUID(),
+          campaignId: registrationClosed.campaignId,
+          category: 'GENERAL_ENLISTMENT',
+          nesaIndexNumber: null,
+          hecRegistrationNumber: null,
+        });
+      });
+    } catch (error) {
+      lateClosedSubmissionError = error;
+    }
+    check('digital submission that reaches the campaign lock after close is refused',
+      lateClosedSubmissionError instanceof CampaignUnavailableForApplicationError);
+
     const cancellationRace = await createReadyCampaign('CANCEL-SUBMISSION-RACE');
     await campaign.publish(commandRequest(RDF_ACTOR, { publicCode: cancellationRace.code }));
     const raceApplicantId = await createTestApplicantIdentity();
