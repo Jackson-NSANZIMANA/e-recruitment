@@ -22,7 +22,8 @@
     "seed:dev": "tsx scripts/seed-dev-officers.ts",
     "provision:first-campaign-admin": "tsx scripts/provision-first-campaign-admin.ts",
     "selfcheck": "tsx selfcheck/verify-iam-issuer-slice.ts",
-    "selfcheck:service-token": "tsx selfcheck/verify-service-token-slice.ts"
+    "selfcheck:service-token": "tsx selfcheck/verify-service-token-slice.ts",
+    "selfcheck:provisioner-auth": "tsx selfcheck/verify-first-admin-provisioner-auth.ts"
   },
   "dependencies": {
     "@usrp/shared-auth": "workspace:*",
