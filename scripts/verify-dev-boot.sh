@@ -123,6 +123,7 @@ note_fail() { bad "$1"; fail=$((fail + 1)); FAILED+=("$1"); }
 
 [[ -f "$ENV_FILE" ]] || { bad "$ENV_FILE not found"; exit 1; }
 command -v curl >/dev/null 2>&1 || { bad 'curl is required'; exit 1; }
+command -v ps >/dev/null 2>&1 || { bad 'ps is required to own and stop the dev-boot session'; exit 1; }
 
 mkdir -p "$LOG_DIR"
 
@@ -318,43 +319,44 @@ else
 fi
 LAUNCH+=(USRP_ENV_FILE="$ENV_FILE" bash scripts/dev.sh --ui=stream)
 
-# Own the whole process group so turbo, its eleven tsx children and their file
-# watchers all die with us. There is an important interactive-shell wrinkle:
-# when `setsid` is launched as a background job that is already a process-group
-# leader, util-linux forks. `$!` then identifies setsid's waiting parent, NOT
-# the child session/process-group leader. Capture the PID inside the new
-# session before exec so teardown always signals the actual service group.
-BOOT_PGID=''
+# Own a distinct session for this proof. Turbo creates a separate process
+# group for each persistent task, so killing only the session leader's group
+# leaves every service alive. Also, util-linux `setsid` forks when launched as
+# a background job that is already a process-group leader (common in interactive
+# shells), making `$!` the waiting parent rather than the new session leader.
+# Capture the new SID inside the session, then signal every process group whose
+# SID matches it during teardown.
+BOOT_SESSION_ID=''
 BOOT_LAUNCH_PID=''
-BOOT_PGID_FILE=''
+BOOT_SESSION_FILE=''
 BOOT_USES_SETSID=0
 BOOT_STOPPED=0
 BOOT_CLEANUP_STATUS=0
 
 if command -v setsid >/dev/null 2>&1; then
   BOOT_USES_SETSID=1
-  BOOT_PGID_FILE="$(mktemp "$LOG_DIR/dev-boot-session.XXXXXX")"
+  BOOT_SESSION_FILE="$(mktemp "$LOG_DIR/dev-boot-session.XXXXXX")"
   setsid bash -c '
     printf "%s\n" "$$" > "$1"
     shift
     exec "$@"
-  ' _ "$BOOT_PGID_FILE" "${LAUNCH[@]}" >>"$BOOT_LOG" 2>&1 &
+  ' _ "$BOOT_SESSION_FILE" "${LAUNCH[@]}" >>"$BOOT_LOG" 2>&1 &
   BOOT_LAUNCH_PID=$!
 
-  # The tiny wrapper writes its session PID before starting Turbo. Bound the
-  # wait in case setsid itself cannot start; never guess that `$!` is the PGID.
+  # The wrapper writes the session ID before starting Turbo. Bound the wait;
+  # never assume `$!` identifies either the session or its task process groups.
   for _ in $(seq 1 100); do
-    [[ -s "$BOOT_PGID_FILE" ]] && break
+    [[ -s "$BOOT_SESSION_FILE" ]] && break
     kill -0 "$BOOT_LAUNCH_PID" 2>/dev/null || break
     sleep 0.05
   done
-  if [[ -s "$BOOT_PGID_FILE" ]]; then
-    IFS= read -r BOOT_PGID <"$BOOT_PGID_FILE"
+  if [[ -s "$BOOT_SESSION_FILE" ]]; then
+    IFS= read -r BOOT_SESSION_ID <"$BOOT_SESSION_FILE"
   fi
-  rm -f "$BOOT_PGID_FILE"
-  BOOT_PGID_FILE=''
-  if [[ ! "$BOOT_PGID" =~ ^[0-9]+$ ]]; then
-    bad 'could not capture the dev-boot session PID; see .boot-logs/dev-boot.log'
+  rm -f "$BOOT_SESSION_FILE"
+  BOOT_SESSION_FILE=''
+  if [[ ! "$BOOT_SESSION_ID" =~ ^[0-9]+$ ]]; then
+    bad 'could not capture the dev-boot session ID; see .boot-logs/dev-boot.log'
     kill -TERM "$BOOT_LAUNCH_PID" 2>/dev/null || true
     wait "$BOOT_LAUNCH_PID" 2>/dev/null || true
     exit 1
@@ -365,9 +367,30 @@ else
   log 'setsid unavailable — falling back to single-PID teardown'
 fi
 
+session_process_groups() {
+  [[ -n "$BOOT_SESSION_ID" ]] || return 0
+  ps -eo pgid=,sid= | awk -v sid="$BOOT_SESSION_ID" '$2 == sid { print $1 }' | sort -u
+}
+
+session_has_processes() {
+  if [[ -z "$BOOT_SESSION_ID" ]]; then
+    kill -0 "$BOOT_LAUNCH_PID" 2>/dev/null
+    return
+  fi
+  ps -eo sid= | awk -v sid="$BOOT_SESSION_ID" '$1 == sid { found=1; exit } END { exit(found ? 0 : 1) }'
+}
+
+signal_session_process_groups() {
+  local signal="$1" process_group
+  while IFS= read -r process_group; do
+    [[ "$process_group" =~ ^[0-9]+$ ]] || continue
+    kill -"$signal" -- "-$process_group" 2>/dev/null || true
+  done < <(session_process_groups)
+}
+
 boot_process_alive() {
   if [[ "$BOOT_USES_SETSID" == '1' ]]; then
-    kill -0 -- "-$BOOT_PGID" 2>/dev/null
+    session_has_processes
   else
     kill -0 "$BOOT_LAUNCH_PID" 2>/dev/null
   fi
@@ -379,17 +402,24 @@ stop_services() {
   fi
   BOOT_STOPPED=1
   log 'stopping services'
+  local cleanup_failed=0 svc port details session_processes
 
   if [[ -n "$BOOT_LAUNCH_PID" ]]; then
     if [[ "$BOOT_USES_SETSID" == '1' ]]; then
-      kill -TERM -- "-$BOOT_PGID" 2>/dev/null || true
+      # Turbo gives each persistent task its own PGID. Signal every group in
+      # this private SID, not only the group containing Turbo itself.
+      signal_session_process_groups TERM
       for _ in $(seq 1 10); do
         boot_process_alive || break
         sleep 1
       done
       if boot_process_alive; then
-        log 'service process group did not stop after SIGTERM; sending SIGKILL'
-        kill -KILL -- "-$BOOT_PGID" 2>/dev/null || true
+        log 'dev-boot session did not stop after SIGTERM; sending SIGKILL to its task groups'
+        signal_session_process_groups KILL
+        for _ in $(seq 1 50); do
+          boot_process_alive || break
+          sleep 0.1
+        done
       fi
     else
       kill -TERM "$BOOT_LAUNCH_PID" 2>/dev/null || true
@@ -402,12 +432,18 @@ stop_services() {
     wait "$BOOT_LAUNCH_PID" 2>/dev/null || true
   fi
 
-  [[ -z "$BOOT_PGID_FILE" ]] || rm -f "$BOOT_PGID_FILE"
+  [[ -z "$BOOT_SESSION_FILE" ]] || rm -f "$BOOT_SESSION_FILE"
+
+  if [[ "$BOOT_USES_SETSID" == '1' ]] && session_has_processes; then
+    session_processes="$(ps -eo pid=,ppid=,pgid=,sid=,stat=,args= | awk -v sid="$BOOT_SESSION_ID" '$4 == sid { print }' | head -n 20)"
+    note_fail "dev-boot session $BOOT_SESSION_ID still has processes after teardown"
+    printf '%s\n' "$session_processes" | sed 's/^/    /'
+    cleanup_failed=1
+  fi
 
   # Ports were all free immediately before launch. A listener remaining now
   # means teardown missed a child (or a concurrent process raced the proof); do
   # not report DEV BOOT GREEN while leaving the developer's ports occupied.
-  local cleanup_failed=0 svc port details
   for svc in "${SERVICES[@]}"; do
     port="${PORT_OF[$svc]}"
     if port_is_listening "$port"; then
