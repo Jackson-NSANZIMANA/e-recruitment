@@ -57,6 +57,12 @@ const REVIEWER: Principal = {
   agency: 'RDF',
   roles: ['reviewer'],
 };
+const OTHER_RDF_ADMIN: Principal = {
+  kind: 'officer',
+  subjectId: randomUUID(),
+  agency: 'RDF',
+  roles: ['agency_admin'],
+};
 
 const repository = new PgCampaignControlRepository();
 const campaign = new CampaignControlService({ repository });
@@ -65,7 +71,7 @@ const publicReads = new PgCampaignPublicReadRepository();
 
 let failures = 0;
 const applicantIds: string[] = [];
-const actorAccountIds = [RDF_ACTOR.subjectId, RNP_ACTOR.subjectId, REVIEWER.subjectId];
+const actorAccountIds = [RDF_ACTOR.subjectId, RNP_ACTOR.subjectId, REVIEWER.subjectId, OTHER_RDF_ADMIN.subjectId];
 let legacyPublicCode: string | null = null;
 function check(label: string, condition: boolean, detail = ''): void {
   if (condition) console.log(`  ✓ ${label}`);
@@ -250,7 +256,7 @@ async function insertApplication(campaignId: string): Promise<void> {
 }
 
 async function seedOfficerTestAccounts(): Promise<void> {
-  for (const actor of [RDF_ACTOR, RNP_ACTOR, REVIEWER]) {
+  for (const actor of [RDF_ACTOR, RNP_ACTOR, REVIEWER, OTHER_RDF_ADMIN]) {
     if (actor.kind !== 'officer') throw new Error('selfcheck principal must be an officer');
     await admin`
       INSERT INTO public_core.officer_accounts
@@ -461,12 +467,22 @@ async function main(): Promise<void> {
 
     await expectPgRejected('RDF database role cannot invoke an RNP command for an RNP administrator', () => sql.begin(async (tx) => {
       await tx`SET LOCAL ROLE usrp_rdf_officer`;
+      await tx`SELECT set_config('usrp.campaign_actor_id', ${RNP_ACTOR.subjectId}, true)`;
       await tx`
         SELECT * FROM public_core.campaign_lock_for_command(
           ${RNP_ACTOR.subjectId}::uuid, 'RNP'::public_core.agency, 'CROSS-AGENCY-SELF-CHECK'
         )
       `;
     }), /campaign DB role does not match the requested agency/i);
+    await expectPgRejected('publication function rejects another active RDF admin UUID outside transaction actor context', () => sql.begin(async (tx) => {
+      await tx`SET LOCAL ROLE usrp_rdf_officer`;
+      await tx`SELECT set_config('usrp.campaign_actor_id', ${RDF_ACTOR.subjectId}, true)`;
+      await tx`
+        SELECT public_core.campaign_write_publication(
+          ${tx.json(asJsonb({ actorId: OTHER_RDF_ADMIN.subjectId, agency: 'RDF' }))}
+        )
+      `;
+    }), /actor does not match transaction actor context/i);
 
     await expectPgRejected('campaign-admin role cannot directly update campaign state', () => sql.begin(async (tx) => {
       await tx`SET LOCAL ROLE usrp_rdf_officer`;

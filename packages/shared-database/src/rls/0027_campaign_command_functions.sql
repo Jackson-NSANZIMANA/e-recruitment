@@ -333,6 +333,14 @@ BEGIN
     RAISE EXCEPTION 'campaign commands are available only to the application database login'
       USING ERRCODE = '42501';
   END IF;
+  -- The adapter sets this transaction-local value from the already-verified
+  -- officer principal. It prevents accidental command-payload substitution,
+  -- but is not an independent identity proof: usrp_app can set custom GUCs, so
+  -- the authenticated service remains the trust boundary for the human subject.
+  IF current_setting('usrp.campaign_actor_id', true) IS DISTINCT FROM p_actor_id::text THEN
+    RAISE EXCEPTION 'campaign command actor does not match transaction actor context'
+      USING ERRCODE = '42501';
+  END IF;
   -- The function owner bypasses RLS, so pin the *invoking database role* to
   -- the requested agency before consulting the active admin account. The app
   -- login is a member of all three officer roles; without this check a bug or

@@ -341,6 +341,7 @@ export class PgCampaignControlRepository implements CampaignControlRepository {
     try {
       return await sql.begin(async (tx) => {
         await tx`SET LOCAL ROLE ${sql(dbRoleForPrincipal(command.actor))}`;
+        await tx`SELECT set_config('usrp.campaign_actor_id', ${actorId}, true)`;
 
         const operation = OPERATION_NAME[command.operation];
         const replay = await this.#readReplay(tx, command, actorId, agency, operation);

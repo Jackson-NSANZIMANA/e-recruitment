@@ -272,6 +272,7 @@ export class PgCampaignSessionRepository implements CampaignSessionRepository {
     try {
       return await sql.begin(async (tx) => {
         await tx`SET LOCAL ROLE ${sql(dbRoleForPrincipal(actor))}`;
+        await tx`SELECT set_config('usrp.campaign_actor_id', ${actor.subjectId}, true)`;
 
         const prior = await this.#readReplay(tx, command, actor.subjectId, actor.agency);
         if (prior !== null) return replayCommit(prior, command, actor.agency);
