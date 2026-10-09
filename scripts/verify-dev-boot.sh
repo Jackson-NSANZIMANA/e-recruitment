@@ -319,31 +319,116 @@ fi
 LAUNCH+=(USRP_ENV_FILE="$ENV_FILE" bash scripts/dev.sh --ui=stream)
 
 # Own the whole process group so turbo, its eleven tsx children and their file
-# watchers all die with us. setsid makes the child its own group leader.
+# watchers all die with us. There is an important interactive-shell wrinkle:
+# when `setsid` is launched as a background job that is already a process-group
+# leader, util-linux forks. `$!` then identifies setsid's waiting parent, NOT
+# the child session/process-group leader. Capture the PID inside the new
+# session before exec so teardown always signals the actual service group.
 BOOT_PGID=''
+BOOT_LAUNCH_PID=''
+BOOT_PGID_FILE=''
+BOOT_USES_SETSID=0
+BOOT_STOPPED=0
+BOOT_CLEANUP_STATUS=0
+
 if command -v setsid >/dev/null 2>&1; then
-  setsid "${LAUNCH[@]}" >>"$BOOT_LOG" 2>&1 &
-  BOOT_PGID=$!
+  BOOT_USES_SETSID=1
+  BOOT_PGID_FILE="$(mktemp "$LOG_DIR/dev-boot-session.XXXXXX")"
+  setsid bash -c '
+    printf "%s\n" "$$" > "$1"
+    shift
+    exec "$@"
+  ' _ "$BOOT_PGID_FILE" "${LAUNCH[@]}" >>"$BOOT_LOG" 2>&1 &
+  BOOT_LAUNCH_PID=$!
+
+  # The tiny wrapper writes its session PID before starting Turbo. Bound the
+  # wait in case setsid itself cannot start; never guess that `$!` is the PGID.
+  for _ in $(seq 1 100); do
+    [[ -s "$BOOT_PGID_FILE" ]] && break
+    kill -0 "$BOOT_LAUNCH_PID" 2>/dev/null || break
+    sleep 0.05
+  done
+  if [[ -s "$BOOT_PGID_FILE" ]]; then
+    IFS= read -r BOOT_PGID <"$BOOT_PGID_FILE"
+  fi
+  rm -f "$BOOT_PGID_FILE"
+  BOOT_PGID_FILE=''
+  if [[ ! "$BOOT_PGID" =~ ^[0-9]+$ ]]; then
+    bad 'could not capture the dev-boot session PID; see .boot-logs/dev-boot.log'
+    kill -TERM "$BOOT_LAUNCH_PID" 2>/dev/null || true
+    wait "$BOOT_LAUNCH_PID" 2>/dev/null || true
+    exit 1
+  fi
 else
   "${LAUNCH[@]}" >>"$BOOT_LOG" 2>&1 &
-  BOOT_PGID=$!
+  BOOT_LAUNCH_PID=$!
   log 'setsid unavailable — falling back to single-PID teardown'
 fi
 
-cleanup() {
-  log 'stopping services'
-  if [[ -n "$BOOT_PGID" ]]; then
-    kill -TERM "-$BOOT_PGID" 2>/dev/null || kill -TERM "$BOOT_PGID" 2>/dev/null
-    for _ in $(seq 1 10); do
-      kill -0 "-$BOOT_PGID" 2>/dev/null || kill -0 "$BOOT_PGID" 2>/dev/null || break
-      sleep 1
-    done
-    kill -KILL "-$BOOT_PGID" 2>/dev/null || kill -KILL "$BOOT_PGID" 2>/dev/null
+boot_process_alive() {
+  if [[ "$BOOT_USES_SETSID" == '1' ]]; then
+    kill -0 -- "-$BOOT_PGID" 2>/dev/null
+  else
+    kill -0 "$BOOT_LAUNCH_PID" 2>/dev/null
   fi
-  wait 2>/dev/null
-  return 0
 }
-trap cleanup EXIT
+
+stop_services() {
+  if [[ "$BOOT_STOPPED" == '1' ]]; then
+    return "$BOOT_CLEANUP_STATUS"
+  fi
+  BOOT_STOPPED=1
+  log 'stopping services'
+
+  if [[ -n "$BOOT_LAUNCH_PID" ]]; then
+    if [[ "$BOOT_USES_SETSID" == '1' ]]; then
+      kill -TERM -- "-$BOOT_PGID" 2>/dev/null || true
+      for _ in $(seq 1 10); do
+        boot_process_alive || break
+        sleep 1
+      done
+      if boot_process_alive; then
+        log 'service process group did not stop after SIGTERM; sending SIGKILL'
+        kill -KILL -- "-$BOOT_PGID" 2>/dev/null || true
+      fi
+    else
+      kill -TERM "$BOOT_LAUNCH_PID" 2>/dev/null || true
+      for _ in $(seq 1 10); do
+        kill -0 "$BOOT_LAUNCH_PID" 2>/dev/null || break
+        sleep 1
+      done
+      kill -KILL "$BOOT_LAUNCH_PID" 2>/dev/null || true
+    fi
+    wait "$BOOT_LAUNCH_PID" 2>/dev/null || true
+  fi
+
+  [[ -z "$BOOT_PGID_FILE" ]] || rm -f "$BOOT_PGID_FILE"
+
+  # Ports were all free immediately before launch. A listener remaining now
+  # means teardown missed a child (or a concurrent process raced the proof); do
+  # not report DEV BOOT GREEN while leaving the developer's ports occupied.
+  local cleanup_failed=0 svc port details
+  for svc in "${SERVICES[@]}"; do
+    port="${PORT_OF[$svc]}"
+    if port_is_listening "$port"; then
+      details="$(port_listener_details "$port")"
+      note_fail "$svc — :$port remains occupied after dev-boot teardown ($details)"
+      cleanup_failed=1
+    fi
+  done
+  BOOT_CLEANUP_STATUS=$cleanup_failed
+  return "$cleanup_failed"
+}
+
+cleanup_on_exit() {
+  local original_status=$?
+  trap - EXIT
+  if ! stop_services && (( original_status == 0 )); then
+    original_status=1
+  fi
+  exit "$original_status"
+}
+trap cleanup_on_exit EXIT
 
 log "booting ${#SERVICES[@]} services via scripts/dev.sh (timeout ${BOOT_TIMEOUT_S}s)"
 
@@ -395,7 +480,7 @@ while :; do
   fi
   [[ $all_ready -eq 1 ]] && break
 
-  if ! kill -0 "-$BOOT_PGID" 2>/dev/null && ! kill -0 "$BOOT_PGID" 2>/dev/null; then
+  if ! boot_process_alive; then
     boot_died=1
     break
   fi
@@ -455,6 +540,13 @@ dump_service_log() {
     printf '     turbo never started its dev task. See the harness lines below.)\n'
   fi
 }
+
+# Stop before the final summary so teardown failures are part of the result,
+# not an unobserved side effect after printing DEV BOOT GREEN.
+if stop_services; then
+  note_pass "all ${#SERVICES[@]} scoped service ports released after teardown"
+fi
+trap - EXIT
 
 # ── Summary ──────────────────────────────────────────────────
 printf '\n%s\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500%s\n' "$BOLD" "$NC"
