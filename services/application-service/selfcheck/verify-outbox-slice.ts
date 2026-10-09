@@ -127,15 +127,18 @@ async function seed(): Promise<void> {
        'VERIFIED'::public_core.identity_verification_status),
       (${CLEARED_APPLICANT_ID}, ${CLEARED_NID_HASH}, 'x','x','x','x','MALE','WEB',
        'VERIFIED'::public_core.identity_verification_status)`;
-  await admin`
-    INSERT INTO public_core.recruitment_campaigns
-      (id, campaign_label, agency, status, target_categories,
-       registration_opens_at, registration_closes_at,
-       examination_start_date, examination_end_date, examination_reporting_hour)
-    VALUES
-      (${CAMPAIGN_ID}, 'Outbox RDF', 'RDF', 'REGISTRATION_OPEN',
-       '["GENERAL_ENLISTMENT"]',
-       now() - interval '1 day', now() + interval '30 days', '2026-09-01','2026-09-15',7)`;
+  await admin.begin(async (tx) => {
+    await tx`SET LOCAL session_replication_role = replica`;
+    await tx`
+      INSERT INTO public_core.recruitment_campaigns
+        (id, public_code, campaign_label, agency, status, target_categories,
+         registration_opens_at, registration_closes_at,
+         examination_start_date, examination_end_date, examination_reporting_hour)
+      VALUES
+        (${CAMPAIGN_ID}, ${`LEGACY-${CAMPAIGN_ID.replaceAll('-', '').toUpperCase()}`},
+         'Outbox RDF', 'RDF', 'REGISTRATION_OPEN', '["GENERAL_ENLISTMENT"]',
+         now() - interval '1 day', now() + interval '30 days', '2026-09-01','2026-09-15',7)`;
+  });
 }
 
 interface OutboxRow {

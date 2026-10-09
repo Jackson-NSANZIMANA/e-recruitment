@@ -83,30 +83,42 @@ async function seedIdentity(id: string, district: string): Promise<void> {
 async function cleanup(): Promise<void> {
   // The slot ledger (ADR-026) and this producer's outbox rows first: they are
   // keyed by this campaign, and the venue rows they reference go next.
-  await admin`DELETE FROM public_core.slot_reservations WHERE campaign_id = ${CAMPAIGN_ID}`;
-  await admin`
-    DELETE FROM public_core.event_outbox
-    WHERE producer = 'scheduling-service'
-      AND (payload->>'campaignId' = ${CAMPAIGN_ID} OR payload->'metadata'->>'campaignId' = ${CAMPAIGN_ID})`;
-  await admin`DELETE FROM public_core.campaign_venue_assignments WHERE campaign_id = ${CAMPAIGN_ID}`;
-  await admin`DELETE FROM public_core.recruitment_campaigns WHERE id = ${CAMPAIGN_ID}`;
-  await admin`DELETE FROM public_core.applicant_identities WHERE id IN ${admin([HAS_VENUE_APPLICANT, NO_VENUE_APPLICANT])}`;
+  await admin.begin(async (tx) => {
+    await tx`DELETE FROM public_core.slot_reservations WHERE campaign_id = ${CAMPAIGN_ID}`;
+    await tx`
+      DELETE FROM public_core.event_outbox
+      WHERE producer = 'scheduling-service'
+        AND (payload->>'campaignId' = ${CAMPAIGN_ID} OR payload->'metadata'->>'campaignId' = ${CAMPAIGN_ID})`;
+    // Legacy fixture teardown is the documented, test-only superuser escape
+    // hatch: production session rows are deactivated, never deleted.
+    await tx`SET LOCAL session_replication_role = replica`;
+    await tx`DELETE FROM public_core.campaign_venue_assignments WHERE campaign_id = ${CAMPAIGN_ID}`;
+    await tx`DELETE FROM public_core.recruitment_campaigns WHERE id = ${CAMPAIGN_ID}`;
+    await tx`SET LOCAL session_replication_role = origin`;
+    await tx`DELETE FROM public_core.applicant_identities WHERE id IN ${tx([HAS_VENUE_APPLICANT, NO_VENUE_APPLICANT])}`;
+  });
 }
 
 async function seed(): Promise<void> {
-  await admin`
-    INSERT INTO public_core.recruitment_campaigns
-      (id, campaign_label, agency, status, target_categories,
-       registration_opens_at, registration_closes_at,
-       examination_start_date, examination_end_date, examination_reporting_hour)
-    VALUES (${CAMPAIGN_ID}, ${'SLOT-TEST-' + randomUUID().slice(0, 8)}, 'RDF', 'REGISTRATION_OPEN',
-            '["GENERAL_ENLISTMENT"]', now() - interval '1 day', now() + interval '30 days',
-            '2026-06-02','2026-06-17',8)`;
-  // One venue for GASABO; deliberately NONE for KIREHE (proves NO_VENUE).
-  await admin`
-    INSERT INTO public_core.campaign_venue_assignments
-      (campaign_id, district, province, venue_name, exam_date, reporting_time_hour)
-    VALUES (${CAMPAIGN_ID}, ${VENUE_DISTRICT}, 'KIGALI_CITY', ${VENUE_NAME}, ${EXAM_DATE}, 8)`;
+  // This legacy fixture includes the historical campaign + venue rows that
+  // scheduling must continue to honour after BUILD-001 session guards.
+  await admin.begin(async (tx) => {
+    await tx`SET LOCAL session_replication_role = replica`;
+    await tx`
+      INSERT INTO public_core.recruitment_campaigns
+        (id, public_code, campaign_label, agency, status, target_categories,
+         registration_opens_at, registration_closes_at,
+         examination_start_date, examination_end_date, examination_reporting_hour)
+      VALUES (${CAMPAIGN_ID}, ${`LEGACY-${CAMPAIGN_ID.replaceAll('-', '').toUpperCase()}`},
+              ${'SLOT-TEST-' + randomUUID().slice(0, 8)}, 'RDF', 'REGISTRATION_OPEN',
+              '["GENERAL_ENLISTMENT"]', now() - interval '1 day', now() + interval '30 days',
+              '2026-06-02','2026-06-17',8)`;
+    // One venue for GASABO; deliberately NONE for KIREHE (proves NO_VENUE).
+    await tx`
+      INSERT INTO public_core.campaign_venue_assignments
+        (campaign_id, district, province, venue_name, exam_date, reporting_time_hour)
+      VALUES (${CAMPAIGN_ID}, ${VENUE_DISTRICT}, 'KIGALI_CITY', ${VENUE_NAME}, ${EXAM_DATE}, 8)`;
+  });
   await seedIdentity(HAS_VENUE_APPLICANT, VENUE_DISTRICT);
   await seedIdentity(NO_VENUE_APPLICANT, NO_VENUE_DISTRICT);
 }

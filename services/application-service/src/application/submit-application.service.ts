@@ -235,6 +235,11 @@ export class SubmitApplicationService {
       (c) => [announce(c)],
     );
 
+    // Cancellation may have committed after the earlier campaign-reader
+    // pre-check. The insert primitive serializes on the campaign row and
+    // returns this business rejection without leaving a ledger/application row.
+    if (recorded.kind === 'NO_OPEN_CAMPAIGN') return { kind: 'NO_OPEN_CAMPAIGN', agency };
+
     // Nothing was filed — so nothing is announced. Re-dispatching the original
     // event here would be wrong twice over: it is already durable in the
     // outbox, and a replay must not look downstream like a new submission.

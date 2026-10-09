@@ -20,6 +20,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint 'src/**/*.ts'",
     "seed:dev": "tsx scripts/seed-dev-officers.ts",
+    "provision:first-campaign-admin": "tsx scripts/provision-first-campaign-admin.ts",
     "selfcheck": "tsx selfcheck/verify-iam-issuer-slice.ts",
     "selfcheck:service-token": "tsx selfcheck/verify-service-token-slice.ts"
   },

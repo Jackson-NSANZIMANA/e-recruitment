@@ -19,13 +19,14 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { sql, type SqlTransaction } from '@usrp/shared-database';
-import type { ApplicationCategory } from '@usrp/shared-types';
+import type { Agency, ApplicationCategory, CampaignStatus } from '@usrp/shared-types';
 import type { AgencyTarget } from '../domain/agency-schema.js';
 import type { CreateApplicationResult } from '../ports/application-repository.js';
 import { ApplicationPersistenceError } from '../domain/application.errors.js';
 
 /** The columns the front door sets on a brand-new SUBMITTED application. */
 export interface FrontDoorApplicationRow {
+  readonly agency: Agency;
   readonly applicantId: string;
   readonly campaignId: string;
   readonly category: ApplicationCategory;
@@ -56,6 +57,42 @@ export async function mintProcessingCode(
   return code;
 }
 
+/** The campaign's locked state is no longer eligible for this application lane. */
+export class CampaignUnavailableForApplicationError extends Error {
+  constructor() {
+    super('Campaign is no longer accepting applications.');
+    this.name = 'CampaignUnavailableForApplicationError';
+  }
+}
+
+/**
+ * Serialize application inserts against BUILD-001 lifecycle updates. `FOR SHARE`
+ * conflicts with the campaign service's `FOR UPDATE` lock. If registration
+ * close or cancellation commits first, the locking read observes that state;
+ * if this insert owns the row first, the lifecycle command waits for its commit.
+ * Each caller supplies the states its existing campaign reader admits: digital
+ * submission accepts only REGISTRATION_OPEN, while legacy walk-in stays valid
+ * during REGISTRATION_OPEN, REGISTRATION_CLOSED, and EXAMINATION_ACTIVE.
+ */
+export async function lockCampaignForApplicationInsert(
+  tx: SqlTransaction,
+  agency: Agency,
+  campaignId: string,
+  allowedStatuses: readonly CampaignStatus[],
+): Promise<void> {
+  const campaigns = await tx<{ status: CampaignStatus }[]>`
+    SELECT status
+    FROM public_core.lock_campaign_for_application_insert(
+      ${campaignId}::uuid,
+      ${agency}::public_core.agency
+    )
+  `;
+  const campaign = campaigns[0];
+  if (campaign === undefined || !allowedStatuses.includes(campaign.status)) {
+    throw new CampaignUnavailableForApplicationError();
+  }
+}
+
 /**
  * INSERT the applications row at SUBMITTED in the owning agency's ops schema.
  *
@@ -75,6 +112,7 @@ export async function insertSubmittedApplication(
   input: FrontDoorApplicationRow,
   identifiers?: CreateApplicationResult,
 ): Promise<CreateApplicationResult> {
+  await lockCampaignForApplicationInsert(tx, input.agency, input.campaignId, ['REGISTRATION_OPEN']);
   const schema = sql(target.schema); // quoted identifier fragment
   const seqName = `${target.schema}.processing_code_seq`;
 

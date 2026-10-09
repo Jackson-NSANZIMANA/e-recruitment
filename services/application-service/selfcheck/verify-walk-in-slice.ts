@@ -132,10 +132,11 @@ async function seed(): Promise<void> {
     // today, walk-ins allowed — the walk-in campaign-resolution predicate.
     await tx`
       INSERT INTO public_core.recruitment_campaigns
-        (id, campaign_label, agency, status, target_categories, registration_opens_at,
+        (id, public_code, campaign_label, agency, status, target_categories, registration_opens_at,
          registration_closes_at, examination_start_date, examination_end_date,
          examination_reporting_hour, allows_walk_in)
-      VALUES (${RDF_CAMPAIGN}, 'WALKIN-SELFCHECK-2026', 'RDF', 'EXAMINATION_ACTIVE',
+      VALUES (${RDF_CAMPAIGN}, ${`LEGACY-${RDF_CAMPAIGN.replaceAll('-', '').toUpperCase()}`},
+              'WALKIN-SELFCHECK-2026', 'RDF', 'EXAMINATION_ACTIVE',
               '["GENERAL_ENLISTMENT"]', now() - interval '40 days', now() - interval '2 days',
               ${today}, ${today}, 8, true)
     `;

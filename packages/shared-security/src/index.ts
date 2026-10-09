@@ -7,6 +7,16 @@
 // ══════════════════════════════════════════════════════════════════
 
 export { canonicalJson, type JsonValue } from './canonical.js';
+export {
+  CAMPAIGN_COVERAGE_HASH_VERSION,
+  CAMPAIGN_POLICY_HASH_VERSION,
+  campaignCoverageHash,
+  canonicalCampaignCoverageJson,
+  campaignFactUuid,
+  canonicalCampaignJson,
+  hashCampaignCanonicalJson,
+  type CampaignCoverageSessionValue,
+} from './campaign-canonical.js';
 
 export {
   InvalidNationalIdError,

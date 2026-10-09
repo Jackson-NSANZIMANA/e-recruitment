@@ -181,14 +181,18 @@ async function seed(): Promise<void> {
       (${APPLICANT_BIO_3}, ${'a4'.repeat(32)}, 'x','x','x','x','MALE','WEB',
        'VERIFIED'::public_core.identity_verification_status, now())`;
 
-  await admin`
-    INSERT INTO public_core.recruitment_campaigns
-      (id, campaign_label, agency, target_categories, registration_opens_at,
-       registration_closes_at, examination_start_date, examination_end_date,
-       examination_reporting_hour, status)
-    VALUES (${CAMPAIGN_ID}, 'RDF-FIELDSYNC-TEST', 'RDF', '["GENERAL_ENLISTMENT"]',
-       now() - interval '10 days', now() + interval '10 days', '2026-08-01', '2026-08-05', 8,
-       'REGISTRATION_OPEN'::public_core.campaign_status)`;
+  await admin.begin(async (tx) => {
+    await tx`SET LOCAL session_replication_role = replica`;
+    await tx`
+      INSERT INTO public_core.recruitment_campaigns
+        (id, public_code, campaign_label, agency, target_categories, registration_opens_at,
+         registration_closes_at, examination_start_date, examination_end_date,
+         examination_reporting_hour, status)
+      VALUES (${CAMPAIGN_ID}, ${`LEGACY-${CAMPAIGN_ID.replaceAll('-', '').toUpperCase()}`},
+         'RDF-FIELDSYNC-TEST', 'RDF', '["GENERAL_ENLISTMENT"]',
+         now() - interval '10 days', now() + interval '10 days', '2026-08-01', '2026-08-05', 8,
+         'REGISTRATION_OPEN'::public_core.campaign_status)`;
+  });
 
   // Four applications parked at PHYSICAL_TEST_SCHEDULED (the stage a score
   // completes), each holding the exam ticket scheduling would have issued.

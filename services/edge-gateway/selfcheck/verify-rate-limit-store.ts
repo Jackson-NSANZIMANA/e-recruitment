@@ -195,6 +195,7 @@ async function main(): Promise<void> {
     IAM_BASE_URL: 'http://127.0.0.1:9', // never contacted at boot
     IDENTITY_SERVICE_BASE_URL: 'http://127.0.0.1:9',
     APPLICATION_SERVICE_BASE_URL: 'http://127.0.0.1:9',
+    SCHEDULING_SERVICE_BASE_URL: 'http://127.0.0.1:9',
     FIELD_SYNC_SERVICE_BASE_URL: 'http://127.0.0.1:9',
     EDGE_SESSION_HMAC_KEY: 'prod_proof_only_key_not_a_published_dev_value_min_32_chars!!',
     EDGE_COOKIE_SECURE: 'true',

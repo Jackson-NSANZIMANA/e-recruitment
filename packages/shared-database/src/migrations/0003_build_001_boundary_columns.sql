@@ -1,0 +1,2 @@
+ALTER TABLE "public_core"."campaign_policy_versions" ADD COLUMN "canonical_policy_json" text;--> statement-breakpoint
+ALTER TABLE "public_core"."campaign_venue_assignments" ADD COLUMN "capacity_decision_code" varchar(64);

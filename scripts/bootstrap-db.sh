@@ -88,8 +88,9 @@ apply_sql "${RLS_DIR}/0008_venue_read_grants.sql" "rls/0008 (venue read grant)"
 apply_sql "${RLS_DIR}/0009_field_devices.sql" "rls/0009 (field-device registry)"
 
 # 11. Officer account store (the token issuer's credential surface). New
-#     public_core.officer_accounts table, readable/writable by usrp_iam_service
-#     ALONE (least privilege on the credential store) under FORCE'd RLS.
+#     public_core.officer_accounts table; only usrp_iam_service receives table
+#     grants under FORCE'd RLS. Note that the shared usrp_app login is a member
+#     of that role, so this does not independently isolate backend processes.
 apply_sql "${RLS_DIR}/0010_officer_accounts.sql" "rls/0010 (officer account store)"
 
 # 12. ADJUDICATION_REVIEW status (ADR-011): late/post-clearance disqualification
@@ -196,9 +197,22 @@ apply_sql "${RLS_DIR}/0024_edge_rate_limit_buckets.sql" "rls/0024 (shared edge r
 #     dependency, idempotently.
 apply_sql "${RLS_DIR}/0025_required_extensions.sql" "rls/0025 (required extensions: pgcrypto)"
 
+# 23e. BUILD-001 Campaign & Policy Control Plane. Campaign ownership stays in
+#     application-service; scheduling owns one session per district and the
+#     versioned coverage head. This adds agency-scoped reads, lifecycle/session
+#     guards, and the safe public projection.
+apply_sql "${RLS_DIR}/0026_campaign_control_plane.sql" "rls/0026 (campaign control plane)"
+
+# 23f. BUILD-001 functions-only write boundary. Revoke direct campaign/session
+#     DML (including inherited column UPDATE grants), authorize narrow command
+#     functions against active agency-admin accounts, and atomically persist
+#     lifecycle facts, command replay, and outbox/audit rows. Legacy reservation
+#     writes to registered_count and pre-control-plane rows remain unchanged.
+apply_sql "${RLS_DIR}/0027_campaign_command_functions.sql" "rls/0027 (campaign command functions)"
+
 printf '\n'
 
-ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts + applicant auth + erasure requests + stored contact + edge sessions + event outbox + slot reservations + submission integrity + walk-in outbox grant + shared rate-limit buckets + required extensions in place"
+ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts + applicant auth + erasure requests + stored contact + edge sessions + event outbox + slot reservations + submission integrity + walk-in outbox grant + shared rate-limit buckets + required extensions + campaign control plane + functions-only command boundary in place"
 
 # 24. Dev officer accounts (one per agency). A CONVENIENCE seed so the officer
 #     console / manual login smoke tests have real credentials to drive —

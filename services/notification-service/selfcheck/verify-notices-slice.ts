@@ -102,16 +102,21 @@ async function seed(): Promise<void> {
        pgp_sym_encrypt(${PHONE}, ${PII_KEY})),
       (${APPLICANT_NC}, ${NID_HASH_NC}, 'x', 'x', 'x', 'x', 'FEMALE', 'WEB',
        'VERIFIED'::public_core.identity_verification_status, NULL)`;
-  await admin`
-    INSERT INTO public_core.recruitment_campaigns
-      (id, campaign_label, agency, status, target_categories,
-       registration_opens_at, registration_closes_at,
-       examination_start_date, examination_end_date, examination_reporting_hour)
-    VALUES
-      (${RDF_CAMPAIGN}, 'Notices RDF', 'RDF', 'REGISTRATION_OPEN', '["GENERAL_ENLISTMENT"]',
-       now() - interval '1 day', now() + interval '30 days', '2026-09-01', '2026-09-15', 7),
-      (${RNP_CAMPAIGN}, 'Notices RNP', 'RNP', 'REGISTRATION_OPEN', '["CADET_OFFICER"]',
-       now() - interval '1 day', now() + interval '30 days', '2026-09-01', '2026-09-15', 7)`;
+  await admin.begin(async (tx) => {
+    await tx`SET LOCAL session_replication_role = replica`;
+    await tx`
+      INSERT INTO public_core.recruitment_campaigns
+        (id, public_code, campaign_label, agency, status, target_categories,
+         registration_opens_at, registration_closes_at,
+         examination_start_date, examination_end_date, examination_reporting_hour)
+      VALUES
+        (${RDF_CAMPAIGN}, ${`LEGACY-${RDF_CAMPAIGN.replaceAll('-', '').toUpperCase()}`},
+         'Notices RDF', 'RDF', 'REGISTRATION_OPEN', '["GENERAL_ENLISTMENT"]',
+         now() - interval '1 day', now() + interval '30 days', '2026-09-01', '2026-09-15', 7),
+        (${RNP_CAMPAIGN}, ${`LEGACY-${RNP_CAMPAIGN.replaceAll('-', '').toUpperCase()}`},
+         'Notices RNP', 'RNP', 'REGISTRATION_OPEN', '["CADET_OFFICER"]',
+         now() - interval '1 day', now() + interval '30 days', '2026-09-01', '2026-09-15', 7)`;
+  });
   await admin`
     INSERT INTO rdf_ops.applications (id, processing_code, applicant_id, campaign_id, category, status)
     VALUES (${RDF_WIN}, 'RDF-98101', ${APPLICANT}, ${RDF_CAMPAIGN}, 'GENERAL_ENLISTMENT',

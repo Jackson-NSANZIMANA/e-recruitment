@@ -15,6 +15,20 @@
       "when": 1789328563320,
       "tag": "0001_align_edge_session_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791412726000,
+      "tag": "0002_campaign_control_plane",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1791501178640,
+      "tag": "0003_build_001_boundary_columns",
+      "breakpoints": true
     }
   ]
 }

@@ -44,10 +44,15 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { randomUUID, randomBytes, generateKeyPairSync } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import postgres from 'postgres';
-import type { ApplicationCategory, ApplicationEligibilityClearedEvent } from '@usrp/shared-types';
+import type {
+  ApplicationCategory,
+  ApplicationEligibilityClearedEvent,
+  RIBVettingCompletedEvent,
+} from '@usrp/shared-types';
 import { sql } from '@usrp/shared-database';
-import { KafkaEventBus, newCorrelationContext, newEnvelope } from '@usrp/shared-events';
+import { KafkaEventBus, newCorrelationContext, newEnvelope, type EventBus } from '@usrp/shared-events';
 import {
   createApplicationService,
   loadApplicationConfig,
@@ -101,6 +106,34 @@ const REJECT_APPLICANT = '4c4c4c4c-4c4c-4c4c-8c4c-4c4c4c4c4c4c';
 // Random hashes → UNKNOWN to the RIB mock → CLEAR (criminal passes for both).
 const GREEN_HASH = randomBytes(32).toString('hex');
 const REJECT_HASH = randomBytes(32).toString('hex');
+
+// The wrapper below records the exact event identity at the real application
+// consumer boundary, then associates the completed projection with that event
+// via async context. This lets the replay proof distinguish one clearance
+// event delivered twice from two different clearances with the same correlation.
+const activeApplicationEvent = new AsyncLocalStorage<{ readonly eventId: string }>();
+interface ConsumedClearanceRecord {
+  readonly event: RIBVettingCompletedEvent;
+  deliveries: number;
+  readonly serializedPayloads: string[];
+}
+const consumedClearanceEvents = new Map<string, ConsumedClearanceRecord>();
+const clearanceProjectionOutcomes = new Map<string, string[]>();
+
+async function waitForCount(
+  readCount: () => number,
+  expected: number,
+  description: string,
+  timeoutMs = 20_000,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (readCount() >= expected) return true;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  console.error(`  ⏱ timed out waiting for ${description} (${readCount()}/${expected})`);
+  return false;
+}
 
 let failures = 0;
 function check(label: string, condition: boolean, detail = ''): void {
@@ -156,21 +189,26 @@ async function seedIdentity(id: string, nationalIdHash: string): Promise<void> {
 }
 
 async function seedCampaign(): Promise<void> {
-  await admin`
-    INSERT INTO public_core.recruitment_campaigns
-      (id, campaign_label, agency, status, target_categories,
-       registration_opens_at, registration_closes_at,
-       examination_start_date, examination_end_date, examination_reporting_hour)
-    VALUES
-      (${RDF_CAMPAIGN}, 'Pipeline RDF', 'RDF', 'REGISTRATION_OPEN',
-       '["GENERAL_ENLISTMENT"]',
-       now() - interval '1 day', now() + interval '30 days', '2026-09-01','2026-09-15',7)`;
-  // The venue the GREEN applicant's home district (GASABO) reports to — so
-  // scheduling can resolve a slot after eligibility clears.
-  await admin`
-    INSERT INTO public_core.campaign_venue_assignments
-      (campaign_id, district, province, venue_name, exam_date, reporting_time_hour)
-    VALUES (${RDF_CAMPAIGN}, ${HOME_DISTRICT}, 'KIGALI_CITY', ${VENUE_NAME}, ${EXAM_DATE}, 8)`;
+  // This is a migrated legacy campaign plus its existing venue; the fixture
+  // bypasses BUILD-001 authoring/session guards like the upgrade did.
+  await admin.begin(async (tx) => {
+    await tx`SET LOCAL session_replication_role = replica`;
+    await tx`
+      INSERT INTO public_core.recruitment_campaigns
+        (id, public_code, campaign_label, agency, status, target_categories,
+         registration_opens_at, registration_closes_at,
+         examination_start_date, examination_end_date, examination_reporting_hour)
+      VALUES
+        (${RDF_CAMPAIGN}, ${`LEGACY-${RDF_CAMPAIGN.replaceAll('-', '').toUpperCase()}`},
+         'Pipeline RDF', 'RDF', 'REGISTRATION_OPEN', '["GENERAL_ENLISTMENT"]',
+         now() - interval '1 day', now() + interval '30 days', '2026-09-01','2026-09-15',7)`;
+    // The venue the GREEN applicant's home district (GASABO) reports to — so
+    // scheduling can resolve a slot after eligibility clears.
+    await tx`
+      INSERT INTO public_core.campaign_venue_assignments
+        (campaign_id, district, province, venue_name, exam_date, reporting_time_hour)
+      VALUES (${RDF_CAMPAIGN}, ${HOME_DISTRICT}, 'KIGALI_CITY', ${VENUE_NAME}, ${EXAM_DATE}, 8)`;
+  });
 }
 
 interface StateRow {
@@ -301,11 +339,45 @@ async function main(): Promise<void> {
   // Assemble the REAL services and start their REAL consumers — the whole spine,
   // now through scheduling: age+academic+criminal → GREEN → cleared → slot.
   const app = createApplicationService(appConfig, appBus);
+  const observedProjector = {
+    project: async (command: Parameters<typeof app.projector.project>[0]) => {
+      const outcome = await app.projector.project(command);
+      const eventId = activeApplicationEvent.getStore()?.eventId;
+      if (eventId !== undefined && command.result.dimension === 'CRIMINAL') {
+        const outcomes = clearanceProjectionOutcomes.get(eventId) ?? [];
+        outcomes.push(outcome.kind);
+        clearanceProjectionOutcomes.set(eventId, outcomes);
+      }
+      return outcome;
+    },
+  } as unknown as typeof app.projector;
+  const observedApplicationConsumerBus: EventBus = {
+    connect: () => appBus.connect(),
+    disconnect: () => appBus.disconnect(),
+    publish: (event) => appBus.publish(event),
+    subscribe: (topics, groupId, handler) => appBus.subscribe(topics, groupId, async (event, meta) => {
+      await activeApplicationEvent.run({ eventId: event.eventId }, async () => handler(event, meta));
+      if (event.eventType === 'RIB_VETTING_COMPLETED') {
+        const payload = JSON.stringify(event);
+        const existing = consumedClearanceEvents.get(event.eventId);
+        if (existing === undefined) {
+          consumedClearanceEvents.set(event.eventId, {
+            event,
+            deliveries: 1,
+            serializedPayloads: [payload],
+          });
+        } else {
+          existing.deliveries += 1;
+          existing.serializedPayloads.push(payload);
+        }
+      }
+    }),
+  };
   const elig = createEligibilityService(eligConfig, eligBus);
   const bv = createBackgroundVettingService(bvConfig, bvBus);
   const sched = createSchedulingService(schedConfig, schedBus);
 
-  await startVettingResultConsumer(appBus, app.projector); // age+academic+criminal → row (+ emits application.cleared on GREEN)
+  await startVettingResultConsumer(observedApplicationConsumerBus, observedProjector); // records exact consumed event ids + outcomes for replay proof
   await startSlotAssignedConsumer(appBus, app.slotProjector); // slot.assigned → row (GREEN → SLOT_ASSIGNED)
   await startAgeConsumer(eligBus, elig.age); // APPLICANT_SUBMITTED → age gate
   await startAcademicVettingConsumer(eligBus, { education: elig.education, degree: elig.degree });
@@ -373,21 +445,170 @@ async function main(): Promise<void> {
 
   // ── Scenario 1b: clearance triggers scheduling → SLOT_ASSIGNED ────────
   console.log('\n── 1b. Clearance auto-assigns an exam slot → SLOT_ASSIGNED ──');
-  const reachedSlot = await awaitStatus(
+  const reachedSlot = await awaitReached(
     greenApp,
     'SLOT_ASSIGNED',
     nudgeCleared(greenApp, GREEN_APPLICANT, RDF_CAMPAIGN),
-    'greenApp → SLOT_ASSIGNED',
+    'greenApp history reached SLOT_ASSIGNED',
   );
   {
     const s = await readState(greenApp);
-    check('status = SLOT_ASSIGNED (scheduling ran autonomously off clearance)', reachedSlot && s?.status === 'SLOT_ASSIGNED', s?.status);
+    const hist = await historyToStatuses(greenApp);
+    check('history reached SLOT_ASSIGNED (scheduling ran autonomously off clearance)', reachedSlot && hist.includes('SLOT_ASSIGNED'), hist.join('→'));
+    check(
+      'live status is SLOT_ASSIGNED or has advanced to PHYSICAL_TEST_SCHEDULED',
+      s?.status === 'SLOT_ASSIGNED' || s?.status === 'PHYSICAL_TEST_SCHEDULED',
+      s?.status,
+    );
     check('assigned_venue_name stamped', s?.assigned_venue_name === VENUE_NAME, String(s?.assigned_venue_name));
     check('assigned_district stamped', s?.assigned_district === HOME_DISTRICT, String(s?.assigned_district));
     check('qr_invitation_code minted', typeof s?.qr_invitation_code === 'string' && (s?.qr_invitation_code?.length ?? 0) >= 20);
     check('venue_assignment_id stamped', s?.venue_assignment_id != null);
-    const hist = await historyToStatuses(greenApp);
-    check('history extends DOCUMENT_REVIEW_GREEN → SLOT_ASSIGNED', hist.includes('SLOT_ASSIGNED'), hist.join('→'));
+    check(
+      'history extends DOCUMENT_REVIEW_GREEN → SLOT_ASSIGNED',
+      hist.indexOf('DOCUMENT_REVIEW_GREEN') >= 0 && hist.indexOf('DOCUMENT_REVIEW_GREEN') < hist.indexOf('SLOT_ASSIGNED'),
+      hist.join('→'),
+    );
+  }
+
+  // The scheduler re-announces its stored SLOT_ASSIGNED event on clearance
+  // retries. A concurrent notification projection can advance the live row
+  // first; replaying that identical assignment must still be an idempotent no-op.
+  {
+    const s = await readState(greenApp);
+    if (s?.venue_assignment_id && s.assigned_district && s.assigned_venue_name && s.qr_invitation_code) {
+      const notification = await app.notificationProjector.project({
+        result: {
+          applicationId: greenApp,
+          agency: 'RDF',
+          deliveryStatus: 'DELIVERED',
+          correlationId: randomUUID(),
+        },
+        context: newCorrelationContext(),
+        agency: 'RDF',
+      });
+      const scheduled = await readState(greenApp);
+      check(
+        'notification projection leaves the application at PHYSICAL_TEST_SCHEDULED',
+        (notification.kind === 'APPLIED' || notification.kind === 'NO_CHANGE') &&
+          scheduled?.status === 'PHYSICAL_TEST_SCHEDULED',
+        `${notification.kind}; ${scheduled?.status}`,
+      );
+
+      const slotReplay = {
+        applicationId: greenApp,
+        agency: 'RDF' as const,
+        venueAssignmentId: s.venue_assignment_id,
+        assignedDistrict: s.assigned_district,
+        assignedVenueName: s.assigned_venue_name,
+        examDate: EXAM_DATE,
+        qrInvitationCode: s.qr_invitation_code,
+        correlationId: randomUUID(),
+      };
+      const historyBeforeReplay = await historyToStatuses(greenApp);
+      const replayed = await app.slotProjector.project({
+        result: slotReplay,
+        context: newCorrelationContext(),
+        agency: 'RDF',
+      });
+      const historyAfterReplay = await historyToStatuses(greenApp);
+      check(
+        'same SLOT_ASSIGNED replay after notification progress → NO_CHANGE, no new history',
+        replayed.kind === 'NO_CHANGE' && historyAfterReplay.length === historyBeforeReplay.length,
+        `${replayed.kind}; history ${historyBeforeReplay.length} → ${historyAfterReplay.length}`,
+      );
+
+      const conflictingReplay = await app.slotProjector.project({
+        result: {
+          ...slotReplay,
+          venueAssignmentId: randomUUID(),
+          qrInvitationCode: randomBytes(32).toString('base64url'),
+          correlationId: randomUUID(),
+        },
+        context: newCorrelationContext(),
+        agency: 'RDF',
+      });
+      check(
+        'different slot replay after schedule progress remains NOT_ASSIGNABLE',
+        conflictingReplay.kind === 'NOT_ASSIGNABLE' && conflictingReplay.currentStatus === 'PHYSICAL_TEST_SCHEDULED',
+        conflictingReplay.kind === 'NOT_ASSIGNABLE' ? conflictingReplay.currentStatus : conflictingReplay.kind,
+      );
+    } else {
+      check('slot metadata available for idempotent replay proof', false, 'venue, district, or ticket missing');
+    }
+  }
+
+  // ── Exact-event Kafka replay: the same RIB clearance through the real consumer ──
+  // Capture the event the criminal-vetting service actually emitted and the
+  // application consumer actually handled. Publish that same eventId + full
+  // payload twice more; associate each completed projection to its Kafka event
+  // id through AsyncLocalStorage, then prove NO_CHANGE and zero audit/history
+  // duplication. This is deliberately stronger than re-running the use case or
+  // publishing a newly enveloped event with equivalent fields.
+  console.log('\n── 1c. Exact RIB clearance event replay through Kafka consumer → NO_CHANGE ──');
+  const replayCandidate = [...consumedClearanceEvents.values()].find((record) =>
+    record.event.applicationId === greenApp && record.event.clearanceStatus === 'CLEARED');
+  if (replayCandidate === undefined) {
+    check('real RIB_VETTING_COMPLETED event captured at the application Kafka consumer', false,
+      `no CLEAR event recorded for ${greenApp}`);
+  } else {
+    const replayEvent = replayCandidate.event;
+    const originalPayload = JSON.stringify(replayEvent);
+    const startingDeliveries = replayCandidate.deliveries;
+    const startingOutcomes = clearanceProjectionOutcomes.get(replayEvent.eventId)?.length ?? 0;
+    check('captured real clearance has stable event identity and a completed initial projection',
+      replayEvent.eventType === 'RIB_VETTING_COMPLETED' && replayEvent.eventId.length > 0 &&
+      replayCandidate.event.applicationId === greenApp && startingDeliveries > 0 &&
+      startingOutcomes === startingDeliveries,
+      `${replayEvent.eventId}; deliveries=${startingDeliveries}; projections=${startingOutcomes}`);
+
+    const historyBeforeReplay = await historyToStatuses(greenApp);
+    const auditBeforeReplay = await admin<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM public_core.event_outbox
+      WHERE producer = 'application-service' AND event_type = 'AUDIT_ENTRY'
+        AND payload->>'entityId' = ${greenApp}
+    `;
+    const auditCountBefore = auditBeforeReplay[0]?.n ?? 0;
+    const replayWaits: boolean[] = [];
+    for (let replayNumber = 1; replayNumber <= 2; replayNumber += 1) {
+      await appBus.publish(replayEvent);
+      const consumed = await waitForCount(
+        () => consumedClearanceEvents.get(replayEvent.eventId)?.deliveries ?? 0,
+        startingDeliveries + replayNumber,
+        `application Kafka consumer delivery ${replayNumber} for exact event ${replayEvent.eventId}`,
+      );
+      const projected = await waitForCount(
+        () => clearanceProjectionOutcomes.get(replayEvent.eventId)?.length ?? 0,
+        startingOutcomes + replayNumber,
+        `completed projection ${replayNumber} for exact event ${replayEvent.eventId}`,
+      );
+      replayWaits.push(consumed && projected);
+    }
+
+    const finalRecord = consumedClearanceEvents.get(replayEvent.eventId);
+    const finalOutcomes = clearanceProjectionOutcomes.get(replayEvent.eventId) ?? [];
+    const replayPayloads = finalRecord?.serializedPayloads.slice(startingDeliveries) ?? [];
+    const replayProjectionOutcomes = finalOutcomes.slice(startingOutcomes);
+    const historyAfterReplay = await historyToStatuses(greenApp);
+    const auditAfterReplay = await admin<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM public_core.event_outbox
+      WHERE producer = 'application-service' AND event_type = 'AUDIT_ENTRY'
+        AND payload->>'entityId' = ${greenApp}
+    `;
+    const auditCountAfter = auditAfterReplay[0]?.n ?? 0;
+
+    check('two acknowledged Kafka redeliveries retain the exact same eventId and full JSON payload',
+      replayWaits.length === 2 && replayWaits.every(Boolean) &&
+      finalRecord?.deliveries === startingDeliveries + 2 && replayPayloads.length === 2 &&
+      replayPayloads.every((payload) => payload === originalPayload));
+    check('the real consumer projects both same-event redeliveries as NO_CHANGE',
+      replayProjectionOutcomes.length === 2 && replayProjectionOutcomes.every((kind) => kind === 'NO_CHANGE'),
+      replayProjectionOutcomes.join(', '));
+    check('same-event replay adds no lifecycle history or application audit/outbox rows',
+      historyAfterReplay.length === historyBeforeReplay.length &&
+      historyAfterReplay.every((status, index) => status === historyBeforeReplay[index]) &&
+      auditCountAfter === auditCountBefore,
+      `history ${historyBeforeReplay.length} → ${historyAfterReplay.length}; audit ${auditCountBefore} → ${auditCountAfter}`);
   }
 
   // ── Scenario 2: the fail path — missing NESA record → REJECTED ────────

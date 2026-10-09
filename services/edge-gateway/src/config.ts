@@ -65,6 +65,7 @@ export interface EdgeUpstreamConfig {
   readonly iamBaseUrl: string;
   readonly identityBaseUrl: string;
   readonly applicationBaseUrl: string;
+  readonly schedulingBaseUrl: string;
   readonly fieldSyncBaseUrl: string;
   /** Per-call upstream deadline. A browser request cannot outlive this. */
   readonly timeoutMs: number;
@@ -78,6 +79,7 @@ export function loadEdgeUpstreamConfig(source: EnvSource = process.env): EdgeUps
       IAM_BASE_URL: url({ protocols: ['http', 'https'] }),
       IDENTITY_SERVICE_BASE_URL: url({ protocols: ['http', 'https'] }),
       APPLICATION_SERVICE_BASE_URL: url({ protocols: ['http', 'https'] }),
+      SCHEDULING_SERVICE_BASE_URL: url({ protocols: ['http', 'https'] }),
       FIELD_SYNC_SERVICE_BASE_URL: url({ protocols: ['http', 'https'] }),
       EDGE_UPSTREAM_TIMEOUT_MS: withDefault(integer({ min: 500, max: 60_000 }), 8_000),
       EDGE_UPSTREAM_MAX_RESPONSE_BYTES: withDefault(
@@ -91,6 +93,7 @@ export function loadEdgeUpstreamConfig(source: EnvSource = process.env): EdgeUps
     iamBaseUrl: env.IAM_BASE_URL,
     identityBaseUrl: env.IDENTITY_SERVICE_BASE_URL,
     applicationBaseUrl: env.APPLICATION_SERVICE_BASE_URL,
+    schedulingBaseUrl: env.SCHEDULING_SERVICE_BASE_URL,
     fieldSyncBaseUrl: env.FIELD_SYNC_SERVICE_BASE_URL,
     timeoutMs: env.EDGE_UPSTREAM_TIMEOUT_MS,
     maxResponseBytes: env.EDGE_UPSTREAM_MAX_RESPONSE_BYTES,

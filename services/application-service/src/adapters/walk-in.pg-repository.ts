@@ -28,7 +28,12 @@ import type {
 } from '../ports/walk-in-repository.js';
 import { ApplicationPersistenceError } from '../domain/application.errors.js';
 import { AGENCY_TARGET } from '../domain/agency-schema.js';
-import { findLiveApplication, isLiveIntentViolation } from './application-insert.js';
+import {
+  CampaignUnavailableForApplicationError,
+  findLiveApplication,
+  isLiveIntentViolation,
+  lockCampaignForApplicationInsert,
+} from './application-insert.js';
 import { stageEvents } from './outbox/pg-event-outbox.js';
 import type { StageEvents } from '../ports/event-outbox.js';
 
@@ -44,6 +49,12 @@ export class PgWalkInRepository implements WalkInRepository {
     try {
       return await sql.begin(async (tx) => {
         await tx`SET LOCAL ROLE ${sql(input.actor.dbRole)}`;
+        await lockCampaignForApplicationInsert(
+          tx,
+          input.actor.agency,
+          input.campaignId,
+          ['REGISTRATION_OPEN', 'REGISTRATION_CLOSED', 'EXAMINATION_ACTIVE'],
+        );
 
         const inserted = await tx<{ id: string; processing_code: string }[]>`
           INSERT INTO ${schema}.applications
@@ -103,6 +114,9 @@ export class PgWalkInRepository implements WalkInRepository {
         return { kind: 'REGISTERED' as const, ...created };
       });
     } catch (cause) {
+      if (cause instanceof CampaignUnavailableForApplicationError) {
+        return { kind: 'NO_WALK_IN_CAMPAIGN' };
+      }
       if (cause instanceof ApplicationPersistenceError) throw cause;
       // ADR-027: the live-intent index refused a second live application for
       // this candidate. Postgres has already aborted the transaction above,
