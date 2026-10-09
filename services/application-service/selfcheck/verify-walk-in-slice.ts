@@ -18,14 +18,18 @@
 //   npx tsx services/application-service/selfcheck/verify-walk-in-slice.ts
 // ══════════════════════════════════════════════════════════════════
 
-import { createPublicKey, randomUUID } from 'node:crypto';
-import postgres from 'postgres';
-import { InMemoryEventBus, newEnvelope } from '@usrp/shared-events';
-import type { AuditEvent } from '@usrp/shared-types';
-import { sql } from '@usrp/shared-database';
-import { startHttpServer } from '@usrp/shared-http';
-import { generateDeviceKeyPair } from '@usrp/shared-security';
-import { makeAuthVerifier, signAuthToken, type AuthTokenClaims } from '@usrp/shared-auth';
+import { createPublicKey, randomUUID } from "node:crypto";
+import postgres from "postgres";
+import { InMemoryEventBus, newEnvelope } from "@usrp/shared-events";
+import type { AuditEvent } from "@usrp/shared-types";
+import { sql } from "@usrp/shared-database";
+import { startHttpServer } from "@usrp/shared-http";
+import { generateDeviceKeyPair } from "@usrp/shared-security";
+import {
+  makeAuthVerifier,
+  signAuthToken,
+  type AuthTokenClaims,
+} from "@usrp/shared-auth";
 import {
   createApplicationService,
   loadApplicationConfig,
@@ -37,58 +41,65 @@ import {
   FINAL_DECISION_PATH,
   ACCEPT_PATH,
   ADJUDICATE_PATH,
-} from '../src/index.js';
-import { PgWalkInRepository } from '../src/adapters/walk-in.pg-repository.js';
+} from "../src/index.js";
+import { PgWalkInRepository } from "../src/adapters/walk-in.pg-repository.js";
 
 // ── In-test issuer key: set the verify public key BEFORE loading config ──
 const AUTH_KEYS = generateDeviceKeyPair();
-process.env['AUTH_JWT_PUBLIC_KEY_B64'] = Buffer.from(
-  createPublicKey(AUTH_KEYS.publicKeyPem).export({ type: 'spki', format: 'pem' }).toString(),
-  'utf8',
-).toString('base64');
+process.env["AUTH_JWT_PUBLIC_KEY_B64"] = Buffer.from(
+  createPublicKey(AUTH_KEYS.publicKeyPem)
+    .export({ type: "spki", format: "pem" })
+    .toString(),
+  "utf8",
+).toString("base64");
 
 const ADMIN_URL =
-  process.env['ADMIN_DATABASE_URL'] ??
-  'postgresql://usrp_admin:usrp_dev_password@localhost:5432/usrp_db';
+  process.env["ADMIN_DATABASE_URL"] ??
+  "postgresql://usrp_admin:usrp_dev_password@localhost:5432/usrp_db";
 const admin = postgres(ADMIN_URL, { onnotice: () => {} });
 
 // Deterministic fixtures (officer subjects are UUIDs — Slice-4 alignment).
-const APPLICANT_ID = '6a000000-0000-4000-8000-000000000001';
-const NID_HASH = '6a6a6a6a'.repeat(8); // 64 hex
+const APPLICANT_ID = "6a000000-0000-4000-8000-000000000001";
+const NID_HASH = "6a6a6a6a".repeat(8); // 64 hex
 // ADR-027 binds the walk-in lane to one LIVE application per
 // (applicant, campaign, category), so the early-hard-fail scenario needs its
 // own candidate — the first one is still live (and ends ACCEPTED) by then.
 // Re-registering APPLICANT_ID now returns 409 ALREADY_APPLIED, which §6b
 // asserts deliberately rather than works around.
-const FAIL_APPLICANT_ID = '6a000000-0000-4000-8000-000000000002';
-const FAIL_NID_HASH = '6b6b6b6b'.repeat(8);
-const STAGING_FAILURE_APPLICANT_ID = '6a000000-0000-4000-8000-000000000003';
-const STAGING_FAILURE_NID_HASH = '6c6c6c6c'.repeat(8);
-const RDF_CAMPAIGN = '6a000000-0000-4000-8000-0000000000c1';
-const RDF_OFFICER_ID = '6a000000-0000-4000-8000-00000000ff01';
-const RNP_OFFICER_ID = '6a000000-0000-4000-8000-00000000ff02';
-const DEVICE_ID = 'walkin-selfcheck-tablet-1';
+const FAIL_APPLICANT_ID = "6a000000-0000-4000-8000-000000000002";
+const FAIL_NID_HASH = "6b6b6b6b".repeat(8);
+const STAGING_FAILURE_APPLICANT_ID = "6a000000-0000-4000-8000-000000000003";
+const STAGING_FAILURE_NID_HASH = "6c6c6c6c".repeat(8);
+const RDF_CAMPAIGN = "6a000000-0000-4000-8000-0000000000c1";
+const RDF_OFFICER_ID = "6a000000-0000-4000-8000-00000000ff01";
+const RNP_OFFICER_ID = "6a000000-0000-4000-8000-00000000ff02";
+const DEVICE_ID = "walkin-selfcheck-tablet-1";
 
 let failures = 0;
-function check(label: string, condition: boolean, detail = ''): void {
+function check(label: string, condition: boolean, detail = ""): void {
   if (condition) console.log(`  ✓ ${label}`);
   else {
     failures += 1;
-    console.error(`  ✗ ${label}${detail ? ` — ${detail}` : ''}`);
+    console.error(`  ✗ ${label}${detail ? ` — ${detail}` : ""}`);
   }
 }
 
-function mint(kind: 'officer' | 'system', opts: { agency?: 'RDF' | 'RNP'; sub?: string } = {}): string {
+function mint(
+  kind: "officer" | "system",
+  opts: { agency?: "RDF" | "RNP"; sub?: string } = {},
+): string {
   const base = {
     v: 1 as const,
-    iss: 'usrp',
-    aud: 'usrp-services',
+    iss: "usrp",
+    aud: "usrp-services",
     sub: opts.sub ?? `walkin-selfcheck-${kind}`,
-    issuedAt: '2026-01-01T00:00:00.000Z',
-    expiresAt: '2999-01-01T00:00:00.000Z',
+    issuedAt: "2026-01-01T00:00:00.000Z",
+    expiresAt: "2999-01-01T00:00:00.000Z",
   };
   const claims: AuthTokenClaims =
-    kind === 'officer' ? { ...base, kind, agency: opts.agency ?? 'RDF', roles: [] } : { ...base, kind };
+    kind === "officer"
+      ? { ...base, kind, agency: opts.agency ?? "RDF", roles: [] }
+      : { ...base, kind };
   return signAuthToken(AUTH_KEYS.privateKeyPem, claims);
 }
 
@@ -135,7 +146,7 @@ async function seed(): Promise<void> {
         (id, public_code, campaign_label, agency, status, target_categories, registration_opens_at,
          registration_closes_at, examination_start_date, examination_end_date,
          examination_reporting_hour, allows_walk_in)
-      VALUES (${RDF_CAMPAIGN}, ${`LEGACY-${RDF_CAMPAIGN.replaceAll('-', '').toUpperCase()}`},
+      VALUES (${RDF_CAMPAIGN}, ${`LEGACY-${RDF_CAMPAIGN.replaceAll("-", "").toUpperCase()}`},
               'WALKIN-SELFCHECK-2026', 'RDF', 'EXAMINATION_ACTIVE',
               '["GENERAL_ENLISTMENT"]', now() - interval '40 days', now() - interval '2 days',
               ${today}, ${today}, 8, true)
@@ -143,7 +154,9 @@ async function seed(): Promise<void> {
   });
 }
 
-async function readState(id: string): Promise<Record<string, unknown> | undefined> {
+async function readState(
+  id: string,
+): Promise<Record<string, unknown> | undefined> {
   const rows = await admin<Record<string, unknown>[]>`
     SELECT status, is_walk_in, qr_invitation_code, age_eligibility_status,
            physical_test_score_id, medical_fitness_status
@@ -151,8 +164,14 @@ async function readState(id: string): Promise<Record<string, unknown> | undefine
   return rows[0];
 }
 
-async function historyRows(id: string): Promise<{ from_status: string | null; to_status: string; performed_by: string }[]> {
-  return admin<{ from_status: string | null; to_status: string; performed_by: string }[]>`
+async function historyRows(
+  id: string,
+): Promise<
+  { from_status: string | null; to_status: string; performed_by: string }[]
+> {
+  return admin<
+    { from_status: string | null; to_status: string; performed_by: string }[]
+  >`
     SELECT from_status, to_status, performed_by
     FROM rdf_ops.application_status_history
     WHERE application_id = ${id} ORDER BY performed_at`;
@@ -166,115 +185,191 @@ async function main(): Promise<void> {
   const bus = new InMemoryEventBus();
   const service = createApplicationService(config, bus);
   const verify = makeAuthVerifier({
-    publicKeyPem: createPublicKey(AUTH_KEYS.publicKeyPem).export({ type: 'spki', format: 'pem' }).toString(),
+    publicKeyPem: createPublicKey(AUTH_KEYS.publicKeyPem)
+      .export({ type: "spki", format: "pem" })
+      .toString(),
     issuer: config.auth.jwtIssuer,
     audience: config.auth.jwtAudience,
   });
 
   const server = await startHttpServer({
-    serviceName: 'walk-in-selfcheck',
+    serviceName: "walk-in-selfcheck",
     port: 0,
-    host: '127.0.0.1',
-    routes: [...walkInRoutes(service.walkIn, verify), ...officerTransitionRoutes(service.officerTransitions, verify)],
+    host: "127.0.0.1",
+    routes: [
+      ...walkInRoutes(service.walkIn, verify),
+      ...officerTransitionRoutes(service.officerTransitions, verify),
+    ],
     readiness: async () => true,
   });
   const base = `http://127.0.0.1:${server.port}`;
   const rdfHeaders = {
-    'content-type': 'application/json',
-    authorization: `Bearer ${mint('officer', { agency: 'RDF', sub: RDF_OFFICER_ID })}`,
+    "content-type": "application/json",
+    authorization: `Bearer ${mint("officer", { agency: "RDF", sub: RDF_OFFICER_ID })}`,
   };
-  const post = async (path: string, body: unknown, headers: Record<string, string> = rdfHeaders) => {
-    const res = await fetch(`${base}${path}`, { method: 'POST', headers, body: JSON.stringify(body) });
+  const post = async (
+    path: string,
+    body: unknown,
+    headers: Record<string, string> = rdfHeaders,
+  ) => {
+    const res = await fetch(`${base}${path}`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    });
     const json = (await res.json()) as Record<string, unknown>;
     return { status: res.status, json, text: JSON.stringify(json) };
   };
 
   // Feed a vetting verdict through the REAL projection use case.
-  const ctx = () => ({ correlationId: randomUUID(), causationId: randomUUID() });
-  const projectAge = (applicationId: string, ageStatus: 'ELIGIBLE' | 'INELIGIBLE') =>
+  const ctx = () => ({
+    correlationId: randomUUID(),
+    causationId: randomUUID(),
+  });
+  const projectAge = (
+    applicationId: string,
+    ageStatus: "ELIGIBLE" | "INELIGIBLE",
+  ) =>
     service.projector.project({
-      result: { dimension: 'AGE', applicationId, agency: 'RDF', ageStatus, detail: { band: 'selfcheck' }, correlationId: randomUUID() },
+      result: {
+        dimension: "AGE",
+        applicationId,
+        agency: "RDF",
+        ageStatus,
+        detail: { band: "selfcheck" },
+        correlationId: randomUUID(),
+      },
       context: ctx(),
-      agency: 'RDF',
+      agency: "RDF",
     });
-  const projectCriminal = (applicationId: string, criminalStatus: 'CLEARED' | 'FLAGGED_CONVICTION') =>
+  const projectCriminal = (
+    applicationId: string,
+    criminalStatus: "CLEARED" | "FLAGGED_CONVICTION",
+  ) =>
     service.projector.project({
-      result: { dimension: 'CRIMINAL', applicationId, agency: 'RDF', criminalStatus, appliedThreshold: 'ANY_CONVICTION', ribRequestId: randomUUID(), correlationId: randomUUID() },
+      result: {
+        dimension: "CRIMINAL",
+        applicationId,
+        agency: "RDF",
+        criminalStatus,
+        appliedThreshold: "ANY_CONVICTION",
+        ribRequestId: randomUUID(),
+        correlationId: randomUUID(),
+      },
       context: ctx(),
-      agency: 'RDF',
+      agency: "RDF",
     });
 
   try {
     // ══ 1. Register a walk-in on exam day ══════════════════════════
-    console.log('\n── 1. Officer registers a walk-in (exam-day campaign) ───────');
+    console.log(
+      "\n── 1. Officer registers a walk-in (exam-day campaign) ───────",
+    );
     const reg = await post(WALK_IN_REGISTER_PATH, {
       applicantId: APPLICANT_ID,
-      category: 'GENERAL_ENLISTMENT',
-      nesaIndexNumber: 'RW2024/1001',
+      category: "GENERAL_ENLISTMENT",
+      nesaIndexNumber: "RW2024/1001",
     });
-    check('register → 201 REGISTERED', reg.status === 201 && reg.json['status'] === 'REGISTERED', reg.text);
-    const appId = reg.json['applicationId'] as string;
-    const ticket = reg.json['qrInvitationCode'] as string;
-    check('on-site ticket minted (score-binding anchor)', typeof ticket === 'string' && ticket.length >= 40, ticket);
+    check(
+      "register → 201 REGISTERED",
+      reg.status === 201 && reg.json["status"] === "REGISTERED",
+      reg.text,
+    );
+    const appId = reg.json["applicationId"] as string;
+    const ticket = reg.json["qrInvitationCode"] as string;
+    check(
+      "on-site ticket minted (score-binding anchor)",
+      typeof ticket === "string" && ticket.length >= 40,
+      ticket,
+    );
     {
       const s = await readState(appId);
-      check('row: WALK_IN_REGISTERED + is_walk_in + ticket persisted',
-        s?.['status'] === 'WALK_IN_REGISTERED' && s?.['is_walk_in'] === true && s?.['qr_invitation_code'] === ticket,
-        JSON.stringify(s));
+      check(
+        "row: WALK_IN_REGISTERED + is_walk_in + ticket persisted",
+        s?.["status"] === "WALK_IN_REGISTERED" &&
+          s?.["is_walk_in"] === true &&
+          s?.["qr_invitation_code"] === ticket,
+        JSON.stringify(s),
+      );
       const hist = await historyRows(appId);
-      check('history: null → WALK_IN_REGISTERED, performed_by = officer UUID',
-        hist.length === 1 && hist[0]?.from_status === null && hist[0]?.to_status === 'WALK_IN_REGISTERED' && hist[0]?.performed_by === RDF_OFFICER_ID,
-        JSON.stringify(hist));
-      const submitted = bus.published.find((e) => e.eventType === 'APPLICANT_SUBMITTED') as unknown as Record<string, unknown> | undefined;
-      check('APPLICANT_SUBMITTED emitted with channel WALK_IN (gates fire unchanged)',
-        submitted?.['channel'] === 'WALK_IN' && submitted?.['applicationId'] === appId, JSON.stringify(submitted));
-      check('AUDIT_ENTRY WALK_IN_REGISTERED attributed to officer',
-        bus.published.some((e) => e.eventType === 'AUDIT_ENTRY' && (e as unknown as Record<string, unknown>)['action'] === 'WALK_IN_REGISTERED' && (e as unknown as Record<string, unknown>)['performedBy'] === RDF_OFFICER_ID));
+      check(
+        "history: null → WALK_IN_REGISTERED, performed_by = officer UUID",
+        hist.length === 1 &&
+          hist[0]?.from_status === null &&
+          hist[0]?.to_status === "WALK_IN_REGISTERED" &&
+          hist[0]?.performed_by === RDF_OFFICER_ID,
+        JSON.stringify(hist),
+      );
+      const submitted = bus.published.find(
+        (e) => e.eventType === "APPLICANT_SUBMITTED",
+      ) as unknown as Record<string, unknown> | undefined;
+      check(
+        "APPLICANT_SUBMITTED emitted with channel WALK_IN (gates fire unchanged)",
+        submitted?.["channel"] === "WALK_IN" &&
+          submitted?.["applicationId"] === appId,
+        JSON.stringify(submitted),
+      );
+      check(
+        "AUDIT_ENTRY WALK_IN_REGISTERED attributed to officer",
+        bus.published.some(
+          (e) =>
+            e.eventType === "AUDIT_ENTRY" &&
+            (e as unknown as Record<string, unknown>)["action"] ===
+              "WALK_IN_REGISTERED" &&
+            (e as unknown as Record<string, unknown>)["performedBy"] ===
+              RDF_OFFICER_ID,
+        ),
+      );
       const staged = await admin<{ event_type: string }[]>`
         SELECT event_type FROM public_core.event_outbox
         WHERE payload->>'applicationId' = ${appId} OR payload->>'entityId' = ${appId}
         ORDER BY id`;
       check(
-        'registration durably stages APPLICANT_SUBMITTED + AUDIT_ENTRY',
+        "registration durably stages APPLICANT_SUBMITTED + AUDIT_ENTRY",
         staged.length === 2 &&
-          staged.some((row) => row.event_type === 'APPLICANT_SUBMITTED') &&
-          staged.some((row) => row.event_type === 'AUDIT_ENTRY'),
+          staged.some((row) => row.event_type === "APPLICANT_SUBMITTED") &&
+          staged.some((row) => row.event_type === "AUDIT_ENTRY"),
         JSON.stringify(staged),
       );
     }
 
     // ══ 1b. Outbox staging failure rolls the whole registration back ═
-    console.log('\n── 1b. Staging failure → application/history/audit all rollback ─');
+    console.log(
+      "\n── 1b. Staging failure → application/history/audit all rollback ─",
+    );
     const repository = new PgWalkInRepository();
-    const failureContext = { correlationId: randomUUID(), causationId: randomUUID() };
+    const failureContext = {
+      correlationId: randomUUID(),
+      causationId: randomUUID(),
+    };
     const duplicateEnvelope = newEnvelope(failureContext);
     let stagingFailed = false;
     try {
       await repository.createWalkInApplication(
         {
           actor: {
-            agency: 'RDF',
-            dbRole: 'usrp_rdf_officer',
+            agency: "RDF",
+            dbRole: "usrp_rdf_officer",
             officerId: RDF_OFFICER_ID,
             correlationId: failureContext.correlationId,
           },
           applicantId: STAGING_FAILURE_APPLICANT_ID,
           campaignId: RDF_CAMPAIGN,
-          category: 'GENERAL_ENLISTMENT',
-          nesaIndexNumber: 'RW2024/1003',
+          category: "GENERAL_ENLISTMENT",
+          nesaIndexNumber: "RW2024/1003",
           hecRegistrationNumber: null,
           qrInvitationCode: randomUUID(),
         },
         (created) => {
           const audit: AuditEvent = {
             ...duplicateEnvelope,
-            eventType: 'AUDIT_ENTRY',
-            entityType: 'APPLICATION',
+            eventType: "AUDIT_ENTRY",
+            entityType: "APPLICATION",
             entityId: created.applicationId,
-            action: 'WALK_IN_REGISTERED',
+            action: "WALK_IN_REGISTERED",
             performedBy: RDF_OFFICER_ID,
-            agency: 'RDF',
-            newStatus: 'WALK_IN_REGISTERED',
+            agency: "RDF",
+            newStatus: "WALK_IN_REGISTERED",
             metadata: { failureInjection: true },
           };
           // The duplicate event_id makes the second stage INSERT fail after
@@ -285,7 +380,7 @@ async function main(): Promise<void> {
     } catch {
       stagingFailed = true;
     }
-    check('injected duplicate event id makes staging fail', stagingFailed);
+    check("injected duplicate event id makes staging fail", stagingFailed);
     const failedApps = await admin<{ n: number }[]>`
       SELECT count(*)::int AS n FROM rdf_ops.applications
       WHERE applicant_id = ${STAGING_FAILURE_APPLICANT_ID}`;
@@ -296,10 +391,18 @@ async function main(): Promise<void> {
     const failedOutbox = await admin<{ n: number }[]>`
       SELECT count(*)::int AS n FROM public_core.event_outbox
       WHERE event_id = ${duplicateEnvelope.eventId}`;
-    check('application rolled back', failedApps[0]?.n === 0, String(failedApps[0]?.n));
-    check('history rolled back', failedHistory[0]?.n === 0, String(failedHistory[0]?.n));
     check(
-      'staged audit and all outbox rows rolled back',
+      "application rolled back",
+      failedApps[0]?.n === 0,
+      String(failedApps[0]?.n),
+    );
+    check(
+      "history rolled back",
+      failedHistory[0]?.n === 0,
+      String(failedHistory[0]?.n),
+    );
+    check(
+      "staged audit and all outbox rows rolled back",
       failedOutbox[0]?.n === 0,
       String(failedOutbox[0]?.n),
     );
@@ -323,8 +426,10 @@ async function main(): Promise<void> {
       } catch {
         officerCouldRead = false;
       }
-      check('officer role can stage events but cannot read the outbox back (rls/0023)',
-        !officerCouldRead);
+      check(
+        "officer role can stage events but cannot read the outbox back (rls/0023)",
+        !officerCouldRead,
+      );
     }
 
     // ── 1c-continued. The FULL 0023 least-privilege matrix, pinned ──
@@ -349,14 +454,16 @@ async function main(): Promise<void> {
           await tx`SET LOCAL ROLE usrp_rdf_officer`;
           await tx`
             INSERT INTO public_core.event_outbox (event_id, event_type, producer, payload)
-            VALUES (${pinnedEventId}, 'AUDIT_ENTRY', 'application-service', '{"proof":"1c"}'::jsonb)`;
+            VALUES (${pinnedEventId}, 'AUDIT_ENTRY', 'application-service', '{"proof":"1c","entityType":"APPLICATION","action":"SELF_CHECK"}'::jsonb)`;
         });
         pinnedInsertOk = true;
       } catch {
         pinnedInsertOk = false;
       }
-      check('officer INSERT with producer=application-service is allowed (rls/0023)',
-        pinnedInsertOk);
+      check(
+        "officer INSERT with producer=application-service is allowed (rls/0023)",
+        pinnedInsertOk,
+      );
 
       // (b) INSERT under any OTHER producer is REFUSED by the WITH CHECK.
       let foreignProducerRejected = false;
@@ -365,13 +472,15 @@ async function main(): Promise<void> {
           await tx`SET LOCAL ROLE usrp_rdf_officer`;
           await tx`
             INSERT INTO public_core.event_outbox (event_id, event_type, producer, payload)
-            VALUES (${randomUUID()}, 'AUDIT_ENTRY', 'scheduling-service', '{"proof":"1c"}'::jsonb)`;
+            VALUES (${randomUUID()}, 'AUDIT_ENTRY', 'scheduling-service', '{"proof":"1c","entityType":"APPLICATION","action":"SELF_CHECK"}'::jsonb)`;
         });
       } catch {
         foreignProducerRejected = true;
       }
-      check('officer INSERT with a foreign producer is refused (WITH CHECK producer pin)',
-        foreignProducerRejected);
+      check(
+        "officer INSERT with a foreign producer is refused (WITH CHECK producer pin)",
+        foreignProducerRejected,
+      );
 
       // (c) The same INSERT under the system role IS allowed — the pin is a
       //     policy on the OFFICER grant, not a column constraint, and the
@@ -382,14 +491,16 @@ async function main(): Promise<void> {
           await tx`SET LOCAL ROLE usrp_system_service`;
           await tx`
             INSERT INTO public_core.event_outbox (event_id, event_type, producer, payload)
-            VALUES (${randomUUID()}, 'AUDIT_ENTRY', 'scheduling-service', '{"proof":"1c"}'::jsonb)`;
+            VALUES (${randomUUID()}, 'AUDIT_ENTRY', 'scheduling-service', '{"proof":"1c","entityType":"APPLICATION","action":"SELF_CHECK"}'::jsonb)`;
         });
         systemForeignProducerOk = true;
       } catch {
         systemForeignProducerOk = false;
       }
-      check('system role may still stage any producer (it remains the general writer)',
-        systemForeignProducerOk);
+      check(
+        "system role may still stage any producer (it remains the general writer)",
+        systemForeignProducerOk,
+      );
 
       // (d) Officer UPDATE is denied — the relay is the sole marker.
       let officerUpdateDenied = false;
@@ -401,7 +512,10 @@ async function main(): Promise<void> {
       } catch {
         officerUpdateDenied = true;
       }
-      check('officer UPDATE on the outbox is denied (no UPDATE grant)', officerUpdateDenied);
+      check(
+        "officer UPDATE on the outbox is denied (no UPDATE grant)",
+        officerUpdateDenied,
+      );
 
       // (e) Officer DELETE is denied — staging is append-only for officers.
       let officerDeleteDenied = false;
@@ -413,7 +527,10 @@ async function main(): Promise<void> {
       } catch {
         officerDeleteDenied = true;
       }
-      check('officer DELETE on the outbox is denied (no DELETE grant)', officerDeleteDenied);
+      check(
+        "officer DELETE on the outbox is denied (no DELETE grant)",
+        officerDeleteDenied,
+      );
 
       // (f) Sequence SELECT is denied while USAGE alone suffices: the
       //     successful INSERT in (a) already proved nextval() works under
@@ -427,45 +544,78 @@ async function main(): Promise<void> {
       } catch {
         officerCouldReadSequence = false;
       }
-      check('officer cannot read the outbox sequence (USAGE granted, SELECT withheld)',
-        !officerCouldReadSequence);
+      check(
+        "officer cannot read the outbox sequence (USAGE granted, SELECT withheld)",
+        !officerCouldReadSequence,
+      );
 
       // (g) Clean up the two rows (a) and (c) staged for the assertion itself.
       await admin`DELETE FROM public_core.event_outbox WHERE payload->>'proof' = '1c'`;
     }
 
     // ══ 2. On-site vetting gates on the autonomous age verdict ═════
-    console.log('\n── 2. On-site vetting: age gate drives the transition ───────');
+    console.log(
+      "\n── 2. On-site vetting: age gate drives the transition ───────",
+    );
     const pend = await post(WALK_IN_VET_PATH, { applicationId: appId });
-    check('vet before the verdict lands → 409 AGE_PENDING', pend.status === 409 && pend.json['status'] === 'AGE_PENDING', pend.text);
+    check(
+      "vet before the verdict lands → 409 AGE_PENDING",
+      pend.status === 409 && pend.json["status"] === "AGE_PENDING",
+      pend.text,
+    );
 
-    const ageOut = await projectAge(appId, 'ELIGIBLE');
-    check('age ELIGIBLE projected; status UNCHANGED (no ladder proposal on walk-in rows)',
-      ageOut.kind === 'APPLIED' && (await readState(appId))?.['status'] === 'WALK_IN_REGISTERED', JSON.stringify(ageOut));
+    const ageOut = await projectAge(appId, "ELIGIBLE");
+    check(
+      "age ELIGIBLE projected; status UNCHANGED (no ladder proposal on walk-in rows)",
+      ageOut.kind === "APPLIED" &&
+        (await readState(appId))?.["status"] === "WALK_IN_REGISTERED",
+      JSON.stringify(ageOut),
+    );
 
     const vet = await post(WALK_IN_VET_PATH, { applicationId: appId });
-    check('vet → 200 APPLIED WALK_IN_REGISTERED → WALK_IN_ON_SITE_VETTING',
-      vet.status === 200 && vet.json['toStatus'] === 'WALK_IN_ON_SITE_VETTING' && vet.json['ageStatus'] === 'ELIGIBLE', vet.text);
+    check(
+      "vet → 200 APPLIED WALK_IN_REGISTERED → WALK_IN_ON_SITE_VETTING",
+      vet.status === 200 &&
+        vet.json["toStatus"] === "WALK_IN_ON_SITE_VETTING" &&
+        vet.json["ageStatus"] === "ELIGIBLE",
+      vet.text,
+    );
     const vetAudit = await admin<{ n: number }[]>`
       SELECT count(*)::int AS n FROM public_core.event_outbox
       WHERE event_type = 'AUDIT_ENTRY'
         AND payload->>'entityId' = ${appId}
         AND payload->>'action' = 'APPLICATION_STATUS_ADVANCED'`;
-    check('on-site vetting audit is durably staged', vetAudit[0]?.n === 1, String(vetAudit[0]?.n));
+    check(
+      "on-site vetting audit is durably staged",
+      vetAudit[0]?.n === 1,
+      String(vetAudit[0]?.n),
+    );
     const revet = await post(WALK_IN_VET_PATH, { applicationId: appId });
-    check('re-vet → 200 NO_CHANGE (idempotent)', revet.status === 200 && revet.json['status'] === 'NO_CHANGE', revet.text);
+    check(
+      "re-vet → 200 NO_CHANGE (idempotent)",
+      revet.status === 200 && revet.json["status"] === "NO_CHANGE",
+      revet.text,
+    );
 
     // All-pass evidence must NOT pull the row into the digital ladder or
     // trigger the slot lane (no application.cleared for walk-ins).
-    await projectCriminal(appId, 'CLEARED');
-    check('criminal CLEARED lands; walk-in row stays WALK_IN_ON_SITE_VETTING',
-      (await readState(appId))?.['status'] === 'WALK_IN_ON_SITE_VETTING');
-    check('no APPLICATION_ELIGIBILITY_CLEARED emitted (slot lane never fires for walk-ins)',
-      !bus.published.some((e) => e.eventType === 'APPLICATION_ELIGIBILITY_CLEARED'));
+    await projectCriminal(appId, "CLEARED");
+    check(
+      "criminal CLEARED lands; walk-in row stays WALK_IN_ON_SITE_VETTING",
+      (await readState(appId))?.["status"] === "WALK_IN_ON_SITE_VETTING",
+    );
+    check(
+      "no APPLICATION_ELIGIBILITY_CLEARED emitted (slot lane never fires for walk-ins)",
+      !bus.published.some(
+        (e) => e.eventType === "APPLICATION_ELIGIBILITY_CLEARED",
+      ),
+    );
 
     // ══ 3. Physical-test capture advances the lane (biometric waived) ══
-    console.log('\n── 3. Captured score → WALK_IN_PHYSICAL_TEST ────────────────');
-    const payloadHash = '6b6b6b6b'.repeat(8);
+    console.log(
+      "\n── 3. Captured score → WALK_IN_PHYSICAL_TEST ────────────────",
+    );
+    const payloadHash = "6b6b6b6b".repeat(8);
     await admin.begin(async (tx) => {
       await tx`SET LOCAL session_replication_role = replica`;
       await tx`
@@ -476,95 +626,253 @@ async function main(): Promise<void> {
       `;
     });
     const phys = await service.physicalTestProjector.project({
-      result: { applicationId: appId, agency: 'RDF', signedPayloadHash: payloadHash, correlationId: randomUUID() },
+      result: {
+        applicationId: appId,
+        agency: "RDF",
+        signedPayloadHash: payloadHash,
+        correlationId: randomUUID(),
+      },
       context: ctx(),
-      agency: 'RDF',
+      agency: "RDF",
     });
-    check('score → APPLIED WALK_IN_ON_SITE_VETTING → WALK_IN_PHYSICAL_TEST (biometric waived: identity verified in person)',
-      phys.kind === 'APPLIED' && phys.toStatus === 'WALK_IN_PHYSICAL_TEST', JSON.stringify(phys));
-    check('score row stamped on the application',
-      (await readState(appId))?.['physical_test_score_id'] != null);
+    check(
+      "score → APPLIED WALK_IN_ON_SITE_VETTING → WALK_IN_PHYSICAL_TEST (biometric waived: identity verified in person)",
+      phys.kind === "APPLIED" && phys.toStatus === "WALK_IN_PHYSICAL_TEST",
+      JSON.stringify(phys),
+    );
+    check(
+      "score row stamped on the application",
+      (await readState(appId))?.["physical_test_score_id"] != null,
+    );
 
     // ══ 4. Late flag → ADJUDICATION_REVIEW; officer CLEAR restores ═══
-    console.log('\n── 4. Late criminal flag → human adjudication, restorable ───');
-    const lateFlag = await projectCriminal(appId, 'FLAGGED_CONVICTION');
-    check('late flag on vetted walk-in → ADJUDICATION_REVIEW (never silent auto-reject)',
-      lateFlag.kind === 'APPLIED' && (await readState(appId))?.['status'] === 'ADJUDICATION_REVIEW', JSON.stringify(lateFlag));
-    const clearRes = await post(ADJUDICATE_PATH, { applicationId: appId, decision: 'CLEAR', notes: 'Record mismatch — dismissed' });
-    check('officer CLEAR restores the pre-flag stage (WALK_IN_PHYSICAL_TEST, from history)',
-      clearRes.status === 200 && clearRes.json['toStatus'] === 'WALK_IN_PHYSICAL_TEST', clearRes.text);
+    console.log(
+      "\n── 4. Late criminal flag → human adjudication, restorable ───",
+    );
+    const lateFlag = await projectCriminal(appId, "FLAGGED_CONVICTION");
+    check(
+      "late flag on vetted walk-in → ADJUDICATION_REVIEW (never silent auto-reject)",
+      lateFlag.kind === "APPLIED" &&
+        (await readState(appId))?.["status"] === "ADJUDICATION_REVIEW",
+      JSON.stringify(lateFlag),
+    );
+    const clearRes = await post(ADJUDICATE_PATH, {
+      applicationId: appId,
+      decision: "CLEAR",
+      notes: "Record mismatch — dismissed",
+    });
+    check(
+      "officer CLEAR restores the pre-flag stage (WALK_IN_PHYSICAL_TEST, from history)",
+      clearRes.status === 200 &&
+        clearRes.json["toStatus"] === "WALK_IN_PHYSICAL_TEST",
+      clearRes.text,
+    );
 
     // ══ 5. THE LANE MERGE: medical → final → accept (one funnel) ═════
-    console.log('\n── 5. Merge at MEDICAL_REVIEW; walk-in reaches ACCEPTED ─────');
-    const med = await post(MEDICAL_REVIEW_PATH, { applicationId: appId, fitnessStatus: 'FIT' });
-    check('medical FIT from WALK_IN_PHYSICAL_TEST → MEDICAL_REVIEW (lane merged)',
-      med.status === 200 && med.json['fromStatus'] === 'WALK_IN_PHYSICAL_TEST' && med.json['toStatus'] === 'MEDICAL_REVIEW', med.text);
-    const fin = await post(FINAL_DECISION_PATH, { applicationId: appId, decision: 'SHORTLIST', notes: 'Walk-in shortlisted' });
-    check('final SHORTLIST → FINAL_SHORTLIST', fin.status === 200 && fin.json['toStatus'] === 'FINAL_SHORTLIST', fin.text);
+    console.log(
+      "\n── 5. Merge at MEDICAL_REVIEW; walk-in reaches ACCEPTED ─────",
+    );
+    const med = await post(MEDICAL_REVIEW_PATH, {
+      applicationId: appId,
+      fitnessStatus: "FIT",
+    });
+    check(
+      "medical FIT from WALK_IN_PHYSICAL_TEST → MEDICAL_REVIEW (lane merged)",
+      med.status === 200 &&
+        med.json["fromStatus"] === "WALK_IN_PHYSICAL_TEST" &&
+        med.json["toStatus"] === "MEDICAL_REVIEW",
+      med.text,
+    );
+    const fin = await post(FINAL_DECISION_PATH, {
+      applicationId: appId,
+      decision: "SHORTLIST",
+      notes: "Walk-in shortlisted",
+    });
+    check(
+      "final SHORTLIST → FINAL_SHORTLIST",
+      fin.status === 200 && fin.json["toStatus"] === "FINAL_SHORTLIST",
+      fin.text,
+    );
     const acc = await post(ACCEPT_PATH, { applicationId: appId });
-    check('accept → ACCEPTED (a walk-in completes the SAME funnel as the digital lane)',
-      acc.status === 200 && acc.json['toStatus'] === 'ACCEPTED', acc.text);
+    check(
+      "accept → ACCEPTED (a walk-in completes the SAME funnel as the digital lane)",
+      acc.status === 200 && acc.json["toStatus"] === "ACCEPTED",
+      acc.text,
+    );
     {
       const hist = await historyRows(appId);
-      const edges = hist.map((h) => `${h.from_status ?? '∅'}→${h.to_status}`);
-      check('append-only history holds the whole walk-in journey',
-        edges.join(',') === '∅→WALK_IN_REGISTERED,WALK_IN_REGISTERED→WALK_IN_ON_SITE_VETTING,WALK_IN_ON_SITE_VETTING→WALK_IN_PHYSICAL_TEST,WALK_IN_PHYSICAL_TEST→ADJUDICATION_REVIEW,ADJUDICATION_REVIEW→WALK_IN_PHYSICAL_TEST,WALK_IN_PHYSICAL_TEST→MEDICAL_REVIEW,MEDICAL_REVIEW→FINAL_SHORTLIST,FINAL_SHORTLIST→ACCEPTED',
-        edges.join(','));
+      const edges = hist.map((h) => `${h.from_status ?? "∅"}→${h.to_status}`);
+      check(
+        "append-only history holds the whole walk-in journey",
+        edges.join(",") ===
+          "∅→WALK_IN_REGISTERED,WALK_IN_REGISTERED→WALK_IN_ON_SITE_VETTING,WALK_IN_ON_SITE_VETTING→WALK_IN_PHYSICAL_TEST,WALK_IN_PHYSICAL_TEST→ADJUDICATION_REVIEW,ADJUDICATION_REVIEW→WALK_IN_PHYSICAL_TEST,WALK_IN_PHYSICAL_TEST→MEDICAL_REVIEW,MEDICAL_REVIEW→FINAL_SHORTLIST,FINAL_SHORTLIST→ACCEPTED",
+        edges.join(","),
+      );
     }
 
     // ══ 6. Early fail: age INELIGIBLE → WALK_IN_REJECTED (terminal) ══
-    console.log('\n── 6. Early hard fail → WALK_IN_REJECTED, a real terminal ───');
-    const reg2 = await post(WALK_IN_REGISTER_PATH, { applicantId: FAIL_APPLICANT_ID, category: 'GENERAL_ENLISTMENT', nesaIndexNumber: 'RW2024/1002' });
-    const app2 = reg2.json['applicationId'] as string;
-    check('second candidate registered', reg2.status === 201, reg2.text);
-    const badAge = await projectAge(app2, 'INELIGIBLE');
-    check('age INELIGIBLE at WALK_IN_REGISTERED → WALK_IN_REJECTED autonomously (lane-local fail-closed)',
-      badAge.kind === 'APPLIED' && (await readState(app2))?.['status'] === 'WALK_IN_REJECTED', JSON.stringify(badAge));
+    console.log(
+      "\n── 6. Early hard fail → WALK_IN_REJECTED, a real terminal ───",
+    );
+    const reg2 = await post(WALK_IN_REGISTER_PATH, {
+      applicantId: FAIL_APPLICANT_ID,
+      category: "GENERAL_ENLISTMENT",
+      nesaIndexNumber: "RW2024/1002",
+    });
+    const app2 = reg2.json["applicationId"] as string;
+    check("second candidate registered", reg2.status === 201, reg2.text);
+    const badAge = await projectAge(app2, "INELIGIBLE");
+    check(
+      "age INELIGIBLE at WALK_IN_REGISTERED → WALK_IN_REJECTED autonomously (lane-local fail-closed)",
+      badAge.kind === "APPLIED" &&
+        (await readState(app2))?.["status"] === "WALK_IN_REJECTED",
+      JSON.stringify(badAge),
+    );
     const vetRejected = await post(WALK_IN_VET_PATH, { applicationId: app2 });
-    check('vet on the rejected row → 200 NO_CHANGE', vetRejected.status === 200 && vetRejected.json['status'] === 'NO_CHANGE', vetRejected.text);
-    await projectCriminal(app2, 'FLAGGED_CONVICTION');
-    check('redelivered hard fail never moves WALK_IN_REJECTED (terminal, not re-adjudicated)',
-      (await readState(app2))?.['status'] === 'WALK_IN_REJECTED');
+    check(
+      "vet on the rejected row → 200 NO_CHANGE",
+      vetRejected.status === 200 && vetRejected.json["status"] === "NO_CHANGE",
+      vetRejected.text,
+    );
+    await projectCriminal(app2, "FLAGGED_CONVICTION");
+    check(
+      "redelivered hard fail never moves WALK_IN_REJECTED (terminal, not re-adjudicated)",
+      (await readState(app2))?.["status"] === "WALK_IN_REJECTED",
+    );
 
     // ══ 6b. One live application per candidate (ADR-027) ══════════════
     // The lane files into the same applications table the digital front door
     // does, so rls/0022's live-intent index governs it too. A double-tap on
     // the officer's tablet must be an ANSWER (the existing processing code),
     // never a second record and never a 500.
-    console.log('\n── 6b. Duplicate on-site registration → 409 ALREADY_APPLIED ─');
-    const dupe = await post(WALK_IN_REGISTER_PATH, { applicantId: FAIL_APPLICANT_ID, category: 'GENERAL_ENLISTMENT', nesaIndexNumber: 'RW2024/1002' });
-    check('re-registering a live candidate → 409 ALREADY_APPLIED', dupe.status === 409 && dupe.json['status'] === 'ALREADY_APPLIED', dupe.text);
-    check('…names the application already on file', dupe.json['applicationId'] === app2, dupe.text);
+    console.log(
+      "\n── 6b. Duplicate on-site registration → 409 ALREADY_APPLIED ─",
+    );
+    const dupe = await post(WALK_IN_REGISTER_PATH, {
+      applicantId: FAIL_APPLICANT_ID,
+      category: "GENERAL_ENLISTMENT",
+      nesaIndexNumber: "RW2024/1002",
+    });
+    check(
+      "re-registering a live candidate → 409 ALREADY_APPLIED",
+      dupe.status === 409 && dupe.json["status"] === "ALREADY_APPLIED",
+      dupe.text,
+    );
+    check(
+      "…names the application already on file",
+      dupe.json["applicationId"] === app2,
+      dupe.text,
+    );
     const dupeCount = await admin<{ n: number }[]>`
       SELECT count(*)::int AS n FROM rdf_ops.applications WHERE applicant_id = ${FAIL_APPLICANT_ID}`;
-    check('…and wrote no second row', dupeCount[0]?.n === 1, String(dupeCount[0]?.n));
+    check(
+      "…and wrote no second row",
+      dupeCount[0]?.n === 1,
+      String(dupeCount[0]?.n),
+    );
 
     // ══ 7. Guards ═════════════════════════════════════════════════════
-    console.log('\n── 7. Agency, auth, and input guards ────────────────────────');
-    const rnpHeaders = { 'content-type': 'application/json', authorization: `Bearer ${mint('officer', { agency: 'RNP', sub: RNP_OFFICER_ID })}` };
-    const rnpReg = await post(WALK_IN_REGISTER_PATH, { applicantId: APPLICANT_ID, category: 'CADET_OFFICER' }, rnpHeaders);
-    check('RNP officer register → 501 UNSUPPORTED_AGENCY (walk-in is RDF-only, engine-backed)', rnpReg.status === 501, rnpReg.text);
-    const rnpVet = await post(WALK_IN_VET_PATH, { applicationId: appId }, rnpHeaders);
-    check('RNP officer vet → 501 UNSUPPORTED_AGENCY', rnpVet.status === 501, rnpVet.text);
-    const wrongCat = await post(WALK_IN_REGISTER_PATH, { applicantId: APPLICANT_ID, category: 'CADET_OFFICER' });
-    check('RDF officer + RNP category → 422 WRONG_AGENCY_CATEGORY', wrongCat.status === 422 && wrongCat.json['status'] === 'WRONG_AGENCY_CATEGORY', wrongCat.text);
-    const ghost = await post(WALK_IN_REGISTER_PATH, { applicantId: randomUUID(), category: 'GENERAL_ENLISTMENT', nesaIndexNumber: 'RW2024/1003' });
-    check('unknown applicant → 404 APPLICANT_NOT_FOUND', ghost.status === 404, ghost.text);
-    const ghostVet = await post(WALK_IN_VET_PATH, { applicationId: randomUUID() });
-    check('unknown application vet → 404 (cross-agency-safe NOT_FOUND)', ghostVet.status === 404, ghostVet.text);
-    const noCred = await post(WALK_IN_REGISTER_PATH, { applicantId: APPLICANT_ID, category: 'GENERAL_ENLISTMENT' });
-    check('missing academic credential → 422 INVALID_ACADEMIC_INPUT (fail-closed)', noCred.status === 422 && noCred.json['status'] === 'INVALID_ACADEMIC_INPUT', noCred.text);
-    const sysTok = await post(WALK_IN_REGISTER_PATH, { applicantId: APPLICANT_ID, category: 'GENERAL_ENLISTMENT' }, { 'content-type': 'application/json', authorization: `Bearer ${mint('system')}` });
-    check('system token → 403 (officer-only route)', sysTok.status === 403, sysTok.text);
-    const noAuth = await fetch(`${base}${WALK_IN_REGISTER_PATH}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
-    check('no token → 401', noAuth.status === 401, String(noAuth.status));
+    console.log(
+      "\n── 7. Agency, auth, and input guards ────────────────────────",
+    );
+    const rnpHeaders = {
+      "content-type": "application/json",
+      authorization: `Bearer ${mint("officer", { agency: "RNP", sub: RNP_OFFICER_ID })}`,
+    };
+    const rnpReg = await post(
+      WALK_IN_REGISTER_PATH,
+      { applicantId: APPLICANT_ID, category: "CADET_OFFICER" },
+      rnpHeaders,
+    );
+    check(
+      "RNP officer register → 501 UNSUPPORTED_AGENCY (walk-in is RDF-only, engine-backed)",
+      rnpReg.status === 501,
+      rnpReg.text,
+    );
+    const rnpVet = await post(
+      WALK_IN_VET_PATH,
+      { applicationId: appId },
+      rnpHeaders,
+    );
+    check(
+      "RNP officer vet → 501 UNSUPPORTED_AGENCY",
+      rnpVet.status === 501,
+      rnpVet.text,
+    );
+    const wrongCat = await post(WALK_IN_REGISTER_PATH, {
+      applicantId: APPLICANT_ID,
+      category: "CADET_OFFICER",
+    });
+    check(
+      "RDF officer + RNP category → 422 WRONG_AGENCY_CATEGORY",
+      wrongCat.status === 422 &&
+        wrongCat.json["status"] === "WRONG_AGENCY_CATEGORY",
+      wrongCat.text,
+    );
+    const ghost = await post(WALK_IN_REGISTER_PATH, {
+      applicantId: randomUUID(),
+      category: "GENERAL_ENLISTMENT",
+      nesaIndexNumber: "RW2024/1003",
+    });
+    check(
+      "unknown applicant → 404 APPLICANT_NOT_FOUND",
+      ghost.status === 404,
+      ghost.text,
+    );
+    const ghostVet = await post(WALK_IN_VET_PATH, {
+      applicationId: randomUUID(),
+    });
+    check(
+      "unknown application vet → 404 (cross-agency-safe NOT_FOUND)",
+      ghostVet.status === 404,
+      ghostVet.text,
+    );
+    const noCred = await post(WALK_IN_REGISTER_PATH, {
+      applicantId: APPLICANT_ID,
+      category: "GENERAL_ENLISTMENT",
+    });
+    check(
+      "missing academic credential → 422 INVALID_ACADEMIC_INPUT (fail-closed)",
+      noCred.status === 422 &&
+        noCred.json["status"] === "INVALID_ACADEMIC_INPUT",
+      noCred.text,
+    );
+    const sysTok = await post(
+      WALK_IN_REGISTER_PATH,
+      { applicantId: APPLICANT_ID, category: "GENERAL_ENLISTMENT" },
+      {
+        "content-type": "application/json",
+        authorization: `Bearer ${mint("system")}`,
+      },
+    );
+    check(
+      "system token → 403 (officer-only route)",
+      sysTok.status === 403,
+      sysTok.text,
+    );
+    const noAuth = await fetch(`${base}${WALK_IN_REGISTER_PATH}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    check("no token → 401", noAuth.status === 401, String(noAuth.status));
 
     // ══ 8. No PII crosses the boundary ════════════════════════════════
-    console.log('\n── 8. No PII in responses or events ─────────────────────────');
-    const responses = [reg.text, vet.text, med.text, acc.text, reg2.text].join(' ');
-    check('no national_id_hash in any HTTP response', !responses.includes(NID_HASH));
-    check('events carry the hash only on APPLICANT_SUBMITTED (never a raw NID, never PII fields)',
-      !JSON.stringify(bus.published).includes('encrypted_') && !JSON.stringify(bus.published).includes('dateOfBirth'));
+    console.log(
+      "\n── 8. No PII in responses or events ─────────────────────────",
+    );
+    const responses = [reg.text, vet.text, med.text, acc.text, reg2.text].join(
+      " ",
+    );
+    check(
+      "no national_id_hash in any HTTP response",
+      !responses.includes(NID_HASH),
+    );
+    check(
+      "events carry the hash only on APPLICANT_SUBMITTED (never a raw NID, never PII fields)",
+      !JSON.stringify(bus.published).includes("encrypted_") &&
+        !JSON.stringify(bus.published).includes("dateOfBirth"),
+    );
   } finally {
     await server.stop();
     await cleanup();
@@ -572,9 +880,11 @@ async function main(): Promise<void> {
     await admin.end({ timeout: 5 });
   }
 
-  console.log('\n───────────────────────────────────────────────');
+  console.log("\n───────────────────────────────────────────────");
   if (failures === 0) {
-    console.log('WALK-IN LANE PROVEN (register → vet → physical test → merged funnel → ACCEPTED; fail-closed both early and late) ✓');
+    console.log(
+      "WALK-IN LANE PROVEN (register → vet → physical test → merged funnel → ACCEPTED; fail-closed both early and late) ✓",
+    );
   } else {
     console.error(`${failures} ASSERTION(S) FAILED ✗`);
   }
@@ -582,11 +892,13 @@ async function main(): Promise<void> {
 }
 
 main().catch(async (err: unknown) => {
-  console.error('SELFCHECK CRASHED ✗', err);
+  console.error("SELFCHECK CRASHED ✗", err);
   try {
     await cleanup();
     await sql.end({ timeout: 5 });
     await admin.end({ timeout: 5 });
-  } catch { /* best-effort teardown */ }
+  } catch {
+    /* best-effort teardown */
+  }
   process.exit(1);
 });
