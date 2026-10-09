@@ -19,7 +19,10 @@ export interface CampaignSessionCommit {
   readonly responseBody: Readonly<Record<string, unknown>>;
   readonly replayed: boolean;
   readonly occurredAt: string;
+  /** Any stored session field changed, including the non-hash capacity decision. */
   readonly changed: boolean;
+  /** Whether immutable publication coverage changed and needs a domain fact. */
+  readonly coverageChanged: boolean;
   readonly coverageVersion: number;
 }
 

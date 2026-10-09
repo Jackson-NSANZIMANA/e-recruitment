@@ -8,13 +8,13 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import postgres from 'postgres';
 import type { Principal } from '@usrp/shared-auth';
-import { sql } from '@usrp/shared-database';
+import { asJsonb, sql } from '@usrp/shared-database';
 import { campaignCoverageHash, campaignFactUuid, hashCampaignCanonicalJson } from '@usrp/shared-security';
 import type { CampaignControlCommand } from '../src/ports/campaign-control.repository.js';
 import { CampaignControlService } from '../src/application/campaign-control.service.js';
 import { PgCampaignControlRepository } from '../src/adapters/campaign-control.pg-repository.js';
 import { PgCampaignPublicReadRepository } from '../src/adapters/campaign-public-read.pg-repository.js';
-import { CampaignCommandError, CampaignPersistenceError } from '../src/domain/campaign-control.errors.js';
+import { CampaignCommandError } from '../src/domain/campaign-control.errors.js';
 import { CampaignInputError } from '../src/domain/campaign-validation.js';
 import { PgCampaignReader } from '../src/adapters/campaign.pg-reader.js';
 import { AGENCY_TARGET } from '../src/domain/agency-schema.js';
@@ -65,6 +65,7 @@ const publicReads = new PgCampaignPublicReadRepository();
 
 let failures = 0;
 const applicantIds: string[] = [];
+const actorAccountIds = [RDF_ACTOR.subjectId, RNP_ACTOR.subjectId, REVIEWER.subjectId];
 let legacyPublicCode: string | null = null;
 function check(label: string, condition: boolean, detail = ''): void {
   if (condition) console.log(`  ✓ ${label}`);
@@ -248,6 +249,23 @@ async function insertApplication(campaignId: string): Promise<void> {
     )`;
 }
 
+async function seedOfficerTestAccounts(): Promise<void> {
+  for (const actor of [RDF_ACTOR, RNP_ACTOR, REVIEWER]) {
+    if (actor.kind !== 'officer') throw new Error('selfcheck principal must be an officer');
+    await admin`
+      INSERT INTO public_core.officer_accounts
+        (officer_id, login_handle, credential, agency, roles, status)
+      VALUES (
+        ${actor.subjectId}::uuid,
+        ${`${PREFIX.toLowerCase()}-${actor.agency}-${actor.subjectId.slice(0, 8)}`},
+        'scrypt$selfcheck$not-a-login-credential',
+        ${actor.agency}::public_core.agency,
+        ${[...actor.roles]},
+        'active'
+      )`;
+  }
+}
+
 async function cleanup(): Promise<void> {
   await admin.begin(async (tx) => {
     // Self-check teardown is the same documented superuser-only escape hatch
@@ -279,6 +297,9 @@ async function cleanup(): Promise<void> {
     }
     if (applicantIds.length > 0) {
       await tx`DELETE FROM public_core.applicant_identities WHERE id IN ${tx(applicantIds)}`;
+    }
+    if (actorAccountIds.length > 0) {
+      await tx`DELETE FROM public_core.officer_accounts WHERE officer_id IN ${tx(actorAccountIds)}`;
     }
   });
 }
@@ -341,6 +362,7 @@ async function coverageState(campaignId: string): Promise<{
 async function main(): Promise<void> {
   try {
     await cleanup();
+    await seedOfficerTestAccounts();
     console.log('\n── P5. Draft persistence, lifecycle history, and idempotency ──');
     const idemCode = publicCode('IDEMPOTENCY');
     const idemBody = draftBody(idemCode);
@@ -364,6 +386,172 @@ async function main(): Promise<void> {
       (await outboxForCampaign(firstDraft.campaignId)).length === 2);
     check('unpublished draft is not available in public detail',
       await publicReads.findPublishedByCode(idemCode) === null);
+
+    console.log('\n── P5a. Functions-only DML boundary and role-backed denials ─');
+    const boundaryPrivileges = await admin<{
+      readonly rdf_campaign_insert: boolean;
+      readonly rdf_campaign_update: boolean;
+      readonly rdf_session_insert: boolean;
+      readonly rdf_history_insert: boolean;
+      readonly system_seat_update: boolean;
+      readonly system_payload_update: boolean;
+      readonly rdf_command_execute: boolean;
+      readonly system_reservation_execute: boolean;
+      readonly command_owner_login: boolean;
+      readonly command_owner_bypass_rls: boolean;
+      readonly app_can_assume_command_owner: boolean;
+      readonly provision_owner_login: boolean;
+      readonly app_can_assume_provision_owner: boolean;
+      readonly app_campaign_insert: boolean;
+      readonly app_campaign_update: boolean;
+      readonly app_session_insert: boolean;
+      readonly app_session_update: boolean;
+      readonly app_history_insert: boolean;
+    }[]>`
+      SELECT
+        has_table_privilege('usrp_rdf_officer', 'public_core.recruitment_campaigns', 'INSERT') AS rdf_campaign_insert,
+        has_column_privilege('usrp_rdf_officer', 'public_core.recruitment_campaigns', 'status', 'UPDATE') AS rdf_campaign_update,
+        has_table_privilege('usrp_rdf_officer', 'public_core.campaign_venue_assignments', 'INSERT') AS rdf_session_insert,
+        has_table_privilege('usrp_rdf_officer', 'public_core.campaign_lifecycle_history', 'INSERT') AS rdf_history_insert,
+        has_column_privilege('usrp_system_service', 'public_core.campaign_venue_assignments', 'registered_count', 'UPDATE') AS system_seat_update,
+        has_column_privilege('usrp_system_service', 'public_core.event_outbox', 'payload', 'UPDATE') AS system_payload_update,
+        has_function_privilege('usrp_rdf_officer', 'public_core.campaign_write_draft(jsonb)', 'EXECUTE') AS rdf_command_execute,
+        has_function_privilege('usrp_system_service', 'public_core.reserve_campaign_venue_seat(uuid)', 'EXECUTE') AS system_reservation_execute,
+        (SELECT rolcanlogin FROM pg_roles WHERE rolname = 'usrp_campaign_command_owner') AS command_owner_login,
+        (SELECT rolbypassrls FROM pg_roles WHERE rolname = 'usrp_campaign_command_owner') AS command_owner_bypass_rls,
+        pg_has_role('usrp_app', 'usrp_campaign_command_owner', 'MEMBER') AS app_can_assume_command_owner,
+        (SELECT rolcanlogin FROM pg_roles WHERE rolname = 'usrp_campaign_admin_provision_owner') AS provision_owner_login,
+        pg_has_role('usrp_app', 'usrp_campaign_admin_provision_owner', 'MEMBER') AS app_can_assume_provision_owner,
+        has_table_privilege('usrp_app', 'public_core.recruitment_campaigns', 'INSERT') AS app_campaign_insert,
+        has_column_privilege('usrp_app', 'public_core.recruitment_campaigns', 'status', 'UPDATE') AS app_campaign_update,
+        has_table_privilege('usrp_app', 'public_core.campaign_venue_assignments', 'INSERT') AS app_session_insert,
+        has_column_privilege('usrp_app', 'public_core.campaign_venue_assignments', 'capacity_limit', 'UPDATE') AS app_session_update,
+        has_table_privilege('usrp_app', 'public_core.campaign_lifecycle_history', 'INSERT') AS app_history_insert`;
+    const boundary = boundaryPrivileges[0];
+    check('campaign-admin DB role has no direct campaign/session/history DML and uses command functions',
+      boundary?.rdf_campaign_insert === false && boundary.rdf_campaign_update === false &&
+      boundary.rdf_session_insert === false && boundary.rdf_history_insert === false &&
+      boundary.rdf_command_execute === true);
+    check('legacy seat counter and outbox payload are not directly mutable by system role',
+      boundary?.system_seat_update === false && boundary.system_payload_update === false &&
+      boundary.system_reservation_execute === true);
+    check('private BYPASSRLS function owners are NOLOGIN and cannot be assumed by the app',
+      boundary?.command_owner_login === false && boundary.command_owner_bypass_rls === true &&
+      boundary.app_can_assume_command_owner === false && boundary.provision_owner_login === false &&
+      boundary.app_can_assume_provision_owner === false);
+    check('application DB login itself has no campaign/session/history DML',
+      boundary?.app_campaign_insert === false && boundary.app_campaign_update === false &&
+      boundary.app_session_insert === false && boundary.app_session_update === false &&
+      boundary.app_history_insert === false);
+    await expectPgRejected('application DB login cannot directly update campaign state', () => sql.begin(async (tx) => {
+      await tx`
+        UPDATE public_core.recruitment_campaigns
+        SET status = 'CANCELLED'
+        WHERE id = ${firstDraft.campaignId}::uuid
+      `;
+    }), /permission denied|insufficient privilege/i);
+    await expectPgRejected('application DB login cannot bypass the explicit IAM provisioning role', () => sql.begin(async (tx) => {
+      await tx`
+        SELECT public_core.provision_first_campaign_agency_admin(
+          ${randomUUID()}::uuid, 'selfcheck-operator-bypass', 'scrypt$selfcheck$not-a-login-credential',
+          'RDF'::public_core.agency, 'SELF-CHECK-OP', 'SELF-CHECK-CORR'
+        )
+      `;
+    }), /available only through the operator CLI/i);
+
+    await expectPgRejected('RDF database role cannot invoke an RNP command for an RNP administrator', () => sql.begin(async (tx) => {
+      await tx`SET LOCAL ROLE usrp_rdf_officer`;
+      await tx`
+        SELECT * FROM public_core.campaign_lock_for_command(
+          ${RNP_ACTOR.subjectId}::uuid, 'RNP'::public_core.agency, 'CROSS-AGENCY-SELF-CHECK'
+        )
+      `;
+    }), /campaign DB role does not match the requested agency/i);
+
+    await expectPgRejected('campaign-admin role cannot directly update campaign state', () => sql.begin(async (tx) => {
+      await tx`SET LOCAL ROLE usrp_rdf_officer`;
+      await tx`
+        UPDATE public_core.recruitment_campaigns
+        SET status = 'CANCELLED'
+        WHERE id = ${firstDraft.campaignId}::uuid
+      `;
+    }), /permission denied|insufficient privilege/i);
+    await expectPgRejected('campaign-admin role cannot directly insert a campaign session', () => sql.begin(async (tx) => {
+      await tx`SET LOCAL ROLE usrp_rdf_officer`;
+      await tx`
+        INSERT INTO public_core.campaign_venue_assignments
+          (id, campaign_id, district, province, venue_name, exam_date,
+           reporting_time_hour, capacity_limit, registered_count, is_active)
+        VALUES (
+          ${randomUUID()}::uuid, ${firstDraft.campaignId}::uuid, 'GASABO', 'KIGALI_CITY',
+          'direct-DML-forbidden', '2030-02-03', 8, 100, 0, true
+        )
+      `;
+    }), /permission denied|insufficient privilege/i);
+    await expectPgRejected('campaign-admin role cannot insert standalone lifecycle history', () => sql.begin(async (tx) => {
+      await tx`SET LOCAL ROLE usrp_rdf_officer`;
+      await tx`
+        INSERT INTO public_core.campaign_lifecycle_history
+          (id, campaign_id, agency, from_status, to_status, actor_id, correlation_id)
+        VALUES (
+          ${randomUUID()}::uuid, ${firstDraft.campaignId}::uuid, 'RDF', NULL, 'DRAFT',
+          ${RDF_ACTOR.subjectId}::uuid, ${randomUUID()}
+        )
+      `;
+    }), /permission denied|insufficient privilege/i);
+    await expectPgRejected('system scheduler cannot directly mutate registered_count', () => sql.begin(async (tx) => {
+      await tx`SET LOCAL ROLE usrp_system_service`;
+      await tx`
+        UPDATE public_core.campaign_venue_assignments
+        SET registered_count = registered_count + 1
+        WHERE campaign_id = ${firstDraft.campaignId}::uuid
+      `;
+    }), /permission denied|insufficient privilege/i);
+    await expectPgRejected('officer role cannot forge a campaign action under another audit entity type', () => sql.begin(async (tx) => {
+      await tx`SET LOCAL ROLE usrp_rdf_officer`;
+      const eventId = randomUUID();
+      await tx`
+        INSERT INTO public_core.event_outbox (event_id, event_type, producer, payload)
+        VALUES (
+          ${eventId}::uuid, 'AUDIT_ENTRY', 'application-service',
+          ${tx.json(asJsonb({
+            eventId,
+            eventType: 'AUDIT_ENTRY',
+            entityType: 'OFFICER',
+            entityId: RDF_ACTOR.subjectId,
+            action: 'CAMPAIGN_SESSION_CONFIGURED',
+          }))}
+        )
+      `;
+    }), /row-level security|permission denied|policy/i);
+    await expectPgRejected('system scheduler cannot forge a campaign domain event directly', () => sql.begin(async (tx) => {
+      await tx`SET LOCAL ROLE usrp_system_service`;
+      const eventId = randomUUID();
+      await tx`
+        INSERT INTO public_core.event_outbox (event_id, event_type, producer, payload)
+        VALUES (
+          ${eventId}::uuid, 'CAMPAIGN_PUBLISHED', 'scheduling-service',
+          ${tx.json(asJsonb({ eventId, eventType: 'CAMPAIGN_PUBLISHED', entityType: 'CAMPAIGN', campaignId: firstDraft.campaignId }))}
+        )
+      `;
+    }), /row-level security|permission denied|policy/i);
+    await expectPgRejected('system scheduler cannot forge a campaign audit under another entity type', () => sql.begin(async (tx) => {
+      await tx`SET LOCAL ROLE usrp_system_service`;
+      const eventId = randomUUID();
+      await tx`
+        INSERT INTO public_core.event_outbox (event_id, event_type, producer, payload)
+        VALUES (
+          ${eventId}::uuid, 'AUDIT_ENTRY', 'scheduling-service',
+          ${tx.json(asJsonb({
+            eventId,
+            eventType: 'AUDIT_ENTRY',
+            entityType: 'OFFICER',
+            entityId: RDF_ACTOR.subjectId,
+            action: 'CAMPAIGN_PUBLISHED',
+          }))}
+        )
+      `;
+    }), /row-level security|permission denied|policy/i);
 
     console.log('\n── P6. Permission, verified agency, and RLS isolation ────────');
     await expectCode('reviewer cannot create a campaign', () =>
@@ -451,10 +639,33 @@ async function main(): Promise<void> {
     console.log('\n── P8. Session configuration, coverage, capacity, and completeness ─');
     const incomplete = await createDraft('INCOMPLETE-COVERAGE');
     await createPolicy(incomplete.code);
-    await campaignSessions.configure(commandRequest(
+    await expectCode('NULL capacity requires an explicit UNBOUNDED_CAPACITY decision', () =>
+      campaignSessions.configure(commandRequest(
+        RDF_ACTOR,
+        sessionBody(incomplete.code, TARGETS[0], 'MISSING-UNBOUNDED-DECISION', { capacityLimit: null }),
+      )),
+    'CAPACITY_DECISION_REQUIRED');
+    const unboundedSession = await campaignSessions.configure(commandRequest(
       RDF_ACTOR,
-      sessionBody(incomplete.code, TARGETS[0], 'INCOMPLETE-GASABO'),
+      sessionBody(incomplete.code, TARGETS[0], 'INCOMPLETE-GASABO', {
+        capacityLimit: null,
+        capacityDecisionCode: 'UNBOUNDED_CAPACITY',
+      }),
     ));
+    const unboundedRow = await admin<{ capacity_decision_code: string | null }[]>`
+      SELECT capacity_decision_code FROM public_core.campaign_venue_assignments
+      WHERE campaign_id = ${incomplete.campaignId}::uuid AND district = 'GASABO'`;
+    const unboundedAudit = await admin<{ decision: string | null }[]>`
+      SELECT payload->'metadata'->>'capacityDecisionCode' AS decision
+      FROM public_core.event_outbox
+      WHERE event_type = 'AUDIT_ENTRY'
+        AND payload->>'entityId' = ${incomplete.campaignId}
+        AND payload->>'action' = 'CAMPAIGN_SESSION_CONFIGURED'
+      LIMIT 1`;
+    check('unbounded capacity decision is persisted and explicitly audited',
+      unboundedSession.responseBody['capacityDecisionCode'] === 'UNBOUNDED_CAPACITY' &&
+      unboundedRow[0]?.capacity_decision_code === 'UNBOUNDED_CAPACITY' &&
+      unboundedAudit[0]?.decision === 'UNBOUNDED_CAPACITY');
     const incompleteBefore = await coverageState(incomplete.campaignId);
     check('one configured target creates versioned coverage evidence',
       incompleteBefore.version === 1 && incompleteBefore.hash === incompleteBefore.computedHash);
@@ -839,13 +1050,16 @@ async function main(): Promise<void> {
     try {
       await repository.execute(atomicCommand, () => {
         stageWasCalled = true;
-        throw new Error('synthetic outbox staging failure');
+        // The DB command function validates this exact event set after it has
+        // attempted aggregate writes; an empty set forces transactional rollback.
+        return [];
       });
     } catch (error) {
       stageFailure = error;
     }
-    check('synthetic outbox failure is reached after campaign writes are staged', stageWasCalled);
-    check('outbox failure aborts the publication transaction', stageFailure instanceof CampaignPersistenceError);
+    check('invalid event set reaches the database command validator', stageWasCalled);
+    check('database event validation aborts the publication transaction',
+      stageFailure instanceof CampaignCommandError && stageFailure.code === 'CAMPAIGN_WRITE_CONFLICT');
     const publishRequestsAfterAbort = await admin<{ n: number }[]>`
       SELECT count(*)::int AS n FROM public_core.campaign_command_requests
       WHERE actor_id = ${RDF_ACTOR.subjectId}::uuid
@@ -875,7 +1089,12 @@ async function main(): Promise<void> {
       const fields = metadata !== null && typeof metadata === 'object'
         ? Object.keys(metadata as Record<string, unknown>)
         : [];
-      return !fields.some((field) => /policyDocument|policyHash|threshold|capacity|officer/i.test(field));
+      const metadataObject = metadata !== null && typeof metadata === 'object'
+        ? metadata as Record<string, unknown>
+        : {};
+      const capacityDecision = metadataObject['capacityDecisionCode'];
+      return !fields.some((field) => /policyDocument|policyHash|threshold|capacityLimit|registeredCount|officer/i.test(field)) &&
+        (capacityDecision === undefined || capacityDecision === null || capacityDecision === 'UNBOUNDED_CAPACITY');
     });
     check('successful commands persist one safe AUDIT_ENTRY each', atomicAudits.length === 5 && safeAudits);
     check('draft, policy, sessions, and publication each stage their domain event',

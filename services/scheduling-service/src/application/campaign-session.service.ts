@@ -87,7 +87,7 @@ export class CampaignSessionService {
 
   #events(commit: CampaignSessionCommit, correlationId: string): readonly USRPEvent[] {
     const events: USRPEvent[] = [];
-    if (commit.changed) events.push(this.#sessionEvent(commit, correlationId));
+    if (commit.coverageChanged) events.push(this.#sessionEvent(commit, correlationId));
     events.push(this.#auditEvent(commit, correlationId));
     return events;
   }
@@ -138,6 +138,7 @@ export class CampaignSessionService {
         publicCode: commit.publicCode,
         district: commit.responseBody['district'],
         sessionChanged: commit.changed,
+        capacityDecisionCode: commit.responseBody['capacityDecisionCode'] ?? null,
         coverageVersion: commit.coverageVersion,
       },
     };

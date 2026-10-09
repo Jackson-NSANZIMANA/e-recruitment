@@ -155,7 +155,9 @@ run_ts "deployment hygiene (EXPOSE ↔ .env.example port map, non-root, exec-for
 # It is the check that would have caught the four BFF services that never
 # existed being read as fact for a month.
 run_ts "edge-gateway: contract drift (registry ↔ OpenAPI ↔ upstream catalogue)" services/edge-gateway/selfcheck/verify-edge-contract.ts
+run_ts "edge-gateway: BUILD-001 live campaign HTTP/session/CSRF/idempotency boundary" services/edge-gateway/selfcheck/verify-campaign-http-boundary.ts
 run_ts "application-service: BUILD-001 domain, canonical policy, and coverage hashes (P1–P4)" services/application-service/selfcheck/verify-campaign-domain.ts
+run_ts "scheduling-service: BUILD-001 session capacity decision validation" services/scheduling-service/selfcheck/verify-campaign-session-validation.ts
 run_ts "edge-gateway: citizen submit front-door readiness (the release signal)" services/edge-gateway/selfcheck/verify-citizen-submit-readiness.ts
 run_ts "edge-gateway: source hygiene (layering, redaction, no raw console)" services/edge-gateway/selfcheck/verify-edge-hygiene.ts
 

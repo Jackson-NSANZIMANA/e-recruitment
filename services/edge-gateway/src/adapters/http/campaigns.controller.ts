@@ -192,6 +192,7 @@ export function configureCampaignSessionHandler(deps: EdgeDeps): RouteHandler {
       'publicCode', 'district', 'province', 'venueName', 'examDate',
       'reportingTimeHour', 'capacityLimit', 'isActive',
     ],
+    ['capacityDecisionCode'],
   );
 }
 

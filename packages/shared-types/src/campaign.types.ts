@@ -109,6 +109,8 @@ export interface CampaignSessionInput {
   readonly examDate: string;
   readonly reportingTimeHour: number;
   readonly capacityLimit: number | null;
+  /** Required and audited when capacityLimit is null; legacy rows may remain null. */
+  readonly capacityDecisionCode: 'UNBOUNDED_CAPACITY' | null;
   readonly isActive: boolean;
 }
 

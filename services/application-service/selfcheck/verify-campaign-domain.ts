@@ -147,6 +147,15 @@ function main(): void {
   check('venue name is NFC normalized', session.venueName === 'Café Test Hall');
   check('district/province relationship validated', session.district === 'GASABO' && session.province === 'KIGALI_CITY');
   expectThrow('zero session capacity rejected', () => normalizeCampaignSession({ ...sessionInput, capacityLimit: 0 }));
+  expectThrow('unbounded capacity requires an explicit decision', () =>
+    normalizeCampaignSession({ ...sessionInput, capacityLimit: null }), /explicitly approve UNBOUNDED_CAPACITY/);
+  const explicitlyUnbounded = normalizeCampaignSession({
+    ...sessionInput,
+    capacityLimit: null,
+    capacityDecisionCode: 'UNBOUNDED_CAPACITY',
+  });
+  check('explicit unbounded decision is retained for persistence and audit',
+    explicitlyUnbounded.capacityDecisionCode === 'UNBOUNDED_CAPACITY');
   expectThrow('district/province mismatch rejected', () => normalizeCampaignSession({ ...sessionInput, province: 'EASTERN' }));
   const secondSession = {
     ...session,

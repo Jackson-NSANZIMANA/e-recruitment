@@ -140,13 +140,16 @@ function compareCoverageSessions(
 }
 
 /** Hash a deterministic session set. Mutable registration counts are excluded. */
-export function campaignCoverageHash(
+export function canonicalCampaignCoverageJson(
   campaignId: string,
   sessions: readonly CampaignCoverageSessionValue[],
 ): string {
   const normalizedSessions = sessions.map((session) => ({
     ...session,
+    district: normalizeString(session.district),
+    province: normalizeString(session.province),
     venueName: normalizeString(session.venueName),
+    examDate: normalizeString(session.examDate),
   }));
   const ordered = normalizedSessions.sort(compareCoverageSessions).map((session) => ({
     district: session.district,
@@ -157,7 +160,16 @@ export function campaignCoverageHash(
     capacityLimit: session.capacityLimit,
     isActive: session.isActive,
   }));
-  return hashCampaignCanonicalJson({ campaignId, sessions: ordered });
+  return canonicalCampaignJson({ campaignId: normalizeString(campaignId), sessions: ordered });
+}
+
+export function campaignCoverageHash(
+  campaignId: string,
+  sessions: readonly CampaignCoverageSessionValue[],
+): string {
+  return createHash('sha256')
+    .update(Buffer.from(canonicalCampaignCoverageJson(campaignId, sessions), 'utf8'))
+    .digest('hex');
 }
 
 function uuidBytes(uuid: string): Buffer {

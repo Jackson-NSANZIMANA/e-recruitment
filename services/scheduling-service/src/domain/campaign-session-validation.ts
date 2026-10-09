@@ -28,7 +28,7 @@ function fail(code: string, message: string): never {
 }
 
 function exactKeys(body: Record<string, unknown>): void {
-  const expected = new Set([
+  const required = [
     'publicCode',
     'district',
     'province',
@@ -37,11 +37,12 @@ function exactKeys(body: Record<string, unknown>): void {
     'reportingTimeHour',
     'capacityLimit',
     'isActive',
-  ]);
+  ];
+  const allowed = new Set([...required, 'capacityDecisionCode']);
   for (const key of Object.keys(body)) {
-    if (!expected.has(key)) fail('INVALID_REQUEST', `Field "${key}" is not accepted.`);
+    if (!allowed.has(key)) fail('INVALID_REQUEST', `Field "${key}" is not accepted.`);
   }
-  for (const key of expected) {
+  for (const key of required) {
     if (!Object.hasOwn(body, key)) fail('INVALID_REQUEST', `Field "${key}" is required.`);
   }
 }
@@ -105,8 +106,14 @@ export function normalizeCampaignSession(value: unknown): CampaignSessionInput {
   let capacityLimit: number | null;
   if (body.capacityLimit === null) {
     capacityLimit = null;
+    if (body.capacityDecisionCode !== 'UNBOUNDED_CAPACITY') {
+      fail('CAPACITY_DECISION_REQUIRED', 'capacityDecisionCode must explicitly approve UNBOUNDED_CAPACITY when capacityLimit is null.');
+    }
   } else {
     capacityLimit = integer(body.capacityLimit, 'capacityLimit', 1, 2_147_483_647);
+    if (body.capacityDecisionCode !== undefined && body.capacityDecisionCode !== null) {
+      fail('INVALID_CAPACITY_DECISION', 'capacityDecisionCode is valid only when capacityLimit is null.');
+    }
   }
   if (typeof body.isActive !== 'boolean') fail('INVALID_REQUEST', 'Field "isActive" must be a boolean.');
   return {
@@ -117,6 +124,7 @@ export function normalizeCampaignSession(value: unknown): CampaignSessionInput {
     examDate: calendarDate(body.examDate),
     reportingTimeHour: integer(body.reportingTimeHour, 'reportingTimeHour', 0, 23),
     capacityLimit,
+    capacityDecisionCode: body.capacityDecisionCode === 'UNBOUNDED_CAPACITY' ? 'UNBOUNDED_CAPACITY' : null,
     isActive: body.isActive,
   };
 }

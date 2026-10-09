@@ -260,6 +260,8 @@ paths:
                 examDate: { type: string, format: date }
                 reportingTimeHour: { type: integer, minimum: 0, maximum: 23 }
                 capacityLimit: { type: [integer, 'null'], minimum: 1 }
+                # Required as UNBOUNDED_CAPACITY when capacityLimit is null; ignored only when absent for finite capacity.
+                capacityDecisionCode: { type: string, enum: [UNBOUNDED_CAPACITY] }
                 isActive: { type: boolean }
       responses:
         '200': { description: Session configured or identical request replayed; includes coverage version/hash for officers. }

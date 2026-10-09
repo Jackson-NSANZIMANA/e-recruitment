@@ -20,7 +20,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint 'src/**/*.ts'",
     "selfcheck": "tsx selfcheck/verify-slot-assignment.ts",
-    "selfcheck:integrity": "tsx selfcheck/verify-slot-integrity.ts"
+    "selfcheck:integrity": "tsx selfcheck/verify-slot-integrity.ts",
+    "selfcheck:campaign": "tsx selfcheck/verify-campaign-session-validation.ts"
   },
   "dependencies": {
     "@usrp/shared-auth": "workspace:*",

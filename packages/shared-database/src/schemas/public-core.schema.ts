@@ -290,7 +290,8 @@ export const campaignVenueAssignments = publicCore.table(
     reportingTimeHour: integer('reporting_time_hour').notNull(),     // 8 or 9
 
     // Capacity management
-    capacityLimit: integer('capacity_limit'),                         // null = unlimited
+    capacityLimit: integer('capacity_limit'),                         // null = unbounded only with explicit decision for BUILD-001
+    capacityDecisionCode: varchar('capacity_decision_code', { length: 64 }),
     registeredCount: integer('registered_count').notNull().default(0),
 
     isActive: boolean('is_active').notNull().default(true),
@@ -305,8 +306,9 @@ export const campaignVenueAssignments = publicCore.table(
 );
 
 // ── BUILD-001 Campaign & Policy Control Plane ─────────────────────
-// Tables below are agency-scoped. Their RLS and append-only triggers are
-// provisioned by rls/0026_campaign_control_plane.sql.
+// Tables below are agency-scoped. Their RLS and command-function write
+// boundary are provisioned by rls/0026_campaign_control_plane.sql and
+// rls/0027_campaign_command_functions.sql.
 
 export const campaignPolicyVersions = publicCore.table(
   'campaign_policy_versions',
@@ -316,6 +318,9 @@ export const campaignPolicyVersions = publicCore.table(
     agency: agencyEnum('agency').notNull(),
     versionNumber: integer('version_number').notNull(),
     policyDocument: jsonb('policy_document').$type<Readonly<Record<string, unknown>>>().notNull(),
+    // Exact canonical v1 serialization is retained so PostgreSQL can verify the
+    // digest independently of JSONB key ordering/number formatting.
+    canonicalPolicyJson: text('canonical_policy_json'),
     policyHash: varchar('policy_hash', { length: 64 }).notNull(),
     hashVersion: integer('hash_version').notNull(),
     legalBasisCode: varchar('legal_basis_code', { length: 64 }).notNull(),
