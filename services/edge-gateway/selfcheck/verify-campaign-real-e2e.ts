@@ -127,7 +127,10 @@ async function main(): Promise<void> {
     databaseCreated = true;
     const proofAdminUrl = new URL(ADMIN_URL);
     proofAdminUrl.pathname = `/${databaseName}`;
-    const proof = postgres(proofAdminUrl.toString(), { max: 4, prepare: false, onnotice: () => {} });
+    // The RLS SQL files contain explicit BEGIN/COMMIT blocks. postgres.js
+    // only permits those in `unsafe()` when this bootstrap client is pinned to
+    // one connection; the runtime service pools remain independently sized.
+    const proof = postgres(proofAdminUrl.toString(), { max: 1, prepare: false, onnotice: () => {} });
     proofDatabase = proof;
     await bootstrapDisposableDatabase(proof);
 

@@ -8,7 +8,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import postgres from 'postgres';
 import type { Principal } from '@usrp/shared-auth';
-import { asJsonb, sql } from '@usrp/shared-database';
+import { asJsonb, configureDatabase, sql } from '@usrp/shared-database';
 import { campaignCoverageHash, campaignFactUuid, hashCampaignCanonicalJson, hashPassword } from '@usrp/shared-security';
 import type { CampaignControlCommand } from '../src/ports/campaign-control.repository.js';
 import { CampaignControlService } from '../src/application/campaign-control.service.js';
@@ -31,6 +31,8 @@ import { PgCampaignSessionRepository } from '../../scheduling-service/src/adapte
 import { CampaignSessionInputError } from '../../scheduling-service/src/domain/campaign-session-validation.js';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+const APPLICATION_URL = process.env['DATABASE_URL']
+  ?? 'postgresql://usrp_app:app_pw@localhost:5432/usrp_db';
 const ADMIN_URL = process.env['ADMIN_DATABASE_URL']
   ?? 'postgresql://usrp_admin:usrp_dev_password@localhost:5432/usrp_db';
 const admin = postgres(ADMIN_URL, { onnotice: () => {} });
@@ -103,7 +105,10 @@ function publicCode(label: string): string {
   return `${PREFIX}-${label.toUpperCase()}`;
 }
 
-function draftBody(code: string, districts: readonly string[] = TARGETS.map((item) => item.district)) {
+function draftBody(
+  code: string,
+  districts: readonly string[] = TARGETS.map((item) => item.district),
+): Record<string, unknown> {
   return {
     publicCode: code,
     campaignLabel: `${PREFIX} ${code.slice(-16)}`.slice(0, 50),
@@ -120,7 +125,7 @@ function draftBody(code: string, districts: readonly string[] = TARGETS.map((ite
 
 // Entirely synthetic policy data; these values are test fixtures, not official
 // thresholds, eligibility rules, or legal guidance.
-function policyBody(code: string, threshold = 'SELF_CHECK_ONLY') {
+function policyBody(code: string, threshold = 'SELF_CHECK_ONLY'): Record<string, unknown> {
   return {
     publicCode: code,
     legalBasisCode: 'SELF_CHECK_FIXTURE',
@@ -138,7 +143,12 @@ function policyBody(code: string, threshold = 'SELF_CHECK_ONLY') {
   };
 }
 
-function sessionBody(code: string, target: (typeof TARGETS)[number], suffix: string, overrides: Record<string, unknown> = {}) {
+function sessionBody(
+  code: string,
+  target: (typeof TARGETS)[number],
+  suffix: string,
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
   return {
     publicCode: code,
     district: target.district,
@@ -156,18 +166,30 @@ function commandRequest(
   actor: Principal,
   body: unknown,
   idempotencyKey = randomUUID(),
-) {
+): {
+  readonly actor: Principal;
+  readonly body: unknown;
+  readonly idempotencyKey: string;
+  readonly correlationId: string;
+} {
   return { actor, body, idempotencyKey, correlationId: randomUUID() } as const;
 }
 
-async function createDraft(label: string, actor: Principal = RDF_ACTOR) {
+async function createDraft(label: string, actor: Principal = RDF_ACTOR): Promise<{
+  readonly code: string;
+  readonly campaignId: string;
+  readonly body: Record<string, unknown>;
+}> {
   const code = publicCode(label);
   const body = draftBody(code);
   const created = await campaign.createDraft(commandRequest(actor, body));
   return { code, campaignId: created.campaignId, body };
 }
 
-async function createPolicy(code: string, actor: Principal = RDF_ACTOR) {
+function createPolicy(
+  code: string,
+  actor: Principal = RDF_ACTOR,
+): ReturnType<typeof campaign.createPolicyVersion> {
   return campaign.createPolicyVersion(commandRequest(actor, policyBody(code)));
 }
 
@@ -180,7 +202,7 @@ async function configureAllSessions(code: string, actor: Principal = RDF_ACTOR):
   }
 }
 
-async function createReadyCampaign(label: string) {
+async function createReadyCampaign(label: string): Promise<Awaited<ReturnType<typeof createDraft>>> {
   const draft = await createDraft(label);
   await createPolicy(draft.code);
   await configureAllSessions(draft.code);
@@ -484,6 +506,9 @@ async function verifyFirstAdminProvisioningSemantics(): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  // The gate supplies DATABASE_URL, but make direct local invocation work with
+  // the same non-production app-role default used by the other selfchecks.
+  configureDatabase({ url: APPLICATION_URL, maxConnections: 12 });
   try {
     await cleanup();
     await seedOfficerTestAccounts();
@@ -965,7 +990,7 @@ async function main(): Promise<void> {
     check('public list includes the open publication and no non-open statuses',
       openList.some((item) => item.publicCode === incomplete.code) &&
       openList.every((item) => item.status === 'REGISTRATION_OPEN'));
-    const publicRoleCannotReadPolicy = await (async () => {
+    const publicRoleCannotReadPolicy = await (async (): Promise<boolean> => {
       try {
         await sql.begin(async (tx) => {
           await tx`SET LOCAL ROLE usrp_campaign_public_reader`;
@@ -1310,6 +1335,7 @@ async function main(): Promise<void> {
         (capacityDecision === undefined || capacityDecision === null || capacityDecision === 'UNBOUNDED_CAPACITY');
     });
     check('successful commands persist one safe AUDIT_ENTRY each', atomicAudits.length === 5 && safeAudits);
+    check('outbox events have schema version, correlation/causation, and PII-free envelopes', safeEvents);
     check('draft, policy, sessions, and publication each stage their domain event',
       atomicDomainEvents.filter((row) => row.event_type === 'CAMPAIGN_DRAFT_CREATED').length === 1 &&
       atomicDomainEvents.filter((row) => row.event_type === 'CAMPAIGN_POLICY_VERSION_CREATED').length === 1 &&
