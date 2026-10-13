@@ -14,6 +14,7 @@
 //      concurrently                 count is 2 and never overshoots.
 //   5. Broker down at assignment  → ASSIGNED, pending outbox, relay delivers.
 //   6. No venue                   → NO_VENUE deferral is STAGED (durable).
+//   7. Release at zero            → constraint error; counter remains zero.
 //
 //   DATABASE_URL='postgresql://usrp_app:app_pw@localhost:5432/usrp_db' \
 //   PII_ENCRYPTION_KEY='dev_pii_encryption_key_min_32_chars_ok!!' \
@@ -79,6 +80,11 @@ function check(label: string, condition: boolean, detail = ''): void {
     failures += 1;
     console.error(`  ✗ ${label}${detail ? ` — ${detail}` : ''}`);
   }
+}
+
+function sqlState(error: unknown): string | undefined {
+  if (error === null || typeof error !== 'object' || !('code' in error)) return undefined;
+  return String((error as { readonly code: unknown }).code);
 }
 
 const touchedApplications: string[] = [];
@@ -222,6 +228,24 @@ async function main(): Promise<void> {
   await seed();
 
   try {
+    // Exercise the same narrow SECURITY DEFINER path used to roll back a losing
+    // concurrent reservation insert. A stray release must not underflow zero.
+    let releaseAtZeroState: string | undefined;
+    try {
+      await sql.begin(async (tx) => {
+        await tx`SET LOCAL ROLE usrp_system_service`;
+        await tx`SELECT public_core.release_campaign_venue_seat(
+          (SELECT id FROM public_core.campaign_venue_assignments
+           WHERE campaign_id = ${CAMPAIGN_ID}::uuid AND district = ${OPEN_DISTRICT})
+        )`;
+      });
+    } catch (error) {
+      releaseAtZeroState = sqlState(error);
+    }
+    check('seat release at zero fails with a constraint error and leaves the count at zero',
+      releaseAtZeroState === '23514' && await seatCount(OPEN_DISTRICT) === 0,
+      releaseAtZeroState ?? 'release unexpectedly succeeded');
+
     // ── 1. First clearance ─────────────────────────────────────────────
     console.log('\n── 1. First clearance → one reservation, one seat, staged ──');
     const appA = newApplicationId();

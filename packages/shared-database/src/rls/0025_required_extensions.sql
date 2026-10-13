@@ -16,8 +16,11 @@
 -- compose init scripts.
 --
 -- The database's own dependency is therefore declared where the
--- database's own changes live: here. Idempotent (IF NOT EXISTS), so
--- the compose path that already created it is unaffected.
+-- database's own changes live: here. pgcrypto is explicitly installed in public
+-- because the campaign/publication functions qualify digest as public.digest.
+-- On a restored or pre-existing database, IF NOT EXISTS alone does not relocate
+-- an extension; the migration below moves an existing relocatable pgcrypto into
+-- the required schema as well.
 --
 -- Scope: ONLY pgcrypto. The init script also creates uuid-ossp,
 -- pg_stat_statements (and the image bundles pg_trgm/btree_gin), but
@@ -29,7 +32,24 @@
 -- the one the PII envelope calls on every write is.
 -- ══════════════════════════════════════════════════════════════════
 
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
+
+DO $$
+DECLARE
+  v_schema text;
+BEGIN
+  SELECT namespace.nspname INTO v_schema
+  FROM pg_extension AS extension
+  JOIN pg_namespace AS namespace ON namespace.oid = extension.extnamespace
+  WHERE extension.extname = 'pgcrypto';
+
+  IF v_schema IS NULL THEN
+    RAISE EXCEPTION 'pgcrypto extension was not installed';
+  END IF;
+  IF v_schema <> 'public' THEN
+    ALTER EXTENSION pgcrypto SET SCHEMA public;
+  END IF;
+END$$;
 
 COMMENT ON EXTENSION pgcrypto IS
   'Required by the PII envelope (pgp_sym_encrypt/pgp_sym_decrypt in identity- and application-service repositories and rls/verify-isolation.sql). Provisioned by the canonical migration path since rls/0025; previously only by the compose container init script.';

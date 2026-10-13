@@ -24,6 +24,9 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'usrp_campaign_admin_provision_owner') THEN
     CREATE ROLE usrp_campaign_admin_provision_owner NOLOGIN BYPASSRLS;
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'usrp_campaign_application_lock_owner') THEN
+    CREATE ROLE usrp_campaign_application_lock_owner NOLOGIN BYPASSRLS;
+  END IF;
 END$$;
 
 -- These are private implementation owners, never service principals. Normalize
@@ -33,6 +36,8 @@ END$$;
 ALTER ROLE usrp_campaign_command_owner
   WITH NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOLOGIN BYPASSRLS;
 ALTER ROLE usrp_campaign_admin_provision_owner
+  WITH NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOLOGIN BYPASSRLS;
+ALTER ROLE usrp_campaign_application_lock_owner
   WITH NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOLOGIN BYPASSRLS;
 -- This is a standalone password/certificate-backed operator connection. Keep
 -- its authority narrow even if a previous deployment added accidental options.
@@ -48,10 +53,12 @@ BEGIN
     JOIN pg_roles AS granted ON granted.oid = membership.roleid
     JOIN pg_roles AS member ON member.oid = membership.member
     WHERE granted.rolname IN (
-        'usrp_campaign_command_owner', 'usrp_campaign_admin_provision_owner', 'usrp_iam_provisioner'
+        'usrp_campaign_command_owner', 'usrp_campaign_admin_provision_owner',
+        'usrp_campaign_application_lock_owner', 'usrp_iam_provisioner'
       )
        OR member.rolname IN (
-        'usrp_campaign_command_owner', 'usrp_campaign_admin_provision_owner', 'usrp_iam_provisioner'
+        'usrp_campaign_command_owner', 'usrp_campaign_admin_provision_owner',
+        'usrp_campaign_application_lock_owner', 'usrp_iam_provisioner'
       )
   LOOP
     EXECUTE format('REVOKE %I FROM %I', v_membership.granted_role, v_membership.member_role);
@@ -96,6 +103,9 @@ GRANT USAGE ON SEQUENCE public_core.event_outbox_id_seq TO usrp_campaign_command
 -- The relay may mark/quarantine and purge rows, but cannot rewrite the event
 -- identity, producer, type, or payload after a command transaction commits.
 REVOKE UPDATE ON public_core.event_outbox FROM usrp_system_service;
+REVOKE UPDATE (id, event_id, event_type, producer, payload, created_at,
+               published_at, attempts, last_error)
+  ON public_core.event_outbox FROM usrp_system_service;
 GRANT UPDATE (published_at, attempts, last_error)
   ON public_core.event_outbox TO usrp_system_service;
 GRANT SELECT (officer_id, agency, roles, status)
@@ -119,6 +129,8 @@ REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON public_core.recruitment_campaigns,
 -- The system reservation worker now updates the legacy seat counter only
 -- through the two narrow functions below, preserving its conditional row-lock
 -- behavior without granting direct session-row DML.
+REVOKE UPDATE ON public_core.campaign_venue_assignments
+  FROM usrp_system_service;
 REVOKE UPDATE (registered_count) ON public_core.campaign_venue_assignments
   FROM usrp_system_service;
 REVOKE UPDATE (current_policy_version_id, status, published_at,
@@ -143,25 +155,25 @@ GRANT SELECT ON public_core.recruitment_campaigns,
   public_core.campaign_venue_assignments
   TO usrp_rdf_officer, usrp_rnp_officer, usrp_rcs_officer;
 
--- Preserve the legacy application-service outbox lane, but campaign domain
--- and campaign AUDIT_ENTRY rows can now be staged only by command functions.
+-- Preserve the legacy application-service outbox lane for ordinary events,
+-- but reserve campaign domain events and audit envelopes for command functions.
+-- Producer strings are application-supplied labels, not process authentication:
+-- this database still trusts backends sharing the usrp_app login.
 DROP POLICY IF EXISTS pc_event_outbox_officer_stage ON public_core.event_outbox;
 CREATE POLICY pc_event_outbox_officer_stage ON public_core.event_outbox
   FOR INSERT TO usrp_rdf_officer, usrp_rnp_officer, usrp_rcs_officer
   WITH CHECK (
     producer = 'application-service'
-    AND event_type NOT LIKE 'CAMPAIGN_%'
-    AND COALESCE(payload->>'eventType', event_type) NOT LIKE 'CAMPAIGN_%'
-    AND NOT (
-      event_type = 'AUDIT_ENTRY'
-      AND (payload->>'entityType' = 'CAMPAIGN' OR payload->>'action' LIKE 'CAMPAIGN_%')
-    )
+    AND left(upper(regexp_replace(event_type, '^[[:space:]]+|[[:space:]]+$', '', 'g')), 9) <> 'CAMPAIGN_'
+    AND left(upper(regexp_replace(COALESCE(payload->>'eventType', event_type), '^[[:space:]]+|[[:space:]]+$', '', 'g')), 9) <> 'CAMPAIGN_'
+    AND upper(regexp_replace(COALESCE(payload->>'entityType', ''), '^[[:space:]]+|[[:space:]]+$', '', 'g')) <> 'CAMPAIGN'
+    AND left(upper(regexp_replace(COALESCE(payload->>'action', ''), '^[[:space:]]+|[[:space:]]+$', '', 'g')), 9) <> 'CAMPAIGN_'
   );
 
--- Keep the system relay's read/update/delete lane while preventing it from
--- forging campaign domain or campaign AUDIT_ENTRY rows outside the command
--- functions. Slot and other legacy events continue through the existing
--- system-service outbox path.
+-- Keep the system relay's read/update/delete lane while restricting new rows
+-- to the known application/scheduling producers and reserving campaign events
+-- and audit envelopes for command functions. The shared system role cannot
+-- prove which backend process supplied the producer label.
 DROP POLICY IF EXISTS pc_event_outbox_system ON public_core.event_outbox;
 DROP POLICY IF EXISTS pc_event_outbox_system_select ON public_core.event_outbox;
 DROP POLICY IF EXISTS pc_event_outbox_system_update ON public_core.event_outbox;
@@ -176,12 +188,11 @@ CREATE POLICY pc_event_outbox_system_delete ON public_core.event_outbox
 CREATE POLICY pc_event_outbox_system_insert ON public_core.event_outbox
   FOR INSERT TO usrp_system_service
   WITH CHECK (
-    event_type NOT LIKE 'CAMPAIGN_%'
-    AND COALESCE(payload->>'eventType', event_type) NOT LIKE 'CAMPAIGN_%'
-    AND NOT (
-      event_type = 'AUDIT_ENTRY'
-      AND (payload->>'entityType' = 'CAMPAIGN' OR payload->>'action' LIKE 'CAMPAIGN_%')
-    )
+    producer IN ('application-service', 'scheduling-service')
+    AND left(upper(regexp_replace(event_type, '^[[:space:]]+|[[:space:]]+$', '', 'g')), 9) <> 'CAMPAIGN_'
+    AND left(upper(regexp_replace(COALESCE(payload->>'eventType', event_type), '^[[:space:]]+|[[:space:]]+$', '', 'g')), 9) <> 'CAMPAIGN_'
+    AND upper(regexp_replace(COALESCE(payload->>'entityType', ''), '^[[:space:]]+|[[:space:]]+$', '', 'g')) <> 'CAMPAIGN'
+    AND left(upper(regexp_replace(COALESCE(payload->>'action', ''), '^[[:space:]]+|[[:space:]]+$', '', 'g')), 9) <> 'CAMPAIGN_'
   );
 
 DO $$
@@ -208,7 +219,7 @@ CREATE OR REPLACE FUNCTION public_core.guard_campaign_session_write()
 RETURNS trigger
 LANGUAGE plpgsql
 SECURITY INVOKER
-SET search_path = pg_catalog
+SET search_path = pg_catalog, pg_temp
 AS $function$
 DECLARE
   v_campaign_id uuid;
@@ -307,7 +318,7 @@ LANGUAGE plpgsql
 IMMUTABLE
 STRICT
 SECURITY INVOKER
-SET search_path = pg_catalog
+SET search_path = pg_catalog, pg_temp
 AS $function$
 DECLARE
   v_digest bytea;
@@ -338,7 +349,7 @@ CREATE OR REPLACE FUNCTION public_core.campaign_private_authorize_admin(
 RETURNS void
 LANGUAGE plpgsql
 SECURITY INVOKER
-SET search_path = pg_catalog
+SET search_path = pg_catalog, pg_temp
 AS $function$
 DECLARE
   v_agency public_core.agency;
@@ -399,7 +410,7 @@ CREATE OR REPLACE FUNCTION public_core.provision_first_campaign_agency_admin(
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog
+SET search_path = pg_catalog, pg_temp
 AS $function$
 DECLARE
   v_event_id uuid;
@@ -441,7 +452,7 @@ BEGIN
     'eventVersion', '1.0',
     'schemaVersion', '1.0',
     'piiClassification', 'NONE',
-    'occurredAt', to_char(v_occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+    'occurredAt', to_char(v_occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
     'correlationId', p_correlation_id,
     'causationId', p_officer_id::text,
     'eventType', 'AUDIT_ENTRY',
@@ -481,7 +492,7 @@ CREATE OR REPLACE FUNCTION public_core.campaign_private_claim_command(
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY INVOKER
-SET search_path = pg_catalog
+SET search_path = pg_catalog, pg_temp
 AS $function$
 DECLARE
   v_prior public_core.campaign_command_requests%ROWTYPE;
@@ -515,7 +526,7 @@ BEGIN
       'resourceId', v_prior.resource_id,
       'responseStatus', v_prior.response_status,
       'responseBody', v_prior.response_body,
-      'occurredAt', v_prior.created_at
+      'occurredAt', to_char(v_prior.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
     );
   END IF;
 
@@ -543,7 +554,7 @@ CREATE OR REPLACE FUNCTION public_core.campaign_private_claim_session_command(
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY INVOKER
-SET search_path = pg_catalog
+SET search_path = pg_catalog, pg_temp
 AS $function$
 DECLARE
   v_prior public_core.session_command_requests%ROWTYPE;
@@ -577,7 +588,7 @@ BEGIN
       'resourceId', v_prior.campaign_id,
       'responseStatus', v_prior.response_status,
       'responseBody', v_prior.response_body,
-      'occurredAt', v_prior.created_at
+      'occurredAt', to_char(v_prior.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
     );
   END IF;
 
@@ -601,7 +612,7 @@ LANGUAGE plpgsql
 IMMUTABLE
 STRICT
 SECURITY INVOKER
-SET search_path = pg_catalog
+SET search_path = pg_catalog, pg_temp
 AS $function$
 DECLARE
   v_result bytea := ''::bytea;
@@ -637,7 +648,7 @@ CREATE OR REPLACE FUNCTION public_core.campaign_read_command_replay(
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog
+SET search_path = pg_catalog, pg_temp
 AS $function$
 DECLARE
   v_prior public_core.campaign_command_requests%ROWTYPE;
@@ -663,7 +674,7 @@ BEGIN
     'resourceId', v_prior.resource_id,
     'responseStatus', v_prior.response_status,
     'responseBody', v_prior.response_body,
-    'occurredAt', v_prior.created_at
+    'occurredAt', to_char(v_prior.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
   );
 END;
 $function$;
@@ -678,7 +689,7 @@ CREATE OR REPLACE FUNCTION public_core.campaign_read_session_command_replay(
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog
+SET search_path = pg_catalog, pg_temp
 AS $function$
 DECLARE
   v_prior public_core.session_command_requests%ROWTYPE;
@@ -704,7 +715,7 @@ BEGIN
     'resourceId', v_prior.campaign_id,
     'responseStatus', v_prior.response_status,
     'responseBody', v_prior.response_body,
-    'occurredAt', v_prior.created_at
+    'occurredAt', to_char(v_prior.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
   );
 END;
 $function$;
@@ -716,7 +727,7 @@ RETURNS jsonb
 LANGUAGE sql
 STABLE
 SECURITY INVOKER
-SET search_path = pg_catalog
+SET search_path = pg_catalog, pg_temp
 AS $function$
   SELECT jsonb_build_object(
     'campaignId', p_campaign_id::text,
@@ -767,7 +778,7 @@ CREATE OR REPLACE FUNCTION public_core.campaign_private_stage_events(
 RETURNS void
 LANGUAGE plpgsql
 SECURITY INVOKER
-SET search_path = pg_catalog
+SET search_path = pg_catalog, pg_temp
 AS $function$
 DECLARE
   v_event jsonb;
@@ -940,7 +951,7 @@ LANGUAGE sql
 IMMUTABLE
 STRICT
 SECURITY INVOKER
-SET search_path = pg_catalog
+SET search_path = pg_catalog, pg_temp
 AS $function$
   SELECT province
   FROM (VALUES
@@ -984,7 +995,7 @@ RETURNS TABLE (
 )
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog
+SET search_path = pg_catalog, pg_temp
 AS $function$
 BEGIN
   PERFORM public_core.campaign_private_authorize_admin(p_actor_id, p_agency);
@@ -1006,7 +1017,7 @@ CREATE OR REPLACE FUNCTION public_core.campaign_lock_coverage_head(
 RETURNS TABLE (coverage_version integer, coverage_hash varchar(64))
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog
+SET search_path = pg_catalog, pg_temp
 AS $function$
 BEGIN
   PERFORM public_core.campaign_private_authorize_admin(p_actor_id, p_agency);
@@ -1036,7 +1047,7 @@ CREATE OR REPLACE FUNCTION public_core.campaign_private_write_history(
 RETURNS void
 LANGUAGE sql
 SECURITY INVOKER
-SET search_path = pg_catalog
+SET search_path = pg_catalog, pg_temp
 AS $function$
   INSERT INTO public_core.campaign_lifecycle_history
     (id, campaign_id, agency, from_status, to_status, actor_id, correlation_id, occurred_at)
@@ -1049,7 +1060,7 @@ CREATE OR REPLACE FUNCTION public_core.campaign_write_draft(p_command jsonb)
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog
+SET search_path = pg_catalog, pg_temp
 AS $function$
 DECLARE
   v_actor uuid := (p_command->>'actorId')::uuid;
@@ -1062,6 +1073,16 @@ DECLARE
   v_history_id uuid := gen_random_uuid();
   v_code text := p_command->>'publicCode';
   v_audit_metadata jsonb;
+  v_label text;
+  v_registration_opens_at timestamptz;
+  v_registration_closes_at timestamptz;
+  v_examination_start_date date;
+  v_examination_end_date date;
+  v_examination_reporting_hour integer;
+  v_target_intake_count integer;
+  v_target_categories text[];
+  v_target_districts text[];
+  v_allowed_categories text[];
 BEGIN
   PERFORM public_core.campaign_private_authorize_admin(v_actor, v_agency);
   IF p_command->>'operation' IS DISTINCT FROM 'createCampaignDraft'
@@ -1082,12 +1103,135 @@ BEGIN
 
   IF v_code !~ '^[A-Z0-9][A-Z0-9-]{2,63}$'
      OR v_code LIKE 'LEGACY-%'
-     OR length(v_draft->>'campaignLabel') NOT BETWEEN 1 AND 50
-     OR jsonb_typeof(v_draft->'targetCategories') <> 'array'
-     OR jsonb_array_length(v_draft->'targetCategories') = 0
-     OR jsonb_typeof(v_draft->'targetDistricts') <> 'array'
-     OR jsonb_array_length(v_draft->'targetDistricts') = 0 THEN
+     OR jsonb_typeof(v_draft->'campaignLabel') IS DISTINCT FROM 'string'
+     OR length(btrim(v_draft->>'campaignLabel')) NOT BETWEEN 1 AND 50
+     OR (v_draft->>'campaignLabel') ~ '[[:cntrl:]]'
+     OR jsonb_typeof(v_draft->'targetCategories') IS DISTINCT FROM 'array'
+     OR jsonb_typeof(v_draft->'targetDistricts') IS DISTINCT FROM 'array'
+     OR jsonb_typeof(v_draft->'registrationOpensAt') IS DISTINCT FROM 'string'
+     OR (v_draft->>'registrationOpensAt') !~* '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?(Z|[+-][0-9]{2}:[0-9]{2})$'
+     OR jsonb_typeof(v_draft->'registrationClosesAt') IS DISTINCT FROM 'string'
+     OR (v_draft->>'registrationClosesAt') !~* '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?(Z|[+-][0-9]{2}:[0-9]{2})$'
+     OR jsonb_typeof(v_draft->'examinationStartDate') IS DISTINCT FROM 'string'
+     OR (v_draft->>'examinationStartDate') !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+     OR jsonb_typeof(v_draft->'examinationEndDate') IS DISTINCT FROM 'string'
+     OR (v_draft->>'examinationEndDate') !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+     OR jsonb_typeof(v_draft->'examinationReportingHour') IS DISTINCT FROM 'number'
+     OR (v_draft->>'examinationReportingHour') !~ '^(0|[1-9]|1[0-9]|2[0-3])$'
+     OR jsonb_typeof(v_draft->'allowsWalkIn') IS DISTINCT FROM 'boolean' THEN
     RAISE EXCEPTION 'invalid draft business fields' USING ERRCODE = '23514';
+  END IF;
+  IF jsonb_array_length(v_draft->'targetCategories') = 0
+     OR jsonb_array_length(v_draft->'targetDistricts') = 0 THEN
+    RAISE EXCEPTION 'draft categories and districts must be non-empty arrays' USING ERRCODE = '23514';
+  END IF;
+  IF EXISTS (
+       SELECT 1 FROM jsonb_array_elements(v_draft->'targetCategories') AS category(value)
+       WHERE jsonb_typeof(value) IS DISTINCT FROM 'string'
+     ) OR EXISTS (
+       SELECT 1 FROM jsonb_array_elements(v_draft->'targetDistricts') AS district(value)
+       WHERE jsonb_typeof(value) IS DISTINCT FROM 'string'
+     ) THEN
+    RAISE EXCEPTION 'draft category and district entries must be strings' USING ERRCODE = '23514';
+  END IF;
+
+  SELECT array_agg(category ORDER BY category COLLATE "C") INTO v_target_categories
+  FROM jsonb_array_elements_text(v_draft->'targetCategories') AS categories(category);
+  SELECT array_agg(district ORDER BY district COLLATE "C") INTO v_target_districts
+  FROM jsonb_array_elements_text(v_draft->'targetDistricts') AS districts(district);
+  v_allowed_categories := CASE v_agency
+    WHEN 'RDF' THEN ARRAY[
+      'GENERAL_ENLISTMENT', 'RESERVE_FORCE_ALEVEL',
+      'RESERVE_FORCE_UNIVERSITY', 'RESERVE_FORCE_SPECIALIST'
+    ]::text[]
+    WHEN 'RNP' THEN ARRAY['CADET_OFFICER', 'BASIC_POLICE_COURSE']::text[]
+    WHEN 'RCS' THEN ARRAY[
+      'GENERAL_ENLISTEE', 'OFFICER_ONE_YEAR',
+      'OFFICER_ONE_YEAR_SPECIALIST', 'OFFICER_FOUR_YEAR_UR'
+    ]::text[]
+  END;
+  IF cardinality(v_target_categories) <> (
+       SELECT count(DISTINCT category)::integer
+       FROM jsonb_array_elements_text(v_draft->'targetCategories') AS categories(category)
+     )
+     OR EXISTS (
+       SELECT 1 FROM unnest(v_target_categories) AS category(value)
+       WHERE NOT (value = ANY(v_allowed_categories))
+     )
+     OR cardinality(v_target_districts) <> (
+       SELECT count(DISTINCT district)::integer
+       FROM jsonb_array_elements_text(v_draft->'targetDistricts') AS districts(district)
+     )
+     OR EXISTS (
+       SELECT 1 FROM unnest(v_target_districts) AS district(value)
+       WHERE public_core.campaign_private_district_province(value) IS NULL
+     ) THEN
+    RAISE EXCEPTION 'invalid, duplicate, or cross-agency draft category/district' USING ERRCODE = '23514';
+  END IF;
+
+  IF v_draft ? 'targetIntakeCount'
+     AND jsonb_typeof(v_draft->'targetIntakeCount') NOT IN ('number', 'null') THEN
+    RAISE EXCEPTION 'targetIntakeCount must be a positive integer or null' USING ERRCODE = '23514';
+  END IF;
+  IF v_draft ? 'targetIntakeCount'
+     AND jsonb_typeof(v_draft->'targetIntakeCount') = 'number' THEN
+    IF length(v_draft->>'targetIntakeCount') > 10
+       OR (v_draft->>'targetIntakeCount') !~ '^[1-9][0-9]*$' THEN
+      RAISE EXCEPTION 'targetIntakeCount must be a positive integer or null' USING ERRCODE = '23514';
+    END IF;
+    IF (v_draft->>'targetIntakeCount')::numeric NOT BETWEEN 1 AND 2147483647 THEN
+      RAISE EXCEPTION 'targetIntakeCount must be a positive integer or null' USING ERRCODE = '23514';
+    END IF;
+  END IF;
+  IF v_draft ? 'contactPhoneNumbers' THEN
+    IF jsonb_typeof(v_draft->'contactPhoneNumbers') IS DISTINCT FROM 'array' THEN
+      RAISE EXCEPTION 'contactPhoneNumbers must be an array of at most 10 strings' USING ERRCODE = '23514';
+    END IF;
+    IF jsonb_array_length(v_draft->'contactPhoneNumbers') > 10 THEN
+      RAISE EXCEPTION 'contactPhoneNumbers must be an array of at most 10 strings' USING ERRCODE = '23514';
+    END IF;
+    IF EXISTS (
+         SELECT 1 FROM jsonb_array_elements(v_draft->'contactPhoneNumbers') AS phone(value)
+         WHERE jsonb_typeof(value) IS DISTINCT FROM 'string'
+       ) THEN
+      RAISE EXCEPTION 'contactPhoneNumbers must contain only strings' USING ERRCODE = '23514';
+    END IF;
+    IF EXISTS (
+         SELECT 1 FROM jsonb_array_elements_text(v_draft->'contactPhoneNumbers') AS phone(value)
+         WHERE length(btrim(value)) NOT BETWEEN 1 AND 40 OR value ~ '[[:cntrl:]]'
+       ) THEN
+      RAISE EXCEPTION 'contactPhoneNumbers contains an invalid string' USING ERRCODE = '23514';
+    END IF;
+  END IF;
+  IF v_draft ? 'contactWebsite'
+     AND jsonb_typeof(v_draft->'contactWebsite') NOT IN ('string', 'null') THEN
+    RAISE EXCEPTION 'contactWebsite must be an HTTP(S) URL or null' USING ERRCODE = '23514';
+  END IF;
+  IF jsonb_typeof(v_draft->'contactWebsite') = 'string'
+     AND (length(btrim(v_draft->>'contactWebsite')) NOT BETWEEN 1 AND 100
+       OR (v_draft->>'contactWebsite') ~ '[[:space:]]'
+       OR (v_draft->>'contactWebsite') !~* '^https?://[^/?#]+([/?#][^[:space:]]*)?$') THEN
+    RAISE EXCEPTION 'contactWebsite must be an absolute HTTP(S) URL' USING ERRCODE = '23514';
+  END IF;
+
+  BEGIN
+    v_registration_opens_at := (v_draft->>'registrationOpensAt')::timestamptz;
+    v_registration_closes_at := (v_draft->>'registrationClosesAt')::timestamptz;
+    v_examination_start_date := (v_draft->>'examinationStartDate')::date;
+    v_examination_end_date := (v_draft->>'examinationEndDate')::date;
+  EXCEPTION
+    WHEN invalid_datetime_format OR datetime_field_overflow OR invalid_text_representation THEN
+      RAISE EXCEPTION 'invalid draft calendar date or timestamp' USING ERRCODE = '23514';
+  END;
+  IF v_registration_opens_at >= v_registration_closes_at
+     OR v_examination_start_date > v_examination_end_date THEN
+    RAISE EXCEPTION 'draft registration/examination windows are not ordered' USING ERRCODE = '23514';
+  END IF;
+
+  v_label := btrim(v_draft->>'campaignLabel');
+  v_examination_reporting_hour := (v_draft->>'examinationReportingHour')::integer;
+  IF jsonb_typeof(v_draft->'targetIntakeCount') = 'number' THEN
+    v_target_intake_count := (v_draft->>'targetIntakeCount')::integer;
   END IF;
 
   INSERT INTO public_core.recruitment_campaigns
@@ -1098,19 +1242,19 @@ BEGIN
      published_at, created_at, updated_at)
   VALUES (
     v_campaign_id,
-    v_draft->>'campaignLabel',
+    v_label,
     v_agency,
     v_code,
     'DRAFT',
-    (v_draft->'targetCategories')::text,
-    v_draft->'targetDistricts',
-    (v_draft->>'registrationOpensAt')::timestamptz,
-    (v_draft->>'registrationClosesAt')::timestamptz,
-    v_draft->>'examinationStartDate',
-    v_draft->>'examinationEndDate',
-    (v_draft->>'examinationReportingHour')::integer,
+    to_jsonb(v_target_categories)::text,
+    to_jsonb(v_target_districts),
+    v_registration_opens_at,
+    v_registration_closes_at,
+    to_char(v_examination_start_date, 'YYYY-MM-DD'),
+    to_char(v_examination_end_date, 'YYYY-MM-DD'),
+    v_examination_reporting_hour,
     (v_draft->>'allowsWalkIn')::boolean,
-    NULLIF(v_draft->>'targetIntakeCount', '')::integer,
+    v_target_intake_count,
     CASE WHEN v_draft ? 'contactPhoneNumbers' THEN (v_draft->'contactPhoneNumbers')::text ELSE NULL END,
     v_draft->>'contactWebsite',
     NULL,
@@ -1132,7 +1276,8 @@ BEGIN
   );
   RETURN jsonb_build_object('replayed', false, 'commandId', v_command_id,
     'resourceId', v_campaign_id, 'responseStatus', (p_command->>'responseStatus')::integer,
-    'responseBody', p_command->'responseBody', 'occurredAt', v_occurred_at);
+    'responseBody', p_command->'responseBody',
+    'occurredAt', to_char(v_occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'));
 END;
 $function$;
 
@@ -1140,7 +1285,7 @@ CREATE OR REPLACE FUNCTION public_core.campaign_write_policy_version(p_command j
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog
+SET search_path = pg_catalog, pg_temp
 AS $function$
 DECLARE
   v_actor uuid := (p_command->>'actorId')::uuid;
@@ -1158,6 +1303,8 @@ DECLARE
   v_canonical text := p_command->>'canonicalPolicyJson';
   v_policy_hash text := p_command->>'policyHash';
   v_metadata jsonb;
+  v_policy_categories text[];
+  v_target_categories text[];
 BEGIN
   PERFORM public_core.campaign_private_authorize_admin(v_actor, v_agency);
   SELECT * INTO v_campaign
@@ -1188,11 +1335,17 @@ BEGIN
      ) THEN
     RAISE EXCEPTION 'POLICY_HASH_MISMATCH' USING ERRCODE = 'P0001';
   END IF;
-  IF NOT (v_campaign.target_categories::jsonb @> (
-       SELECT jsonb_agg(to_jsonb(k)) FROM jsonb_object_keys(v_policy->'policyDocument') AS keys(k)
-     )) OR NOT ((v_campaign.target_categories::jsonb) <@ (
-       SELECT jsonb_agg(to_jsonb(k)) FROM jsonb_object_keys(v_policy->'policyDocument') AS keys(k)
-     )) THEN
+  IF jsonb_typeof(v_campaign.target_categories::jsonb) IS DISTINCT FROM 'array' THEN
+    RAISE EXCEPTION 'POLICY_CATEGORY_COVERAGE_MISMATCH' USING ERRCODE = 'P0001';
+  END IF;
+  SELECT COALESCE(array_agg(category ORDER BY category COLLATE "C"), ARRAY[]::text[])
+    INTO v_policy_categories
+  FROM jsonb_object_keys(v_policy->'policyDocument') AS policy_categories(category);
+  SELECT COALESCE(array_agg(category ORDER BY category COLLATE "C"), ARRAY[]::text[])
+    INTO v_target_categories
+  FROM jsonb_array_elements_text(v_campaign.target_categories::jsonb) AS campaign_categories(category);
+  IF cardinality(v_policy_categories) = 0
+     OR v_policy_categories IS DISTINCT FROM v_target_categories THEN
     RAISE EXCEPTION 'POLICY_CATEGORY_COVERAGE_MISMATCH' USING ERRCODE = 'P0001';
   END IF;
 
@@ -1231,7 +1384,8 @@ BEGIN
   );
   RETURN jsonb_build_object('replayed', false, 'commandId', v_command_id,
     'resourceId', v_campaign_id, 'responseStatus', (p_command->>'responseStatus')::integer,
-    'responseBody', p_command->'responseBody', 'occurredAt', v_occurred_at);
+    'responseBody', p_command->'responseBody',
+    'occurredAt', to_char(v_occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'));
 END;
 $function$;
 
@@ -1239,7 +1393,7 @@ CREATE OR REPLACE FUNCTION public_core.campaign_write_publication(p_command json
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog
+SET search_path = pg_catalog, pg_temp
 AS $function$
 DECLARE
   v_actor uuid := (p_command->>'actorId')::uuid;
@@ -1382,7 +1536,8 @@ BEGIN
   );
   RETURN jsonb_build_object('replayed', false, 'commandId', v_command_id,
     'resourceId', v_campaign_id, 'responseStatus', (p_command->>'responseStatus')::integer,
-    'responseBody', p_command->'responseBody', 'occurredAt', v_occurred_at);
+    'responseBody', p_command->'responseBody',
+    'occurredAt', to_char(v_occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'));
 END;
 $function$;
 
@@ -1395,7 +1550,7 @@ CREATE OR REPLACE FUNCTION public_core.campaign_private_write_lifecycle(
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY INVOKER
-SET search_path = pg_catalog
+SET search_path = pg_catalog, pg_temp
 AS $function$
 DECLARE
   v_actor uuid := (p_command->>'actorId')::uuid;
@@ -1435,6 +1590,8 @@ BEGIN
   IF NOT (
        (p_target_status = 'REGISTRATION_CLOSED' AND v_from = 'REGISTRATION_OPEN') OR
        (p_target_status = 'COMPLETED' AND v_from = 'REGISTRATION_CLOSED') OR
+       (p_target_status = 'COMPLETED' AND v_from = 'EXAMINATION_ACTIVE'
+         AND v_campaign.public_code ~ '^LEGACY-[A-F0-9]{32}$') OR
        (p_target_status = 'CANCELLED' AND v_from IN ('DRAFT', 'REGISTRATION_OPEN'))
      ) THEN
     RAISE EXCEPTION 'INVALID_STATE' USING ERRCODE = 'P0001';
@@ -1504,12 +1661,13 @@ BEGIN
   );
   RETURN jsonb_build_object('replayed', false, 'commandId', v_command_id,
     'resourceId', v_campaign_id, 'responseStatus', (p_command->>'responseStatus')::integer,
-    'responseBody', p_command->'responseBody', 'occurredAt', v_occurred_at);
+    'responseBody', p_command->'responseBody',
+    'occurredAt', to_char(v_occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'));
 END;
 $function$;
 
 CREATE OR REPLACE FUNCTION public_core.campaign_close_registration(p_command jsonb)
-RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp
 AS $function$
 BEGIN
   RETURN public_core.campaign_private_write_lifecycle(
@@ -1519,7 +1677,7 @@ END;
 $function$;
 
 CREATE OR REPLACE FUNCTION public_core.campaign_complete(p_command jsonb)
-RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp
 AS $function$
 BEGIN
   RETURN public_core.campaign_private_write_lifecycle(
@@ -1529,7 +1687,7 @@ END;
 $function$;
 
 CREATE OR REPLACE FUNCTION public_core.campaign_cancel(p_command jsonb)
-RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp
 AS $function$
 BEGIN
   RETURN public_core.campaign_private_write_lifecycle(
@@ -1542,7 +1700,7 @@ CREATE OR REPLACE FUNCTION public_core.scheduling_configure_campaign_session(p_c
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog
+SET search_path = pg_catalog, pg_temp
 AS $function$
 DECLARE
   v_actor uuid := (p_command->>'actorId')::uuid;
@@ -1575,6 +1733,14 @@ DECLARE
   v_domain_name text;
   v_fact_id text;
   v_domain_fields jsonb;
+  v_session_district text;
+  v_session_province text;
+  v_session_venue_name text;
+  v_session_exam_date date;
+  v_reporting_time_hour integer;
+  v_capacity_limit integer;
+  v_capacity_decision_code text;
+  v_session_is_active boolean;
 BEGIN
   PERFORM public_core.campaign_private_authorize_admin(v_actor, v_agency);
   SELECT * INTO v_campaign
@@ -1600,17 +1766,61 @@ BEGIN
 
   IF p_command->>'operation' IS DISTINCT FROM 'configureCampaignSession'
      OR v_campaign.status <> 'DRAFT'
-     OR jsonb_typeof(v_session) <> 'object'
+     OR jsonb_typeof(v_session) IS DISTINCT FROM 'object'
      OR v_session->>'publicCode' IS DISTINCT FROM v_public_code
+     OR jsonb_typeof(v_session->'district') IS DISTINCT FROM 'string'
+     OR jsonb_typeof(v_session->'province') IS DISTINCT FROM 'string'
+     OR jsonb_typeof(v_session->'venueName') IS DISTINCT FROM 'string'
+     OR jsonb_typeof(v_session->'examDate') IS DISTINCT FROM 'string'
+     OR (v_session->>'examDate') !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+     OR jsonb_typeof(v_session->'reportingTimeHour') IS DISTINCT FROM 'number'
+     OR (v_session->>'reportingTimeHour') !~ '^(0|[1-9]|1[0-9]|2[0-3])$'
+     OR jsonb_typeof(v_session->'capacityLimit') IS DISTINCT FROM 'number'
+        AND jsonb_typeof(v_session->'capacityLimit') IS DISTINCT FROM 'null'
+     OR jsonb_typeof(v_session->'isActive') IS DISTINCT FROM 'boolean'
+     OR (v_session ? 'capacityDecisionCode'
+       AND jsonb_typeof(v_session->'capacityDecisionCode') IS DISTINCT FROM 'string'
+       AND jsonb_typeof(v_session->'capacityDecisionCode') IS DISTINCT FROM 'null') THEN
+    RAISE EXCEPTION 'INVALID_SESSION_CONFIGURATION' USING ERRCODE = 'P0001';
+  END IF;
+  IF length(btrim(v_session->>'venueName')) NOT BETWEEN 1 AND 200
+     OR (v_session->>'venueName') ~ '[[:cntrl:]]' THEN
+    RAISE EXCEPTION 'INVALID_SESSION_CONFIGURATION' USING ERRCODE = 'P0001';
+  END IF;
+
+  v_session_district := v_session->>'district';
+  v_session_province := v_session->>'province';
+  v_session_venue_name := btrim(v_session->>'venueName');
+  v_session_is_active := (v_session->>'isActive')::boolean;
+  v_capacity_decision_code := v_session->>'capacityDecisionCode';
+  v_reporting_time_hour := (v_session->>'reportingTimeHour')::integer;
+  IF jsonb_typeof(v_session->'capacityLimit') = 'null' THEN
+    v_capacity_limit := NULL;
+    IF v_capacity_decision_code IS DISTINCT FROM 'UNBOUNDED_CAPACITY' THEN
+      RAISE EXCEPTION 'INVALID_SESSION_CONFIGURATION' USING ERRCODE = 'P0001';
+    END IF;
+  ELSE
+    IF length(v_session->>'capacityLimit') > 10
+       OR (v_session->>'capacityLimit') !~ '^[1-9][0-9]*$' THEN
+      RAISE EXCEPTION 'INVALID_SESSION_CONFIGURATION' USING ERRCODE = 'P0001';
+    END IF;
+    IF (v_session->>'capacityLimit')::numeric NOT BETWEEN 1 AND 2147483647
+       OR v_capacity_decision_code IS NOT NULL THEN
+      RAISE EXCEPTION 'INVALID_SESSION_CONFIGURATION' USING ERRCODE = 'P0001';
+    END IF;
+    v_capacity_limit := (v_session->>'capacityLimit')::integer;
+  END IF;
+  BEGIN
+    v_session_exam_date := (v_session->>'examDate')::date;
+  EXCEPTION
+    WHEN invalid_datetime_format OR datetime_field_overflow OR invalid_text_representation THEN
+      RAISE EXCEPTION 'INVALID_SESSION_CONFIGURATION' USING ERRCODE = 'P0001';
+  END;
+  IF v_session_exam_date < v_campaign.examination_start_date::date
+     OR v_session_exam_date > v_campaign.examination_end_date::date
+     OR public_core.campaign_private_district_province(v_session_district) IS DISTINCT FROM v_session_province
      OR v_campaign.target_districts IS NULL
-     OR NOT (v_campaign.target_districts @> jsonb_build_array(v_session->>'district'))
-     OR (v_session->>'examDate')::varchar(10) < v_campaign.examination_start_date
-     OR (v_session->>'examDate')::varchar(10) > v_campaign.examination_end_date
-     OR public_core.campaign_private_district_province(v_session->>'district') IS DISTINCT FROM v_session->>'province'
-     OR (v_session->>'reportingTimeHour')::integer NOT BETWEEN 0 AND 23
-     OR ((v_session->>'capacityLimit') IS NULL AND v_session->>'capacityDecisionCode' IS DISTINCT FROM 'UNBOUNDED_CAPACITY')
-     OR ((v_session->>'capacityLimit') IS NOT NULL AND
-          ((v_session->>'capacityLimit')::integer <= 0 OR v_session->>'capacityDecisionCode' IS NOT NULL)) THEN
+     OR NOT (v_campaign.target_districts @> jsonb_build_array(v_session_district)) THEN
     RAISE EXCEPTION 'INVALID_SESSION_CONFIGURATION' USING ERRCODE = 'P0001';
   END IF;
 
@@ -1630,7 +1840,7 @@ BEGIN
 
   SELECT * INTO v_existing
   FROM public_core.campaign_venue_assignments AS s
-  WHERE s.campaign_id = v_campaign_id AND s.district = v_session->>'district'
+  WHERE s.campaign_id = v_campaign_id AND s.district = v_session_district
   FOR UPDATE;
   v_has_existing := FOUND;
   IF v_has_existing THEN
@@ -1639,11 +1849,9 @@ BEGIN
       v_existing.reporting_time_hour, v_existing.capacity_limit,
       v_existing.capacity_decision_code, v_existing.is_active
     ) IS DISTINCT FROM ROW(
-      v_session->>'province', v_session->>'venueName', v_session->>'examDate',
-      (v_session->>'reportingTimeHour')::integer,
-      NULLIF(v_session->>'capacityLimit', '')::integer,
-      v_session->>'capacityDecisionCode',
-      (v_session->>'isActive')::boolean
+      v_session_province, v_session_venue_name, to_char(v_session_exam_date, 'YYYY-MM-DD'),
+      v_reporting_time_hour, v_capacity_limit, v_capacity_decision_code,
+      v_session_is_active
     );
     IF v_changed AND v_existing.registered_count > 0 THEN
       RAISE EXCEPTION 'SESSION_ALREADY_RESERVED' USING ERRCODE = 'P0001';
@@ -1652,9 +1860,8 @@ BEGIN
       v_existing.district, v_existing.province, v_existing.venue_name, v_existing.exam_date,
       v_existing.reporting_time_hour, v_existing.capacity_limit, v_existing.is_active
     ) IS DISTINCT FROM ROW(
-      v_session->>'district', v_session->>'province', v_session->>'venueName',
-      v_session->>'examDate', (v_session->>'reportingTimeHour')::integer,
-      NULLIF(v_session->>'capacityLimit', '')::integer, (v_session->>'isActive')::boolean
+      v_session_district, v_session_province, v_session_venue_name,
+      to_char(v_session_exam_date, 'YYYY-MM-DD'), v_reporting_time_hour, v_capacity_limit, v_session_is_active
     );
   ELSE
     v_changed := true;
@@ -1671,14 +1878,14 @@ BEGIN
   IF v_has_existing THEN
     IF v_changed THEN
       UPDATE public_core.campaign_venue_assignments
-      SET province = v_session->>'province',
-          venue_name = v_session->>'venueName',
-          exam_date = v_session->>'examDate',
-          reporting_time_hour = (v_session->>'reportingTimeHour')::integer,
-          capacity_limit = NULLIF(v_session->>'capacityLimit', '')::integer,
-          capacity_decision_code = v_session->>'capacityDecisionCode',
-          is_active = (v_session->>'isActive')::boolean
-      WHERE campaign_id = v_campaign_id AND district = v_session->>'district';
+      SET province = v_session_province,
+          venue_name = v_session_venue_name,
+          exam_date = to_char(v_session_exam_date, 'YYYY-MM-DD'),
+          reporting_time_hour = v_reporting_time_hour,
+          capacity_limit = v_capacity_limit,
+          capacity_decision_code = v_capacity_decision_code,
+          is_active = v_session_is_active
+      WHERE campaign_id = v_campaign_id AND district = v_session_district;
     END IF;
   ELSE
     INSERT INTO public_core.campaign_venue_assignments
@@ -1686,11 +1893,9 @@ BEGIN
        reporting_time_hour, capacity_limit, capacity_decision_code,
        registered_count, is_active, created_at)
     VALUES (
-      v_session_id, v_campaign_id, v_session->>'district', v_session->>'province',
-      v_session->>'venueName', v_session->>'examDate',
-      (v_session->>'reportingTimeHour')::integer,
-      NULLIF(v_session->>'capacityLimit', '')::integer,
-      v_session->>'capacityDecisionCode', 0, (v_session->>'isActive')::boolean,
+      v_session_id, v_campaign_id, v_session_district, v_session_province,
+      v_session_venue_name, to_char(v_session_exam_date, 'YYYY-MM-DD'), v_reporting_time_hour,
+      v_capacity_limit, v_capacity_decision_code, 0, v_session_is_active,
       v_occurred_at
     );
   END IF;
@@ -1716,13 +1921,13 @@ BEGIN
   IF v_response->>'coverageVersion' IS DISTINCT FROM v_next_version::text
      OR v_response->>'coverageHash' IS DISTINCT FROM v_expected_hash
      OR (v_response->>'status' = 'SESSION_CONFIGURED') IS DISTINCT FROM v_changed
-     OR v_response->>'capacityDecisionCode' IS DISTINCT FROM v_session->>'capacityDecisionCode' THEN
+     OR v_response->>'capacityDecisionCode' IS DISTINCT FROM v_capacity_decision_code THEN
     RAISE EXCEPTION 'invalid session response snapshot' USING ERRCODE = '23514';
   END IF;
 
   v_metadata := jsonb_build_object(
     'publicCode', v_public_code,
-    'district', v_session->>'district',
+    'district', v_session_district,
     'sessionChanged', v_changed,
     'capacityDecisionCode', COALESCE(v_session->'capacityDecisionCode', 'null'::jsonb),
     'coverageVersion', v_next_version
@@ -1732,7 +1937,7 @@ BEGIN
     v_fact_id := v_campaign_id::text || ':' || v_next_version::text;
     v_domain_name := 'campaign-session-coverage:' || v_fact_id;
     v_domain_fields := jsonb_build_object(
-      'district', v_session->>'district',
+      'district', v_session_district,
       'coverageVersion', v_next_version,
       'coverageHash', v_expected_hash,
       'configuredAt', p_command->'occurredAt'
@@ -1751,7 +1956,8 @@ BEGIN
   );
   RETURN jsonb_build_object('replayed', false, 'commandId', v_command_id,
     'resourceId', v_campaign_id, 'responseStatus', 200,
-    'responseBody', v_response, 'occurredAt', v_occurred_at);
+    'responseBody', v_response,
+    'occurredAt', to_char(v_occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'));
 END;
 $function$;
 
@@ -1763,7 +1969,7 @@ CREATE OR REPLACE FUNCTION public_core.reserve_campaign_venue_seat(p_venue_assig
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog
+SET search_path = pg_catalog, pg_temp
 AS $function$
 DECLARE
   v_result jsonb;
@@ -1817,7 +2023,7 @@ CREATE OR REPLACE FUNCTION public_core.release_campaign_venue_seat(p_venue_assig
 RETURNS integer
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog
+SET search_path = pg_catalog, pg_temp
 AS $function$
 DECLARE
   v_registered_count integer;
@@ -1850,7 +2056,7 @@ CREATE OR REPLACE FUNCTION public_core.campaign_private_check_history_matches_st
 RETURNS trigger
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog
+SET search_path = pg_catalog, pg_temp
 AS $function$
 DECLARE
   v_status public_core.campaign_status;
@@ -1881,7 +2087,7 @@ CREATE OR REPLACE FUNCTION public_core.campaign_private_guard_history_insert()
 RETURNS trigger
 LANGUAGE plpgsql
 SECURITY INVOKER
-SET search_path = pg_catalog
+SET search_path = pg_catalog, pg_temp
 AS $function$
 BEGIN
   IF current_user <> 'usrp_campaign_command_owner' THEN
@@ -1906,7 +2112,7 @@ CREATE OR REPLACE FUNCTION public_core.campaign_private_guard_current_policy_poi
 RETURNS trigger
 LANGUAGE plpgsql
 SECURITY INVOKER
-SET search_path = pg_catalog
+SET search_path = pg_catalog, pg_temp
 AS $function$
 DECLARE
   v_latest_id uuid;

@@ -70,7 +70,7 @@ interface FunctionReply {
 }
 
 interface DbClock {
-  readonly occurred_at: Date | string;
+  readonly occurred_at: string;
 }
 
 function requireOfficer(actor: Principal): Extract<Principal, { readonly kind: 'officer' }> {
@@ -80,10 +80,13 @@ function requireOfficer(actor: Principal): Extract<Principal, { readonly kind: '
   return actor;
 }
 
-function toDate(value: Date | string): Date {
-  const result = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(result.getTime())) throw new SchedulingReadError('Database returned an invalid transaction timestamp.');
-  return result;
+function toIso(value: Date | string): string {
+  if (value instanceof Date) return value.toISOString();
+  if (Number.isNaN(new Date(value).getTime())) {
+    throw new SchedulingReadError('Database returned an invalid transaction timestamp.');
+  }
+  // Preserve the database's canonical UTC timestamp and its microsecond part.
+  return value;
 }
 
 function arrayOfStrings(value: unknown): string[] {
@@ -242,7 +245,7 @@ function replayCommit(
     responseStatus: reply.responseStatus,
     responseBody,
     replayed: true,
-    occurredAt: toDate(reply.occurredAt).toISOString(),
+    occurredAt: toIso(reply.occurredAt),
     changed: responseBody['status'] === 'SESSION_CONFIGURED',
     // Replay never stages a second domain event. This value is informative only
     // to callers; StageCampaignSessionEvents is skipped for replayed commits.
@@ -356,7 +359,7 @@ export class PgCampaignSessionRepository implements CampaignSessionRepository {
           responseStatus: 200,
           responseBody,
           replayed: false,
-          occurredAt: occurredAt.toISOString(),
+          occurredAt,
           changed,
           coverageChanged,
           coverageVersion,
@@ -465,11 +468,15 @@ export class PgCampaignSessionRepository implements CampaignSessionRepository {
     `;
   }
 
-  async #transactionTime(tx: SqlTransaction): Promise<Date> {
-    const rows = await tx<DbClock[]>`SELECT transaction_timestamp() AS occurred_at`;
+  async #transactionTime(tx: SqlTransaction): Promise<string> {
+    const rows = await tx<DbClock[]>`
+      SELECT to_char(
+        transaction_timestamp() AT TIME ZONE 'UTC',
+        'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+      ) AS occurred_at`;
     const row = rows[0];
     if (row === undefined) throw new SchedulingWriteError('Database did not return transaction time.');
-    return toDate(row.occurred_at);
+    return row.occurred_at;
   }
 
   async #callWriteFunction(

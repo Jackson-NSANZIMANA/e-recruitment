@@ -97,11 +97,13 @@ PG_DB="${PG_DB:-usrp_db}"
 
 pass=0
 fail=0
+skipped=0
 declare -a FAILED=()
 
 hdr()  { printf '\n\033[1;36m══ %s\033[0m\n' "$*"; }
 ok()   { printf '\033[0;32m✓ PASS — %s\033[0m\n' "$*"; pass=$((pass+1)); }
 bad()  { printf '\033[0;31m✗ FAIL — %s\033[0m\n' "$*"; fail=$((fail+1)); FAILED+=("$1"); }
+skip() { printf '\033[1;33m↷ SKIP — %s\033[0m\n' "$*"; skipped=$((skipped+1)); }
 
 # ── Preflight: the workspace must be BUILT *from this source* ──────────────
 # @usrp/* packages resolve their TYPES to src/ and their RUNTIME to dist/, and
@@ -207,10 +209,18 @@ fi
 run_ts "shared-database: schema drift (.ts ↔ snapshot ↔ live DB)" packages/shared-database/selfcheck/verify-schema-drift.ts
 # BUILD-001 migration acceptance: apply the exact pre-feature migrations to a
 # disposable real PostgreSQL database, insert legacy campaign/session rows,
-# then apply 0002/0003 and assert the backfill and data preservation. This needs
-# ADMIN_DATABASE_URL (or its dev default) with CREATEDB/DROP DATABASE rights;
-# source inspection and in-memory SQL engines are not substitutes.
-run_ts "BUILD-001: populated PostgreSQL upgrade (pre-0002 rows → 0002/0003 backfill)" packages/shared-database/selfcheck/verify-build001-populated-upgrade.ts
+# apply 0002–0004, then replay every bootstrap RLS SQL file twice and attempt
+# forbidden writes after each pass. This needs ADMIN_DATABASE_URL (or its dev
+# default) with CREATEDB/DROP DATABASE rights; PGlite/source review is not a substitute.
+run_ts "BUILD-001: populated PostgreSQL upgrade and twice-replayed full bootstrap RLS" packages/shared-database/selfcheck/verify-build001-populated-upgrade.ts
+# This proof is deliberately conditional because the direct first-admin login
+# credential must come from an approved secret channel, never the dev DATABASE_URL.
+# When supplied, the proof opens its own TCP session and prints no URL/credential.
+if [[ -n "${FIRST_ADMIN_DATABASE_URL:-}" ]]; then
+  run_ts "BUILD-001: direct first-admin provisioner authentication/privilege proof" services/iam-service/selfcheck/verify-first-admin-provisioner-auth.ts
+else
+  skip "direct first-admin provisioner auth proof — FIRST_ADMIN_DATABASE_URL was not supplied"
+fi
 # ADR-027 follow-up: the citizen submit rate limit's shared store. Two limiter
 # instances over one database share one window, concurrent increments are
 # lossless, windows expire, store faults fail closed (never "allow"), and
@@ -276,7 +286,7 @@ run_ts "scheduling-service: slot assignment"      services/scheduling-service/se
 # ADR-026: one invitation per application, no venue overbooked. Right after the
 # assignment proof: that one proves the happy path over Kafka, this one proves
 # the path under redelivery, concurrency, capacity and a broker outage.
-run_ts "scheduling-service: slot integrity (idempotent re-announce, seat capacity, concurrent redelivery, durable)" services/scheduling-service/selfcheck/verify-slot-integrity.ts
+run_ts "scheduling-service: slot integrity (idempotent re-announce, seat capacity, release-at-zero, durable)" services/scheduling-service/selfcheck/verify-slot-integrity.ts
 run_ts "notification-service: invitation delivery + lifecycle advance" services/notification-service/selfcheck/verify-notification-slice.ts
 run_ts "notification-service: contact capture → real delivery" services/notification-service/selfcheck/verify-contact-delivery-slice.ts
 run_ts "notification-service: withdrawal notice (acceptance → sweep → citizen SMS, ADR-022)" services/notification-service/selfcheck/verify-notices-slice.ts
@@ -316,10 +326,18 @@ fi
 
 # ── Summary ────────────────────────────────────────
 printf '\n\033[1m───────────────────────────────────────────\033[0m\n'
-printf 'Proofs: \033[0;32m%d passed\033[0m, ' "$pass"
+printf 'Proofs: \033[0;32m%d passed\033[0m' "$pass"
+if [[ $skipped -gt 0 ]]; then
+  printf ', \033[1;33m%d skipped\033[0m' "$skipped"
+fi
+printf ', '
 if [[ $fail -eq 0 ]]; then
   printf '\033[0;32m%d failed\033[0m\n' "$fail"
-  printf '\033[1;32mALL PROOFS GREEN — every invariant holds ✓\033[0m\n'
+  if [[ $skipped -eq 0 ]]; then
+    printf '\033[1;32mALL PROOFS GREEN — every invariant holds ✓\033[0m\n'
+  else
+    printf '\033[1;33mPROOFS PASSED WITH %d SKIPPED CHECK(S) — do not treat as complete acceptance ⚠\033[0m\n' "$skipped"
+  fi
   exit 0
 else
   printf '\033[0;31m%d failed\033[0m\n' "$fail"

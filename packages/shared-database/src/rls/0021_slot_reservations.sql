@@ -66,11 +66,13 @@ CREATE POLICY pc_slot_reservations_system ON public_core.slot_reservations
   TO usrp_system_service USING (true) WITH CHECK (true);
 
 -- ── The seat counter ──────────────────────────────────────────────────────────
--- A COLUMN grant: scheduling may advance registered_count and nothing else on
--- the venue map (0008 stays read-only for every other column). The conditional
--- UPDATE that advances it also takes the venue row lock, which is what
--- serialises concurrent reservations for one venue.
-GRANT UPDATE (registered_count) ON public_core.campaign_venue_assignments TO usrp_system_service;
+-- No direct UPDATE grant is made to usrp_system_service. The counter is changed
+-- only through the narrowly scoped reserve/release SECURITY DEFINER functions
+-- installed by rls/0027; those retain the conditional row-lock behavior without
+-- reopening a table- or column-level UPDATE privilege during bootstrap replay.
+REVOKE UPDATE ON public_core.campaign_venue_assignments FROM usrp_system_service;
+REVOKE UPDATE (registered_count) ON public_core.campaign_venue_assignments
+  FROM usrp_system_service;
 
 DO $$
 BEGIN

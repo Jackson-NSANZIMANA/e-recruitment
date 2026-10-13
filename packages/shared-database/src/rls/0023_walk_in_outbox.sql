@@ -28,8 +28,9 @@
 -- The grant is therefore as narrow as the lane it serves:
 --   • INSERT only. Officers cannot read, amend or delete outbox rows; the
 --     relay stays the sole reader and the sole marker of delivery.
---   • WITH CHECK pins the producer, so an officer session cannot stage a row
---     attributed to another service.
+--   • WITH CHECK pins the producer and rejects campaign-domain/audit envelopes
+--     case- and whitespace-insensitively, so this older direct-write lane cannot impersonate the
+--     later BUILD-001 command-function writer.
 --   • All three officer roles are granted for symmetry with rls/0001, even
 --     though ADR-012 confines walk-in to RDF today. A future RNP/RCS on-site
 --     lane must not need a migration to be durable; the WITH CHECK is what
@@ -53,6 +54,12 @@ DROP POLICY IF EXISTS pc_event_outbox_officer_stage ON public_core.event_outbox;
 CREATE POLICY pc_event_outbox_officer_stage ON public_core.event_outbox
   FOR INSERT
   TO usrp_rdf_officer, usrp_rnp_officer, usrp_rcs_officer
-  WITH CHECK (producer = 'application-service');
+  WITH CHECK (
+    producer = 'application-service'
+    AND left(upper(regexp_replace(event_type, '^[[:space:]]+|[[:space:]]+$', '', 'g')), 9) <> 'CAMPAIGN_'
+    AND left(upper(regexp_replace(COALESCE(payload->>'eventType', event_type), '^[[:space:]]+|[[:space:]]+$', '', 'g')), 9) <> 'CAMPAIGN_'
+    AND upper(regexp_replace(COALESCE(payload->>'entityType', ''), '^[[:space:]]+|[[:space:]]+$', '', 'g')) <> 'CAMPAIGN'
+    AND left(upper(regexp_replace(COALESCE(payload->>'action', ''), '^[[:space:]]+|[[:space:]]+$', '', 'g')), 9) <> 'CAMPAIGN_'
+  );
 
 COMMIT;

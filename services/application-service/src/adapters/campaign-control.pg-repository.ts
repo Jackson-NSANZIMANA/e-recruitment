@@ -75,7 +75,7 @@ interface FunctionReply {
 }
 
 interface DbClock {
-  readonly occurred_at: Date | string;
+  readonly occurred_at: string;
 }
 
 interface CoverageHeadRow {
@@ -132,14 +132,14 @@ function parseStringArray(value: unknown, field: string): string[] {
   return strings;
 }
 
-function asDate(value: Date | string): Date {
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) throw new CampaignReadError('Database returned an invalid campaign timestamp.');
-  return date;
-}
-
 function asIso(value: Date | string): string {
-  return asDate(value).toISOString();
+  if (value instanceof Date) return value.toISOString();
+  if (Number.isNaN(new Date(value).getTime())) {
+    throw new CampaignReadError('Database returned an invalid campaign timestamp.');
+  }
+  // The command functions return a canonical UTC text value with PostgreSQL's
+  // six fractional digits. Parsing validates it without truncating microseconds.
+  return value;
 }
 
 function actorFields(actor: Principal): { readonly actorId: string; readonly agency: Agency } {
@@ -455,11 +455,15 @@ export class PgCampaignControlRepository implements CampaignControlRepository {
     `;
   }
 
-  async #transactionTime(tx: SqlTransaction): Promise<Date> {
-    const rows = await tx<DbClock[]>`SELECT transaction_timestamp() AS occurred_at`;
+  async #transactionTime(tx: SqlTransaction): Promise<string> {
+    const rows = await tx<DbClock[]>`
+      SELECT to_char(
+        transaction_timestamp() AT TIME ZONE 'UTC',
+        'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+      ) AS occurred_at`;
     const row = rows[0];
     if (row === undefined) throw new CampaignPersistenceError('Database did not return transaction time.');
-    return asDate(row.occurred_at);
+    return row.occurred_at;
   }
 
   async #callWriteFunction(
@@ -552,8 +556,8 @@ export class PgCampaignControlRepository implements CampaignControlRepository {
       responseStatus: 201,
       responseBody,
       replayed: false,
-      occurredAt: occurredAt.toISOString(),
-      fact: { kind: 'DRAFT_CREATED', occurredAt: occurredAt.toISOString() },
+      occurredAt: occurredAt,
+      fact: { kind: 'DRAFT_CREATED', occurredAt: occurredAt },
       auditAction: 'CAMPAIGN_DRAFT_CREATED',
       auditMetadata: {},
     };
@@ -622,12 +626,12 @@ export class PgCampaignControlRepository implements CampaignControlRepository {
       responseStatus: 201,
       responseBody,
       replayed: false,
-      occurredAt: occurredAt.toISOString(),
+      occurredAt: occurredAt,
       fact: {
         kind: 'POLICY_VERSION_CREATED',
         policyVersionId,
         policyVersionNumber: versionNumber,
-        occurredAt: occurredAt.toISOString(),
+        occurredAt: occurredAt,
       },
       auditAction: 'CAMPAIGN_POLICY_VERSION_CREATED',
       auditMetadata: { policyVersionNumber: versionNumber },
@@ -736,7 +740,7 @@ export class PgCampaignControlRepository implements CampaignControlRepository {
       policyVersionNumber: policy.version_number,
       coverageVersion: head.coverage_version,
       coverageHash,
-      occurredAt: occurredAt.toISOString(),
+      occurredAt: occurredAt,
     };
     const commit: CampaignCommit = {
       operation: command.operation,
@@ -748,7 +752,7 @@ export class PgCampaignControlRepository implements CampaignControlRepository {
       responseStatus: 200,
       responseBody,
       replayed: false,
-      occurredAt: occurredAt.toISOString(),
+      occurredAt: occurredAt,
       fact,
       auditAction: 'CAMPAIGN_PUBLISHED',
       auditMetadata: {
@@ -873,11 +877,13 @@ export class PgCampaignControlRepository implements CampaignControlRepository {
             auditAction: 'CAMPAIGN_CANCELLED',
             factKind: 'CANCELLED' as const,
           };
+    const legacyExamCompletion = command.operation === 'COMPLETE' &&
+      campaign.status === 'EXAMINATION_ACTIVE' && /^LEGACY-[A-F0-9]{32}$/.test(campaign.public_code);
     if (command.operation === 'CANCEL') {
       if (campaign.status !== 'DRAFT' && campaign.status !== 'REGISTRATION_OPEN') {
         throw commandError('INVALID_STATE', 'Only draft or open campaigns can be cancelled.');
       }
-    } else if (campaign.status !== lifecycle.from) {
+    } else if (campaign.status !== lifecycle.from && !legacyExamCompletion) {
       throw commandError('INVALID_STATE', command.operation === 'CLOSE_REGISTRATION'
         ? 'Only an open campaign can close registration.'
         : 'Only a registration-closed campaign can be completed.');
@@ -898,14 +904,14 @@ export class PgCampaignControlRepository implements CampaignControlRepository {
     const auditMetadata: Record<string, unknown> = { lifecycleHistoryId: historyId };
     if (command.operation === 'CANCEL') auditMetadata['fromStatus'] = cancelFromStatus;
     const fact: CampaignFact = lifecycle.factKind === 'REGISTRATION_CLOSED'
-      ? { kind: 'REGISTRATION_CLOSED', lifecycleHistoryId: historyId, occurredAt: occurredAt.toISOString() }
+      ? { kind: 'REGISTRATION_CLOSED', lifecycleHistoryId: historyId, occurredAt: occurredAt }
       : lifecycle.factKind === 'COMPLETED'
-        ? { kind: 'COMPLETED', lifecycleHistoryId: historyId, occurredAt: occurredAt.toISOString() }
+        ? { kind: 'COMPLETED', lifecycleHistoryId: historyId, occurredAt: occurredAt }
         : {
             kind: 'CANCELLED',
             lifecycleHistoryId: historyId,
             fromStatus: cancelFromStatus ?? cancellableStatus(fromStatus),
-            occurredAt: occurredAt.toISOString(),
+            occurredAt: occurredAt,
           };
     const commit: CampaignCommit = {
       operation: command.operation,
@@ -917,7 +923,7 @@ export class PgCampaignControlRepository implements CampaignControlRepository {
       responseStatus: lifecycle.responseStatus,
       responseBody,
       replayed: false,
-      occurredAt: occurredAt.toISOString(),
+      occurredAt: occurredAt,
       fact,
       auditAction: lifecycle.auditAction,
       auditMetadata,

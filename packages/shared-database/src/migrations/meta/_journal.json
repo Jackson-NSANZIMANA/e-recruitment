@@ -29,6 +29,13 @@
       "when": 1791501178640,
       "tag": "0003_build_001_boundary_columns",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791873962720,
+      "tag": "0004_build001_completion_and_capacity_constraints",
+      "breakpoints": true
     }
   ]
 }
