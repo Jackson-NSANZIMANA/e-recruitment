@@ -97,11 +97,13 @@ PG_DB="${PG_DB:-usrp_db}"
 
 pass=0
 fail=0
+skipped=0
 declare -a FAILED=()
 
 hdr()  { printf '\n\033[1;36m══ %s\033[0m\n' "$*"; }
 ok()   { printf '\033[0;32m✓ PASS — %s\033[0m\n' "$*"; pass=$((pass+1)); }
 bad()  { printf '\033[0;31m✗ FAIL — %s\033[0m\n' "$*"; fail=$((fail+1)); FAILED+=("$1"); }
+skip() { printf '\033[1;33m↷ SKIP — %s\033[0m\n' "$*"; skipped=$((skipped+1)); }
 
 # ── Preflight: the workspace must be BUILT *from this source* ──────────────
 # @usrp/* packages resolve their TYPES to src/ and their RUNTIME to dist/, and
@@ -217,7 +219,7 @@ run_ts "BUILD-001: populated PostgreSQL upgrade and twice-replayed full bootstra
 if [[ -n "${FIRST_ADMIN_DATABASE_URL:-}" ]]; then
   run_ts "BUILD-001: direct first-admin provisioner authentication/privilege proof" services/iam-service/selfcheck/verify-first-admin-provisioner-auth.ts
 else
-  log "SKIP direct first-admin provisioner auth proof — FIRST_ADMIN_DATABASE_URL was not supplied"
+  skip "direct first-admin provisioner auth proof — FIRST_ADMIN_DATABASE_URL was not supplied"
 fi
 # ADR-027 follow-up: the citizen submit rate limit's shared store. Two limiter
 # instances over one database share one window, concurrent increments are
@@ -324,10 +326,18 @@ fi
 
 # ── Summary ────────────────────────────────────────
 printf '\n\033[1m───────────────────────────────────────────\033[0m\n'
-printf 'Proofs: \033[0;32m%d passed\033[0m, ' "$pass"
+printf 'Proofs: \033[0;32m%d passed\033[0m' "$pass"
+if [[ $skipped -gt 0 ]]; then
+  printf ', \033[1;33m%d skipped\033[0m' "$skipped"
+fi
+printf ', '
 if [[ $fail -eq 0 ]]; then
   printf '\033[0;32m%d failed\033[0m\n' "$fail"
-  printf '\033[1;32mALL PROOFS GREEN — every invariant holds ✓\033[0m\n'
+  if [[ $skipped -eq 0 ]]; then
+    printf '\033[1;32mALL PROOFS GREEN — every invariant holds ✓\033[0m\n'
+  else
+    printf '\033[1;33mPROOFS PASSED WITH %d SKIPPED CHECK(S) — do not treat as complete acceptance ⚠\033[0m\n' "$skipped"
+  fi
   exit 0
 else
   printf '\033[0;31m%d failed\033[0m\n' "$fail"
