@@ -15,6 +15,7 @@
     "build:affected": "turbo run build --filter=[HEAD^1]",
     "dev": "bash scripts/dev.sh",
     "test": "turbo run test",
+    "test:scripts": "node --test scripts/test/*.test.mjs",
     "test:e2e": "turbo run test:e2e",
     "lint": "turbo run lint",
     "//lint:count": "Authoritative lint-debt measure. `pnpm lint` (turbo) stops at the first failing package and hides the rest; this counts every package. Always build first.",

@@ -120,3 +120,77 @@ and the gate is what makes that enforceable rather than remembered.
   live risks of the same kind.
 - **`lint` and `typecheck` must be run on this branch.** The lazy client
   uses proxies, and the repo runs `tsc --strict` with a custom eslint base.
+
+## 2026-10-13: environment preflight and retained proof evidence
+
+An all-services boot failure can be a single loading-boundary failure, not
+twelve independent service failures. In the reported run, the decisive line
+was `.env.example: line 374: THERE: command not found`. The template had
+uncommented prose, so `source` tried to execute it and `dev.sh` exited before
+Turbo launched any dev task. Increasing the readiness timeout cannot fix this.
+The committed template at this checkpoint does not contain that prose.
+
+`scripts/check-env-file.mjs` now checks the data-only environment format without
+executing the file: blank lines, `#` comments, and single-line literal
+`KEY=value` assignments (optionally prefixed with `export`). Shell commands,
+unquoted trailing text, substitutions, and unterminated quotes are rejected.
+Use single quotes for literal values containing spaces, `$`, or backticks.
+Diagnostics name the file and line, never the value. CRLF is accepted and
+normalized before loading; `USRP_ENV_FILE` accepts relative or absolute paths.
+
+The same preflight runs in `dev.sh`, `verify-dev-boot.sh`, and at the beginning
+of `run-selfchecks.sh`. Thus a malformed template fails before any build check,
+service launch, or infrastructure-heavy proof. `generate-env.sh` also validates
+before copying: even `--force` cannot overwrite an existing `.env` with an
+invalid template. A preflight failure leaves the previous boot log intact.
+
+### Recovery and diagnosis
+
+1. Run `node scripts/check-env-file.mjs .env.example`. Remove the prose at each
+   reported line, or make it a comment by prefixing it with `#`. Do not put
+   shell commands in an environment file.
+2. With the existing tier-1/tier-2 infrastructure up and bootstrapped, run
+   `pnpm build && bash scripts/run-selfchecks.sh`.
+3. If the separate BUILD-001 campaign proof still fails, read
+   `.selfcheck-logs/services/application-service/selfcheck/verify-campaign-control-plane.log`.
+   The summary alone does not contain its failing assertion or database error.
+   To run it independently: `pnpm exec tsx services/application-service/selfcheck/verify-campaign-control-plane.ts`.
+
+Every TypeScript proof now tees both stdout and stderr to a service-relative
+log under `.selfcheck-logs/` (gitignored). Failed-proof paths are repeated in the
+final summary. `pipefail` preserves a failed proof's exit status even when
+`tee` succeeds, and later proofs still run. Override the directory with
+`USRP_SELFCHECK_LOG_DIR`; a subsequent run replaces the logs for proofs it runs.
+These logs can contain database exceptions: keep them local and redact any
+sensitive context before sharing them. The optional first-admin credential
+proof's skip is informational, not the cause of either failure above.
+
+### Regression checks
+
+`pnpm test:scripts` runs the zero-infrastructure script regression tests, also
+registered in `run-selfchecks.sh`. They cover the exact line-374 prose incident,
+rejecting shell execution before launch, value-free diagnostics, CRLF and
+absolute-path loading, template generation without destructive overwrites, and
+proof stderr/exit-status/log-path retention. The runner tests use fake proof
+commands solely to test the harness; they do not claim infrastructure proofs.
+
+On 2026-10-13, the 16 script tests, workspace build, unit tests, and typecheck
+(`pnpm exec turbo run typecheck --concurrency=2` on the memory-limited sandbox)
+passed under Node 24.18.0. The production guard and deployment-hygiene proofs
+also passed. The campaign P5–P17 proof passed against a freshly bootstrapped
+real PostgreSQL 16.14 database, both independently and after the real
+IAM → Edge → application → PostgreSQL proof (15 checks passed). Therefore the
+reported campaign failure is not reproduced by the supplied summary; its
+actual assertion/exception remains necessary to diagnose that user's run.
+
+A further **dev-only tier-1 boot rehearsal** used a temporary copy of the
+validated template with only `KAFKA_BROKERS=` changed, plus a build warmed with
+the same development environment. All 12 services answered `/ready` on their
+scoped ports and all ports were released after teardown (16 checks passed,
+0 failed). This exercised the real `dev.sh` → Turbo strict environment → tsx
+path, not stub services. It does **not** prove the committed template's
+Kafka-backed boot, event delivery, MinIO, or ClamAV: those dependencies are
+unavailable in the sandbox, so the full self-check gate was not claimed green.
+The populated PostgreSQL upgrade proof (8 checks), live RLS isolation proof,
+and workspace lint (`pnpm -r --workspace-concurrency=1 --no-bail run lint`)
+also passed.

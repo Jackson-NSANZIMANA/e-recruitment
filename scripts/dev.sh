@@ -34,10 +34,18 @@ if [[ ! -f "$ENV_FILE" ]]; then
   exit 1
 fi
 
-# set -a exports every assignment the file makes, and nothing else.
+# An env file is DATA, not an arbitrary shell script. Validate every line before
+# source can execute pasted prose, command substitutions or trailing commands.
+# bash -n cannot catch these: they are syntactically valid shell statements.
+if ! node "$REPO_ROOT/scripts/check-env-file.mjs" "$ENV_FILE"; then
+  exit 1
+fi
+
+# set -a exports the validated literal assignments. Normalize CRLF so the
+# loader and validator agree, and accept both relative and absolute file paths.
 set -a
 # shellcheck disable=SC1090
-source "./$ENV_FILE"
+source <(sed 's/\r$//' "$ENV_FILE")
 set +a
 
 printf '\033[0;36m▶ loaded %s\033[0m\n' "$ENV_FILE"

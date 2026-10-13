@@ -122,6 +122,13 @@ note_pass() { ok "$1"; pass=$((pass + 1)); }
 note_fail() { bad "$1"; fail=$((fail + 1)); FAILED+=("$1"); }
 
 [[ -f "$ENV_FILE" ]] || { bad "$ENV_FILE not found"; exit 1; }
+# Catch a broken shared loading boundary once, with the file/line, rather than
+# blaming every service for never answering a socket it never tried to open.
+# Keep any previous boot log intact and do not launch a process on this path.
+if ! node "$REPO_ROOT/scripts/check-env-file.mjs" "$ENV_FILE"; then
+  bad 'environment file validation — not booting services'
+  exit 1
+fi
 command -v curl >/dev/null 2>&1 || { bad 'curl is required'; exit 1; }
 command -v ps >/dev/null 2>&1 || { bad 'ps is required to own and stop the dev-boot session'; exit 1; }
 
