@@ -14,8 +14,9 @@
 // production: every login succeeds and NOTHING records that it happened.
 // ══════════════════════════════════════════════════════════════════
 
-import { sql } from '@usrp/shared-database';
-import { InMemoryEventBus, KafkaEventBus, type EventBus } from '@usrp/shared-events';
+import { PgOutboxRelay, sql } from '@usrp/shared-database';
+import { hasValidEnvelope, InMemoryEventBus, KafkaEventBus, type EventBus } from '@usrp/shared-events';
+import type { USRPEvent } from '@usrp/shared-types';
 import {
   assertProductionSecrets,
   loadKafkaConfig,
@@ -26,6 +27,8 @@ import { startHttpServer } from '@usrp/shared-http';
 import { createIamService, loadIamConfig } from './index.js';
 import { officerLoginRoutes } from './adapters/http/officer-login.controller.js';
 import { serviceTokenRoutes } from './adapters/http/service-token.controller.js';
+
+const IAM_OUTBOX_PRODUCER = 'iam-service';
 
 function createEventBus(serviceName: string, transport: EventTransport): EventBus {
   if (transport.kind === 'kafka') {
@@ -52,6 +55,12 @@ async function main(): Promise<void> {
   await bus.connect();
 
   const service = createIamService(config, bus);
+  const outboxRelay = new PgOutboxRelay<USRPEvent>(bus, {
+    producer: IAM_OUTBOX_PRODUCER,
+    isValid: (payload: unknown): boolean => hasValidEnvelope(payload),
+  });
+  outboxRelay.start();
+  console.log(JSON.stringify({ msg: 'outbox_relay_started', producer: IAM_OUTBOX_PRODUCER }));
 
   const server = await startHttpServer({
     serviceName: config.runtime.serviceName,
@@ -68,6 +77,7 @@ async function main(): Promise<void> {
     },
     onShutdown: async (): Promise<void> => {
       console.log(JSON.stringify({ msg: 'service_stopping', service: config.runtime.serviceName }));
+      await outboxRelay.stop();
       await bus.disconnect();
       await sql.end({ timeout: 5 });
       console.log(JSON.stringify({ msg: 'service_stopped', service: config.runtime.serviceName }));

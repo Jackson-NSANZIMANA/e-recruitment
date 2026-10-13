@@ -34,6 +34,10 @@ import { ProjectApplicationAcceptedService } from './application/project-applica
 import { PgWithdrawalRepository } from './adapters/withdrawal.pg-repository.js';
 import { SelfWithdrawalService } from './application/self-withdrawal.service.js';
 import { PgSelfWithdrawalRepository } from './adapters/self-withdrawal.pg-repository.js';
+import { PgCampaignControlRepository } from './adapters/campaign-control.pg-repository.js';
+import { PgCampaignPublicReadRepository } from './adapters/campaign-public-read.pg-repository.js';
+import { CampaignControlService } from './application/campaign-control.service.js';
+import { CampaignPublicReadService } from './application/campaign-public-read.service.js';
 import type { ApplicationServiceConfig } from './config.js';
 
 /** The application aggregate's adapters over one repository. */
@@ -64,6 +68,10 @@ export interface ApplicationService {
   readonly withdrawalProjector: ProjectApplicationAcceptedService;
   /** HTTP system-token write — the citizen's OWN voluntary withdrawal (ADR-020). */
   readonly selfWithdrawal: SelfWithdrawalService;
+  /** Officer-authorized BUILD-001 campaign aggregate writes. */
+  readonly campaignControl: CampaignControlService;
+  /** Anonymous published-campaign allowlist reads. */
+  readonly campaignPublicRead: CampaignPublicReadService;
 }
 
 /**
@@ -120,6 +128,8 @@ export function createApplicationService(
       repository: new PgSelfWithdrawalRepository(),
       eventBus,
     }),
+    campaignControl: new CampaignControlService({ repository: new PgCampaignControlRepository() }),
+    campaignPublicRead: new CampaignPublicReadService({ repository: new PgCampaignPublicReadRepository() }),
   };
 }
 
@@ -158,10 +168,28 @@ export {
   WALK_IN_VET_PATH,
   walkInRoutes,
 } from './adapters/http/walk-in.controller.js';
+export {
+  CREATE_CAMPAIGN_PATH,
+  CREATE_CAMPAIGN_POLICY_PATH,
+  PUBLISH_CAMPAIGN_PATH,
+  CLOSE_CAMPAIGN_REGISTRATION_PATH,
+  COMPLETE_CAMPAIGN_PATH,
+  CANCEL_CAMPAIGN_PATH,
+  campaignControlRoutes,
+} from './adapters/http/campaign-control.controller.js';
+export {
+  LIST_PUBLIC_CAMPAIGNS_PATH,
+  READ_PUBLIC_CAMPAIGN_PATH,
+  campaignPublicReadRoutes,
+} from './adapters/http/campaign-public-read.controller.js';
 export { SubmitApplicationService } from './application/submit-application.service.js';
 export { ListApplicationsService } from './application/list-applications.service.js';
 export { OfficerTransitionsService } from './application/officer-transitions.service.js';
 export { WalkInService } from './application/walk-in.service.js';
+export { CampaignControlService } from './application/campaign-control.service.js';
+export { CampaignPublicReadService } from './application/campaign-public-read.service.js';
+export { PgCampaignControlRepository } from './adapters/campaign-control.pg-repository.js';
+export { PgCampaignPublicReadRepository } from './adapters/campaign-public-read.pg-repository.js';
 export type {
   RegisterWalkInCommand,
   RegisterWalkInOutcome,
@@ -328,6 +356,18 @@ export type {
 export { loadApplicationConfig } from './config.js';
 export type { ApplicationServiceConfig } from './config.js';
 export type { IdentityReader, ApplicantIdentitySummary } from './ports/identity-reader.js';
+export type {
+  CampaignControlRepository,
+  CampaignControlCommand,
+  CampaignContext,
+  CampaignCommit,
+  CampaignFact,
+  StageCampaignEvents,
+} from './ports/campaign-control.repository.js';
+export type {
+  CampaignPublicReadRepository,
+  PublicCampaign,
+} from './ports/campaign-public-read.repository.js';
 export type { CampaignReader, OpenCampaign } from './ports/campaign-reader.js';
 export type {
   ApplicationRepository,

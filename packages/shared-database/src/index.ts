@@ -45,6 +45,12 @@ import type {
   applicantSessions,
   recruitmentCampaigns,
   campaignVenueAssignments,
+  campaignPolicyVersions,
+  campaignPublications,
+  campaignLifecycleHistory,
+  campaignCommandRequests,
+  campaignCoverageHeads,
+  sessionCommandRequests,
 } from './schemas/public-core.schema.js';
 import type { edgeSessions } from './schemas/edge-sessions.schema.js';
 import type { edgeRateLimitBuckets } from './schemas/edge-rate-limit-buckets.schema.js';
@@ -80,6 +86,18 @@ export type RecruitmentCampaign = InferSelectModel<typeof recruitmentCampaigns>;
 export type NewRecruitmentCampaign = InferInsertModel<typeof recruitmentCampaigns>;
 export type CampaignVenueAssignment = InferSelectModel<typeof campaignVenueAssignments>;
 export type NewCampaignVenueAssignment = InferInsertModel<typeof campaignVenueAssignments>;
+export type CampaignPolicyVersion = InferSelectModel<typeof campaignPolicyVersions>;
+export type NewCampaignPolicyVersion = InferInsertModel<typeof campaignPolicyVersions>;
+export type CampaignPublication = InferSelectModel<typeof campaignPublications>;
+export type NewCampaignPublication = InferInsertModel<typeof campaignPublications>;
+export type CampaignLifecycleHistory = InferSelectModel<typeof campaignLifecycleHistory>;
+export type NewCampaignLifecycleHistory = InferInsertModel<typeof campaignLifecycleHistory>;
+export type CampaignCommandRequest = InferSelectModel<typeof campaignCommandRequests>;
+export type NewCampaignCommandRequest = InferInsertModel<typeof campaignCommandRequests>;
+export type CampaignCoverageHead = InferSelectModel<typeof campaignCoverageHeads>;
+export type NewCampaignCoverageHead = InferInsertModel<typeof campaignCoverageHeads>;
+export type SessionCommandRequest = InferSelectModel<typeof sessionCommandRequests>;
+export type NewSessionCommandRequest = InferInsertModel<typeof sessionCommandRequests>;
 export type EdgeSession = InferSelectModel<typeof edgeSessions>;
 export type NewEdgeSession = InferInsertModel<typeof edgeSessions>;
 export type EdgeRateLimitBucket = InferSelectModel<typeof edgeRateLimitBuckets>;

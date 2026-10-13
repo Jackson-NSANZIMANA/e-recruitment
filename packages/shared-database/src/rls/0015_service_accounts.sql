@@ -12,13 +12,14 @@
 -- token `sub`), unique client_id, scrypt credential digest (NEVER a
 -- plaintext secret), free-text description, active|disabled status.
 --
--- Least-privilege, exactly like the officer store: readable/writable by
--- usrp_iam_service ALONE. Deliberately NO grant to usrp_system_service —
--- a compromised worker service must not be able to read the credential
--- digests that mint its own kind of token. FORCE'd RLS constrains the
--- owner; the single iam policy is USING(true) because a client_id lookup
--- has no narrower scope. Secret rotation, per-service scopes, and mTLS
--- binding are flagged follow-ons in ADR-016.
+-- Least-privilege by role grant, exactly like the officer store: only
+-- usrp_iam_service receives table privileges. There is deliberately NO grant
+-- to usrp_system_service. Because rls/0001 grants usrp_iam_service membership
+-- to the shared usrp_app login, though, any trusted backend process using that
+-- login can SET ROLE and reach this store; this is not DB-enforced process
+-- isolation. FORCE'd RLS constrains ordinary roles; the iam policy is USING(true)
+-- because a client_id lookup has no narrower scope. Secret rotation, per-service
+-- credentials/scopes, and mTLS binding remain follow-ons in ADR-016.
 --
 -- Run as usrp_admin AFTER db:migrate and 0001 (defines usrp_iam_service).
 -- Fully re-runnable (IF NOT EXISTS + idempotent GRANT/POLICY).

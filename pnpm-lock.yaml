@@ -388,6 +388,9 @@ importers:
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.2
+      '@usrp/shared-events':
+        specifier: workspace:*
+        version: link:../../packages/shared-events
       postgres:
         specifier: ^3.4.5
         version: 3.4.9
@@ -615,6 +618,9 @@ importers:
 
   services/scheduling-service:
     dependencies:
+      '@usrp/shared-auth':
+        specifier: workspace:*
+        version: link:../../packages/shared-auth
       '@usrp/shared-config':
         specifier: workspace:*
         version: link:../../packages/shared-config

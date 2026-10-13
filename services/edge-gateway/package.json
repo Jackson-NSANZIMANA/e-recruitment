@@ -33,6 +33,7 @@
     "@usrp/shared-types": "workspace:*"
   },
   "devDependencies": {
+    "@usrp/shared-events": "workspace:*",
     "@types/node": "^24.0.0",
     "postgres": "^3.4.5",
     "tsx": "^4.21.0",

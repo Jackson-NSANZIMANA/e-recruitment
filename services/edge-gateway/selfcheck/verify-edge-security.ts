@@ -376,6 +376,7 @@ async function main(): Promise<void> {
     IAM_BASE_URL: stubUrl,
     IDENTITY_SERVICE_BASE_URL: stubUrl,
     APPLICATION_SERVICE_BASE_URL: stubUrl,
+    SCHEDULING_SERVICE_BASE_URL: stubUrl,
     FIELD_SYNC_SERVICE_BASE_URL: stubUrl,
     EDGE_COOKIE_SECURE: "false",
     // Generous, so the proof's own traffic is never what trips the limiter —

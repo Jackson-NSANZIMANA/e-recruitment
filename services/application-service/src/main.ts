@@ -63,6 +63,8 @@ import { startNotificationDeliveredConsumer } from './adapters/events/notificati
 import { startFieldScoreCapturedConsumer } from './adapters/events/field-score-captured.consumer.js';
 import { startForensicsResultConsumer } from './adapters/events/forensics-result.consumer.js';
 import { startApplicationAcceptedConsumer } from './adapters/events/application-accepted.consumer.js';
+import { campaignControlRoutes } from './adapters/http/campaign-control.controller.js';
+import { campaignPublicReadRoutes } from './adapters/http/campaign-public-read.controller.js';
 
 function createEventBus(serviceName: string, transport: EventTransport): EventBus {
   if (transport.kind === 'kafka') {
@@ -124,6 +126,8 @@ async function main(): Promise<void> {
     serviceName: config.runtime.serviceName,
     port: config.runtime.port,
     routes: [
+      ...campaignPublicReadRoutes(service.campaignPublicRead), // safe published-only anonymous projection
+      ...campaignControlRoutes(service.campaignControl, verify), // agency-admin BUILD-001 commands
       submitApplicationRoute(service.submit, verify), // system-token required
       listApplicationsRoute(service.list, verify), // officer-token required
       amberQueueRoute(service.list, verify), // officer review queue (ADR-011)

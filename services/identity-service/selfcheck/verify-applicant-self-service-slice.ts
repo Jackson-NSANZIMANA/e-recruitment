@@ -165,18 +165,24 @@ async function seed(applicantId: string, encryptionKey: string): Promise<void> {
     VALUES (${CTRL_APPLICANT}, ${CTRL_NID_HASH}, 'x', 'x', 'x', 'x', 'FEMALE', 'WEB',
             'VERIFIED'::public_core.identity_verification_status,
             pgp_sym_encrypt(${CTRL_PHONE}, ${encryptionKey}))`;
-  await admin`
-    INSERT INTO public_core.recruitment_campaigns
-      (id, campaign_label, agency, status, target_categories,
-       registration_opens_at, registration_closes_at,
-       examination_start_date, examination_end_date, examination_reporting_hour)
-    VALUES
-      (${RDF_CAMPAIGN}, 'Self-service RDF', 'RDF', 'REGISTRATION_OPEN', '["GENERAL_ENLISTMENT"]',
-       now() - interval '1 day', now() + interval '30 days', '2026-10-01', '2026-10-15', 7),
-      (${RNP_CAMPAIGN}, 'Self-service RNP', 'RNP', 'REGISTRATION_OPEN', '["CADET_OFFICER"]',
-       now() - interval '1 day', now() + interval '30 days', '2026-10-01', '2026-10-15', 7),
-      (${RCS_CAMPAIGN}, 'Self-service RCS', 'RCS', 'REGISTRATION_OPEN', '["GENERAL_ENLISTEE"]',
-       now() - interval '1 day', now() + interval '30 days', '2026-10-01', '2026-10-15', 7)`;
+  await admin.begin(async (tx) => {
+    await tx`SET LOCAL session_replication_role = replica`;
+    await tx`
+      INSERT INTO public_core.recruitment_campaigns
+        (id, public_code, campaign_label, agency, status, target_categories,
+         registration_opens_at, registration_closes_at,
+         examination_start_date, examination_end_date, examination_reporting_hour)
+      VALUES
+        (${RDF_CAMPAIGN}, ${`LEGACY-${RDF_CAMPAIGN.replaceAll('-', '').toUpperCase()}`},
+         'Self-service RDF', 'RDF', 'REGISTRATION_OPEN', '["GENERAL_ENLISTMENT"]',
+         now() - interval '1 day', now() + interval '30 days', '2026-10-01', '2026-10-15', 7),
+        (${RNP_CAMPAIGN}, ${`LEGACY-${RNP_CAMPAIGN.replaceAll('-', '').toUpperCase()}`},
+         'Self-service RNP', 'RNP', 'REGISTRATION_OPEN', '["CADET_OFFICER"]',
+         now() - interval '1 day', now() + interval '30 days', '2026-10-01', '2026-10-15', 7),
+        (${RCS_CAMPAIGN}, ${`LEGACY-${RCS_CAMPAIGN.replaceAll('-', '').toUpperCase()}`},
+         'Self-service RCS', 'RCS', 'REGISTRATION_OPEN', '["GENERAL_ENLISTEE"]',
+         now() - interval '1 day', now() + interval '30 days', '2026-10-01', '2026-10-15', 7)`;
+  });
   await admin`
     INSERT INTO rdf_ops.applications (id, processing_code, applicant_id, campaign_id, category, status)
     VALUES (${RDF_APP}, ${RDF_CODE}, ${applicantId}, ${RDF_CAMPAIGN}, 'GENERAL_ENLISTMENT',

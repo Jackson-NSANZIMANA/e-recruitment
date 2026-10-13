@@ -97,10 +97,10 @@ LOG_DIR="${USRP_BOOT_LOG_DIR:-$REPO_ROOT/.boot-logs}"
 BOOT_LOG="$LOG_DIR/dev-boot.log"
 INHERIT_ENV="${USRP_BOOT_INHERIT_ENV:-0}"
 
-# Every service's main() ends with a .catch() that logs this and exits. It is
-# therefore the one marker that means "this service is not coming up", for all
-# eleven, regardless of cause — bad config, invalid key, unreachable broker.
-FATAL_STARTUP_PATTERN='startup_failed'
+# Every service's main() logs startup_failed before exiting. EADDRINUSE is
+# also fatal: an old process can answer /ready as the expected service while
+# this boot failed to bind its own port, creating a false-green result.
+FATAL_STARTUP_PATTERN='startup_failed|EADDRINUSE'
 # How many of a service's OWN lines to show when it fails. Generous: these are
 # one service's lines, not eleven services' lines, so there is no flood to cap.
 EVIDENCE_LINES="${USRP_BOOT_EVIDENCE_LINES:-80}"
@@ -123,9 +123,9 @@ note_fail() { bad "$1"; fail=$((fail + 1)); FAILED+=("$1"); }
 
 [[ -f "$ENV_FILE" ]] || { bad "$ENV_FILE not found"; exit 1; }
 command -v curl >/dev/null 2>&1 || { bad 'curl is required'; exit 1; }
+command -v ps >/dev/null 2>&1 || { bad 'ps is required to own and stop the dev-boot session'; exit 1; }
 
 mkdir -p "$LOG_DIR"
-: >"$BOOT_LOG"
 
 # ── Service discovery ──────────────────────────────────────
 # DERIVED from the filesystem, not a hard-coded list: a service added later is
@@ -173,6 +173,34 @@ template_value() {
     raw="${raw:1:${#raw}-2}"
   fi
   printf '%s' "$raw"
+}
+
+# A listener left by an earlier dev run can fool an HTTP readiness probe if it
+# is the same service. Refuse to start over any occupied scoped port; show the
+# owner when lsof/ss is available instead of silently trusting its response.
+port_is_listening() {
+  local port="$1" listeners=''
+  if command -v ss >/dev/null 2>&1; then
+    listeners="$(ss -H -ltn "sport = :$port" 2>/dev/null || true)"
+    [[ -n "$listeners" ]] && return 0
+  fi
+  if command -v lsof >/dev/null 2>&1; then
+    listeners="$(lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null || true)"
+    [[ -n "$listeners" ]] && return 0
+  fi
+  (exec 9<>"/dev/tcp/127.0.0.1/$port") >/dev/null 2>&1
+}
+
+port_listener_details() {
+  local port="$1" details=''
+  if command -v lsof >/dev/null 2>&1; then
+    details="$(lsof -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | sed '1d' | tr '\n' '; ' || true)"
+  fi
+  if [[ -z "$details" ]] && command -v ss >/dev/null 2>&1; then
+    details="$(ss -H -ltnp "sport = :$port" 2>/dev/null | tr '\n' '; ' || true)"
+  fi
+  [[ -n "$details" ]] || details='process owner unavailable'
+  printf '%s' "$details"
 }
 
 # ── 1. Static: the template assigns every service its OWN port ─────
@@ -238,6 +266,28 @@ if [[ $port_conflict -ne 0 || $turbo_gap -ne 0 ]]; then
   exit 1
 fi
 
+# ── 2b. Runtime: scoped ports must be free before this proof starts ──
+# Otherwise an old same-service process could answer /ready and make a failed
+# bind look green. Never kill a developer's process; identify it and stop here.
+log 'service ports are free before boot'
+preflight_conflicts=0
+for svc in "${SERVICES[@]}"; do
+  p="${PORT_OF[$svc]}"
+  if port_is_listening "$p"; then
+    details="$(port_listener_details "$p")"
+    note_fail "$svc — :$p is already listening ($details); stop that process before rerunning"
+    preflight_conflicts=1
+  fi
+done
+if [[ $preflight_conflicts -ne 0 ]]; then
+  printf '\n%s%d failed%s — occupied service ports; not booting.\n' "$RED" "$fail" "$NC"
+  exit 1
+fi
+note_pass "all ${#SERVICES[@]} scoped service ports are free"
+
+# Keep a previous boot log intact when static checks or the port preflight fail.
+: >"$BOOT_LOG"
+
 # ── 3. Boot through the REAL entrypoint, in a SANITIZED environment ────
 # `pnpm dev` is `bash scripts/dev.sh`, which sources the env file and execs
 # `turbo run dev --parallel`. We invoke exactly that, so the loading boundary
@@ -269,32 +319,152 @@ else
 fi
 LAUNCH+=(USRP_ENV_FILE="$ENV_FILE" bash scripts/dev.sh --ui=stream)
 
-# Own the whole process group so turbo, its eleven tsx children and their file
-# watchers all die with us. setsid makes the child its own group leader.
-BOOT_PGID=''
+# Own a distinct session for this proof. Turbo creates a separate process
+# group for each persistent task, so killing only the session leader's group
+# leaves every service alive. Also, util-linux `setsid` forks when launched as
+# a background job that is already a process-group leader (common in interactive
+# shells), making `$!` the waiting parent rather than the new session leader.
+# Capture the new SID inside the session, then signal every process group whose
+# SID matches it during teardown.
+BOOT_SESSION_ID=''
+BOOT_LAUNCH_PID=''
+BOOT_SESSION_FILE=''
+BOOT_USES_SETSID=0
+BOOT_STOPPED=0
+BOOT_CLEANUP_STATUS=0
+
 if command -v setsid >/dev/null 2>&1; then
-  setsid "${LAUNCH[@]}" >>"$BOOT_LOG" 2>&1 &
-  BOOT_PGID=$!
+  BOOT_USES_SETSID=1
+  BOOT_SESSION_FILE="$(mktemp "$LOG_DIR/dev-boot-session.XXXXXX")"
+  setsid bash -c '
+    printf "%s\n" "$$" > "$1"
+    shift
+    exec "$@"
+  ' _ "$BOOT_SESSION_FILE" "${LAUNCH[@]}" >>"$BOOT_LOG" 2>&1 &
+  BOOT_LAUNCH_PID=$!
+
+  # The wrapper writes the session ID before starting Turbo. Bound the wait;
+  # never assume `$!` identifies either the session or its task process groups.
+  for _ in $(seq 1 100); do
+    [[ -s "$BOOT_SESSION_FILE" ]] && break
+    kill -0 "$BOOT_LAUNCH_PID" 2>/dev/null || break
+    sleep 0.05
+  done
+  if [[ -s "$BOOT_SESSION_FILE" ]]; then
+    IFS= read -r BOOT_SESSION_ID <"$BOOT_SESSION_FILE"
+  fi
+  rm -f "$BOOT_SESSION_FILE"
+  BOOT_SESSION_FILE=''
+  if [[ ! "$BOOT_SESSION_ID" =~ ^[0-9]+$ ]]; then
+    bad 'could not capture the dev-boot session ID; see .boot-logs/dev-boot.log'
+    kill -TERM "$BOOT_LAUNCH_PID" 2>/dev/null || true
+    wait "$BOOT_LAUNCH_PID" 2>/dev/null || true
+    exit 1
+  fi
 else
   "${LAUNCH[@]}" >>"$BOOT_LOG" 2>&1 &
-  BOOT_PGID=$!
+  BOOT_LAUNCH_PID=$!
   log 'setsid unavailable — falling back to single-PID teardown'
 fi
 
-cleanup() {
-  log 'stopping services'
-  if [[ -n "$BOOT_PGID" ]]; then
-    kill -TERM "-$BOOT_PGID" 2>/dev/null || kill -TERM "$BOOT_PGID" 2>/dev/null
-    for _ in $(seq 1 10); do
-      kill -0 "-$BOOT_PGID" 2>/dev/null || kill -0 "$BOOT_PGID" 2>/dev/null || break
-      sleep 1
-    done
-    kill -KILL "-$BOOT_PGID" 2>/dev/null || kill -KILL "$BOOT_PGID" 2>/dev/null
-  fi
-  wait 2>/dev/null
-  return 0
+session_process_groups() {
+  [[ -n "$BOOT_SESSION_ID" ]] || return 0
+  ps -eo pgid=,sid= | awk -v sid="$BOOT_SESSION_ID" '$2 == sid { print $1 }' | sort -u
 }
-trap cleanup EXIT
+
+session_has_processes() {
+  if [[ -z "$BOOT_SESSION_ID" ]]; then
+    kill -0 "$BOOT_LAUNCH_PID" 2>/dev/null
+    return
+  fi
+  ps -eo sid= | awk -v sid="$BOOT_SESSION_ID" '$1 == sid { found=1; exit } END { exit(found ? 0 : 1) }'
+}
+
+signal_session_process_groups() {
+  local signal="$1" process_group
+  while IFS= read -r process_group; do
+    [[ "$process_group" =~ ^[0-9]+$ ]] || continue
+    kill -"$signal" -- "-$process_group" 2>/dev/null || true
+  done < <(session_process_groups)
+}
+
+boot_process_alive() {
+  if [[ "$BOOT_USES_SETSID" == '1' ]]; then
+    session_has_processes
+  else
+    kill -0 "$BOOT_LAUNCH_PID" 2>/dev/null
+  fi
+}
+
+stop_services() {
+  if [[ "$BOOT_STOPPED" == '1' ]]; then
+    return "$BOOT_CLEANUP_STATUS"
+  fi
+  BOOT_STOPPED=1
+  log 'stopping services'
+  local cleanup_failed=0 svc port details session_processes
+
+  if [[ -n "$BOOT_LAUNCH_PID" ]]; then
+    if [[ "$BOOT_USES_SETSID" == '1' ]]; then
+      # Turbo gives each persistent task its own PGID. Signal every group in
+      # this private SID, not only the group containing Turbo itself.
+      signal_session_process_groups TERM
+      for _ in $(seq 1 10); do
+        boot_process_alive || break
+        sleep 1
+      done
+      if boot_process_alive; then
+        log 'dev-boot session did not stop after SIGTERM; sending SIGKILL to its task groups'
+        signal_session_process_groups KILL
+        for _ in $(seq 1 50); do
+          boot_process_alive || break
+          sleep 0.1
+        done
+      fi
+    else
+      kill -TERM "$BOOT_LAUNCH_PID" 2>/dev/null || true
+      for _ in $(seq 1 10); do
+        kill -0 "$BOOT_LAUNCH_PID" 2>/dev/null || break
+        sleep 1
+      done
+      kill -KILL "$BOOT_LAUNCH_PID" 2>/dev/null || true
+    fi
+    wait "$BOOT_LAUNCH_PID" 2>/dev/null || true
+  fi
+
+  [[ -z "$BOOT_SESSION_FILE" ]] || rm -f "$BOOT_SESSION_FILE"
+
+  if [[ "$BOOT_USES_SETSID" == '1' ]] && session_has_processes; then
+    session_processes="$(ps -eo pid=,ppid=,pgid=,sid=,stat=,args= | awk -v sid="$BOOT_SESSION_ID" '$4 == sid { print }' | head -n 20)"
+    note_fail "dev-boot session $BOOT_SESSION_ID still has processes after teardown"
+    printf '%s\n' "$session_processes" | sed 's/^/    /'
+    cleanup_failed=1
+  fi
+
+  # Ports were all free immediately before launch. A listener remaining now
+  # means teardown missed a child (or a concurrent process raced the proof); do
+  # not report DEV BOOT GREEN while leaving the developer's ports occupied.
+  for svc in "${SERVICES[@]}"; do
+    port="${PORT_OF[$svc]}"
+    if port_is_listening "$port"; then
+      details="$(port_listener_details "$port")"
+      note_fail "$svc — :$port remains occupied after dev-boot teardown ($details)"
+      cleanup_failed=1
+    fi
+  done
+  BOOT_CLEANUP_STATUS=$cleanup_failed
+  return "$cleanup_failed"
+}
+
+cleanup_on_exit() {
+  local original_status=$?
+  trap - EXIT
+  if ! stop_services && (( original_status == 0 )); then
+    original_status=1
+  fi
+  exit "$original_status"
+}
+trap cleanup_on_exit EXIT
 
 log "booting ${#SERVICES[@]} services via scripts/dev.sh (timeout ${BOOT_TIMEOUT_S}s)"
 
@@ -335,19 +505,18 @@ while :; do
       all_ready=0
     fi
   done
-  [[ $all_ready -eq 1 ]] && break
 
-  # FAIL FAST on a service that has ALREADY given up. `tsx watch` outlives its
-  # child by design, so process.exit(1) in a service does NOT end the process
-  # group and the liveness check below stays true — which is how a crash that
-  # is known in two seconds used to cost the entire ten-minute deadline.
-  if grep -q "$FATAL_STARTUP_PATTERN" "$BOOT_LOG" 2>/dev/null; then
+  # Check fatal markers BEFORE accepting readiness. In particular, a stale
+  # same-service process can answer /ready while this boot logs EADDRINUSE.
+  # Also fail fast when tsx watch survives a child that already reported exit.
+  if grep -Eq "$FATAL_STARTUP_PATTERN" "$BOOT_LOG" 2>/dev/null; then
     fatal_startup=1
-    log 'a service reported startup_failed — not waiting out the deadline'
+    log 'a service reported startup_failed or EADDRINUSE — readiness is not trusted'
     break
   fi
+  [[ $all_ready -eq 1 ]] && break
 
-  if ! kill -0 "-$BOOT_PGID" 2>/dev/null && ! kill -0 "$BOOT_PGID" 2>/dev/null; then
+  if ! boot_process_alive; then
     boot_died=1
     break
   fi
@@ -355,11 +524,23 @@ while :; do
   sleep 2
 done
 
+# Catch a startup marker written just after the last readiness poll as well.
+if grep -Eq "$FATAL_STARTUP_PATTERN" "$BOOT_LOG" 2>/dev/null; then
+  fatal_startup=1
+fi
+
 declare -a FAILED_SERVICES=()
+fatal_service_count=0
 for svc in "${SERVICES[@]}"; do
   p="${PORT_OF[$svc]}"
   state="${READY[$svc]:-}"
-  if [[ "$state" == 'ready' || "$state" == 'health' ]]; then
+  prefix="$(turbo_prefix_for "$svc")"
+  service_log="$(grep -F "$prefix" "$BOOT_LOG" 2>/dev/null || true)"
+  if grep -Eq "$FATAL_STARTUP_PATTERN" <<<"$service_log"; then
+    note_fail "$svc — startup_failed/EADDRINUSE logged; :$p is not trusted"
+    FAILED_SERVICES+=("$svc")
+    fatal_service_count=$((fatal_service_count + 1))
+  elif [[ "$state" == 'ready' || "$state" == 'health' ]]; then
     note_pass "$svc — $state on :$p"
   elif [[ "$state" == WRONG:* ]]; then
     note_fail "$svc — :$p answered as someone else: ${state#WRONG:}"
@@ -369,6 +550,10 @@ for svc in "${SERVICES[@]}"; do
     FAILED_SERVICES+=("$svc")
   fi
 done
+
+if [[ $fatal_startup -eq 1 && $fatal_service_count -eq 0 ]]; then
+  note_fail 'fatal startup marker was not attributed to a service; readiness is not trusted'
+fi
 
 [[ $boot_died -eq 1 ]] && note_fail 'scripts/dev.sh exited before every service was ready'
 
@@ -392,6 +577,13 @@ dump_service_log() {
   fi
 }
 
+# Stop before the final summary so teardown failures are part of the result,
+# not an unobserved side effect after printing DEV BOOT GREEN.
+if stop_services; then
+  note_pass "all ${#SERVICES[@]} scoped service ports released after teardown"
+fi
+trap - EXIT
+
 # ── Summary ──────────────────────────────────────────────────
 printf '\n%s\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500%s\n' "$BOLD" "$NC"
 printf 'Checks: %s%d passed%s, ' "$GREEN" "$pass" "$NC"
@@ -409,8 +601,8 @@ for f in "${FAILED[@]}"; do printf '  %s\u2717 %s%s\n' "$RED" "$f" "$NC"; done
 # discarded tmpdir is why the first red run could not be diagnosed; printing a
 # shared tail is why the next two could not be either.
 if [[ $fatal_startup -eq 1 ]]; then
-  printf '\n%s\u2500\u2500 startup_failed reported by ─\u2500%s\n' "$BOLD" "$NC"
-  grep "$FATAL_STARTUP_PATTERN" "$BOOT_LOG" 2>/dev/null | tail -n 20 | sed 's/^/    /'
+  printf '\n%s\u2500\u2500 startup_failed/EADDRINUSE reported in boot log ─\u2500%s\n' "$BOLD" "$NC"
+  grep -E "$FATAL_STARTUP_PATTERN" "$BOOT_LOG" 2>/dev/null | tail -n 20 | sed 's/^/    /'
 fi
 
 for svc in "${FAILED_SERVICES[@]}"; do

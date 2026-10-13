@@ -57,6 +57,31 @@ async function reservationIn(tx: SqlTransaction, applicationId: string): Promise
   return row === undefined ? null : decodeSlotEvent(row.slot_event);
 }
 
+interface SeatDecision {
+  readonly reserved: boolean;
+  readonly venueExists: boolean;
+  readonly capacityLimit: number | null;
+  readonly registeredCount: number | null;
+  readonly isActive: boolean;
+}
+
+function decodeSeatDecision(value: unknown): SeatDecision {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new SchedulingWriteError('seat reservation function returned an invalid decision');
+  }
+  const row = value as Record<string, unknown>;
+  if (
+    typeof row['reserved'] !== 'boolean' ||
+    typeof row['venueExists'] !== 'boolean' ||
+    !(row['capacityLimit'] === null || (typeof row['capacityLimit'] === 'number' && Number.isInteger(row['capacityLimit']))) ||
+    !(row['registeredCount'] === null || (typeof row['registeredCount'] === 'number' && Number.isInteger(row['registeredCount']))) ||
+    typeof row['isActive'] !== 'boolean'
+  ) {
+    throw new SchedulingWriteError('seat reservation function returned an incomplete decision');
+  }
+  return row as unknown as SeatDecision;
+}
+
 export class PgSlotLedger implements SlotLedger {
   async findReservation(applicationId: string): Promise<SlotAssignedEvent | null> {
     try {
@@ -82,36 +107,26 @@ export class PgSlotLedger implements SlotLedger {
         const prior = await reservationIn(tx, input.applicationId);
         if (prior !== null) return { kind: 'ALREADY_ASSIGNED', event: prior };
 
-        // 2. Count a seat, under the venue row lock.
-        const seat = await tx<{ registered_count: number }[]>`
-          UPDATE public_core.campaign_venue_assignments
-          SET registered_count = registered_count + 1
-          WHERE id = ${input.venueAssignmentId}
-            AND is_active = true
-            AND (capacity_limit IS NULL OR registered_count < capacity_limit)
-          RETURNING registered_count
+        // 2. Count a seat through the narrow database command function. It
+        // keeps the original conditional UPDATE's venue-row lock and never
+        // exposes direct campaign_venue_assignments DML to this repository.
+        const seatRows = await tx<{ readonly decision: unknown }[]>`
+          SELECT public_core.reserve_campaign_venue_seat(${input.venueAssignmentId}::uuid) AS decision
         `;
+        const seat = decodeSeatDecision(seatRows[0]?.decision);
 
-        if (seat[0] === undefined) {
+        if (!seat.reserved) {
           // A concurrent delivery of THIS clearance may have committed while we
           // waited on the row lock and taken the last seat. That is not "full"
           // for this application, it is already assigned.
           const raced = await reservationIn(tx, input.applicationId);
           if (raced !== null) return { kind: 'ALREADY_ASSIGNED', event: raced };
 
-          const venueRows = await tx<
-            { capacity_limit: number | null; registered_count: number; is_active: boolean }[]
-          >`
-            SELECT capacity_limit, registered_count, is_active
-            FROM public_core.campaign_venue_assignments
-            WHERE id = ${input.venueAssignmentId}
-          `;
-          const venue = venueRows[0];
           const full: ReserveSlotOutcome = {
             kind: 'NO_CAPACITY',
-            reason: venue !== undefined && venue.is_active ? 'VENUE_AT_CAPACITY' : 'VENUE_INACTIVE',
-            capacityLimit: venue?.capacity_limit ?? null,
-            registeredCount: venue?.registered_count ?? null,
+            reason: seat.venueExists && seat.isActive ? 'VENUE_AT_CAPACITY' : 'VENUE_INACTIVE',
+            capacityLimit: seat.capacityLimit,
+            registeredCount: seat.registeredCount,
           };
           await stageOutboxEvents(tx, stage(full), SCHEDULING_OUTBOX_PRODUCER);
           return full;
@@ -137,9 +152,7 @@ export class PgSlotLedger implements SlotLedger {
           // Lost the race to a concurrent delivery of the same clearance. We
           // still hold the venue row lock, so this restores the exact count.
           await tx`
-            UPDATE public_core.campaign_venue_assignments
-            SET registered_count = registered_count - 1
-            WHERE id = ${input.venueAssignmentId}
+            SELECT public_core.release_campaign_venue_seat(${input.venueAssignmentId}::uuid)
           `;
           const winner = await reservationIn(tx, input.applicationId);
           if (winner === null) {

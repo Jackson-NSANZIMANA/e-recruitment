@@ -46,6 +46,17 @@ import {
   recordMedicalReviewHandler,
 } from './adapters/http/officer-transitions.controller.js';
 import { registerWalkInHandler, vetWalkInHandler } from './adapters/http/walk-in.controller.js';
+import {
+  cancelCampaignHandler,
+  closeCampaignRegistrationHandler,
+  completeCampaignHandler,
+  configureCampaignSessionHandler,
+  createCampaignHandler,
+  createCampaignPolicyHandler,
+  listPublicCampaignsHandler,
+  publicCampaignDetailHandler,
+  publishCampaignHandler,
+} from './adapters/http/campaigns.controller.js';
 import { verifyIdentityHandler } from './adapters/http/identity.controller.js';
 import {
   fileMyErasureRequestHandler,
@@ -77,6 +88,16 @@ export function edgeHandlers(deps: EdgeDeps): Record<EdgeOperationId, RouteHandl
     requestApplicantOtp: requestApplicantOtpHandler(deps),
     verifyApplicantOtp: verifyApplicantOtpHandler(deps),
     logoutApplicant: logoutApplicantHandler(deps),
+
+    createCampaign: createCampaignHandler(deps),
+    createCampaignPolicy: createCampaignPolicyHandler(deps),
+    configureCampaignSession: configureCampaignSessionHandler(deps),
+    publishCampaign: publishCampaignHandler(deps),
+    closeCampaignRegistration: closeCampaignRegistrationHandler(deps),
+    completeCampaign: completeCampaignHandler(deps),
+    cancelCampaign: cancelCampaignHandler(deps),
+    listCampaigns: listPublicCampaignsHandler(deps),
+    getCampaignDetail: publicCampaignDetailHandler(deps),
 
     listApplications: listApplicationsHandler(deps),
     listAmberQueue: listAmberQueueHandler(deps),

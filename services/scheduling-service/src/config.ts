@@ -19,10 +19,12 @@
 
 import { createPublicKey } from 'node:crypto';
 import {
+  loadAuthVerifyConfig,
   loadDatabaseConfig,
   loadEnv,
   loadRuntimeConfig,
   string,
+  type AuthVerifyConfig,
   type DatabaseConfig,
   type EnvSource,
   type RuntimeConfig,
@@ -47,6 +49,7 @@ export interface SchedulingServiceConfig {
   readonly database: DatabaseConfig;
   readonly security: SchedulingSecurityConfig;
   readonly signing: SchedulingSigningConfig;
+  readonly auth: AuthVerifyConfig;
 }
 
 export function loadSchedulingConfig(source: EnvSource = process.env): SchedulingServiceConfig {
@@ -72,6 +75,7 @@ export function loadSchedulingConfig(source: EnvSource = process.env): Schedulin
     runtime: loadRuntimeConfig('scheduling-service', source),
     database: loadDatabaseConfig(source),
     security: { encryptionKey: env.PII_ENCRYPTION_KEY },
+    auth: loadAuthVerifyConfig(source),
     signing: {
       qrSigningPrivateKeyPem,
       qrSigningPublicKeyPem,

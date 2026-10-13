@@ -10,14 +10,14 @@
 -- handle, a scrypt password digest (NEVER a plaintext — see shared-security
 -- hashPassword), owning agency, roles, and an active|disabled status.
 --
--- Least-privilege by design: unlike every other table (system_service-owned),
--- the credential store is readable/writable by usrp_iam_service ALONE. No
--- officer policy (officers never read the credential store) and no
--- system_service policy (a compromise of any other service must not be able to
--- read password hashes). Login is a cross-agency lookup — an officer presents a
--- handle and iam-service must find it regardless of agency — so the single iam
--- policy is USING(true); FORCE'd RLS still constrains the owner. Real IdP/SSO,
--- MFA, lockout, and provisioning workflow are deferred follow-ons.
+-- Least-privilege by role grant: only usrp_iam_service receives table
+-- privileges; officer and system-service roles receive none. However, rls/0001
+-- grants usrp_iam_service membership to the shared usrp_app login, so any
+-- trusted backend process using DATABASE_URL can SET ROLE and reach this
+-- credential store. This is NOT database-enforced process isolation. The
+-- first-admin provisioning function has a separate standalone login. Login is
+-- a cross-agency lookup, so its iam RLS policy is USING(true); FORCE'd RLS still
+-- constrains ordinary roles. Real IdP/SSO, MFA, and lockout remain deferred.
 --
 -- Run as usrp_admin AFTER db:migrate and 0001 (which defines usrp_iam_service).
 -- Fully re-runnable (IF NOT EXISTS + idempotent GRANT/POLICY).

@@ -1,10 +1,13 @@
 -- Enforced cross-agency isolation for USRP. Run as usrp_admin AFTER db:migrate.
--- Re-runnable. RLS is FORCEd so even table owners are constrained; the app must
--- connect as a NON-owner, NON-superuser login role (usrp_app) that is a member
--- of the agency roles below, or none of this bites.
+-- Re-runnable. RLS is FORCEd so even table owners are constrained; application
+-- traffic must use the NON-owner, NON-superuser usrp_app login. That login is
+-- shared across backend processes and can SET ROLE to its granted service roles,
+-- so this is a trusted-backend boundary, not per-process DB identity isolation.
+-- The one-purpose usrp_iam_provisioner login is separate and never granted to
+-- usrp_app; its password/certificate is provisioned out of band.
 BEGIN;
 
--- ── Roles (NOLOGIN group roles + one LOGIN app role) ──────────────
+-- ── Roles (NOLOGIN group roles + shared app + dedicated operator login) ─
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='usrp_rdf_officer')  THEN CREATE ROLE usrp_rdf_officer  NOLOGIN; END IF;
@@ -12,19 +15,30 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='usrp_rcs_officer')  THEN CREATE ROLE usrp_rcs_officer  NOLOGIN; END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='usrp_system_service') THEN CREATE ROLE usrp_system_service NOLOGIN; END IF;
   -- Least-privilege role for the IAM/credential surface. Deliberately NOT
-  -- usrp_system_service: officer password hashes (public_core.officer_accounts)
-  -- must be readable by iam-service ALONE, so a compromise of any other
-  -- system_service caller cannot read credentials. Its table grants + RLS live
-  -- in rls/0010; here we only define the role and its usrp_app membership.
+  -- usrp_system_service: only this role receives table grants in rls/0010 and
+  -- 0015. Since usrp_app is shared and is a member, any trusted backend with
+  -- that login can SET ROLE to it; this does not independently isolate the
+  -- IAM process from another backend using the same credential.
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='usrp_iam_service') THEN CREATE ROLE usrp_iam_service NOLOGIN; END IF;
+  -- Separate, one-purpose database identity for the human-operated first-admin
+  -- bootstrap. It has no password until an operator provisions one out of band;
+  -- unlike usrp_iam_service it is deliberately NOT a member of usrp_app.
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='usrp_iam_provisioner') THEN CREATE ROLE usrp_iam_provisioner LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS; END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='usrp_app')          THEN CREATE ROLE usrp_app LOGIN PASSWORD 'app_pw'; END IF;
 END$$;
 
--- usrp_app carries no privileges of its own; it only assumes agency roles via SET ROLE.
+-- The dedicated first-admin login must remain a one-purpose, standalone
+-- identity even when this script is re-run against a database where the role
+-- predates BUILD-001. No inherited privileges or cluster/database powers.
+ALTER ROLE usrp_iam_provisioner
+  LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+
+-- usrp_app carries no privileges of its own; it assumes service/agency roles
+-- via SET ROLE. The dedicated provisioner is intentionally not granted to it.
 GRANT usrp_rdf_officer, usrp_rnp_officer, usrp_rcs_officer, usrp_system_service, usrp_iam_service TO usrp_app;
 
 -- ── Schema usage ──────────────────────────────────────────────────
-GRANT USAGE ON SCHEMA public_core TO usrp_rdf_officer, usrp_rnp_officer, usrp_rcs_officer, usrp_system_service, usrp_iam_service;
+GRANT USAGE ON SCHEMA public_core TO usrp_rdf_officer, usrp_rnp_officer, usrp_rcs_officer, usrp_system_service, usrp_iam_service, usrp_iam_provisioner;
 GRANT USAGE ON SCHEMA rdf_ops TO usrp_rdf_officer, usrp_system_service;
 GRANT USAGE ON SCHEMA rnp_ops TO usrp_rnp_officer, usrp_system_service;
 GRANT USAGE ON SCHEMA rcs_ops TO usrp_rcs_officer, usrp_system_service;

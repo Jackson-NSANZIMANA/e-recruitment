@@ -1,13 +1,14 @@
 // ══════════════════════════════════════════════════════════════════
 // iam-service — OfficerAccountRepository adapter (PostgreSQL)
 //
-// Reads the credential store AS usrp_iam_service — the ONLY role granted on
-// public_core.officer_accounts (rls/0010). No other service can assume a role
-// that reads password hashes, so the credential surface's blast radius is
-// confined to iam-service at the database engine, not merely in code. usrp_app
-// is a member of usrp_iam_service (rls/0001), so `SET LOCAL ROLE` succeeds; the
-// FORCE'd RLS policy pc_oa_iam (USING true) lets login resolve a handle across
-// agencies before the agency is known.
+// Reads the credential store AS usrp_iam_service — the only role receiving
+// table grants on public_core.officer_accounts (rls/0010). IMPORTANT: usrp_app
+// is shared by backend processes and is a member of usrp_iam_service, so a
+// process with the shared DATABASE_URL can also SET ROLE and read this table.
+// This is a trusted-backend boundary, not DB-enforced per-service isolation.
+// First-admin provisioning is separately limited to the standalone
+// usrp_iam_provisioner login. The FORCE'd RLS policy pc_oa_iam (USING true)
+// permits the IAM login lookup across agencies before the agency is known.
 // ══════════════════════════════════════════════════════════════════
 
 import { sql } from '@usrp/shared-database';

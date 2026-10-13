@@ -66,7 +66,25 @@ function check(label: string, condition: boolean, detail = ''): void {
 }
 
 async function cleanup(hashes: readonly string[]): Promise<void> {
-  await admin`DELETE FROM public_core.applicant_identities WHERE national_id_hash IN ${admin(hashes)}`;
+  // applicant_sessions has a restrictive FK to identities. Lock the fixture
+  // identities, then remove dependents and parents atomically for repeatability.
+  await admin.begin(async (tx) => {
+    await tx`
+      SELECT id
+      FROM public_core.applicant_identities
+      WHERE national_id_hash IN ${tx(hashes)}
+      ORDER BY id
+      FOR UPDATE`;
+    await tx`
+      DELETE FROM public_core.applicant_sessions
+      WHERE applicant_id IN (
+        SELECT id FROM public_core.applicant_identities
+        WHERE national_id_hash IN ${tx(hashes)}
+      )`;
+    await tx`
+      DELETE FROM public_core.applicant_identities
+      WHERE national_id_hash IN ${tx(hashes)}`;
+  });
 }
 
 async function main(): Promise<void> {

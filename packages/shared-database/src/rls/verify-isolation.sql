@@ -38,16 +38,21 @@ VALUES
    pgp_sym_encrypt('SOUTHERN_PROVINCE', current_setting('app.encryption_key')),
    'MALE', 'WEB');
 
--- A campaign per agency (FK target for applications).
+-- These are historical fixture rows, inserted through the migration-compatible
+-- escape hatch so the isolation proof remains independent of campaign authoring.
+SET LOCAL session_replication_role = replica;
 INSERT INTO public_core.recruitment_campaigns
-  (id, campaign_label, agency, status, target_categories,
+  (id, public_code, campaign_label, agency, status, target_categories,
    registration_opens_at, registration_closes_at,
    examination_start_date, examination_end_date, examination_reporting_hour)
 VALUES
-  ('c1111111-1111-1111-1111-111111111111', 'RDF-ISOLATION-TEST', 'RDF', 'REGISTRATION_OPEN',
-   '["GENERAL_ENLISTMENT"]', now(), now() + interval '30 days', '2026-09-01', '2026-09-30', 8),
-  ('c2222222-2222-2222-2222-222222222222', 'RNP-ISOLATION-TEST', 'RNP', 'REGISTRATION_OPEN',
-   '["CADET_OFFICER"]', now(), now() + interval '30 days', '2026-09-01', '2026-09-30', 8);
+  ('c1111111-1111-1111-1111-111111111111', 'LEGACY-C111111111111111111111111111111111',
+   'RDF-ISOLATION-TEST', 'RDF', 'REGISTRATION_OPEN', '["GENERAL_ENLISTMENT"]',
+   now(), now() + interval '30 days', '2026-09-01', '2026-09-30', 8),
+  ('c2222222-2222-2222-2222-222222222222', 'LEGACY-C222222222222222222222222222222222',
+   'RNP-ISOLATION-TEST', 'RNP', 'REGISTRATION_OPEN', '["CADET_OFFICER"]',
+   now(), now() + interval '30 days', '2026-09-01', '2026-09-30', 8);
+SET LOCAL session_replication_role = origin;
 
 INSERT INTO rdf_ops.applications
   (id, processing_code, applicant_id, campaign_id, category, status)

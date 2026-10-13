@@ -11,6 +11,13 @@ export { AUTH_NS, AUTH_VER, type AuthTokenClaims, type PrincipalKind } from './c
 
 export { dbRoleForPrincipal, type DbRole, type Principal } from './principal.js';
 
+export {
+  CAMPAIGN_PERMISSIONS,
+  hasCampaignPermission,
+  rolesHaveCampaignPermission,
+  type CampaignPermission,
+} from './campaign-permissions.js';
+
 export { signAuthToken, verifyAuthToken, type VerifyAuthTokenOptions } from './token.js';
 
 export {

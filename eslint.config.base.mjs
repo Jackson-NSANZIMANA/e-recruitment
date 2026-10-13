@@ -56,8 +56,11 @@ export default tseslint.config(
     // Proofs and one-shot operator scripts are console programs by definition:
     // their stdout IS the artefact. They are also outside every tsconfig, so
     // type-aware rules cannot run on them at all.
-    files: ['**/selfcheck/**/*.ts', '**/scripts/**/*.ts'],
     ...tseslint.configs.disableTypeChecked,
-    rules: { 'no-console': 'off' }
+    files: ['**/selfcheck/**/*.ts', '**/scripts/**/*.ts'],
+    rules: {
+      ...tseslint.configs.disableTypeChecked.rules,
+      'no-console': 'off',
+    }
   }
 );

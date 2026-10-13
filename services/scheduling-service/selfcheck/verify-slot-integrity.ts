@@ -89,16 +89,22 @@ function newApplicationId(): string {
 }
 
 async function cleanup(): Promise<void> {
-  await admin`DELETE FROM public_core.slot_reservations WHERE campaign_id = ${CAMPAIGN_ID}`;
-  await admin`
-    DELETE FROM public_core.event_outbox
-    WHERE producer = ${SCHEDULING_OUTBOX_PRODUCER}
-      AND (payload->>'campaignId' = ${CAMPAIGN_ID} OR payload->'metadata'->>'campaignId' = ${CAMPAIGN_ID})`;
-  await admin`DELETE FROM public_core.campaign_venue_assignments WHERE campaign_id = ${CAMPAIGN_ID}`;
-  await admin`DELETE FROM public_core.recruitment_campaigns WHERE id = ${CAMPAIGN_ID}`;
-  await admin`
-    DELETE FROM public_core.applicant_identities
-    WHERE id IN ${admin([OPEN_APPLICANT, FULL_APPLICANT, NO_VENUE_APPLICANT])}`;
+  await admin.begin(async (tx) => {
+    await tx`DELETE FROM public_core.slot_reservations WHERE campaign_id = ${CAMPAIGN_ID}`;
+    await tx`
+      DELETE FROM public_core.event_outbox
+      WHERE producer = ${SCHEDULING_OUTBOX_PRODUCER}
+        AND (payload->>'campaignId' = ${CAMPAIGN_ID} OR payload->'metadata'->>'campaignId' = ${CAMPAIGN_ID})`;
+    // Legacy fixture teardown is the documented, test-only superuser escape
+    // hatch: production session rows are deactivated, never deleted.
+    await tx`SET LOCAL session_replication_role = replica`;
+    await tx`DELETE FROM public_core.campaign_venue_assignments WHERE campaign_id = ${CAMPAIGN_ID}`;
+    await tx`DELETE FROM public_core.recruitment_campaigns WHERE id = ${CAMPAIGN_ID}`;
+    await tx`SET LOCAL session_replication_role = origin`;
+    await tx`
+      DELETE FROM public_core.applicant_identities
+      WHERE id IN ${tx([OPEN_APPLICANT, FULL_APPLICANT, NO_VENUE_APPLICANT])}`;
+  });
 }
 
 async function seedIdentity(id: string, district: string): Promise<void> {
@@ -123,20 +129,26 @@ async function seedIdentity(id: string, district: string): Promise<void> {
 }
 
 async function seed(): Promise<void> {
-  await admin`
-    INSERT INTO public_core.recruitment_campaigns
-      (id, campaign_label, agency, status, target_categories,
-       registration_opens_at, registration_closes_at,
-       examination_start_date, examination_end_date, examination_reporting_hour)
-    VALUES (${CAMPAIGN_ID}, ${'SLOT-INTEGRITY-' + randomUUID().slice(0, 8)}, 'RDF', 'REGISTRATION_OPEN',
-            '["GENERAL_ENLISTMENT"]', now() - interval '1 day', now() + interval '30 days',
-            '2026-12-01','2026-12-15',8)`;
-  await admin`
-    INSERT INTO public_core.campaign_venue_assignments
-      (campaign_id, district, province, venue_name, exam_date, reporting_time_hour, capacity_limit)
-    VALUES
-      (${CAMPAIGN_ID}, ${OPEN_DISTRICT}, 'KIGALI_CITY', 'Amahoro Stadium', '2026-12-03', 8, NULL),
-      (${CAMPAIGN_ID}, ${FULL_DISTRICT}, 'KIGALI_CITY', 'Kigali Pele Stadium', '2026-12-04', 8, ${CAPACITY})`;
+  // The reservation proof consumes a migrated legacy campaign/session set;
+  // keep fixture creation outside BUILD-001 authoring guards.
+  await admin.begin(async (tx) => {
+    await tx`SET LOCAL session_replication_role = replica`;
+    await tx`
+      INSERT INTO public_core.recruitment_campaigns
+        (id, public_code, campaign_label, agency, status, target_categories,
+         registration_opens_at, registration_closes_at,
+         examination_start_date, examination_end_date, examination_reporting_hour)
+      VALUES (${CAMPAIGN_ID}, ${`LEGACY-${CAMPAIGN_ID.replaceAll('-', '').toUpperCase()}`},
+              ${'SLOT-INTEGRITY-' + randomUUID().slice(0, 8)}, 'RDF', 'REGISTRATION_OPEN',
+              '["GENERAL_ENLISTMENT"]', now() - interval '1 day', now() + interval '30 days',
+              '2026-12-01','2026-12-15',8)`;
+    await tx`
+      INSERT INTO public_core.campaign_venue_assignments
+        (campaign_id, district, province, venue_name, exam_date, reporting_time_hour, capacity_limit)
+      VALUES
+        (${CAMPAIGN_ID}, ${OPEN_DISTRICT}, 'KIGALI_CITY', 'Amahoro Stadium', '2026-12-03', 8, NULL),
+        (${CAMPAIGN_ID}, ${FULL_DISTRICT}, 'KIGALI_CITY', 'Kigali Pele Stadium', '2026-12-04', 8, ${CAPACITY})`;
+  });
   await seedIdentity(OPEN_APPLICANT, OPEN_DISTRICT);
   await seedIdentity(FULL_APPLICANT, FULL_DISTRICT);
   await seedIdentity(NO_VENUE_APPLICANT, NO_VENUE_DISTRICT);

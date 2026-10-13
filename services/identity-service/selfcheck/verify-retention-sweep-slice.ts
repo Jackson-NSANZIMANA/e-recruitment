@@ -120,13 +120,15 @@ async function seed(): Promise<void> {
 
     await tx`
       INSERT INTO public_core.recruitment_campaigns
-        (id, campaign_label, agency, status, target_categories,
+        (id, public_code, campaign_label, agency, status, target_categories,
          registration_opens_at, registration_closes_at,
          examination_start_date, examination_end_date, examination_reporting_hour)
       VALUES
-        (${CAMPAIGN}, 'Retention-check RDF', 'RDF', 'REGISTRATION_OPEN', '["GENERAL_ENLISTMENT"]',
+        (${CAMPAIGN}, ${`LEGACY-${CAMPAIGN.replaceAll('-', '').toUpperCase()}`},
+         'Retention-check RDF', 'RDF', 'REGISTRATION_OPEN', '["GENERAL_ENLISTMENT"]',
          now() - interval '1 day', now() + interval '30 days', '2026-09-01', '2026-09-15', 7),
-        (${RNP_CAMPAIGN}, 'Retention-check RNP', 'RNP', 'REGISTRATION_OPEN', '["CADET_OFFICER"]',
+        (${RNP_CAMPAIGN}, ${`LEGACY-${RNP_CAMPAIGN.replaceAll('-', '').toUpperCase()}`},
+         'Retention-check RNP', 'RNP', 'REGISTRATION_OPEN', '["CADET_OFFICER"]',
          now() - interval '1 day', now() + interval '30 days', '2026-09-01', '2026-09-15', 7)`;
 
     // SWEEP_B: everything negative-terminal, untouched for 25 months.

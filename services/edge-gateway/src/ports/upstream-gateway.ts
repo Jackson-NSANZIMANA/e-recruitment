@@ -1,8 +1,9 @@
 // ══════════════════════════════════════════════════════════════════
 // edge-gateway — Upstream gateway port
 //
-// The abstract interface for calling upstream microservices (iam-service,
-// identity-service, application-service, field-sync-service). The application
+// The abstract interface for calling allowlisted upstream microservices
+// (iam-service, identity-service, application-service, scheduling-service,
+// field-sync-service). The application
 // layer orchestrates upstream calls through this port without knowing whether
 // they are HTTP, gRPC, or a test stub.
 //
@@ -32,10 +33,10 @@ export interface UpstreamCallInput {
    */
   readonly credential?: string;
   /**
-   * The caller's VALIDATED UUID retry identity (ADR-027), for the submit
-   * operation only. This is a deliberately NARROW typed field — not a
-   * headers map — so "the edge forwards an idempotency key" can never widen
-   * into "the edge forwards headers". The adapter emits it as exactly one
+   * The caller's validated UUID retry identity for an explicitly idempotent
+   * write (citizen submission or BUILD-001 campaign command). This is a
+   * deliberately NARROW typed field — not a headers map — so forwarding one
+   * key can never widen into forwarding arbitrary headers. The adapter emits it as exactly one
    * `Idempotency-Key` header; everything else it builds itself.
    */
   readonly idempotencyKey?: string;

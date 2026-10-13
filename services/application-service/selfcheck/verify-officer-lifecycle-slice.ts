@@ -182,18 +182,24 @@ async function seed(): Promise<void> {
       VALUES (${id}, ${hash}, 'x', 'x', 'x', 'x', 'MALE', 'WEB',
               'VERIFIED'::public_core.identity_verification_status)`;
   }
-  await admin`
-    INSERT INTO public_core.recruitment_campaigns
-      (id, campaign_label, agency, status, target_categories,
-       registration_opens_at, registration_closes_at,
-       examination_start_date, examination_end_date, examination_reporting_hour)
-    VALUES
-      (${RDF_CAMPAIGN}, 'Officer-lifecycle RDF', 'RDF', 'REGISTRATION_OPEN', '["GENERAL_ENLISTMENT"]',
-       now() - interval '1 day', now() + interval '30 days', '2026-09-01', '2026-09-15', 7),
-      (${RNP_CAMPAIGN}, 'Officer-lifecycle RNP', 'RNP', 'REGISTRATION_OPEN', '["CADET_OFFICER"]',
-       now() - interval '1 day', now() + interval '30 days', '2026-09-01', '2026-09-15', 7),
-      (${RCS_CAMPAIGN}, 'Officer-lifecycle RCS', 'RCS', 'REGISTRATION_OPEN', '["GENERAL_ENLISTEE"]',
-       now() - interval '1 day', now() + interval '30 days', '2026-09-01', '2026-09-15', 7)`;
+  await admin.begin(async (tx) => {
+    await tx`SET LOCAL session_replication_role = replica`;
+    await tx`
+      INSERT INTO public_core.recruitment_campaigns
+        (id, public_code, campaign_label, agency, status, target_categories,
+         registration_opens_at, registration_closes_at,
+         examination_start_date, examination_end_date, examination_reporting_hour)
+      VALUES
+        (${RDF_CAMPAIGN}, ${`LEGACY-${RDF_CAMPAIGN.replaceAll('-', '').toUpperCase()}`},
+         'Officer-lifecycle RDF', 'RDF', 'REGISTRATION_OPEN', '["GENERAL_ENLISTMENT"]',
+         now() - interval '1 day', now() + interval '30 days', '2026-09-01', '2026-09-15', 7),
+        (${RNP_CAMPAIGN}, ${`LEGACY-${RNP_CAMPAIGN.replaceAll('-', '').toUpperCase()}`},
+         'Officer-lifecycle RNP', 'RNP', 'REGISTRATION_OPEN', '["CADET_OFFICER"]',
+         now() - interval '1 day', now() + interval '30 days', '2026-09-01', '2026-09-15', 7),
+        (${RCS_CAMPAIGN}, ${`LEGACY-${RCS_CAMPAIGN.replaceAll('-', '').toUpperCase()}`},
+         'Officer-lifecycle RCS', 'RCS', 'REGISTRATION_OPEN', '["GENERAL_ENLISTEE"]',
+         now() - interval '1 day', now() + interval '30 days', '2026-09-01', '2026-09-15', 7)`;
+  });
 
   // Seed each RDF scenario app at its starting status; the RNP app mirrors the
   // happy start for the cross-agency probe. Status seeded directly — this slice

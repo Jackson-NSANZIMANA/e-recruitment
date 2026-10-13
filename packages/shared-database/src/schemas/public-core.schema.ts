@@ -16,6 +16,11 @@ import {
   index,
   uniqueIndex,
   text,
+  jsonb,
+  check,
+  foreignKey,
+  unique,
+  type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 
 export const publicCore = pgSchema('public_core');
@@ -166,6 +171,10 @@ export const applicantSessions = publicCore.table(
 // Administrators create campaigns before opening registration.
 // The system reads the active campaign to route applicants correctly.
 
+function campaignPolicyVersionReferenceColumns(): [AnyPgColumn, AnyPgColumn, AnyPgColumn] {
+  return [campaignPolicyVersions.id, campaignPolicyVersions.campaignId, campaignPolicyVersions.agency];
+}
+
 export const recruitmentCampaigns = publicCore.table(
   'recruitment_campaigns',
   {
@@ -175,11 +184,16 @@ export const recruitmentCampaigns = publicCore.table(
     campaignLabel: varchar('campaign_label', { length: 50 }).notNull().unique(),
 
     agency: agencyEnum('agency').notNull(),
+    // Stable external addressing. Legacy rows are backfilled during 0002.
+    publicCode: varchar('public_code', { length: 64 }).notNull(),
     status: campaignStatusEnum('status').notNull().default('DRAFT'),
 
     // Application categories this campaign accepts (stored as JSON array)
     // e.g. ["GENERAL_ENLISTMENT","RESERVE_FORCE_ALEVEL"]
     targetCategories: text('target_categories').notNull(),
+    // Null on some legacy campaigns whose historical venue list was incomplete.
+    targetDistricts: jsonb('target_districts').$type<readonly string[] | null>(),
+    currentPolicyVersionId: uuid('current_policy_version_id'),
 
     // Registration window — from official announcements
     registrationOpensAt: timestamp('registration_opens_at', { withTimezone: true }).notNull(),
@@ -204,13 +218,27 @@ export const recruitmentCampaigns = publicCore.table(
     announcementReference: varchar('announcement_reference', { length: 200 }),
 
     publishedAt: timestamp('published_at', { withTimezone: true }),
+    registrationClosedAt: timestamp('registration_closed_at', { withTimezone: true }),
+    cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [
     uniqueIndex('idx_pc_campaign_label').on(t.campaignLabel),
+    uniqueIndex('idx_pc_campaign_public_code').on(t.publicCode),
+    uniqueIndex('idx_pc_campaign_id_agency').on(t.id, t.agency),
     index('idx_pc_campaign_agency').on(t.agency),
     index('idx_pc_campaign_status').on(t.status),
+    check('campaign_public_code_format_check', sql`public_code ~ '^[A-Z0-9][A-Z0-9-]{2,63}$'`),
+    check(
+      'campaign_target_districts_array_check',
+      sql`target_districts IS NULL OR jsonb_typeof(target_districts) = 'array'`,
+    ),
+    foreignKey({
+      name: 'campaign_current_policy_same_campaign_fk',
+      columns: [t.currentPolicyVersionId, t.id, t.agency],
+      foreignColumns: campaignPolicyVersionReferenceColumns(),
+    }).onDelete('restrict').onUpdate('restrict'),
   ],
 );
 
@@ -262,7 +290,8 @@ export const campaignVenueAssignments = publicCore.table(
     reportingTimeHour: integer('reporting_time_hour').notNull(),     // 8 or 9
 
     // Capacity management
-    capacityLimit: integer('capacity_limit'),                         // null = unlimited
+    capacityLimit: integer('capacity_limit'),                         // null = unbounded only with explicit decision for BUILD-001
+    capacityDecisionCode: varchar('capacity_decision_code', { length: 64 }),
     registeredCount: integer('registered_count').notNull().default(0),
 
     isActive: boolean('is_active').notNull().default(true),
@@ -273,6 +302,188 @@ export const campaignVenueAssignments = publicCore.table(
     index('idx_pc_venue_campaign').on(t.campaignId),
     index('idx_pc_venue_district').on(t.district),
     uniqueIndex('idx_pc_venue_campaign_district').on(t.campaignId, t.district),
+  ],
+);
+
+// ── BUILD-001 Campaign & Policy Control Plane ─────────────────────
+// Tables below are agency-scoped. Their RLS and command-function write
+// boundary are provisioned by rls/0026_campaign_control_plane.sql and
+// rls/0027_campaign_command_functions.sql.
+
+export const campaignPolicyVersions = publicCore.table(
+  'campaign_policy_versions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    campaignId: uuid('campaign_id').notNull(),
+    agency: agencyEnum('agency').notNull(),
+    versionNumber: integer('version_number').notNull(),
+    policyDocument: jsonb('policy_document').$type<Readonly<Record<string, unknown>>>().notNull(),
+    // Exact canonical v1 serialization is retained so PostgreSQL can verify the
+    // digest independently of JSONB key ordering/number formatting.
+    canonicalPolicyJson: text('canonical_policy_json'),
+    policyHash: varchar('policy_hash', { length: 64 }).notNull(),
+    hashVersion: integer('hash_version').notNull(),
+    legalBasisCode: varchar('legal_basis_code', { length: 64 }).notNull(),
+    legalBasisReference: varchar('legal_basis_reference', { length: 256 }).notNull(),
+    createdBy: uuid('created_by').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex('idx_pc_policy_campaign_version').on(t.campaignId, t.versionNumber),
+    uniqueIndex('idx_pc_policy_id_campaign_agency').on(t.id, t.campaignId, t.agency),
+    index('idx_pc_policy_campaign').on(t.campaignId),
+    check('campaign_policy_versions_version_positive_check', sql`version_number > 0`),
+    check('campaign_policy_versions_hash_check', sql`policy_hash ~ '^[0-9a-f]{64}$'`),
+    check('campaign_policy_versions_hash_version_check', sql`hash_version = 1`),
+    check('campaign_policy_versions_document_object_check', sql`jsonb_typeof(policy_document) = 'object'`),
+    check(
+      'campaign_policy_versions_legal_basis_check',
+      sql`length(btrim(legal_basis_code)) > 0 AND length(btrim(legal_basis_reference)) > 0`,
+    ),
+    foreignKey({
+      name: 'campaign_policy_versions_campaign_agency_fk',
+      columns: [t.campaignId, t.agency],
+      foreignColumns: [recruitmentCampaigns.id, recruitmentCampaigns.agency],
+    }).onDelete('restrict').onUpdate('restrict'),
+  ],
+);
+
+export const campaignPublications = publicCore.table(
+  'campaign_publications',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    campaignId: uuid('campaign_id').notNull(),
+    agency: agencyEnum('agency').notNull(),
+    publicCode: varchar('public_code', { length: 64 }).notNull(),
+    policyVersionId: uuid('policy_version_id').notNull(),
+    coverageVersion: integer('coverage_version').notNull(),
+    coverageHash: varchar('coverage_hash', { length: 64 }).notNull(),
+    publicationEventId: uuid('publication_event_id').notNull(),
+    publishedBy: uuid('published_by').notNull(),
+    publishedAt: timestamp('published_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex('idx_pc_publication_campaign').on(t.campaignId),
+    uniqueIndex('idx_pc_publication_id_campaign_agency').on(t.id, t.campaignId, t.agency),
+    index('idx_pc_publication_agency_published').on(t.agency, t.publishedAt),
+    unique('campaign_publications_event_unique').on(t.publicationEventId),
+    check('campaign_publications_coverage_version_check', sql`coverage_version > 0`),
+    check('campaign_publications_coverage_hash_check', sql`coverage_hash ~ '^[0-9a-f]{64}$'`),
+    foreignKey({
+      name: 'campaign_publications_campaign_agency_fk',
+      columns: [t.campaignId, t.agency],
+      foreignColumns: [recruitmentCampaigns.id, recruitmentCampaigns.agency],
+    }).onDelete('restrict').onUpdate('restrict'),
+    foreignKey({
+      name: 'campaign_publications_policy_campaign_fk',
+      columns: [t.policyVersionId, t.campaignId, t.agency],
+      foreignColumns: [campaignPolicyVersions.id, campaignPolicyVersions.campaignId, campaignPolicyVersions.agency],
+    }).onDelete('restrict').onUpdate('restrict'),
+  ],
+);
+
+export const campaignLifecycleHistory = publicCore.table(
+  'campaign_lifecycle_history',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    campaignId: uuid('campaign_id').notNull(),
+    agency: agencyEnum('agency').notNull(),
+    fromStatus: campaignStatusEnum('from_status'),
+    toStatus: campaignStatusEnum('to_status').notNull(),
+    actorId: uuid('actor_id').notNull(),
+    correlationId: varchar('correlation_id', { length: 128 }).notNull(),
+    reasonCode: varchar('reason_code', { length: 64 }),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('idx_pc_campaign_history_campaign_time').on(t.campaignId, t.occurredAt),
+    check(
+      'campaign_lifecycle_history_legal_edge_check',
+      sql`(from_status IS NULL AND to_status = 'DRAFT') OR
+        (from_status IS NOT NULL AND from_status = 'DRAFT' AND to_status IN ('REGISTRATION_OPEN', 'CANCELLED')) OR
+        (from_status IS NOT NULL AND from_status = 'REGISTRATION_OPEN' AND to_status IN ('REGISTRATION_CLOSED', 'CANCELLED')) OR
+        (from_status IS NOT NULL AND from_status = 'REGISTRATION_CLOSED' AND to_status = 'COMPLETED')`,
+    ),
+    foreignKey({
+      name: 'campaign_lifecycle_history_campaign_agency_fk',
+      columns: [t.campaignId, t.agency],
+      foreignColumns: [recruitmentCampaigns.id, recruitmentCampaigns.agency],
+    }).onDelete('restrict').onUpdate('restrict'),
+  ],
+);
+
+export const campaignCommandRequests = publicCore.table(
+  'campaign_command_requests',
+  {
+    commandId: uuid('command_id').defaultRandom().primaryKey(),
+    actorId: uuid('actor_id').notNull(),
+    agency: agencyEnum('agency').notNull(),
+    operation: varchar('operation', { length: 48 }).notNull(),
+    idempotencyKey: uuid('idempotency_key').notNull(),
+    requestHash: varchar('request_hash', { length: 64 }).notNull(),
+    resourceId: uuid('resource_id').notNull(),
+    responseStatus: integer('response_status').notNull(),
+    responseBody: jsonb('response_body').$type<Readonly<Record<string, unknown>>>().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex('idx_pc_campaign_command_actor_operation_key').on(t.actorId, t.operation, t.idempotencyKey),
+    index('idx_pc_campaign_command_resource').on(t.resourceId, t.createdAt),
+    check('campaign_command_requests_hash_check', sql`request_hash ~ '^[0-9a-f]{64}$'`),
+    check('campaign_command_requests_response_status_check', sql`response_status BETWEEN 200 AND 299`),
+    check('campaign_command_requests_response_object_check', sql`jsonb_typeof(response_body) = 'object'`),
+  ],
+);
+
+export const campaignCoverageHeads = publicCore.table(
+  'campaign_coverage_heads',
+  {
+    campaignId: uuid('campaign_id').primaryKey(),
+    agency: agencyEnum('agency').notNull(),
+    coverageVersion: integer('coverage_version').notNull(),
+    coverageHash: varchar('coverage_hash', { length: 64 }).notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    check('campaign_coverage_heads_version_check', sql`coverage_version >= 0`),
+    check('campaign_coverage_heads_hash_check', sql`coverage_hash ~ '^[0-9a-f]{64}$'`),
+    foreignKey({
+      name: 'campaign_coverage_heads_campaign_agency_fk',
+      columns: [t.campaignId, t.agency],
+      foreignColumns: [recruitmentCampaigns.id, recruitmentCampaigns.agency],
+    }).onDelete('restrict').onUpdate('restrict'),
+  ],
+);
+
+export const sessionCommandRequests = publicCore.table(
+  'session_command_requests',
+  {
+    commandId: uuid('command_id').defaultRandom().primaryKey(),
+    campaignId: uuid('campaign_id').notNull(),
+    agency: agencyEnum('agency').notNull(),
+    actorId: uuid('actor_id').notNull(),
+    operation: varchar('operation', { length: 48 }).notNull(),
+    idempotencyKey: uuid('idempotency_key').notNull(),
+    requestHash: varchar('request_hash', { length: 64 }).notNull(),
+    responseStatus: integer('response_status').notNull(),
+    responseBody: jsonb('response_body').$type<Readonly<Record<string, unknown>>>().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex('idx_pc_session_command_actor_operation_key').on(
+      t.actorId,
+      t.operation,
+      t.idempotencyKey,
+    ),
+    index('idx_pc_session_command_campaign').on(t.campaignId, t.createdAt),
+    check('session_command_requests_hash_check', sql`request_hash ~ '^[0-9a-f]{64}$'`),
+    check('session_command_requests_response_status_check', sql`response_status BETWEEN 200 AND 299`),
+    check('session_command_requests_response_object_check', sql`jsonb_typeof(response_body) = 'object'`),
+    foreignKey({
+      name: 'session_command_requests_campaign_agency_fk',
+      columns: [t.campaignId, t.agency],
+      foreignColumns: [recruitmentCampaigns.id, recruitmentCampaigns.agency],
+    }).onDelete('restrict').onUpdate('restrict'),
   ],
 );
 

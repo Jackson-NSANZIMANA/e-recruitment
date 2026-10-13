@@ -82,6 +82,7 @@ export QR_SIGNING_KEY_ID="${QR_SIGNING_KEY_ID:-selfcheck-qr-key-1}"
 #     upstream credentials, so it is one published dev secret rather than two.
 export IAM_BASE_URL="${IAM_BASE_URL:-http://localhost:4011}"
 export APPLICATION_SERVICE_BASE_URL="${APPLICATION_SERVICE_BASE_URL:-http://localhost:4006}"
+export SCHEDULING_SERVICE_BASE_URL="${SCHEDULING_SERVICE_BASE_URL:-http://localhost:4007}"
 export IDENTITY_SERVICE_BASE_URL="${IDENTITY_SERVICE_BASE_URL:-http://localhost:4001}"
 export FIELD_SYNC_SERVICE_BASE_URL="${FIELD_SYNC_SERVICE_BASE_URL:-http://localhost:4009}"
 export EDGE_SESSION_HMAC_KEY="${EDGE_SESSION_HMAC_KEY:-dev_edge_session_hmac_key_min_32_chars!!}"
@@ -154,6 +155,17 @@ run_ts "deployment hygiene (EXPOSE ↔ .env.example port map, non-root, exec-for
 # It is the check that would have caught the four BFF services that never
 # existed being read as fact for a month.
 run_ts "edge-gateway: contract drift (registry ↔ OpenAPI ↔ upstream catalogue)" services/edge-gateway/selfcheck/verify-edge-contract.ts
+run_ts "edge-gateway: BUILD-001 live campaign HTTP/session/CSRF/idempotency boundary" services/edge-gateway/selfcheck/verify-campaign-http-boundary.ts
+# This second HTTP proof does not stub either side: a real IAM-issued officer
+# token traverses the Edge persistent session and the application controller,
+# and the result/actor/audit/outbox are read back from PostgreSQL. It creates an
+# isolated database and calls the first-admin function before login. For that
+# function check, SET LOCAL SESSION AUTHORIZATION from the admin connection
+# emulates session_user; it does NOT prove direct provisioner password auth or
+# independently authenticate a human operator.
+run_ts "BUILD-001: real IAM → Edge → application → PostgreSQL campaign flow" services/edge-gateway/selfcheck/verify-campaign-real-e2e.ts
+run_ts "application-service: BUILD-001 domain, canonical policy, and coverage hashes (P1–P4)" services/application-service/selfcheck/verify-campaign-domain.ts
+run_ts "scheduling-service: BUILD-001 session capacity decision validation" services/scheduling-service/selfcheck/verify-campaign-session-validation.ts
 run_ts "edge-gateway: citizen submit front-door readiness (the release signal)" services/edge-gateway/selfcheck/verify-citizen-submit-readiness.ts
 run_ts "edge-gateway: source hygiene (layering, redaction, no raw console)" services/edge-gateway/selfcheck/verify-edge-hygiene.ts
 
@@ -193,6 +205,12 @@ fi
 # database must agree. Runs early: every proof below asserts behaviour ON
 # this schema, so a silent divergence here would undermine all of them.
 run_ts "shared-database: schema drift (.ts ↔ snapshot ↔ live DB)" packages/shared-database/selfcheck/verify-schema-drift.ts
+# BUILD-001 migration acceptance: apply the exact pre-feature migrations to a
+# disposable real PostgreSQL database, insert legacy campaign/session rows,
+# then apply 0002/0003 and assert the backfill and data preservation. This needs
+# ADMIN_DATABASE_URL (or its dev default) with CREATEDB/DROP DATABASE rights;
+# source inspection and in-memory SQL engines are not substitutes.
+run_ts "BUILD-001: populated PostgreSQL upgrade (pre-0002 rows → 0002/0003 backfill)" packages/shared-database/selfcheck/verify-build001-populated-upgrade.ts
 # ADR-027 follow-up: the citizen submit rate limit's shared store. Two limiter
 # instances over one database share one window, concurrent increments are
 # lossless, windows expire, store faults fail closed (never "allow"), and
@@ -247,6 +265,7 @@ run_ts "application-service: vetting projection"   services/application-service/
 # ADR-025: a committed transition can no longer lose its event (the GREEN-but-
 # never-scheduled defect). Right after the projection proof it hardens.
 run_ts "application-service: transactional outbox (atomic stage → relay → no lost CLEARED)" services/application-service/selfcheck/verify-outbox-slice.ts
+run_ts "BUILD-001: campaign control-plane P5–P17 (RLS, idempotency, lifecycle, races, public projection, outbox/audit, legacy)" services/application-service/selfcheck/verify-campaign-control-plane.ts
 run_ts "application-service: history immutability" services/application-service/selfcheck/verify-history-immutability.ts
 run_ts "eligibility-service: age gate"            services/eligibility-service/selfcheck/verify-age-eligibility.ts
 run_ts "eligibility-service: NESA education gate" services/eligibility-service/selfcheck/verify-education-eligibility.ts
@@ -275,7 +294,7 @@ run_ts "application-service: amber routing + adjudication" services/application-
 run_ts "application-service: walk-in lane (register → vet → physical → merged funnel)" services/application-service/selfcheck/verify-walk-in-slice.ts
 # The whole spine composed: one real submission → all 3 gates → DOCUMENT_REVIEW_GREEN.
 # Runs late — it exercises the most services (eligibility + background-vetting + application).
-run_ts "pipeline: full chain → DOCUMENT_REVIEW_GREEN" services/application-service/selfcheck/verify-pipeline-e2e.ts
+run_ts "pipeline: full chain → slot assignment + exact RIB Kafka replay" services/application-service/selfcheck/verify-pipeline-e2e.ts
 
 # ── 3. The developer entrypoint itself ────────────────────────────
 # Boots ALL TWELVE services from .env.example — the committed template, NOT

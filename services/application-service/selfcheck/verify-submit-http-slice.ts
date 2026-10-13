@@ -123,20 +123,23 @@ async function seed(): Promise<void> {
   // Two open campaigns: RDF accepting GENERAL_ENLISTMENT (and only that),
   // RNP accepting CADET_OFFICER — so the proof can show a submission routing
   // to the OWNING agency's isolated ops schema, per category.
-  await admin`
-    INSERT INTO public_core.recruitment_campaigns
-      (id, campaign_label, agency, status, target_categories,
-       registration_opens_at, registration_closes_at,
-       examination_start_date, examination_end_date, examination_reporting_hour)
-    VALUES
-      (${CAMPAIGN_ID}, 'Self-check RDF Intake', 'RDF',
-       'REGISTRATION_OPEN', '["GENERAL_ENLISTMENT"]',
-       now() - interval '1 day', now() + interval '30 days',
-       '2026-09-01', '2026-09-15', 7),
-      (${RNP_CAMPAIGN_ID}, 'Self-check RNP Intake', 'RNP',
-       'REGISTRATION_OPEN', '["CADET_OFFICER"]',
-       now() - interval '1 day', now() + interval '30 days',
-       '2026-09-01', '2026-09-15', 7)`;
+  await admin.begin(async (tx) => {
+    await tx`SET LOCAL session_replication_role = replica`;
+    await tx`
+      INSERT INTO public_core.recruitment_campaigns
+        (id, public_code, campaign_label, agency, status, target_categories,
+         registration_opens_at, registration_closes_at,
+         examination_start_date, examination_end_date, examination_reporting_hour)
+      VALUES
+        (${CAMPAIGN_ID}, ${`LEGACY-${CAMPAIGN_ID.replaceAll('-', '').toUpperCase()}`},
+         'Self-check RDF Intake', 'RDF', 'REGISTRATION_OPEN', '["GENERAL_ENLISTMENT"]',
+         now() - interval '1 day', now() + interval '30 days',
+         '2026-09-01', '2026-09-15', 7),
+        (${RNP_CAMPAIGN_ID}, ${`LEGACY-${RNP_CAMPAIGN_ID.replaceAll('-', '').toUpperCase()}`},
+         'Self-check RNP Intake', 'RNP', 'REGISTRATION_OPEN', '["CADET_OFFICER"]',
+         now() - interval '1 day', now() + interval '30 days',
+         '2026-09-01', '2026-09-15', 7)`;
+  });
 }
 
 async function main(): Promise<void> {

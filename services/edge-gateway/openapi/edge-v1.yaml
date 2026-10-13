@@ -4,15 +4,15 @@ info:
   description: |
     The EDGE RUNTIME CONTRACT — the single trusted browser boundary.
     
-    All 27 operations mount under `/edge/v1/**`. The browser never calls service
+    All 36 operations mount under `/edge/v1/**`. The browser never calls service
     ports directly, never holds upstream credentials, and never declares agency:
     the edge serves opaque session cookies and derives agency from the verified
     officer session.
     
-    NEVER HAND-EDIT THIS DOCUMENT. It is generated from the registry
-    (services/edge-gateway/src/domain/edge-operations.ts) and reconciled by
-    selfcheck/verify-edge-contract.ts. Edit the registry; run the proof; the
-    document follows.
+    This document is maintained alongside the operation registry
+    (services/edge-gateway/src/domain/edge-operations.ts). The required
+    selfcheck/verify-edge-contract.ts compares the mounted routes, registry,
+    public allowlist, upstream catalogue, and OpenAPI operation IDs.
   version: "2026-09-13"
   contact:
     name: Backend Architecture
@@ -119,6 +119,285 @@ paths:
           description: Logged out
         '403':
           description: CSRF invalid
+
+  /edge/v1/campaigns:
+    post:
+      operationId: createCampaign
+      summary: Create a campaign draft
+      tags: [campaign-control]
+      x-usrp-session: officer
+      x-usrp-csrf: true
+      x-usrp-retry-on-g2g: false
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [publicCode, campaignLabel, targetCategories, targetDistricts, registrationOpensAt, registrationClosesAt, examinationStartDate, examinationEndDate, examinationReportingHour, allowsWalkIn]
+              properties:
+                publicCode: { type: string, minLength: 3, maxLength: 64, pattern: '^[A-Z0-9][A-Z0-9-]*$' }
+                campaignLabel: { type: string, minLength: 1, maxLength: 50 }
+                targetCategories: { type: array, minItems: 1, uniqueItems: true, items: { type: string } }
+                targetDistricts: { type: array, minItems: 1, uniqueItems: true, items: { type: string } }
+                registrationOpensAt: { type: string, format: date-time }
+                registrationClosesAt: { type: string, format: date-time }
+                examinationStartDate: { type: string, format: date }
+                examinationEndDate: { type: string, format: date }
+                examinationReportingHour: { type: integer, minimum: 0, maximum: 23 }
+                allowsWalkIn: { type: boolean }
+                targetIntakeCount: { type: [integer, 'null'], minimum: 1 }
+                contactPhoneNumbers: { type: array, maxItems: 10, items: { type: string, maxLength: 40 } }
+                contactWebsite: { type: [string, 'null'], maxLength: 100, format: uri }
+      responses:
+        '201': { description: Draft created; replay returns the stored original body. }
+        '400': { description: Invalid draft or idempotency key. }
+        '403': { description: Officer lacks campaign.create permission. }
+        '409': { description: Public code or campaign label conflict. }
+        '422': { description: Category, agency, or campaign-window validation failed. }
+        '503': { description: Campaign persistence unavailable. }
+    get:
+      operationId: listCampaigns
+      summary: List open published campaigns
+      tags: [public-campaigns]
+      x-usrp-session: anonymous
+      x-usrp-csrf: false
+      x-usrp-retry-on-g2g: true
+      responses:
+        '200': { description: Only REGISTRATION_OPEN campaigns with the safe public projection. }
+        '503': { description: Public campaign read unavailable. }
+
+  /edge/v1/campaigns/policy:
+    post:
+      operationId: createCampaignPolicy
+      summary: Create an immutable policy version
+      tags: [campaign-control]
+      x-usrp-session: officer
+      x-usrp-csrf: true
+      x-usrp-retry-on-g2g: false
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [publicCode, policyDocument, legalBasisCode, legalBasisReference]
+              properties:
+                publicCode: { type: string }
+                policyDocument:
+                  type: object
+                  minProperties: 1
+                  description: One complete policy entry per target category; official values are supplied by the authorized officer, not defaulted by this API.
+                  additionalProperties:
+                    type: object
+                    additionalProperties: false
+                    required: [age, education, criminalThreshold, requiredDocumentTypes, medicalMode, legalBasis]
+                    properties:
+                      age:
+                        type: object
+                        additionalProperties: false
+                        required: [minimumAge, maximumAge, referenceDate]
+                        properties:
+                          minimumAge: { type: integer, minimum: 0, maximum: 130 }
+                          maximumAge: { type: integer, minimum: 0, maximum: 130 }
+                          referenceDate: { type: string, format: date }
+                      education:
+                        type: object
+                        additionalProperties: false
+                        required: [mode, threshold]
+                        properties:
+                          mode: { type: string }
+                          threshold: { oneOf: [{ type: string }, { type: number }] }
+                      criminalThreshold: { type: string }
+                      requiredDocumentTypes: { type: array, minItems: 1, uniqueItems: true, items: { type: string } }
+                      medicalMode: { type: string }
+                      legalBasis:
+                        type: object
+                        additionalProperties: false
+                        required: [code, reference]
+                        properties:
+                          code: { type: string }
+                          reference: { type: string, maxLength: 256 }
+                legalBasisCode: { type: string }
+                legalBasisReference: { type: string, maxLength: 256 }
+      responses:
+        '201': { description: Immutable policy version created; response includes its canonical SHA-256 hash. }
+        '400': { description: Invalid request or idempotency key. }
+        '403': { description: Officer lacks campaign.policy.create permission. }
+        '404': { description: Campaign not found in the officer's agency. }
+        '409': { description: Policy cannot be amended in the current campaign state. }
+        '422': { description: Policy shape or target-category coverage is invalid. }
+
+  /edge/v1/campaigns/session:
+    post:
+      operationId: configureCampaignSession
+      summary: Configure one scheduling-owned district session
+      tags: [campaign-control]
+      x-usrp-session: officer
+      x-usrp-csrf: true
+      x-usrp-retry-on-g2g: false
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [publicCode, district, province, venueName, examDate, reportingTimeHour, capacityLimit, isActive]
+              properties:
+                publicCode: { type: string }
+                district: { type: string }
+                province: { type: string }
+                venueName: { type: string, minLength: 1, maxLength: 200 }
+                examDate: { type: string, format: date }
+                reportingTimeHour: { type: integer, minimum: 0, maximum: 23 }
+                capacityLimit: { type: [integer, 'null'], minimum: 1 }
+                # Required as UNBOUNDED_CAPACITY when capacityLimit is null; ignored only when absent for finite capacity.
+                capacityDecisionCode: { type: string, enum: [UNBOUNDED_CAPACITY] }
+                isActive: { type: boolean }
+      responses:
+        '200': { description: Session configured or identical request replayed; includes coverage version/hash for officers. }
+        '400': { description: Invalid session shape or idempotency key. }
+        '403': { description: Officer lacks campaign.session.configure permission. }
+        '404': { description: Campaign not found in the officer's agency. }
+        '409': { description: State, reserved-session, idempotency, or coverage conflict. }
+        '422': { description: District or exam-date configuration is invalid. }
+
+  /edge/v1/campaigns/publish:
+    post:
+      operationId: publishCampaign
+      summary: Publish a validated draft and open registration
+      tags: [campaign-control]
+      x-usrp-session: officer
+      x-usrp-csrf: true
+      x-usrp-retry-on-g2g: false
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [publicCode]
+              properties:
+                publicCode: { type: string }
+      responses:
+        '200': { description: Published; policy version and exact coverage evidence are stored. }
+        '400': { description: Invalid request or idempotency key. }
+        '403': { description: Officer lacks campaign.publish permission. }
+        '404': { description: Campaign not found in the officer's agency. }
+        '409': { description: Invalid state, missing policy, incomplete coverage, or invalid capacity. }
+        '422': { description: Policy/coverage hash or capacity validation failed. }
+
+  /edge/v1/campaigns/registration-close:
+    post:
+      operationId: closeCampaignRegistration
+      summary: Close campaign registration
+      tags: [campaign-control]
+      x-usrp-session: officer
+      x-usrp-csrf: true
+      x-usrp-retry-on-g2g: false
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [publicCode]
+              properties:
+                publicCode: { type: string }
+      responses:
+        '200': { description: Registration closed. }
+        '400': { description: Invalid request or idempotency key. }
+        '403': { description: Officer lacks campaign.registration.close permission. }
+        '404': { description: Campaign not found in the officer's agency. }
+        '409': { description: Invalid lifecycle transition. }
+
+  /edge/v1/campaigns/complete:
+    post:
+      operationId: completeCampaign
+      summary: Complete a campaign after registration closes
+      tags: [campaign-control]
+      x-usrp-session: officer
+      x-usrp-csrf: true
+      x-usrp-retry-on-g2g: false
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [publicCode]
+              properties:
+                publicCode: { type: string }
+      responses:
+        '200': { description: Campaign completed after registration closure. }
+        '400': { description: Invalid request or idempotency key. }
+        '403': { description: Officer lacks campaign.complete permission. }
+        '404': { description: Campaign not found in the officer's agency. }
+        '409': { description: Invalid lifecycle transition. }
+
+  /edge/v1/campaigns/cancel:
+    post:
+      operationId: cancelCampaign
+      summary: Cancel a permitted campaign
+      tags: [campaign-control]
+      x-usrp-session: officer
+      x-usrp-csrf: true
+      x-usrp-retry-on-g2g: false
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [publicCode]
+              properties:
+                publicCode: { type: string }
+      responses:
+        '200': { description: Campaign cancelled where the lifecycle and application-count rules permit it. }
+        '400': { description: Invalid request or idempotency key. }
+        '403': { description: Officer lacks campaign.cancel permission. }
+        '404': { description: Campaign not found in the officer's agency. }
+        '409': { description: Invalid lifecycle transition or applications prevent cancellation. }
+
+  /edge/v1/campaigns/detail:
+    get:
+      operationId: getCampaignDetail
+      summary: Read an externally published campaign by public code
+      tags: [public-campaigns]
+      x-usrp-session: anonymous
+      x-usrp-csrf: false
+      x-usrp-retry-on-g2g: true
+      parameters:
+        - name: publicCode
+          in: query
+          required: true
+          schema: { type: string, minLength: 3, maxLength: 64 }
+      responses:
+        '200': { description: Public projection only; internal UUIDs, policies, coverage, capacity, registrations, and audit facts are omitted. }
+        '400': { description: Invalid or missing publicCode. }
+        '404': { description: Campaign is not externally published or does not exist. }
+        '503': { description: Public campaign read unavailable. }
 
   /edge/v1/applications:
     get:
@@ -514,6 +793,17 @@ paths:
         '503':
           description: Not ready
 
+components:
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: UUID key required for each campaign write; same actor, operation, key, and request body replay the original result.
+      schema:
+        type: string
+        format: uuid
+
 tags:
   - name: session
     description: Session management
@@ -521,6 +811,10 @@ tags:
     description: Officer authentication
   - name: applicant-auth
     description: Applicant authentication
+  - name: campaign-control
+    description: Officer-authorized campaign lifecycle and session configuration
+  - name: public-campaigns
+    description: Safe published campaign catalogue and detail
   - name: officer-reads
     description: Officer reads
   - name: officer-transitions
