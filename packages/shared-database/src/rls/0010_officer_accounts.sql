@@ -10,14 +10,15 @@
 -- handle, a scrypt password digest (NEVER a plaintext — see shared-security
 -- hashPassword), owning agency, roles, and an active|disabled status.
 --
--- Least-privilege by role grant: only usrp_iam_service receives table
--- privileges; officer and system-service roles receive none. However, rls/0001
--- grants usrp_iam_service membership to the shared usrp_app login, so any
--- trusted backend process using DATABASE_URL can SET ROLE and reach this
--- credential store. This is NOT database-enforced process isolation. The
--- first-admin provisioning function has a separate standalone login. Login is
--- a cross-agency lookup, so its iam RLS policy is USING(true); FORCE'd RLS still
--- constrains ordinary roles. Real IdP/SSO, MFA, and lockout remain deferred.
+-- Least-privilege by role grant: usrp_iam_service may SELECT officer
+-- credentials for login, but cannot insert, update, promote, or delete accounts.
+-- Officer creation/promotion uses the separately authenticated first-admin
+-- provisioning boundary or a privileged deployment/operator workflow. rls/0001
+-- grants usrp_iam_service membership to the shared usrp_app login, so any trusted
+-- backend using that login can SET ROLE and read this credential store. This is
+-- NOT database-enforced process isolation. Login is a cross-agency lookup, so
+-- the iam RLS policy is USING(true); FORCE'd RLS still constrains ordinary roles.
+-- Real IdP/SSO, MFA, and lockout remain deferred.
 --
 -- Run as usrp_admin AFTER db:migrate and 0001 (which defines usrp_iam_service).
 -- Fully re-runnable (IF NOT EXISTS + idempotent GRANT/POLICY).
@@ -39,9 +40,13 @@ CREATE TABLE IF NOT EXISTS public_core.officer_accounts (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_pc_officer_accounts_handle
   ON public_core.officer_accounts (login_handle);
 
--- iam-service is the SOLE reader/writer of the credential store. No grant to
--- officers or to usrp_system_service — least privilege on the crown jewels.
-GRANT SELECT, INSERT, UPDATE ON public_core.officer_accounts TO usrp_iam_service;
+-- IAM authenticates against this table but is not an account-provisioning
+-- authority. Clear historical table/column ACLs before granting read-only access.
+REVOKE ALL PRIVILEGES ON TABLE public_core.officer_accounts FROM usrp_iam_service;
+REVOKE INSERT (officer_id, login_handle, credential, agency, roles, status, created_at),
+       UPDATE (officer_id, login_handle, credential, agency, roles, status, created_at)
+  ON public_core.officer_accounts FROM usrp_iam_service;
+GRANT SELECT ON public_core.officer_accounts TO usrp_iam_service;
 
 -- FORCE RLS so even the table owner is constrained (mirrors applicant_identities
 -- and field_devices).
@@ -53,6 +58,6 @@ ALTER TABLE public_core.officer_accounts FORCE  ROW LEVEL SECURITY;
 -- with any policy → every other role sees nothing even if a grant slipped in.
 DROP POLICY IF EXISTS pc_oa_iam ON public_core.officer_accounts;
 CREATE POLICY pc_oa_iam ON public_core.officer_accounts
-  TO usrp_iam_service USING (true) WITH CHECK (true);
+  FOR SELECT TO usrp_iam_service USING (true);
 
 COMMIT;

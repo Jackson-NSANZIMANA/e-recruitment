@@ -21,37 +21,82 @@ END$$;
 GRANT usrp_campaign_public_reader TO usrp_app;
 GRANT USAGE ON SCHEMA public_core TO usrp_campaign_public_reader;
 
--- Campaign authoring and lifecycle. UPDATE is column-scoped; there is no
--- campaign DELETE grant. Each officer role remains confined by agency RLS.
-GRANT SELECT, INSERT ON public_core.recruitment_campaigns
-  TO usrp_rdf_officer, usrp_rnp_officer, usrp_rcs_officer;
-GRANT UPDATE (current_policy_version_id, status, published_at,
-              registration_closed_at, cancelled_at, updated_at)
-  ON public_core.recruitment_campaigns
-  TO usrp_rdf_officer, usrp_rnp_officer, usrp_rcs_officer;
+-- The application-submission row lock is a separate tiny definer boundary. Its
+-- NOLOGIN owner can SELECT only the campaign key/status/agency columns needed
+-- by the function. PostgreSQL also requires UPDATE privilege on at least one
+-- column for SELECT ... FOR SHARE, so it receives only updated_at at column
+-- scope; it has no table-wide DML or campaign-state/configuration UPDATE grant.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'usrp_campaign_application_lock_owner') THEN
+    CREATE ROLE usrp_campaign_application_lock_owner NOLOGIN BYPASSRLS;
+  END IF;
+END$$;
+ALTER ROLE usrp_campaign_application_lock_owner
+  WITH NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOLOGIN BYPASSRLS;
+REVOKE ALL PRIVILEGES ON TABLE public_core.recruitment_campaigns
+  FROM usrp_campaign_application_lock_owner;
+DO $$
+DECLARE
+  v_columns text;
+BEGIN
+  SELECT string_agg(format('%I', column_info.attname), ', ' ORDER BY column_info.attnum)
+    INTO v_columns
+  FROM pg_attribute AS column_info
+  WHERE column_info.attrelid = 'public_core.recruitment_campaigns'::regclass
+    AND column_info.attnum > 0
+    AND NOT column_info.attisdropped;
+  IF v_columns IS NOT NULL THEN
+    EXECUTE format(
+      'REVOKE UPDATE (%s) ON public_core.recruitment_campaigns FROM usrp_campaign_application_lock_owner',
+      v_columns
+    );
+  END IF;
+END$$;
+GRANT USAGE ON SCHEMA public_core TO usrp_campaign_application_lock_owner;
+GRANT CREATE ON SCHEMA public_core TO usrp_campaign_application_lock_owner;
+GRANT SELECT (id, agency, status) ON public_core.recruitment_campaigns
+  TO usrp_campaign_application_lock_owner;
+GRANT UPDATE (updated_at) ON public_core.recruitment_campaigns
+  TO usrp_campaign_application_lock_owner;
+COMMENT ON ROLE usrp_campaign_application_lock_owner IS
+  'NOLOGIN owner of the narrow campaign application-lock definer function; reads campaign id, agency, and status, with a single updated_at UPDATE ACL required by PostgreSQL row-lock checks.';
 
-GRANT SELECT, INSERT ON public_core.campaign_policy_versions,
+-- Re-running bootstrap must not reopen direct command-table writes between
+-- 0026 and 0027. Keep only the agency-scoped read paths; operation-specific
+-- writes are installed later as SECURITY DEFINER functions in 0027.
+GRANT SELECT ON public_core.recruitment_campaigns,
+  public_core.campaign_policy_versions,
   public_core.campaign_publications,
   public_core.campaign_lifecycle_history,
-  public_core.campaign_command_requests
+  public_core.campaign_coverage_heads,
+  public_core.campaign_venue_assignments
   TO usrp_rdf_officer, usrp_rnp_officer, usrp_rcs_officer;
-
--- Session configuration is scheduling-owned. The campaign-specific agency
--- row policy scopes these narrow writes; registered_count remains exclusively
--- the existing system-service column grant from 0021.
-GRANT SELECT, INSERT ON public_core.campaign_venue_assignments
-  TO usrp_rdf_officer, usrp_rnp_officer, usrp_rcs_officer;
-GRANT UPDATE (district, province, venue_name, exam_date, reporting_time_hour,
-              capacity_limit, is_active)
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON public_core.recruitment_campaigns,
+  public_core.campaign_policy_versions,
+  public_core.campaign_publications,
+  public_core.campaign_lifecycle_history,
+  public_core.campaign_command_requests,
+  public_core.campaign_coverage_heads,
+  public_core.session_command_requests,
+  public_core.campaign_venue_assignments
+  FROM usrp_rdf_officer, usrp_rnp_officer, usrp_rcs_officer;
+-- PostgreSQL stores column-level ACLs independently; clear the historic narrow
+-- UPDATE grants too so a bootstrap replay remains fail-closed before 0027.
+REVOKE UPDATE (current_policy_version_id, status, published_at,
+               registration_closed_at, cancelled_at, updated_at)
+  ON public_core.recruitment_campaigns
+  FROM usrp_rdf_officer, usrp_rnp_officer, usrp_rcs_officer;
+REVOKE UPDATE (district, province, venue_name, exam_date, reporting_time_hour,
+               capacity_limit, is_active)
   ON public_core.campaign_venue_assignments
-  TO usrp_rdf_officer, usrp_rnp_officer, usrp_rcs_officer;
-GRANT SELECT, INSERT, UPDATE ON public_core.campaign_coverage_heads
-  TO usrp_rdf_officer, usrp_rnp_officer, usrp_rcs_officer;
-GRANT SELECT, INSERT ON public_core.session_command_requests
-  TO usrp_rdf_officer, usrp_rnp_officer, usrp_rcs_officer;
+  FROM usrp_rdf_officer, usrp_rnp_officer, usrp_rcs_officer;
+REVOKE SELECT, INSERT, UPDATE, DELETE, TRUNCATE
+  ON public_core.campaign_command_requests, public_core.session_command_requests
+  FROM usrp_rdf_officer, usrp_rnp_officer, usrp_rcs_officer;
 
--- The system scheduler retains exactly its prior read path and registered_count
--- column write. RLS policies below do not add any new system-service grants.
+-- The system scheduler retains its existing read/outbox relay paths. It has
+-- no direct campaign/session counter write; rls/0027 installs only narrow functions.
 
 -- Campaign public projection: security_invoker means the public reader needs
 -- column-level SELECT and the RLS policies below. Its query never selects an
@@ -95,10 +140,10 @@ CREATE POLICY pc_campaign_public_reader ON public_core.recruitment_campaigns
   ));
 
 -- Application submission must serialize against cancellation, but the
--- cross-agency system worker deliberately has no UPDATE privilege on campaigns.
--- This tiny definer function exposes only the campaign status while taking the
--- shared row lock; it does not grant a direct lock/update capability on the
--- table and is executable only by the existing system-service role.
+-- cross-agency system worker deliberately has no direct UPDATE privilege on
+-- campaigns. This tiny definer function exposes only the campaign status while
+-- taking the shared row lock; callers receive no direct UPDATE capability and
+-- only the existing system-service/officer roles may execute the function.
 CREATE OR REPLACE FUNCTION public_core.lock_campaign_for_application_insert(
   p_campaign_id uuid,
   p_agency public_core.agency
@@ -106,7 +151,7 @@ CREATE OR REPLACE FUNCTION public_core.lock_campaign_for_application_insert(
 RETURNS TABLE (status public_core.campaign_status)
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog
+SET search_path = pg_catalog, pg_temp
 AS $function$
 DECLARE
   v_allowed_agency public_core.agency;
@@ -132,6 +177,9 @@ BEGIN
     FOR SHARE;
 END;
 $function$;
+ALTER FUNCTION public_core.lock_campaign_for_application_insert(uuid, public_core.agency)
+  OWNER TO usrp_campaign_application_lock_owner;
+REVOKE CREATE ON SCHEMA public_core FROM usrp_campaign_application_lock_owner;
 REVOKE ALL ON FUNCTION public_core.lock_campaign_for_application_insert(uuid, public_core.agency)
   FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public_core.lock_campaign_for_application_insert(uuid, public_core.agency)
@@ -579,8 +627,9 @@ CREATE TRIGGER trg_campaign_initial_state_guard
   BEFORE INSERT ON public_core.recruitment_campaigns
   FOR EACH ROW EXECUTE FUNCTION public_core.guard_campaign_initial_state();
 
--- Exact BUILD-001 lifecycle graph and associated timestamps. Legacy enum value
--- EXAMINATION_ACTIVE remains present but is not a legal control-plane edge.
+-- Exact BUILD-001 lifecycle graph and associated timestamps. Preserve only the
+-- migration-backed LEGACY-<32 hex> EXAMINATION_ACTIVE -> COMPLETED exception;
+-- new control-plane campaigns cannot enter that legacy state.
 CREATE OR REPLACE FUNCTION public_core.guard_campaign_lifecycle_update()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -615,7 +664,9 @@ BEGIN
     IF NOT (
       (OLD.status = 'DRAFT' AND NEW.status IN ('REGISTRATION_OPEN', 'CANCELLED')) OR
       (OLD.status = 'REGISTRATION_OPEN' AND NEW.status IN ('REGISTRATION_CLOSED', 'CANCELLED')) OR
-      (OLD.status = 'REGISTRATION_CLOSED' AND NEW.status = 'COMPLETED')
+      (OLD.status = 'REGISTRATION_CLOSED' AND NEW.status = 'COMPLETED') OR
+      (OLD.status = 'EXAMINATION_ACTIVE' AND NEW.status = 'COMPLETED'
+        AND OLD.public_code ~ '^LEGACY-[A-F0-9]{32}$')
     ) THEN
       RAISE EXCEPTION 'illegal campaign lifecycle transition: % -> %', OLD.status, NEW.status
         USING ERRCODE = 'check_violation';
@@ -731,35 +782,18 @@ CREATE CONSTRAINT TRIGGER trg_campaign_lifecycle_history_required
 -- ── Safe public view RLS and atomic outbox staging ─────────────────────────
 -- Policy rows remain private. Public reader sees only safe view columns; the
 -- publication table grants it only a publicCode equality key.
--- The existing officer outbox grant remains INSERT-only. Keep its established
--- application-service producer path; allow scheduling-service only for the
--- BUILD-001 session event and its matching agency-bound safe audit envelope.
+-- Direct officer outbox writes remain limited to ordinary, unreserved
+-- application-service events. Campaign domain events and audit envelopes are
+-- staged by the private command-function owner, not by a role-shared backend.
 DROP POLICY IF EXISTS pc_event_outbox_officer_stage ON public_core.event_outbox;
 CREATE POLICY pc_event_outbox_officer_stage ON public_core.event_outbox
   FOR INSERT TO usrp_rdf_officer, usrp_rnp_officer, usrp_rcs_officer
   WITH CHECK (
     producer = 'application-service'
-    OR (
-      producer = 'scheduling-service'
-      AND payload->>'eventType' = event_type
-      AND payload->>'schemaVersion' = '1.0'
-      AND payload->>'piiClassification' = 'NONE'
-      AND payload ? 'correlationId'
-      AND payload ? 'causationId'
-      AND (
-        (current_user = 'usrp_rdf_officer' AND payload->>'agency' = 'RDF') OR
-        (current_user = 'usrp_rnp_officer' AND payload->>'agency' = 'RNP') OR
-        (current_user = 'usrp_rcs_officer' AND payload->>'agency' = 'RCS')
-      )
-      AND (
-        event_type = 'CAMPAIGN_SESSION_CONFIGURED'
-        OR (
-          event_type = 'AUDIT_ENTRY'
-          AND payload->>'entityType' = 'CAMPAIGN'
-          AND payload->>'action' = 'CAMPAIGN_SESSION_CONFIGURED'
-        )
-      )
-    )
+    AND left(upper(regexp_replace(event_type, '^[[:space:]]+|[[:space:]]+$', '', 'g')), 9) <> 'CAMPAIGN_'
+    AND left(upper(regexp_replace(COALESCE(payload->>'eventType', event_type), '^[[:space:]]+|[[:space:]]+$', '', 'g')), 9) <> 'CAMPAIGN_'
+    AND upper(regexp_replace(COALESCE(payload->>'entityType', ''), '^[[:space:]]+|[[:space:]]+$', '', 'g')) <> 'CAMPAIGN'
+    AND left(upper(regexp_replace(COALESCE(payload->>'action', ''), '^[[:space:]]+|[[:space:]]+$', '', 'g')), 9) <> 'CAMPAIGN_'
   );
 
 COMMIT;

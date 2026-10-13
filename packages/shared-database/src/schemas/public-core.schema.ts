@@ -302,6 +302,11 @@ export const campaignVenueAssignments = publicCore.table(
     index('idx_pc_venue_campaign').on(t.campaignId),
     index('idx_pc_venue_district').on(t.district),
     uniqueIndex('idx_pc_venue_campaign_district').on(t.campaignId, t.district),
+    check(
+      'campaign_capacity_decision_code_check',
+      sql`(capacity_decision_code IS NULL OR capacity_decision_code = 'UNBOUNDED_CAPACITY')
+        AND (capacity_limit IS NULL OR capacity_decision_code IS NULL)`,
+    ),
   ],
 );
 
@@ -402,7 +407,8 @@ export const campaignLifecycleHistory = publicCore.table(
       sql`(from_status IS NULL AND to_status = 'DRAFT') OR
         (from_status IS NOT NULL AND from_status = 'DRAFT' AND to_status IN ('REGISTRATION_OPEN', 'CANCELLED')) OR
         (from_status IS NOT NULL AND from_status = 'REGISTRATION_OPEN' AND to_status IN ('REGISTRATION_CLOSED', 'CANCELLED')) OR
-        (from_status IS NOT NULL AND from_status = 'REGISTRATION_CLOSED' AND to_status = 'COMPLETED')`,
+        (from_status IS NOT NULL AND from_status = 'REGISTRATION_CLOSED' AND to_status = 'COMPLETED') OR
+        (from_status IS NOT NULL AND from_status = 'EXAMINATION_ACTIVE' AND to_status = 'COMPLETED')`,
     ),
     foreignKey({
       name: 'campaign_lifecycle_history_campaign_agency_fk',

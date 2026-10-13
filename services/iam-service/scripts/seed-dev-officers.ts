@@ -3,18 +3,18 @@
 //
 // Seeds one officer per agency so the officer console (and manual login smoke
 // tests) have real credentials to drive. NOT for production — real officers are
-// provisioned through a proper IdP/workflow (a deferred follow-on). Each row is
-// inserted AS usrp_iam_service (the only role permitted on the credential store)
-// with a scrypt password digest computed here in Node — SQL has no scrypt
-// primitive, which is precisely why seeding lives in TS.
+// provisioned through a proper IdP/workflow (a deferred follow-on). Officer rows
+// are inserted by a direct privileged local operator connection because
+// usrp_iam_service is SELECT-only on the credential store. The scrypt password
+// digest is computed here in Node; SQL has no scrypt primitive.
 //
-//   pnpm --filter @usrp/iam-service exec tsx scripts/seed-dev-officers.ts
-//   (or `pnpm --filter @usrp/iam-service seed:dev`)
+//   DEV_SEED_DATABASE_URL='postgresql://usrp_admin:...@localhost:5432/usrp_db' pnpm --filter @usrp/iam-service seed:dev
+// Supply the privileged local operator URL; the shared usrp_app login is denied.
 //
 // Idempotent: ON CONFLICT (login_handle) DO NOTHING. Re-running is a no-op.
 // ══════════════════════════════════════════════════════════════════
 
-import { sql } from '@usrp/shared-database';
+import postgres from 'postgres';
 import { hashPassword } from '@usrp/shared-security';
 import type { Agency } from '@usrp/shared-types';
 
@@ -53,60 +53,99 @@ const DEV_OFFICERS: readonly DevOfficer[] = [
 ];
 
 async function main(): Promise<void> {
-  let seeded = 0;
-  for (const officer of DEV_OFFICERS) {
-    const credential = hashPassword(DEV_PASSWORD);
-    const inserted = await sql.begin(async (tx) => {
-      await tx`SET LOCAL ROLE ${sql('usrp_iam_service')}`;
-      const rows = await tx<{ officer_id: string }[]>`
-        INSERT INTO public_core.officer_accounts
-          (officer_id, login_handle, credential, agency, roles)
-        VALUES (
-          ${officer.officerId}, ${officer.loginHandle}, ${credential},
-          ${officer.agency}, ${sql.array(officer.roles as string[])}
-        )
-        ON CONFLICT (login_handle) DO NOTHING
-        RETURNING officer_id
-      `;
-      return rows.length > 0;
-    });
-    seeded += inserted ? 1 : 0;
-    console.log(
-      JSON.stringify({
-        msg: inserted ? 'officer_seeded' : 'officer_exists',
-        loginHandle: officer.loginHandle,
-        agency: officer.agency,
-      }),
-    );
+  if (process.env['NODE_ENV'] === 'production') {
+    throw new Error('Refusing to seed fixed development officer credentials when NODE_ENV=production.');
   }
-  // The dev service clients (same idempotent shape as the officers).
-  for (const client of DEV_SERVICE_CLIENTS) {
-    const serviceCredential = hashPassword(DEV_CLIENT_SECRET);
-    const clientInserted = await sql.begin(async (tx) => {
-      await tx`SET LOCAL ROLE ${sql('usrp_iam_service')}`;
-      const rows = await tx<{ service_id: string }[]>`
-        INSERT INTO public_core.service_accounts (service_id, client_id, credential, description)
-        VALUES (${client.serviceId}, ${client.clientId}, ${serviceCredential}, ${client.description})
-        ON CONFLICT (client_id) DO NOTHING
-        RETURNING service_id
-      `;
-      return rows.length > 0;
-    });
-    console.log(
-      JSON.stringify({
-        msg: clientInserted ? 'service_client_seeded' : 'service_client_exists',
-        clientId: client.clientId,
-      }),
-    );
+  const databaseUrl = process.env['DEV_SEED_DATABASE_URL'] ?? process.env['DATABASE_URL'];
+  if (!databaseUrl) {
+    throw new Error('Set DEV_SEED_DATABASE_URL (or DATABASE_URL) to a privileged local development database connection.');
   }
 
-  console.log(
-    JSON.stringify({ msg: 'seed_complete', inserted: seeded, total: DEV_OFFICERS.length, devPassword: DEV_PASSWORD }),
-  );
-  await sql.end({ timeout: 5 });
+  const database = postgres(databaseUrl, { max: 1, onnotice: () => {} });
+  try {
+    const [principal] = await database<{
+      readonly session_user: string;
+      readonly current_user: string;
+      readonly officer_insert: boolean;
+      readonly can_bypass_rls: boolean;
+      readonly iam_role_assumable: boolean;
+    }[]>`
+      SELECT
+        session_user::text AS session_user,
+        current_user::text AS current_user,
+        has_table_privilege(current_user, 'public_core.officer_accounts', 'INSERT') AS officer_insert,
+        (SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user) AS can_bypass_rls,
+        (SELECT rolsuper FROM pg_roles WHERE rolname = session_user)
+          OR pg_has_role(session_user, 'usrp_iam_service', 'MEMBER') AS iam_role_assumable
+    `;
+    if (!principal || principal.session_user === 'usrp_app' || principal.current_user === 'usrp_app' ||
+        principal.session_user !== principal.current_user || !principal.officer_insert ||
+        !principal.can_bypass_rls || !principal.iam_role_assumable) {
+      throw new Error(
+        `Officer seeding requires a direct operator connection with officer-account INSERT and BYPASSRLS (session_user=${principal?.session_user ?? 'unknown'}, ` +
+        `current_user=${principal?.current_user ?? 'unknown'}); usrp_app is intentionally read-only for officer accounts. ` +
+        'Set DEV_SEED_DATABASE_URL to the local database administrator URL. The URL is never logged.',
+      );
+    }
+
+    let seeded = 0;
+    for (const officer of DEV_OFFICERS) {
+      const credential = hashPassword(DEV_PASSWORD);
+      const inserted = await database.begin(async (tx) => {
+        // The privileged development operator inserts under its authenticated
+        // session; usrp_iam_service is intentionally SELECT-only for this table.
+        const rows = await tx<{ officer_id: string }[]>`
+          INSERT INTO public_core.officer_accounts
+            (officer_id, login_handle, credential, agency, roles)
+          VALUES (
+            ${officer.officerId}, ${officer.loginHandle}, ${credential},
+            ${officer.agency}, ${tx.array(officer.roles as string[])}
+          )
+          ON CONFLICT (login_handle) DO NOTHING
+          RETURNING officer_id
+        `;
+        return rows.length > 0;
+      });
+      seeded += inserted ? 1 : 0;
+      console.log(
+        JSON.stringify({
+          msg: inserted ? 'officer_seeded' : 'officer_exists',
+          loginHandle: officer.loginHandle,
+          agency: officer.agency,
+        }),
+      );
+    }
+    // The dev service clients (same idempotent shape as the officers).
+    for (const client of DEV_SERVICE_CLIENTS) {
+      const serviceCredential = hashPassword(DEV_CLIENT_SECRET);
+      const clientInserted = await database.begin(async (tx) => {
+        await tx`SET LOCAL ROLE usrp_iam_service`;
+        const rows = await tx<{ service_id: string }[]>`
+          INSERT INTO public_core.service_accounts (service_id, client_id, credential, description)
+          VALUES (${client.serviceId}, ${client.clientId}, ${serviceCredential}, ${client.description})
+          ON CONFLICT (client_id) DO NOTHING
+          RETURNING service_id
+        `;
+        return rows.length > 0;
+      });
+      console.log(
+        JSON.stringify({
+          msg: clientInserted ? 'service_client_seeded' : 'service_client_exists',
+          clientId: client.clientId,
+        }),
+      );
+    }
+
+    console.log(
+      JSON.stringify({ msg: 'seed_complete', inserted: seeded, total: DEV_OFFICERS.length, devPassword: DEV_PASSWORD }),
+    );
+  } finally {
+    await database.end({ timeout: 5 });
+  }
 }
 
 main().catch((err: unknown) => {
-  console.error(JSON.stringify({ msg: 'seed_failed' }), err);
+  const message = err instanceof Error ? err.message : String(err);
+  console.error(JSON.stringify({ msg: 'seed_failed', error: message }));
   process.exit(1);
 });

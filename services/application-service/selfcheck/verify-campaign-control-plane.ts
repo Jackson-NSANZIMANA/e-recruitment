@@ -75,6 +75,7 @@ let failures = 0;
 const applicantIds: string[] = [];
 const actorAccountIds = [RDF_ACTOR.subjectId, RNP_ACTOR.subjectId, REVIEWER.subjectId, OTHER_RDF_ADMIN.subjectId];
 let legacyPublicCode: string | null = null;
+let legacyCompletionPublicCode: string | null = null;
 function check(label: string, condition: boolean, detail = ''): void {
   if (condition) console.log(`  ✓ ${label}`);
   else {
@@ -301,7 +302,9 @@ async function cleanup(): Promise<void> {
     await tx`SET LOCAL session_replication_role = replica`;
     const roots = await tx<{ id: string }[]>`
       SELECT id FROM public_core.recruitment_campaigns
-      WHERE public_code LIKE ${`${PREFIX}-%`} OR public_code = ${legacyPublicCode}`;
+      WHERE public_code LIKE ${`${PREFIX}-%`}
+         OR public_code = ${legacyPublicCode}
+         OR public_code = ${legacyCompletionPublicCode}`;
     const ids = roots.map((row) => row.id);
     if (ids.length > 0) {
       await tx`
@@ -344,6 +347,135 @@ async function expectPgRejected(
     const message = error instanceof Error ? error.message : String(error);
     check(label, pattern.test(message), message);
   }
+}
+
+type OutboxTestRole = 'usrp_rdf_officer' | 'usrp_system_service';
+
+async function expectOutboxDenied(
+  label: string,
+  role: OutboxTestRole,
+  eventType: string,
+  producer: string,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  const eventId = typeof payload['eventId'] === 'string' ? payload['eventId'] : randomUUID();
+  await expectPgRejected(label, () => sql.begin(async (tx) => {
+    if (role === 'usrp_rdf_officer') await tx`SET LOCAL ROLE usrp_rdf_officer`;
+    else await tx`SET LOCAL ROLE usrp_system_service`;
+    await tx`
+      INSERT INTO public_core.event_outbox (event_id, event_type, producer, payload)
+      VALUES (${eventId}::uuid, ${eventType}, ${producer}, ${tx.json(asJsonb(payload))})
+    `;
+  }), /row-level security|permission denied|policy/i);
+}
+
+async function expectDirectDraftRejected(
+  label: string,
+  overrides: Record<string, unknown>,
+  pattern: RegExp = /invalid draft|draft .*must|draft .*window|draft category|draft business|invalid, duplicate/i,
+): Promise<void> {
+  const code = publicCode('DATABASE-VALIDATION');
+  const draft = { ...draftBody(code), ...overrides };
+  const command = {
+    actorId: RDF_ACTOR.subjectId,
+    agency: 'RDF',
+    operation: 'createCampaignDraft',
+    commandId: randomUUID(),
+    campaignId: randomUUID(),
+    publicCode: code,
+    idempotencyKey: randomUUID(),
+    requestHash: 'a'.repeat(64),
+    responseStatus: 201,
+    responseBody: { status: 'DRAFT_CREATED', publicCode: code },
+    occurredAt: '2030-01-01T00:00:00.000000Z',
+    draft,
+  };
+  await expectPgRejected(label, () => sql.begin(async (tx) => {
+    await tx`SET LOCAL ROLE usrp_rdf_officer`;
+    await tx`SELECT set_config('usrp.campaign_actor_id', ${RDF_ACTOR.subjectId}, true)`;
+    await tx`SELECT public_core.campaign_write_draft(${tx.json(asJsonb(command))})`;
+  }), pattern);
+}
+
+async function expectDirectSessionRejected(
+  label: string,
+  campaignId: string,
+  publicCodeValue: string,
+  overrides: Record<string, unknown>,
+): Promise<void> {
+  const session = {
+    publicCode: publicCodeValue,
+    district: 'GASABO',
+    province: 'KIGALI_CITY',
+    venueName: `${PREFIX} SQL session validation`,
+    examDate: '2030-02-03',
+    reportingTimeHour: 8,
+    capacityLimit: 100,
+    capacityDecisionCode: null,
+    isActive: true,
+    ...overrides,
+  };
+  const emptyCoverageHash = campaignCoverageHash(campaignId, []);
+  const command = {
+    actorId: RDF_ACTOR.subjectId,
+    agency: 'RDF',
+    operation: 'configureCampaignSession',
+    commandId: randomUUID(),
+    campaignId,
+    publicCode: publicCodeValue,
+    sessionId: randomUUID(),
+    idempotencyKey: randomUUID(),
+    requestHash: 'b'.repeat(64),
+    occurredAt: '2030-01-01T00:00:00.000000Z',
+    currentCoverageVersion: 0,
+    currentCoverageCanonicalJson: '[]',
+    currentCoverageHash: emptyCoverageHash,
+    coverageVersion: 1,
+    coverageCanonicalJson: '[]',
+    coverageHash: emptyCoverageHash,
+    responseBody: {
+      status: 'SESSION_CONFIGURED',
+      publicCode: publicCodeValue,
+      coverageVersion: 1,
+      coverageHash: emptyCoverageHash,
+      capacityDecisionCode: null,
+    },
+    session,
+  };
+  await expectPgRejected(label, () => sql.begin(async (tx) => {
+    await tx`SET LOCAL ROLE usrp_rdf_officer`;
+    await tx`SELECT set_config('usrp.campaign_actor_id', ${RDF_ACTOR.subjectId}, true)`;
+    await tx`SELECT public_core.scheduling_configure_campaign_session(${tx.json(asJsonb(command))})`;
+  }), /INVALID_SESSION_CONFIGURATION/i);
+}
+
+async function verifyOutboxStageAllowed(
+  label: string,
+  role: OutboxTestRole,
+  eventType: string,
+  producer: string,
+): Promise<void> {
+  const eventId = randomUUID();
+  let insertError: string | null = null;
+  try {
+    await sql.begin(async (tx) => {
+      if (role === 'usrp_rdf_officer') await tx`SET LOCAL ROLE usrp_rdf_officer`;
+      else await tx`SET LOCAL ROLE usrp_system_service`;
+      await tx`
+        INSERT INTO public_core.event_outbox (event_id, event_type, producer, payload)
+        VALUES (
+          ${eventId}::uuid, ${eventType}, ${producer},
+          ${tx.json(asJsonb({ eventId, eventType }))}
+        )
+      `;
+    });
+  } catch (error) {
+    insertError = error instanceof Error ? error.message : String(error);
+  }
+  const rows = await admin<{ n: number }[]>`
+    SELECT count(*)::int AS n FROM public_core.event_outbox WHERE event_id = ${eventId}::uuid`;
+  check(label, insertError === null && rows[0]?.n === 1, insertError ?? `visible rows: ${rows[0]?.n ?? 0}`);
+  await admin`DELETE FROM public_core.event_outbox WHERE event_id = ${eventId}::uuid`;
 }
 
 async function coverageState(campaignId: string): Promise<{
@@ -517,6 +649,22 @@ async function main(): Promise<void> {
     const idemBody = draftBody(idemCode);
     const idemKey = randomUUID();
     const firstDraft = await campaign.createDraft(commandRequest(RDF_ACTOR, idemBody, idemKey));
+    const timestampAlignment = await admin<{ aligned: boolean }[]>`
+      SELECT campaign.created_at = campaign.updated_at
+          AND history.occurred_at = campaign.created_at
+          AND count(outbox.id) = 2
+          AND bool_and(outbox.created_at = campaign.created_at)
+          AND bool_and((outbox.payload->>'occurredAt')::timestamptz = campaign.created_at) AS aligned
+      FROM public_core.recruitment_campaigns AS campaign
+      JOIN public_core.campaign_lifecycle_history AS history
+        ON history.campaign_id = campaign.id AND history.to_status = 'DRAFT'
+      JOIN public_core.event_outbox AS outbox
+        ON outbox.payload->>'campaignId' = campaign.id::text
+      WHERE campaign.id = ${firstDraft.campaignId}::uuid
+      GROUP BY campaign.created_at, campaign.updated_at, history.occurred_at
+    `;
+    check('transaction_timestamp is retained at microsecond precision across command, row, history, and outbox',
+      timestampAlignment[0]?.aligned === true);
     const replayDraft = await campaign.createDraft(commandRequest(RDF_ACTOR, idemBody, idemKey));
     check('same actor/op/key/hash replays the original draft result',
       replayDraft.replayed && replayDraft.commandId === firstDraft.commandId);
@@ -574,6 +722,20 @@ async function main(): Promise<void> {
       readonly provisioner_account_select: boolean;
       readonly provisioner_account_insert: boolean;
       readonly provisioner_outbox_insert: boolean;
+      readonly iam_officer_insert: boolean;
+      readonly iam_officer_update: boolean;
+      readonly lock_owner_login: boolean;
+      readonly lock_owner_bypass_rls: boolean;
+      readonly lock_owner_can_select_id: boolean;
+      readonly lock_owner_can_select_status: boolean;
+      readonly lock_owner_can_select_public_code: boolean;
+      readonly lock_owner_can_insert: boolean;
+      readonly lock_owner_table_update: boolean;
+      readonly lock_owner_updated_at_update: boolean;
+      readonly lock_owner_status_update: boolean;
+      readonly lock_owner_extra_update_columns: number;
+      readonly app_can_assume_lock_owner: boolean;
+      readonly lock_function_owner: string | null;
       readonly unsafe_definer_search_paths: number;
       readonly command_definer_count: number;
     }[]>`
@@ -614,11 +776,33 @@ async function main(): Promise<void> {
         has_table_privilege('usrp_iam_provisioner', 'public_core.officer_accounts', 'SELECT') AS provisioner_account_select,
         has_table_privilege('usrp_iam_provisioner', 'public_core.officer_accounts', 'INSERT') AS provisioner_account_insert,
         has_table_privilege('usrp_iam_provisioner', 'public_core.event_outbox', 'INSERT') AS provisioner_outbox_insert,
+        (has_table_privilege('usrp_iam_service', 'public_core.officer_accounts', 'INSERT')
+          OR has_any_column_privilege('usrp_iam_service', 'public_core.officer_accounts', 'INSERT')) AS iam_officer_insert,
+        (has_table_privilege('usrp_iam_service', 'public_core.officer_accounts', 'UPDATE')
+          OR has_any_column_privilege('usrp_iam_service', 'public_core.officer_accounts', 'UPDATE')) AS iam_officer_update,
+        (SELECT rolcanlogin FROM pg_roles WHERE rolname = 'usrp_campaign_application_lock_owner') AS lock_owner_login,
+        (SELECT rolbypassrls FROM pg_roles WHERE rolname = 'usrp_campaign_application_lock_owner') AS lock_owner_bypass_rls,
+        has_column_privilege('usrp_campaign_application_lock_owner', 'public_core.recruitment_campaigns', 'id', 'SELECT') AS lock_owner_can_select_id,
+        has_column_privilege('usrp_campaign_application_lock_owner', 'public_core.recruitment_campaigns', 'status', 'SELECT') AS lock_owner_can_select_status,
+        has_column_privilege('usrp_campaign_application_lock_owner', 'public_core.recruitment_campaigns', 'public_code', 'SELECT') AS lock_owner_can_select_public_code,
+        has_table_privilege('usrp_campaign_application_lock_owner', 'public_core.recruitment_campaigns', 'INSERT') AS lock_owner_can_insert,
+        has_table_privilege('usrp_campaign_application_lock_owner', 'public_core.recruitment_campaigns', 'UPDATE') AS lock_owner_table_update,
+        has_column_privilege('usrp_campaign_application_lock_owner', 'public_core.recruitment_campaigns', 'updated_at', 'UPDATE') AS lock_owner_updated_at_update,
+        has_column_privilege('usrp_campaign_application_lock_owner', 'public_core.recruitment_campaigns', 'status', 'UPDATE') AS lock_owner_status_update,
+        (SELECT count(*)::int
+          FROM pg_attribute AS column_info
+          WHERE column_info.attrelid = 'public_core.recruitment_campaigns'::regclass
+            AND column_info.attnum > 0 AND NOT column_info.attisdropped
+            AND column_info.attname <> 'updated_at'
+            AND has_column_privilege('usrp_campaign_application_lock_owner', 'public_core.recruitment_campaigns', column_info.attname, 'UPDATE')) AS lock_owner_extra_update_columns,
+        pg_has_role('usrp_app', 'usrp_campaign_application_lock_owner', 'MEMBER') AS app_can_assume_lock_owner,
+        (SELECT owner.rolname FROM pg_proc p JOIN pg_roles owner ON owner.oid = p.proowner
+          WHERE p.oid = 'public_core.lock_campaign_for_application_insert(uuid,public_core.agency)'::regprocedure) AS lock_function_owner,
         (SELECT count(*)::int FROM pg_proc p JOIN pg_roles r ON r.oid = p.proowner
-          WHERE r.rolname IN ('usrp_campaign_command_owner', 'usrp_campaign_admin_provision_owner')
-            AND p.prosecdef AND NOT ('search_path=pg_catalog' = ANY(COALESCE(p.proconfig, ARRAY[]::text[])))) AS unsafe_definer_search_paths,
+          WHERE r.rolname IN ('usrp_campaign_command_owner', 'usrp_campaign_admin_provision_owner', 'usrp_campaign_application_lock_owner')
+            AND p.prosecdef AND NOT ('search_path=pg_catalog, pg_temp' = ANY(COALESCE(p.proconfig, ARRAY[]::text[])))) AS unsafe_definer_search_paths,
         (SELECT count(*)::int FROM pg_proc p JOIN pg_roles r ON r.oid = p.proowner
-          WHERE r.rolname IN ('usrp_campaign_command_owner', 'usrp_campaign_admin_provision_owner')
+          WHERE r.rolname IN ('usrp_campaign_command_owner', 'usrp_campaign_admin_provision_owner', 'usrp_campaign_application_lock_owner')
             AND p.prosecdef) AS command_definer_count`;
     const boundary = boundaryPrivileges[0];
     check('campaign-admin DB role has no direct campaign/session/history DML and uses command functions',
@@ -632,6 +816,16 @@ async function main(): Promise<void> {
       boundary?.command_owner_login === false && boundary.command_owner_bypass_rls === true &&
       boundary.app_can_assume_command_owner === false && boundary.provision_owner_login === false &&
       boundary.app_can_assume_provision_owner === false);
+    check('IAM retains read-only officer-account access',
+      boundary?.iam_officer_insert === false && boundary.iam_officer_update === false);
+    check('application lock function uses a NOLOGIN owner with key/status reads and only the row-lock ACL',
+      boundary?.lock_function_owner === 'usrp_campaign_application_lock_owner' &&
+      boundary.lock_owner_login === false && boundary.lock_owner_bypass_rls === true &&
+      boundary.lock_owner_can_select_id === true && boundary.lock_owner_can_select_status === true &&
+      boundary.lock_owner_can_select_public_code === false && boundary.lock_owner_can_insert === false &&
+      boundary.lock_owner_table_update === false && boundary.lock_owner_updated_at_update === true &&
+      boundary.lock_owner_status_update === false && boundary.lock_owner_extra_update_columns === 0 &&
+      boundary.app_can_assume_lock_owner === false);
     check('application DB login itself has no campaign/session/history DML',
       boundary?.app_campaign_insert === false && boundary.app_campaign_update === false &&
       boundary.app_session_insert === false && boundary.app_session_update === false &&
@@ -647,7 +841,7 @@ async function main(): Promise<void> {
       boundary.provisioner_execute === true && boundary.iam_service_execute_provisioner === false &&
       boundary.app_execute_provisioner === false && boundary.provisioner_account_select === false &&
       boundary.provisioner_account_insert === false && boundary.provisioner_outbox_insert === false);
-    check('all campaign SECURITY DEFINER functions pin search_path to pg_catalog',
+    check('campaign SECURITY DEFINER functions pin search_path to pg_catalog, pg_temp',
       boundary?.command_definer_count !== undefined && boundary.command_definer_count > 0 &&
       boundary.unsafe_definer_search_paths === 0);
     const iamRoleSwitch = await sql.begin(async (tx) => {
@@ -658,6 +852,35 @@ async function main(): Promise<void> {
     });
     check('live app session can SET ROLE usrp_iam_service (explicit shared-backend trust boundary)',
       iamRoleSwitch[0]?.session_user === 'usrp_app' && iamRoleSwitch[0]?.current_user === 'usrp_iam_service');
+    await expectPgRejected('IAM role cannot insert/promote officer accounts', () => sql.begin(async (tx) => {
+      await tx`SET LOCAL ROLE usrp_iam_service`;
+      await tx`
+        INSERT INTO public_core.officer_accounts
+          (officer_id, login_handle, credential, agency, roles, status)
+        VALUES (
+          ${randomUUID()}::uuid, ${`${PREFIX.toLowerCase()}-iam-write-forbidden`},
+          'scrypt$selfcheck$not-a-login-credential', 'RDF', ARRAY['agency_admin']::text[], 'active'
+        )
+      `;
+    }), /permission denied|insufficient privilege/i);
+    await expectPgRejected('IAM role cannot update/promote an officer account', () => sql.begin(async (tx) => {
+      await tx`SET LOCAL ROLE usrp_iam_service`;
+      await tx`
+        UPDATE public_core.officer_accounts
+        SET roles = ARRAY['agency_admin']::text[]
+        WHERE officer_id = ${RDF_ACTOR.subjectId}::uuid
+      `;
+    }), /permission denied|insufficient privilege/i);
+    await expectPgRejected('shared application role cannot write officer accounts directly', () => sql.begin(async (tx) => {
+      await tx`
+        INSERT INTO public_core.officer_accounts
+          (officer_id, login_handle, credential, agency, roles, status)
+        VALUES (
+          ${randomUUID()}::uuid, ${`${PREFIX.toLowerCase()}-app-write-forbidden`},
+          'scrypt$selfcheck$not-a-login-credential', 'RDF', ARRAY['agency_admin']::text[], 'active'
+        )
+      `;
+    }), /permission denied|insufficient privilege/i);
     await expectPgRejected('usrp_app cannot directly update campaign state', () => sql.begin(async (tx) => {
       await tx`
         UPDATE public_core.recruitment_campaigns
@@ -745,51 +968,161 @@ async function main(): Promise<void> {
         WHERE campaign_id = ${firstDraft.campaignId}::uuid
       `;
     }), /permission denied|insufficient privilege/i);
-    await expectPgRejected('officer role cannot forge a campaign action under another audit entity type', () => sql.begin(async (tx) => {
+    await expectOutboxDenied(
+      'officer cannot forge a campaign action under another audit entity type',
+      'usrp_rdf_officer', 'AUDIT_ENTRY', 'application-service',
+      {
+        eventId: randomUUID(), eventType: 'AUDIT_ENTRY', entityType: 'OFFICER',
+        entityId: RDF_ACTOR.subjectId, action: 'CAMPAIGN_SESSION_CONFIGURED',
+      },
+    );
+    await expectOutboxDenied(
+      'officer cannot hide a lower-case campaign event in an ordinary event envelope',
+      'usrp_rdf_officer', 'APPLICATION_SUBMITTED', 'application-service',
+      { eventId: randomUUID(), eventType: 'cAmPaIgN_PuBlIsHeD', entityType: 'APPLICATION' },
+    );
+    await expectOutboxDenied(
+      'officer cannot stage a campaign audit using mixed-case envelope fields',
+      'usrp_rdf_officer', 'audit_entry', 'application-service',
+      {
+        eventId: randomUUID(), eventType: 'audit_entry', entityType: 'cAmPaIgN',
+        action: 'cAmPaIgN_sEsSiOn_cOnFiGuReD',
+      },
+    );
+    await expectOutboxDenied(
+      'officer cannot hide a campaign event behind leading whitespace',
+      'usrp_rdf_officer', 'APPLICATION_SUBMITTED', 'application-service',
+      { eventId: randomUUID(), eventType: '\tCAMPAIGN_PUBLISHED', entityType: 'APPLICATION' },
+    );
+    await expectOutboxDenied(
+      'officer cannot stage under the scheduling-service producer',
+      'usrp_rdf_officer', 'APPLICATION_SUBMITTED', 'scheduling-service',
+      { eventId: randomUUID(), eventType: 'APPLICATION_SUBMITTED' },
+    );
+    await expectOutboxDenied(
+      'officer cannot stage under the IAM relay producer',
+      'usrp_rdf_officer', 'APPLICATION_SUBMITTED', 'iam-service',
+      { eventId: randomUUID(), eventType: 'APPLICATION_SUBMITTED' },
+    );
+    await expectOutboxDenied(
+      'system role cannot forge a mixed-case campaign domain event',
+      'usrp_system_service', 'cAmPaIgN_pUbLiShEd', 'scheduling-service',
+      { eventId: randomUUID(), eventType: 'cAmPaIgN_pUbLiShEd', entityType: 'cAmPaIgN' },
+    );
+    await expectOutboxDenied(
+      'system role cannot forge a mixed-case campaign audit under another entity type',
+      'usrp_system_service', 'audit_entry', 'application-service',
+      {
+        eventId: randomUUID(), eventType: 'AUDIT_ENTRY', entityType: 'OFFICER',
+        entityId: RDF_ACTOR.subjectId, action: 'cAmPaIgN_pUbLiShEd',
+      },
+    );
+    await expectOutboxDenied(
+      'system role cannot stage under the IAM relay producer',
+      'usrp_system_service', 'APPLICATION_SUBMITTED', 'iam-service',
+      { eventId: randomUUID(), eventType: 'APPLICATION_SUBMITTED' },
+    );
+    await expectOutboxDenied(
+      'system role cannot stage under an unknown producer',
+      'usrp_system_service', 'APPLICATION_SUBMITTED', 'unknown-service',
+      { eventId: randomUUID(), eventType: 'APPLICATION_SUBMITTED' },
+    );
+    await verifyOutboxStageAllowed(
+      'officer can stage an ordinary application-service event',
+      'usrp_rdf_officer', 'APPLICATION_SUBMITTED', 'application-service',
+    );
+    await verifyOutboxStageAllowed(
+      'system role can stage an ordinary application-service event',
+      'usrp_system_service', 'APPLICATION_SUBMITTED', 'application-service',
+    );
+    await verifyOutboxStageAllowed(
+      'system role can stage an ordinary scheduling-service event',
+      'usrp_system_service', 'SLOT_ASSIGNED', 'scheduling-service',
+    );
+
+    console.log('\n── P5b. Database-side JSON draft/session/policy validation ─────');
+    await expectDirectDraftRejected(
+      'database rejects duplicate target districts on a direct command call',
+      { targetDistricts: ['GASABO', 'GASABO'] },
+      /invalid, duplicate, or cross-agency draft category\/district/i,
+    );
+    await expectDirectDraftRejected(
+      'database rejects an unrecognized target district on a direct command call',
+      { targetDistricts: ['NOT_A_RUANDA_DISTRICT'] },
+      /invalid, duplicate, or cross-agency draft category\/district/i,
+    );
+    await expectDirectDraftRejected(
+      'database rejects another agency category on a direct command call',
+      { targetCategories: ['CADET_OFFICER'] },
+      /invalid, duplicate, or cross-agency draft category\/district/i,
+    );
+    await expectDirectDraftRejected(
+      'database rejects a registration window with reversed timestamps',
+      { registrationOpensAt: '2030-01-31T17:00:00.000Z', registrationClosesAt: '2030-01-01T08:00:00.000Z' },
+      /draft registration\/examination windows are not ordered/i,
+    );
+    await expectDirectDraftRejected(
+      'database rejects impossible calendar dates before insertion',
+      { examinationStartDate: '2030-02-30' },
+      /invalid draft calendar date or timestamp/i,
+    );
+    await expectDirectDraftRejected(
+      'database rejects a non-integer target-intake count before casting',
+      { targetIntakeCount: 'many' },
+      /targetIntakeCount must be a positive integer or null/i,
+    );
+
+    const malformedSessionCampaign = await createDraft('SESSION-JSON-VALIDATION');
+    await expectDirectSessionRejected(
+      'database rejects a string capacity instead of a JSON number',
+      malformedSessionCampaign.campaignId,
+      malformedSessionCampaign.code,
+      { capacityLimit: '100' },
+    );
+    await expectDirectSessionRejected(
+      'database rejects an impossible session date before casting',
+      malformedSessionCampaign.campaignId,
+      malformedSessionCampaign.code,
+      { examDate: '2030-02-30' },
+    );
+
+    const emptyPolicyCampaign = await createDraft('EMPTY-POLICY');
+    const emptyPolicy = {
+      legalBasisCode: 'SELF_CHECK_FIXTURE',
+      legalBasisReference: 'Synthetic policy used only by the database proof.',
+      policyDocument: {},
+    };
+    const emptyPolicyCanonical = JSON.stringify(emptyPolicy);
+    const emptyPolicyHash = createHash('sha256').update(emptyPolicyCanonical).digest('hex');
+    await expectPgRejected('database rejects a hash-valid policy with empty category coverage', () => sql.begin(async (tx) => {
       await tx`SET LOCAL ROLE usrp_rdf_officer`;
-      const eventId = randomUUID();
+      await tx`SELECT set_config('usrp.campaign_actor_id', ${RDF_ACTOR.subjectId}, true)`;
       await tx`
-        INSERT INTO public_core.event_outbox (event_id, event_type, producer, payload)
-        VALUES (
-          ${eventId}::uuid, 'AUDIT_ENTRY', 'application-service',
+        SELECT public_core.campaign_write_policy_version(
           ${tx.json(asJsonb({
-            eventId,
-            eventType: 'AUDIT_ENTRY',
-            entityType: 'OFFICER',
-            entityId: RDF_ACTOR.subjectId,
-            action: 'CAMPAIGN_SESSION_CONFIGURED',
+            actorId: RDF_ACTOR.subjectId,
+            agency: 'RDF',
+            operation: 'createCampaignPolicyVersion',
+            commandId: randomUUID(),
+            campaignId: emptyPolicyCampaign.campaignId,
+            publicCode: emptyPolicyCampaign.code,
+            policyVersionId: randomUUID(),
+            policyVersionNumber: 1,
+            idempotencyKey: randomUUID(),
+            requestHash: 'c'.repeat(64),
+            responseStatus: 201,
+            responseBody: { status: 'POLICY_VERSION_CREATED', publicCode: emptyPolicyCampaign.code },
+            occurredAt: '2030-01-01T00:00:00.000000Z',
+            policyHash: emptyPolicyHash,
+            canonicalPolicyJson: emptyPolicyCanonical,
+            policy: emptyPolicy,
+            events: [],
           }))}
         )
       `;
-    }), /row-level security|permission denied|policy/i);
-    await expectPgRejected('system scheduler cannot forge a campaign domain event directly', () => sql.begin(async (tx) => {
-      await tx`SET LOCAL ROLE usrp_system_service`;
-      const eventId = randomUUID();
-      await tx`
-        INSERT INTO public_core.event_outbox (event_id, event_type, producer, payload)
-        VALUES (
-          ${eventId}::uuid, 'CAMPAIGN_PUBLISHED', 'scheduling-service',
-          ${tx.json(asJsonb({ eventId, eventType: 'CAMPAIGN_PUBLISHED', entityType: 'CAMPAIGN', campaignId: firstDraft.campaignId }))}
-        )
-      `;
-    }), /row-level security|permission denied|policy/i);
-    await expectPgRejected('system scheduler cannot forge a campaign audit under another entity type', () => sql.begin(async (tx) => {
-      await tx`SET LOCAL ROLE usrp_system_service`;
-      const eventId = randomUUID();
-      await tx`
-        INSERT INTO public_core.event_outbox (event_id, event_type, producer, payload)
-        VALUES (
-          ${eventId}::uuid, 'AUDIT_ENTRY', 'scheduling-service',
-          ${tx.json(asJsonb({
-            eventId,
-            eventType: 'AUDIT_ENTRY',
-            entityType: 'OFFICER',
-            entityId: RDF_ACTOR.subjectId,
-            action: 'CAMPAIGN_PUBLISHED',
-          }))}
-        )
-      `;
-    }), /row-level security|permission denied|policy/i);
+    }), /POLICY_CATEGORY_COVERAGE_MISMATCH/i);
+    check('empty database policy was not persisted after rejection',
+      await countForCampaign('campaign_policy_versions', emptyPolicyCampaign.campaignId) === 0);
 
     console.log('\n── P6. Permission, verified agency, and RLS isolation ────────');
     await expectCode('reviewer cannot create a campaign', () =>
@@ -1460,6 +1793,48 @@ async function main(): Promise<void> {
       (await admin<{ target_districts: unknown }[]>`
         SELECT target_districts FROM public_core.recruitment_campaigns WHERE id = ${legacyId}::uuid`
       )[0]?.target_districts === null);
+
+    const completionMigration = readFileSync(resolve(
+      REPO_ROOT,
+      'packages/shared-database/src/migrations/0004_build001_completion_and_capacity_constraints.sql',
+    ), 'utf8');
+    check('forward migration mirrors the venue-capacity check and legacy completion edge',
+      completionMigration.includes('campaign_capacity_decision_code_check') &&
+      completionMigration.includes("from_status = 'EXAMINATION_ACTIVE' AND to_status = 'COMPLETED'"));
+
+    const legacyExamId = randomUUID();
+    const legacyExamCode = `LEGACY-${legacyExamId.replaceAll('-', '').toUpperCase()}`;
+    legacyCompletionPublicCode = legacyExamCode;
+    await admin.begin(async (tx) => {
+      await tx`SET LOCAL session_replication_role = replica`;
+      await tx`
+        INSERT INTO public_core.recruitment_campaigns
+          (id, campaign_label, agency, public_code, status, target_categories,
+           target_districts, registration_opens_at, registration_closes_at,
+           examination_start_date, examination_end_date, examination_reporting_hour,
+           allows_walk_in)
+        VALUES (
+          ${legacyExamId}::uuid, ${`${PREFIX} legacy examination completion`}, 'RNP', ${legacyExamCode},
+          'EXAMINATION_ACTIVE', '["CADET_OFFICER"]', NULL,
+          now() - interval '30 days', now() - interval '1 day',
+          '2030-02-01', '2030-02-15', 8, false
+        )`;
+    });
+    const legacyCompletionRequest = commandRequest(RNP_ACTOR, { publicCode: legacyExamCode });
+    const legacyCompletion = await campaign.complete(legacyCompletionRequest);
+    const legacyCompletionReplay = await campaign.complete(legacyCompletionRequest);
+    const legacyCompletionHistory = await admin<{ from_status: string; to_status: string }[]>`
+      SELECT from_status, to_status
+      FROM public_core.campaign_lifecycle_history WHERE campaign_id = ${legacyExamId}::uuid`;
+    const legacyCompletionEvents = await outboxForCampaign(legacyExamId);
+    check('legacy EXAMINATION_ACTIVE campaign can complete through the narrow LEGACY-code exception',
+      legacyCompletion.fact?.kind === 'COMPLETED' && (await campaignRow(legacyExamCode))?.status === 'COMPLETED' &&
+      legacyCompletionHistory[0]?.from_status === 'EXAMINATION_ACTIVE' &&
+      legacyCompletionHistory[0]?.to_status === 'COMPLETED');
+    check('legacy completion replay returns the same command and emits exactly one completion event',
+      legacyCompletionReplay.replayed && legacyCompletionReplay.commandId === legacyCompletion.commandId &&
+      legacyCompletionEvents.filter((row) => row.event_type === 'CAMPAIGN_COMPLETED').length === 1 &&
+      await publicReads.findPublishedByCode(legacyExamCode) === null);
 
   } finally {
     await cleanup();

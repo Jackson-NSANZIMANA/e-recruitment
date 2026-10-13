@@ -131,7 +131,8 @@ export class CampaignControlService {
   async complete(request: CampaignWriteRequest): Promise<CampaignCommit> {
     const actor = requirePermission(request.actor, 'campaign.complete');
     const idempotencyKey = requireIdempotencyKey(request.idempotencyKey);
-    const publicCode = normalizeCampaignPublicCodeCommand(request.body);
+    // Only completion keeps the narrow pre-BUILD-001 legacy-code exception.
+    const publicCode = normalizeCampaignPublicCodeCommand(request.body, true);
     const command: CampaignControlCommand = {
       operation: 'COMPLETE',
       actor,

@@ -55,10 +55,12 @@ function exactKeys(
   }
 }
 
-function requirePublicCode(value: unknown): string {
+function requirePublicCode(value: unknown, allowLegacy = false): string {
   if (typeof value !== 'string') throw new HttpError(400, 'INVALID_PUBLIC_CODE', 'Field "publicCode" is required.');
   const code = value.trim().toUpperCase();
-  if (!PUBLIC_CODE_RE.test(code) || code.startsWith('LEGACY-')) {
+  const legacyCode = /^LEGACY-[A-F0-9]{32}$/.test(code);
+  if (!PUBLIC_CODE_RE.test(code) ||
+      (code.startsWith('LEGACY-') && (!allowLegacy || !legacyCode))) {
     throw new HttpError(400, 'INVALID_PUBLIC_CODE', 'Field "publicCode" is invalid.');
   }
   return code;
@@ -68,6 +70,7 @@ function requestObject(
   body: Record<string, unknown>,
   required: readonly string[],
   optional: readonly string[] = [],
+  allowLegacyPublicCode = false,
 ): Record<string, unknown> {
   exactKeys(body, required, optional);
   const result: Record<string, unknown> = {};
@@ -75,7 +78,9 @@ function requestObject(
   for (const key of optional) {
     if (Object.hasOwn(body, key)) result[key] = body[key];
   }
-  if (Object.hasOwn(result, 'publicCode')) result['publicCode'] = requirePublicCode(result['publicCode']);
+  if (Object.hasOwn(result, 'publicCode')) {
+    result['publicCode'] = requirePublicCode(result['publicCode'], allowLegacyPublicCode);
+  }
   return result;
 }
 
@@ -131,10 +136,11 @@ function campaignWriteHandler(
   upstreamOperation: UpstreamOperation,
   allowedRequired: readonly string[],
   allowedOptional: readonly string[] = [],
+  allowLegacyPublicCode = false,
 ): RouteHandler {
   return withOfficerSession(deps, operationId, async (ctx, session) => {
     const parsed = await readJsonBody(ctx);
-    const body = requestObject(parsed, allowedRequired, allowedOptional);
+    const body = requestObject(parsed, allowedRequired, allowedOptional, allowLegacyPublicCode);
     const idempotencyKey = requireIdempotencyKey(ctx.headers['idempotency-key']);
     const upstream = await deps.upstream.call({
       operation: upstreamOperation,
@@ -215,6 +221,8 @@ export function completeCampaignHandler(deps: EdgeDeps): RouteHandler {
     'completeCampaign',
     UPSTREAM.campaignComplete,
     ['publicCode'],
+    [],
+    true,
   );
 }
 

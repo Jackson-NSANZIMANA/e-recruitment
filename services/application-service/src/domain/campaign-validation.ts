@@ -95,9 +95,11 @@ function safeCode(value: unknown, field: string): string {
   return normalized;
 }
 
-export function normalizePublicCode(value: unknown): string {
+export function normalizePublicCode(value: unknown, allowLegacy = false): string {
   const normalized = requiredString(value, 'publicCode', 64).toUpperCase();
-  if (!PUBLIC_CODE_RE.test(normalized) || normalized.startsWith('LEGACY-')) {
+  const legacyCode = /^LEGACY-[A-F0-9]{32}$/.test(normalized);
+  if (!PUBLIC_CODE_RE.test(normalized) ||
+      (normalized.startsWith('LEGACY-') && (!allowLegacy || !legacyCode))) {
     fail('INVALID_PUBLIC_CODE', 'Field "publicCode" is invalid or uses a reserved legacy prefix.');
   }
   return normalized;
@@ -324,10 +326,10 @@ export function normalizeCampaignPolicy(
   };
 }
 
-export function normalizeCampaignPublicCodeCommand(value: unknown): string {
+export function normalizeCampaignPublicCodeCommand(value: unknown, allowLegacy = false): string {
   const body = record(value, 'body');
   exactKeys(body, ['publicCode'], [], 'body');
-  return normalizePublicCode(body.publicCode);
+  return normalizePublicCode(body.publicCode, allowLegacy);
 }
 
 export function normalizeCampaignSession(value: unknown): CampaignSessionInput {

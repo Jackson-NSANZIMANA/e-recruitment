@@ -114,6 +114,9 @@ async function main(): Promise<void> {
           ...(replayed ? { replayed: true } : {}),
         };
       }
+      if (input.operation.id === 'campaignComplete') {
+        return { status: 200, body: { status: 'COMPLETED', publicCode: 'LEGACY-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' } };
+      }
       if (input.operation.id === 'publicCampaignList') {
         return { status: 200, body: { campaigns: [campaignPublicFixture()] } };
       }
@@ -307,6 +310,35 @@ async function main(): Promise<void> {
     check('a stored upstream replay is represented by the allowlisted replay header',
       replayWrite.status === 200 && replayWrite.headers.get('Idempotency-Replayed') === 'true' &&
       calls.length === 2 && calls[1]?.idempotencyKey === key);
+
+    const legacyCode = `LEGACY-${'A'.repeat(32)}`;
+    const completeLegacy = await fetch(`${base}/edge/v1/campaigns/complete`, {
+      method: 'POST',
+      headers: {
+        cookie: cookies,
+        'content-type': 'application/json',
+        'x-csrf-token': CSRF_TOKEN,
+        'idempotency-key': randomUUID(),
+      },
+      body: JSON.stringify({ publicCode: legacyCode.toLowerCase() }),
+    });
+    const legacyCompletionCall = calls.at(-1);
+    check('only the completion endpoint accepts and normalizes an exact legacy campaign code',
+      completeLegacy.status === 200 && calls.length === 3 &&
+      legacyCompletionCall?.operation.id === 'campaignComplete' &&
+      (legacyCompletionCall.body as Record<string, unknown>)?.['publicCode'] === legacyCode);
+    const publishLegacy = await fetch(`${base}/edge/v1/campaigns/publish`, {
+      method: 'POST',
+      headers: {
+        cookie: cookies,
+        'content-type': 'application/json',
+        'x-csrf-token': CSRF_TOKEN,
+        'idempotency-key': randomUUID(),
+      },
+      body: JSON.stringify({ publicCode: legacyCode }),
+    });
+    check('legacy code is rejected by publish without an upstream call',
+      publishLegacy.status === 400 && calls.length === 3);
 
     const publicList = await fetch(`${base}/edge/v1/campaigns`);
     const listBody = await publicList.json() as { campaigns?: Record<string, unknown>[] };

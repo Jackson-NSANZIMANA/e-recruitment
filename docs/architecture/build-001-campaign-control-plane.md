@@ -12,7 +12,7 @@ BUILD-001 adds campaign authoring and publication to the existing `application-s
 
 ## Lifecycle
 
-The database and service allow exactly these BUILD-001 edges:
+The database and service allow exactly these BUILD-001 edges for new campaigns:
 
 - `DRAFT → REGISTRATION_OPEN`
 - `REGISTRATION_OPEN → REGISTRATION_CLOSED`
@@ -20,7 +20,7 @@ The database and service allow exactly these BUILD-001 edges:
 - `DRAFT → CANCELLED`
 - `REGISTRATION_OPEN → CANCELLED`, only if the campaign has no applications
 
-The legacy `EXAMINATION_ACTIVE` enum value is retained for compatibility; it is not a BUILD-001 transition. Published structure, selected policy version, publication evidence, and session coverage are frozen. A published campaign cannot receive a policy amendment in this build.
+The legacy `EXAMINATION_ACTIVE` enum value remains for compatibility and cannot be entered by the BUILD-001 authoring path. A narrow upgrade exception allows an existing row with its deterministic `LEGACY-<32 uppercase hex>` public code to complete through `EXAMINATION_ACTIVE → COMPLETED`; the service, database transition guard, and lifecycle-history check agree on that exception. Other `EXAMINATION_ACTIVE` transitions remain illegal. Published structure, selected policy version, publication evidence, and session coverage are frozen. A published campaign cannot receive a policy amendment in this build.
 
 ## Commands and public reads
 
@@ -42,11 +42,13 @@ Public list reads contain only `REGISTRATION_OPEN` campaigns. Public detail is a
 
 Campaign permissions are campaign-specific and composed with a verified officer principal. Agency and actor come from that principal, never from request input. Before a campaign/session command, the service adapter stores the verified subject UUID in the transaction-local custom setting `usrp.campaign_actor_id`; the command function requires that value to equal its `p_actor_id`. This catches actor substitution between service authorization and the database call.
 
-This is an explicit trusted-backend boundary, not independent human authentication by PostgreSQL. `usrp_app` can set custom settings and can select service roles, so a compromised or buggy backend that deliberately sets both the context and command payload to another active agency administrator can still impersonate that administrator. The database verifies the backend login, the agency role, the transaction-context equality, and the active admin row; it does not cryptographically verify the officer token or prove that the UUID belongs to the human who sent the HTTP request. An ordinary reviewer token cannot log in as `usrp_rdf_officer` (`NOLOGIN`) and is denied by the service permission check; that is distinct from the trusted-backend risk. Database roles remain agency-scoped; no system-service grant is broadened for campaign authoring.
+This is an explicit trusted-backend boundary, not independent human authentication by PostgreSQL. `usrp_app` can set custom settings and can select service roles, so a compromised or buggy backend that deliberately sets both the context and command payload to another active agency administrator can still impersonate that administrator. The database verifies the backend login, the agency role, the transaction-context equality, and the active admin row; it does not cryptographically verify the officer token or prove that the UUID belongs to the human who sent the HTTP request. An ordinary reviewer token is denied by the service permission check; there is no claim that a reviewer can assume an owner or agency role. The DB proof queries actual role membership (`pg_has_role`) for `usrp_app` and the NOLOGIN function owners, while the live HTTP proof exercises the reviewer denial. Database roles remain agency-scoped; no system-service grant is broadened for campaign authoring.
+
+`usrp_iam_service` now has SELECT-only access to `officer_accounts`; its direct and inherited INSERT/UPDATE grants are revoked, and the write-denial proof attempts both operations through IAM and the shared application login. Because `usrp_app` is a member of `usrp_iam_service`, every backend with the shared application credential can still read the cross-agency login credential store by selecting that role. This is a trusted-backend read boundary, not per-service isolation. The write-denial proof uses the shared `usrp_app` connection, explicitly `SET ROLE usrp_iam_service`, and attempts both INSERT and UPDATE; it separately checks a direct `usrp_app` INSERT denial. The development account seeder therefore requires a separate privileged local operator connection (`DEV_SEED_DATABASE_URL`), refuses to seed through `usrp_app`, and refuses to run when `NODE_ENV=production`; this does not create a production account-administration API. First-admin creation remains on the separate provisioner login described below.
 
 ## First administrator provisioning identity
 
-`FIRST_ADMIN_DATABASE_URL` is intentionally separate from application database configuration and is never included in `.env.example`. To prove the dedicated provisioner credential against a real PostgreSQL server without creating an administrator, run `pnpm --filter @usrp/iam-service selfcheck:provisioner-auth` with that variable supplied through an approved local secret channel. The read-only proof opens a direct TCP connection, checks `session_user = current_user = usrp_iam_provisioner`, verifies the role's least-privilege attributes and grants, then invokes the provisioning function with invalid NULL inputs inside a savepoint. SQLSTATE `22023` confirms the direct session passed the function's login guard; the savepoint is rolled back, so no account or audit row is written. Credentials and connection details are not printed. This is a manual proof and is intentionally not a substitute for real-PostgreSQL acceptance gates.
+`FIRST_ADMIN_DATABASE_URL` is intentionally separate from application database configuration and is never included in `.env.example`. To prove the dedicated provisioner credential against a real PostgreSQL server without creating an administrator, run `pnpm --filter @usrp/iam-service selfcheck:provisioner-auth` with that variable supplied through an approved local secret channel. The live `scripts/run-selfchecks.sh` runner also invokes this proof when (and only when) the variable is already present in its environment; it never prompts for or prints the secret. The read-only proof opens a direct TCP connection, checks `session_user = current_user = usrp_iam_provisioner`, verifies the role's least-privilege attributes and grants, then invokes the provisioning function with invalid NULL inputs inside a savepoint. SQLSTATE `22023` confirms the direct session passed the function's login guard; the savepoint is rolled back, so no account or audit row is written. Credentials and connection details are not printed. This is a direct database-credential proof, not independent human-operator authentication or a substitute for real-PostgreSQL acceptance gates.
 
 That proof establishes control of the database credential, not the human operator's identity. `FIRST_ADMIN_OPERATOR_REFERENCE`, correlation IDs, and confirmation environment variables are caller-supplied values; they are audit references, not authentication. No trusted operator IdP, PKI, or signed approval authority is configured in this repository, so human-operator identity remains unproven until an authoritative source and its verification/binding rules are selected. Do not claim human identity from a ticket string or database role alone.
 
@@ -68,28 +70,52 @@ The coverage digest hashes canonical JSON containing the campaign ID and session
 
 ## Database, events, and audit
 
-Migrations `packages/shared-database/src/migrations/0002_campaign_control_plane.sql` and `0003_build_001_boundary_columns.sql` provide the campaign DDL and later boundary columns. Authorization, RLS, immutable-fact guards, legal-edge enforcement, and lifecycle/session guards begin in `packages/shared-database/src/rls/0026_campaign_control_plane.sql`; direct campaign/session DML revocation, private command owners, and operation-specific `SECURITY DEFINER` functions live in `packages/shared-database/src/rls/0027_campaign_command_functions.sql`. `scripts/bootstrap-db.sh` applies the new schema migration before the corresponding RLS command boundary. Historical migrations are unchanged.
+Migrations `packages/shared-database/src/migrations/0002_campaign_control_plane.sql` and `0003_build_001_boundary_columns.sql` provide the campaign DDL and later boundary columns. Migration `0004_build001_completion_and_capacity_constraints.sql` mirrors the venue-capacity decision check and records the legacy completion edge in Drizzle's schema snapshot. Authorization, RLS, immutable-fact guards, legal-edge enforcement, and lifecycle/session guards begin in `packages/shared-database/src/rls/0026_campaign_control_plane.sql`; direct campaign/session DML revocation, private command owners, and operation-specific `SECURITY DEFINER` functions live in `packages/shared-database/src/rls/0027_campaign_command_functions.sql`. `scripts/bootstrap-db.sh` applies the schema migrations before the corresponding RLS command boundary. The RLS files are deliberately replayable; `verify-build001-populated-upgrade.ts` applies the manifest parsed from `bootstrap-db.sh` twice against populated rows and attempts denied writes after both replays. This forward migration does not rewrite legacy statuses or session data.
 
 Successful draft, policy-version, session-coverage, publication, close, completion, and cancellation commands stage their campaign domain event(s), plus exactly one safe `AUDIT_ENTRY`, in the same database transaction as state and command rows. Domain events carry schema version, correlation ID, causation ID, and `piiClassification: NONE`. Immutable publication/history facts use deterministic event IDs; outbox delivery remains at-least-once. Replays do not add new outbox rows.
 
 ## Cancellation/submission serialization
 
-Open-campaign cancellation checks the agency application table while holding the campaign row `FOR UPDATE` lock. The existing submission insert primitive obtains a narrow `FOR SHARE` campaign lock through `public_core.lock_campaign_for_application_insert` before creating the application. The helper is agency-bound for officer roles, exposes only campaign status, and adds no `UPDATE` grant to `usrp_system_service`. Therefore an in-flight application insert commits before cancellation checks for applications, or a cancellation commits first and the later insert observes the cancelled state and is rejected. P14 proves both orderings against live PostgreSQL.
+Open-campaign cancellation checks the agency application table while holding the campaign row `FOR UPDATE` lock. The existing submission insert primitive obtains a narrow `FOR SHARE` campaign lock through `public_core.lock_campaign_for_application_insert` before creating the application. The helper is agency-bound for officer roles and exposes only campaign status. Its NOLOGIN function owner can SELECT only campaign `id`, `agency`, and `status`; PostgreSQL requires UPDATE privilege on at least one column for `SELECT ... FOR SHARE`, so the owner receives only column-level UPDATE on `updated_at`, not table-wide UPDATE or UPDATE on state/configuration columns. `usrp_app` cannot assume that owner. The shared system role gets no direct campaign UPDATE grant. Therefore an in-flight application insert commits before cancellation checks for applications, or a cancellation commits first and the later insert observes the cancelled state and is rejected. The live-PostgreSQL ordering proof is registered in P14 but was not executable in this sandbox.
 
-## Registered proofs and execution record
+## Registered proofs and current validation status
 
-The BUILD-001 self-checks are registered in `scripts/run-selfchecks.sh`:
+The BUILD-001 checks are registered in `scripts/run-selfchecks.sh`. Results below describe this remediation checkout only; historical execution notes for earlier checkpoints are not evidence for this source state.
 
-- `verify-campaign-domain.ts` — P1–P4: draft/policy/session validation, normalization, and canonical-hash contract. Executed successfully, including NFC normalization, integer-looking object-key ordering, capacity rejection, and deterministic coverage hashing.
-- `verify-campaign-control-plane.ts` — P5–P17 and the earlier 21 obligations: live PostgreSQL writes, RLS, lifecycle, idempotency, locking races, public/private projection, event/audit atomicity, and legacy preservation/migration assertions. Executed successfully against the bootstrapped PostgreSQL 16.14 database. This includes concurrent publication, publication/session-write and publication/close races, cancellation/submission serialization, completion/replay, and migration compatibility.
-- `verify-edge-contract.ts` — edge registry, mounted routes, upstream catalogue, and OpenAPI drift. Executed successfully: 511 checks, including the completion route.
-- `packages/shared-database/src/rls/verify-isolation.sql` — executed successfully; all agency-isolation assertions passed.
-- `verify-schema-drift.ts` — executed successfully against the live database: 513 columns, 29 enums (including value order), and 91 named indexes match Drizzle; no catch-up migration was emitted.
+### Executed in this checkout
 
-The database-backed proof used the documented native-stack PostgreSQL fallback because Docker is unavailable in this sandbox. Bootstrap applied Drizzle migrations and RLS scripts 0001–0026, then seeded the development officer accounts. The focused scheduling slot-integrity proof passed all six sections, the edge-boundary proof passed 123 checks, and the shared rate-limit-store proof passed 23 checks. The full `scripts/run-selfchecks.sh` run completed with 45 proofs passed and 11 infrastructure-dependent proofs failed: Kafka round-trip/dead-letter, Kafka-backed vetting/eligibility/scheduling/audit/pipeline checks, MinIO+ClamAV forensics checks, and the all-services dev boot (which requires Kafka). Kafka, MinIO, and ClamAV are not part of the native fallback; no failure was reported in the BUILD-001 proofs. Root build passed 21/21 tasks, typecheck passed 36/36 tasks, `lint:count` returned 0, and `git diff --check` passed. Node 22.22.3 emits an engine warning because the workspace requests Node 24–25.
+- `pnpm build` — passed, 21/21 tasks.
+- `pnpm typecheck` — passed, 36/36 tasks. The environment is Node `v22.22.3`; the workspace requests Node `>=24 <=25`, so pnpm emitted an engine warning.
+- `bash scripts/refresh-schema-snapshot.sh` — passed; Drizzle reported no schema changes and the TypeScript schema agrees with the checked-in snapshot. This validates snapshot generation only, not a live database.
+- `services/edge-gateway/selfcheck/verify-edge-contract.ts` — passed, 511 checks. It was given a syntactically valid `DATABASE_URL` and required gateway configuration; it is a static route/catalogue/OpenAPI proof and did not connect to PostgreSQL.
+- `services/edge-gateway/selfcheck/verify-campaign-http-boundary.ts` — 13 checks passed, including reviewer permission denial and the completion-only legacy-code route.
+- `services/application-service/selfcheck/verify-campaign-domain.ts` — P1–P4 passed.
+- `services/scheduling-service/selfcheck/verify-campaign-session-validation.ts` — 8 checks passed.
+- Standalone TypeScript compilation passed for `verify-build001-populated-upgrade.ts` and `verify-slot-integrity.ts`; this checks proof-source typing, not their database behavior.
+- The dev officer seeder refused `NODE_ENV=production` before opening a database connection.
+- `pnpm lint:count` — passed with 0 lint findings.
+- `git diff --check` — passed.
 
-## Mission 003.1 adversarial acceptance status
+### Real-PostgreSQL acceptance remains unverified
 
-The adversarial review of checkpoint `bb93cd75339630eb23936ad3f4104e1592b7280d` classified source correctness as READY WITH REMEDIATIONS, but database/security correctness as UNVERIFIED and BUILD-001 merge readiness as NOT READY. This is consistent with the trust boundary above: the transaction-local actor setting is a defensive service-to-database assertion, not proof of the human operator's identity.
+This sandbox has no `docker`, `podman`, `psql`, or `pg_ctl`, no PostgreSQL listener on port 5432, and no configured live database URL. No PostgreSQL statement from the new migration/RLS files was executed here. Therefore these database-backed proofs were **not run**: `verify-campaign-control-plane.ts` (including account-write denial and outbox forgery), `verify-build001-populated-upgrade.ts` (populated migration plus two full RLS-bootstrap replays and fail-closed assertions), `verify-slot-integrity.ts` (including release-at-zero), and `verify-first-admin-provisioner-auth.ts` (no `FIRST_ADMIN_DATABASE_URL` was supplied). The full `scripts/run-selfchecks.sh` gate was not run because its live infrastructure prerequisites are absent. No claim is made here about PostgreSQL SQL execution, live ACL/RLS behavior, migration upgrade behavior, row-lock races, or provisioner authentication. PGlite is not used as a substitute.
 
-The current coding sandbox did not expose `psql`, Docker, or a PostgreSQL listener. The local PGlite semantic rehearsal and static SQL inspection do not establish real PostgreSQL role membership, `SECURITY DEFINER` execution, populated migration upgrade, concurrency, Kafka replay, or first-admin-to-edge login acceptance. The historical execution record in this document is not an independently reproduced result for this checkpoint and must not be used to close the Mission 003 real-PostgreSQL gate. Record real acceptance runs separately, with server version, role/session identities, migration source state, exact commands, and test results.
+### Exact follow-up commands
+
+Run these against real PostgreSQL after the database is bootstrapped; provide secrets through the approved environment/secret channel, not in chat. The populated-upgrade proof creates its own disposable database and needs an admin URL with `CREATEDB` and permission to drop that generated database.
+
+```bash
+ADMIN_DATABASE_URL="$ADMIN_DATABASE_URL" pnpm exec tsx packages/shared-database/selfcheck/verify-build001-populated-upgrade.ts
+
+DATABASE_URL="$DATABASE_URL" ADMIN_DATABASE_URL="$ADMIN_DATABASE_URL" \
+  pnpm exec tsx services/application-service/selfcheck/verify-campaign-control-plane.ts
+
+DATABASE_URL="$DATABASE_URL" ADMIN_DATABASE_URL="$ADMIN_DATABASE_URL" \
+PII_ENCRYPTION_KEY="$PII_ENCRYPTION_KEY" \
+  pnpm exec tsx services/scheduling-service/selfcheck/verify-slot-integrity.ts
+
+FIRST_ADMIN_DATABASE_URL="$FIRST_ADMIN_DATABASE_URL" \
+  pnpm --filter @usrp/iam-service selfcheck:provisioner-auth
+```
+
+After those focused gates pass, run `bash scripts/run-selfchecks.sh` with the repository's documented live infrastructure available. Record PostgreSQL server version, the actual session/database roles, migration source state, exact commands, and results separately. Until then, the BUILD-001 database/security acceptance gate remains **UNVERIFIED**.

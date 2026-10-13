@@ -88,9 +88,10 @@ apply_sql "${RLS_DIR}/0008_venue_read_grants.sql" "rls/0008 (venue read grant)"
 apply_sql "${RLS_DIR}/0009_field_devices.sql" "rls/0009 (field-device registry)"
 
 # 11. Officer account store (the token issuer's credential surface). New
-#     public_core.officer_accounts table; only usrp_iam_service receives table
-#     grants under FORCE'd RLS. Note that the shared usrp_app login is a member
-#     of that role, so this does not independently isolate backend processes.
+#     public_core.officer_accounts table; usrp_iam_service receives SELECT only
+#     under FORCE'd RLS. Account writes remain behind provisioning/operator
+#     workflows. The shared usrp_app login can SET ROLE to IAM, so the read path
+#     is still a trusted-backend boundary, not per-process DB isolation.
 apply_sql "${RLS_DIR}/0010_officer_accounts.sql" "rls/0010 (officer account store)"
 
 # 12. ADJUDICATION_REVIEW status (ADR-011): late/post-clearance disqualification
@@ -220,9 +221,14 @@ ok "database bootstrapped — schema + isolation + audit immutability + processi
 #     resolves @usrp/* runtime dist), so a failure here NEVER blocks the
 #     structural bootstrap above. Re-run manually after `pnpm -r build`:
 #       pnpm --filter @usrp/iam-service seed:dev
-log "seeding dev officer accounts (best-effort)"
-if DATABASE_URL="$DATABASE_URL" pnpm --filter @usrp/iam-service exec tsx scripts/seed-dev-officers.ts; then
-  ok "dev officer accounts seeded (login handles: rdf.officer / rnp.officer / rcs.officer)"
+if [[ "${NODE_ENV:-}" == "production" ]]; then
+  log "skipping development officer seed because NODE_ENV=production"
 else
-  log "dev officer seed skipped — build the workspace, then: pnpm --filter @usrp/iam-service seed:dev"
+  log "seeding dev officer accounts (best-effort)"
+  if DATABASE_URL="$DATABASE_URL" DEV_SEED_DATABASE_URL="$DATABASE_URL" \
+      pnpm --filter @usrp/iam-service exec tsx scripts/seed-dev-officers.ts; then
+    ok "dev officer accounts seeded (login handles: rdf.officer / rnp.officer / rcs.officer)"
+  else
+    log "dev officer seed skipped — set NODE_ENV=development and a privileged local URL, then: pnpm --filter @usrp/iam-service seed:dev"
+  fi
 fi

@@ -54,7 +54,17 @@ CREATE INDEX IF NOT EXISTS idx_pc_event_outbox_published
   ON public_core.event_outbox (published_at)
   WHERE published_at IS NOT NULL;
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON public_core.event_outbox TO usrp_system_service;
+GRANT SELECT, INSERT, DELETE ON public_core.event_outbox TO usrp_system_service;
+-- Clear any historic table- or column-level UPDATE ACL before granting only the
+-- delivery metadata columns. A full RLS bootstrap replay must not retain the
+-- older table-wide relay grant.
+REVOKE UPDATE ON public_core.event_outbox FROM usrp_system_service;
+REVOKE UPDATE (id, event_id, event_type, producer, payload, created_at,
+               published_at, attempts, last_error)
+  ON public_core.event_outbox FROM usrp_system_service;
+-- Relay metadata is mutable; event identity, producer, type and payload are not.
+GRANT UPDATE (published_at, attempts, last_error)
+  ON public_core.event_outbox TO usrp_system_service;
 GRANT USAGE, SELECT ON SEQUENCE public_core.event_outbox_id_seq TO usrp_system_service;
 
 ALTER TABLE public_core.event_outbox ENABLE ROW LEVEL SECURITY;
@@ -62,6 +72,12 @@ ALTER TABLE public_core.event_outbox FORCE  ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS pc_event_outbox_system ON public_core.event_outbox;
 CREATE POLICY pc_event_outbox_system ON public_core.event_outbox
-  TO usrp_system_service USING (true) WITH CHECK (true);
+  FOR ALL TO usrp_system_service USING (true) WITH CHECK (
+    producer IN ('application-service', 'scheduling-service')
+    AND left(upper(regexp_replace(event_type, '^[[:space:]]+|[[:space:]]+$', '', 'g')), 9) <> 'CAMPAIGN_'
+    AND left(upper(regexp_replace(COALESCE(payload->>'eventType', event_type), '^[[:space:]]+|[[:space:]]+$', '', 'g')), 9) <> 'CAMPAIGN_'
+    AND upper(regexp_replace(COALESCE(payload->>'entityType', ''), '^[[:space:]]+|[[:space:]]+$', '', 'g')) <> 'CAMPAIGN'
+    AND left(upper(regexp_replace(COALESCE(payload->>'action', ''), '^[[:space:]]+|[[:space:]]+$', '', 'g')), 9) <> 'CAMPAIGN_'
+  );
 
 COMMIT;
