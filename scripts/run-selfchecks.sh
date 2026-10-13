@@ -24,13 +24,22 @@
 # fingerprints them too (see packages/shared-config/src/production-guard.ts).
 #
 # Usage:  bash scripts/run-selfchecks.sh
-# Exit:   0 iff every proof passes; first failure aborts (fail-fast).
+#         USRP_SELFCHECK_LOG_DIR=.selfcheck-logs bash scripts/run-selfchecks.sh
+# Exit:   0 iff every proof passes; preflight errors abort, proof failures collect.
+# Output: per-proof stdout/stderr retained under .selfcheck-logs (gitignored).
 # ═════════════════════════════════════════════════
 set -euo pipefail
 ulimit -n 65536 2>/dev/null || true
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
+
+# The final boot proof reads this file, not the inline environment below. A
+# malformed file cannot boot anything: report its offending line BEFORE paying
+# for all the live proofs, without sourcing it or exposing any secret values.
+if ! node "$REPO_ROOT/scripts/check-env-file.mjs" "${USRP_ENV_FILE:-.env.example}"; then
+  exit 1
+fi
 
 # ── Shared dev environment (non-production, matches the slice docs) ──
 export DATABASE_URL="${DATABASE_URL:-postgresql://usrp_app:app_pw@localhost:5432/usrp_db}"
@@ -120,15 +129,40 @@ bad()  { printf '\033[0;31m✗ FAIL — %s\033[0m\n' "$*"; fail=$((fail+1)); FAI
 # protects direct `bash scripts/run-selfchecks.sh` callers.
 if ! node scripts/check-workspace-build.mjs; then exit 1; fi
 
+# Preserve the actual assertion/exception for a failed proof, not just its
+# label after dozens of subsequent proofs. Keep service-relative paths so two
+# selfchecks with the same basename cannot overwrite one another's evidence.
+SELFCHECK_LOG_DIR="${USRP_SELFCHECK_LOG_DIR:-$REPO_ROOT/.selfcheck-logs}"
+declare -A FAILED_LOGS=()
+
 # Run a tsx selfcheck; $1 = human label, $2 = path.
 run_ts() {
-  local label="$1" path="$2"
+  local label="$1" path="$2" proof_log
+  proof_log="$SELFCHECK_LOG_DIR/${path%.ts}.log"
+  mkdir -p "$(dirname "$proof_log")"
   hdr "$label"
-  if npx tsx "$path"; then ok "$label"; else bad "$label"; fi
+  # pipefail preserves tsx's failure even if tee succeeds. Capture stderr too:
+  # assertion failures and PostgreSQL exceptions are usually written there.
+  if npx tsx "$path" 2>&1 | tee "$proof_log"; then
+    ok "$label"
+  else
+    bad "$label"
+    FAILED_LOGS["$label"]="$proof_log"
+    printf '  proof output retained at %s\n' "${proof_log#"$REPO_ROOT"/}"
+  fi
 }
 
+# Zero-infrastructure regression proofs for the shared environment boundary and
+# the runner's failure reporting. A malformed env must never reach source/Turbo.
+hdr 'script regressions (environment preflight and proof evidence)'
+if node --test scripts/test/*.test.mjs; then
+  ok 'script regressions (environment preflight and proof evidence)'
+else
+  bad 'script regressions (environment preflight and proof evidence)'
+fi
+
 # ── 0. The production boot guard — zero infrastructure, fastest signal ──
-# Runs FIRST, ahead of even the RLS proof, for two reasons. It needs no
+# Runs ahead of the database-backed proofs for two reasons. It needs no
 # Postgres, no Kafka, no MinIO and no docker at all, so a regression is known
 # in under a second instead of after ClamAV downloads a virus database. And it
 # guards @usrp/shared-config — the config layer every service in the proofs
@@ -324,6 +358,11 @@ if [[ $fail -eq 0 ]]; then
 else
   printf '\033[0;31m%d failed\033[0m\n' "$fail"
   printf 'Failed proofs:\n'
-  for f in "${FAILED[@]}"; do printf '  \033[0;31m✗ %s\033[0m\n' "$f"; done
+  for f in "${FAILED[@]}"; do
+    printf '  \033[0;31m✗ %s\033[0m\n' "$f"
+    if [[ -n "${FAILED_LOGS[$f]:-}" ]]; then
+      printf '    log: %s\n' "${FAILED_LOGS[$f]#"$REPO_ROOT"/}"
+    fi
+  done
   exit 1
 fi

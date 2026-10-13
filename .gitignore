@@ -64,6 +64,7 @@ logs/
 # Test artifacts
 junit.xml
 test-results/
+.selfcheck-logs/
 
 # Schema-drift proof scratch (verify-schema-drift.ts cleans up after itself;
 # this catches leftovers from an aborted run). Kept inside the repo on

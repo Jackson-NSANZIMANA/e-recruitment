@@ -53,6 +53,10 @@ if [[ -f .env && $FORCE -eq 0 ]]; then
   fail '.env already exists — pass --force to overwrite (it is gitignored)'
 fi
 
+# Never copy a malformed template over a developer's existing .env, even when
+# --force was requested. Validate without executing or printing its values.
+node "$REPO_ROOT/scripts/check-env-file.mjs" .env.example || exit 1
+
 log 'rendering .env from .env.example'
 cp .env.example .env
 
