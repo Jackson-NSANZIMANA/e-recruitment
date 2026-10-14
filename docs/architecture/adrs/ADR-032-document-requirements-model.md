@@ -25,18 +25,22 @@ would contradict the very announcements the system encodes.
 4. `evaluateDocumentChecklist` is pure and advisory. It never decides "may
    proceed".
 
-## Owner decisions (engineers flag, they do not decide)
-- Is the checklist **advisory**, **blocking before slot assignment**, or
-  **verified at check-in only**? Per agency? Per campaign?
-- Does an API confirmation **waive** the paper copy at the venue?
-- Is a notarised diploma verified by HEC enough, or is the notarised paper the
-  requirement?
-- Who may clear a document at the venue, and is that recorded as a document
-  event with the officer's identity?
+## Owner decisions — RECORDED 2026-10-14
+| Question | Decision | Where it is enforced |
+|---|---|---|
+| Advisory, blocking, or check-in only? | **Advisory** | No transition reads the checklist; proven by `verify-document-checklist.ts` (status unchanged after reads and venue clearing) |
+| Does an automated verification waive the paper? | **Yes** | `API_VERIFIED` satisfies the item, nothing uploaded required |
+| Who clears a document at the venue? | **The front-door on-site officer who checks candidates in** | Permission `document.verify.venue` → `screening_officer` only; `POST /v1/applications/documents/verify-at-venue`; attributed, audited once, write-once (rls/0030) |
+| Notarised diploma: is the registry enough? | **Upload, then registry verification** | `BOTH_REQUIRED`: cleared upload AND the category's academic registry (HEC for degree categories); a venue sighting does not replace the upload; `AWAITING_REGISTRY` in between |
 
-## Recommended course (proposed, not implemented)
-1. Expose the checklist read-only to the citizen ("done / under review / bring
-   or upload") and the officer.
-2. Record **presentation at check-in** as a document event (BUILD-003).
-3. Only then, if the agencies decide so, add a blocking rule at the chosen
-   transition, behind the policy document — not a global switch.
+### Flag raised with the decision
+RCS **General Enlistee** lists `DEGREE_DIPLOMA_NOTARIZED`, but the category is
+NESA-path (A-Level), so HEC never runs for it. The rule is implemented as "the
+category's OWN academic registry", which is HEC for every degree category and
+NESA for General Enlistee. Please confirm, or correct the ground-truth entry
+(it may really be a notarised A-Level certificate).
+
+## Surfaces
+- `GET /v1/applications/document-checklist?applicationId=` — officer, own agency, `application.read`.
+- `GET /v1/applications/document-checklist/by-applicant` — system token (identity bridge), subject-scoped.
+- `POST /v1/applications/documents/verify-at-venue` — `document.verify.venue`; 404 other agency, 409 terminal, 422 type not required, idempotent re-scan.

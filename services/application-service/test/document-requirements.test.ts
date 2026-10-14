@@ -17,6 +17,7 @@ const doc = (documentType: DocumentType, over: Partial<StoredDocument> = {}): St
   verifiedViaApi: false,
   humanReviewDecision: null,
   virusScanPassed: true,
+  venueVerified: false,
   ...over,
 });
 
@@ -91,4 +92,39 @@ test('a complete checklist needs every item cleared', () => {
     .map((t) => doc(t, { forensicsLane: 'GREEN' }));
   const c = evaluateDocumentChecklist('CADET_OFFICER', req, allPassed, docs);
   assert.equal(c.complete, true, JSON.stringify(c.items));
+});
+
+test('owner decision: the check-in officer clears a document by seeing it at the venue', () => {
+  const req = resolveRequiredDocuments('GENERAL_ENLISTEE', ['CELIBACY_CERTIFICATE']);
+  const c = evaluateDocumentChecklist('GENERAL_ENLISTEE', req, pending, [doc('CELIBACY_CERTIFICATE', { venueVerified: true })]);
+  assert.equal(c.items[0]?.satisfaction, 'VENUE_VERIFIED');
+  assert.equal(c.complete, true);
+});
+
+test('owner decision: an automated verification waives the paper even with nothing uploaded', () => {
+  const req = resolveRequiredDocuments('CADET_OFFICER', ['NATIONAL_ID', 'DEGREE_DIPLOMA_COPY']);
+  const c = evaluateDocumentChecklist('CADET_OFFICER', req, allPassed, []);
+  assert.deepEqual(c.items.map((i) => i.satisfaction), ['API_VERIFIED', 'API_VERIFIED']);
+  assert.equal(c.complete, true);
+});
+
+test('owner decision: a notarised diploma needs the upload AND THEN the registry — neither alone', () => {
+  const req = resolveRequiredDocuments('OFFICER_ONE_YEAR', ['DEGREE_DIPLOMA_NOTARIZED']);
+  const state = (gates: GateVerdicts, docs: StoredDocument[]): string | undefined =>
+    evaluateDocumentChecklist('OFFICER_ONE_YEAR', req, gates, docs).items[0]?.satisfaction;
+  assert.equal(state(allPassed, []), 'MISSING', 'HEC alone does not satisfy it');
+  assert.equal(state(allPassed, [doc('DEGREE_DIPLOMA_NOTARIZED', { venueVerified: true })]), 'MISSING',
+    'a venue sighting does not replace the upload');
+  assert.equal(state(pending, [doc('DEGREE_DIPLOMA_NOTARIZED', { forensicsLane: 'GREEN' })]), 'AWAITING_REGISTRY');
+  assert.equal(state(allPassed, [doc('DEGREE_DIPLOMA_NOTARIZED', { forensicsLane: 'GREEN' })]), 'UPLOADED_CLEARED');
+  assert.equal(state(allPassed, [doc('DEGREE_DIPLOMA_NOTARIZED', { forensicsLane: 'AMBER' })]), 'UNDER_REVIEW');
+  const item = evaluateDocumentChecklist('OFFICER_ONE_YEAR', req, allPassed, []).items[0];
+  assert.equal(item?.registry, 'HEC', 'a degree category verifies through HEC');
+});
+
+test('the notarised item follows the CATEGORY registry (RCS General Enlistee is NESA-path)', () => {
+  const req = resolveRequiredDocuments('GENERAL_ENLISTEE', ['DEGREE_DIPLOMA_NOTARIZED']);
+  const c = evaluateDocumentChecklist('GENERAL_ENLISTEE', req, allPassed, [doc('DEGREE_DIPLOMA_NOTARIZED', { forensicsLane: 'GREEN' })]);
+  assert.equal(c.items[0]?.registry, 'NESA');
+  assert.equal(c.items[0]?.satisfaction, 'UPLOADED_CLEARED');
 });

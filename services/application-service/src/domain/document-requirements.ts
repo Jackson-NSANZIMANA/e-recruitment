@@ -13,12 +13,16 @@
 //      have no policy version (published before BUILD-001, or walk-in).
 // A policy list, when present, WINS; it is never merged with the table.
 //
-// HOW AN ITEM IS SATISFIED. The official announcements say candidates "present
-// themselves with" / "bring" the documents (RNP, RCS), and RDF admits walk-ins
-// with none pre-registered. So a digital upload is ONE way to satisfy an item,
-// not the only way, and this module therefore never answers "may proceed" — it
-// answers "what is the state of each item", and leaves the consequence (advisory
-// vs. blocking, and at which stage) to a policy-owner decision (ADR-032).
+// HOW AN ITEM IS SATISFIED — owner decisions of 2026-10-14 (ADR-032):
+//   • the checklist is ADVISORY: it never blocks a transition, and this module
+//     never answers "may proceed";
+//   • a successful automated registry verification WAIVES the paper copy;
+//   • the front-door check-in officer may clear a document by seeing the paper
+//     at the venue (VENUE_VERIFIED);
+//   • a NOTARISED diploma needs BOTH: an uploaded copy that cleared the scan and
+//     forensics, THEN the academic registry's verification. Neither alone.
+// The announcements say candidates "present themselves with" / "bring" the
+// documents (RNP, RCS) and RDF admits walk-ins, which is why advisory is right.
 //
 //   API_VERIFIED       a registry has positively confirmed the underlying fact
 //                      (NIDA identity; NESA/HEC academic; RIB criminal). Only
@@ -26,6 +30,8 @@
 //                      from the document type alone.
 //   UPLOADED_CLEARED   a stored document passed the scan and forensics GREEN,
 //                      or a human reviewer cleared an amber/red hold.
+//   VENUE_VERIFIED     the check-in officer saw the paper (attributed, write-once).
+//   AWAITING_REGISTRY  notarised copy cleared, registry verification pending.
 //   UNDER_REVIEW       uploaded; awaiting forensics or a human decision.
 //   REJECTED           uploaded and refused (RED, or a human REJECT).
 //   MISSING            nothing satisfies it (yet) — present at the venue, or
@@ -60,6 +66,8 @@ export const REGISTRY_FOR_DOCUMENT: Readonly<Record<DocumentType, VerifyingAutho
   OLEVEL_CERTIFICATE: 'NESA',
   ALEVEL_CERTIFICATE: 'NESA',
   DEGREE_DIPLOMA_COPY: 'HEC',
+  // Upload AND registry — see BOTH_REQUIRED. The registry is the CATEGORY's own
+  // academic path (HEC for degree categories), resolved at evaluation time.
   DEGREE_DIPLOMA_NOTARIZED: null,
   NON_CONVICTION_CERTIFICATE: 'RIB',
   GOOD_CONDUCT_CERTIFICATE: null,
@@ -69,9 +77,18 @@ export const REGISTRY_FOR_DOCUMENT: Readonly<Record<DocumentType, VerifyingAutho
   MEDICAL_CERTIFICATE_GOVT: null,
 };
 
+/**
+ * Types whose paper must be uploaded AND whose content the category's academic
+ * registry must then verify (owner decision 2026-10-14). A venue sighting does
+ * not substitute for the upload here.
+ */
+export const BOTH_REQUIRED: ReadonlySet<DocumentType> = new Set<DocumentType>(['DEGREE_DIPLOMA_NOTARIZED']);
+
 export type DocumentSatisfaction =
   | 'API_VERIFIED'
   | 'UPLOADED_CLEARED'
+  | 'VENUE_VERIFIED'
+  | 'AWAITING_REGISTRY'
   | 'UNDER_REVIEW'
   | 'REJECTED'
   | 'MISSING';
@@ -98,6 +115,8 @@ export interface StoredDocument {
   readonly verifiedViaApi: boolean;
   readonly humanReviewDecision: 'CLEAR' | 'REJECT' | null;
   readonly virusScanPassed: boolean;
+  /** The check-in officer saw this paper at the venue (rls/0030). */
+  readonly venueVerified: boolean;
 }
 
 export interface ChecklistItem {
@@ -110,7 +129,7 @@ export interface ChecklistItem {
 export interface DocumentChecklist {
   readonly source: RequirementSource;
   readonly items: readonly ChecklistItem[];
-  /** Every item is API_VERIFIED or UPLOADED_CLEARED. Advisory — see header. */
+  /** Every item is satisfied (see SATISFIED). ADVISORY — never a gate. */
   readonly complete: boolean;
 }
 
@@ -150,20 +169,31 @@ function registryConfirmed(
   }
 }
 
-function satisfactionOf(stored: readonly StoredDocument[]): DocumentSatisfaction {
-  // Best evidence wins across re-uploads of the same type.
-  const cleared = stored.some(
-    (d) =>
-      d.verifiedViaApi ||
-      d.humanReviewDecision === 'CLEAR' ||
-      (d.forensicsLane === 'GREEN' && d.virusScanPassed && d.humanReviewDecision !== 'REJECT'),
+/** The states that satisfy an item. */
+export const SATISFIED: ReadonlySet<DocumentSatisfaction> = new Set<DocumentSatisfaction>([
+  'API_VERIFIED',
+  'UPLOADED_CLEARED',
+  'VENUE_VERIFIED',
+]);
+
+function uploadCleared(d: StoredDocument): boolean {
+  return (
+    d.verifiedViaApi ||
+    d.humanReviewDecision === 'CLEAR' ||
+    (d.forensicsLane === 'GREEN' && d.virusScanPassed && d.humanReviewDecision !== 'REJECT')
   );
-  if (cleared) return 'UPLOADED_CLEARED';
-  const pending = stored.some(
+}
+
+function satisfactionOf(stored: readonly StoredDocument[], venueCounts: boolean): DocumentSatisfaction {
+  // Best evidence wins across re-uploads of the same type.
+  const uploads = stored.filter((d) => !d.venueVerified);
+  if (uploads.some(uploadCleared)) return 'UPLOADED_CLEARED';
+  if (venueCounts && stored.some((d) => d.venueVerified)) return 'VENUE_VERIFIED';
+  const pending = uploads.some(
     (d) => d.humanReviewDecision === null && d.forensicsLane !== 'RED',
   );
   if (pending) return 'UNDER_REVIEW';
-  if (stored.length > 0) return 'REJECTED';
+  if (uploads.length > 0) return 'REJECTED';
   return 'MISSING';
 }
 
@@ -175,18 +205,28 @@ export function evaluateDocumentChecklist(
   documents: readonly StoredDocument[],
 ): DocumentChecklist {
   const items = requirements.types.map((documentType): ChecklistItem => {
+    const stored = documents.filter((d) => d.documentType === documentType);
+    if (BOTH_REQUIRED.has(documentType)) {
+      // Upload FIRST, then the category's own academic registry.
+      const academic = academicPathForCategory(category);
+      const uploaded = satisfactionOf(stored, false);
+      if (uploaded !== 'UPLOADED_CLEARED') return { documentType, satisfaction: uploaded, registry: academic };
+      return {
+        documentType,
+        satisfaction: registryConfirmed(academic, category, gates) ? 'UPLOADED_CLEARED' : 'AWAITING_REGISTRY',
+        registry: academic,
+      };
+    }
     const registry = REGISTRY_FOR_DOCUMENT[documentType];
+    // A successful automated verification waives the paper (owner decision).
     if (registry !== null && registryConfirmed(registry, category, gates)) {
       return { documentType, satisfaction: 'API_VERIFIED', registry };
     }
-    const stored = documents.filter((d) => d.documentType === documentType);
-    return { documentType, satisfaction: satisfactionOf(stored), registry };
+    return { documentType, satisfaction: satisfactionOf(stored, true), registry };
   });
   return {
     source: requirements.source,
     items,
-    complete: items.every(
-      (i) => i.satisfaction === 'API_VERIFIED' || i.satisfaction === 'UPLOADED_CLEARED',
-    ),
+    complete: items.every((i) => SATISFIED.has(i.satisfaction)),
   };
 }

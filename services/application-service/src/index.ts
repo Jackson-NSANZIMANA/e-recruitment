@@ -12,6 +12,8 @@
 // main.ts, not here, so composing the service in a proof starts no timers.
 // ══════════════════════════════════════════════════════════════════
 
+import { DocumentChecklistService } from './application/document-checklist.service.js';
+import { PgDocumentChecklistRepository } from './adapters/document-checklist.pg-repository.js';
 import type { EventBus } from '@usrp/shared-events';
 import { PgIdentityReader } from './adapters/identity.pg-reader.js';
 import { PgCampaignReader } from './adapters/campaign.pg-reader.js';
@@ -68,6 +70,8 @@ export interface ApplicationService {
   readonly withdrawalProjector: ProjectApplicationAcceptedService;
   /** HTTP system-token write — the citizen's OWN voluntary withdrawal (ADR-020). */
   readonly selfWithdrawal: SelfWithdrawalService;
+  /** Advisory document checklist + venue verification (ADR-032). */
+  readonly documentChecklist: DocumentChecklistService;
   /** Officer-authorized BUILD-001 campaign aggregate writes. */
   readonly campaignControl: CampaignControlService;
   /** Anonymous published-campaign allowlist reads. */
@@ -124,6 +128,10 @@ export function createApplicationService(
     forensicsProjector: new ProjectForensicsResultService({ repository, eventBus }),
     withdrawalProjector: new ProjectApplicationAcceptedService({
       repository: new PgWithdrawalRepository(),
+      eventBus,
+    }),
+    documentChecklist: new DocumentChecklistService({
+      repository: new PgDocumentChecklistRepository(),
       eventBus,
     }),
     selfWithdrawal: new SelfWithdrawalService({
@@ -397,3 +405,20 @@ export {
   ApplicationReadError,
   ApplicationPersistenceError,
 } from './domain/application.errors.js';
+
+// ── Document checklist (ADR-032) ──
+export { DocumentChecklistService } from './application/document-checklist.service.js';
+export { PgDocumentChecklistRepository } from './adapters/document-checklist.pg-repository.js';
+export {
+  documentChecklistRoutes,
+  DOCUMENT_CHECKLIST_PATH,
+  DOCUMENT_CHECKLIST_BY_APPLICANT_PATH,
+  VERIFY_DOCUMENT_AT_VENUE_PATH,
+} from './adapters/http/document-checklist.controller.js';
+export {
+  evaluateDocumentChecklist,
+  resolveRequiredDocuments,
+  REGISTRY_FOR_DOCUMENT,
+  BOTH_REQUIRED,
+  SATISFIED,
+} from './domain/document-requirements.js';
