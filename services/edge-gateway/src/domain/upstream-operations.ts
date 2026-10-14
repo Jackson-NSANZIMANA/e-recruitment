@@ -53,6 +53,7 @@ export const UPSTREAM = Object.freeze({
   officerLogin: op('officerLogin', 'iam', 'POST', '/v1/auth/officer/login', 'none'),
 
   // identity-service — applicant-auth.controller.ts
+  onboardingBegin: op('onboardingBegin', 'identity', 'POST', '/v1/applicants/auth/onboarding/begin', 'none'),
   otpRequest: op('otpRequest', 'identity', 'POST', '/v1/applicants/auth/otp/request', 'none'),
   otpVerify: op('otpVerify', 'identity', 'POST', '/v1/applicants/auth/otp/verify', 'none'),
   applicantLogout: op('applicantLogout', 'identity', 'POST', '/v1/applicants/auth/logout', 'applicant-opaque'),
@@ -64,6 +65,10 @@ export const UPSTREAM = Object.freeze({
   // nothing else of the browser's.
   mySubmit: op('mySubmit', 'identity', 'POST', '/v1/applicants/me/applications', 'applicant-opaque'),
   myWithdraw: op('myWithdraw', 'identity', 'POST', '/v1/applicants/me/applications/withdraw', 'applicant-opaque'),
+  // The citizen document door (BUILD-002): identity-service authenticates the
+  // opaque session, derives the subject, and forwards to document-forensics
+  // under its OWN system token. The edge never talks to forensics.
+  myDocumentUpload: op('myDocumentUpload', 'identity', 'POST', '/v1/applicants/me/applications/documents', 'applicant-opaque'),
   // identity-service — erasure-request.controller.ts (session-authenticated half)
   myErasureRequestGet: op('myErasureRequestGet', 'identity', 'GET', '/v1/applicants/me/erasure-request', 'applicant-opaque'),
   myErasureRequestFile: op('myErasureRequestFile', 'identity', 'POST', '/v1/applicants/me/erasure-request', 'applicant-opaque'),

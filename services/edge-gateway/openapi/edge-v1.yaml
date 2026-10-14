@@ -79,10 +79,25 @@ paths:
         '403':
           description: CSRF invalid
 
+  /edge/v1/auth/applicant/identity:
+    post:
+      operationId: beginApplicantOnboarding
+      summary: Confirm National ID and date of birth against NIDA (onboarding step 1)
+      tags: [applicant-auth]
+      x-usrp-session: anonymous
+      x-usrp-csrf: true
+      responses:
+        '200':
+          description: Confirmed; a short-lived onboarding token is returned
+        '422':
+          description: Details could not be confirmed (one body for every non-match)
+        '429':
+          description: Rate limited
+
   /edge/v1/auth/applicant/otp/request:
     post:
       operationId: requestApplicantOtp
-      summary: Request OTP
+      summary: Send an OTP to the stated phone number (onboarding step 2)
       tags: [applicant-auth]
       x-usrp-session: anonymous
       x-usrp-csrf: true
@@ -90,13 +105,15 @@ paths:
       responses:
         '202':
           description: OTP request accepted
+        '401':
+          description: Onboarding token missing or expired
         '429':
           description: Rate limited
 
   /edge/v1/auth/applicant/otp/verify:
     post:
       operationId: verifyApplicantOtp
-      summary: Verify OTP
+      summary: Verify the OTP and open the applicant session (onboarding step 3)
       tags: [applicant-auth]
       x-usrp-session: anonymous
       x-usrp-csrf: true
@@ -692,6 +709,35 @@ paths:
         '503':
           description: Dependency failure (fail closed).
 
+  /edge/v1/me/applications/documents:
+    post:
+      operationId: uploadMyDocument
+      summary: Upload a required document for the citizen's own application
+      tags: [citizen]
+      x-usrp-session: applicant
+      x-usrp-csrf: true
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [applicationId, documentType, file]
+              properties:
+                applicationId: { type: string, format: uuid }
+                documentType: { type: string }
+                file: { type: string, format: binary }
+      responses:
+        '201':
+          description: Stored; only { documentId, documentType } is returned (never a verdict)
+        '404':
+          description: No such application for this citizen
+        '409':
+          description: The application is not accepting documents
+        '422':
+          description: Unsupported, mislabelled or infected file
+        '503':
+          description: A dependency is unavailable
   /edge/v1/me/applications/withdraw:
     post:
       operationId: withdrawMyApplication

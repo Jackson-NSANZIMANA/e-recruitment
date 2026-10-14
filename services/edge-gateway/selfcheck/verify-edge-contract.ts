@@ -22,6 +22,7 @@
 // boot guard at the very front of the gate.
 // ══════════════════════════════════════════════════════════════════
 
+import { ALL_PERMISSIONS } from '@usrp/shared-auth';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -263,6 +264,7 @@ const APPROVED_PUBLIC: readonly EdgeOperationId[] = [
   'readSession',
   'refreshSession',
   'officerLogin',
+  'beginApplicantOnboarding',
   'requestApplicantOtp',
   'verifyApplicantOtp',
   'listCampaigns',
@@ -304,7 +306,23 @@ for (const id of FIELD_SYNC) {
 check(
   'only the policy document and field-sync batch have raised body caps',
   EDGE_OPERATION_IDS.filter((id) => edgeOperation(id).maxBodyBytes > 8 * 1_024).join(',') ===
-    'createCampaignPolicy,syncFieldScores',
+    'createCampaignPolicy,uploadMyDocument,syncFieldScores',
+);
+
+// ── Every officer operation declares the permission it needs ───
+const SESSION_LOCAL_OFFICER_OPS: ReadonlySet<EdgeOperationId> = new Set(['officerLogout']);
+for (const id of EDGE_OPERATION_IDS) {
+  const operation = edgeOperation(id);
+  if (operation.session !== 'officer' || SESSION_LOCAL_OFFICER_OPS.has(id)) continue;
+  check(
+    `${id}: declares a known permission`,
+    operation.permission !== undefined && (ALL_PERMISSIONS as readonly string[]).includes(operation.permission),
+    String(operation.permission),
+  );
+}
+check(
+  'no anonymous or applicant operation declares an officer permission',
+  EDGE_OPERATION_IDS.every((id) => edgeOperation(id).session === 'officer' || edgeOperation(id).permission === undefined),
 );
 
 // ── Summary ──────────────────────────────────────────────────

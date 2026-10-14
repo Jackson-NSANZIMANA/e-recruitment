@@ -153,8 +153,14 @@ export class UpstreamClient implements UpstreamGateway {
     if (input.credential !== undefined && input.credential !== '') {
       headers.authorization = `Bearer ${input.credential}`;
     }
+    if (input.body !== undefined && input.multipart !== undefined) {
+      throw new Error(`Upstream ${operation.id}: body and multipart are mutually exclusive.`);
+    }
     if (input.body !== undefined) {
       headers['content-type'] = 'application/json';
+    }
+    if (input.multipart !== undefined) {
+      headers['content-type'] = input.multipart.contentType;
     }
     if (input.idempotencyKey !== undefined) {
       headers['idempotency-key'] = input.idempotencyKey;
@@ -172,6 +178,7 @@ export class UpstreamClient implements UpstreamGateway {
         method: operation.method,
         headers,
         ...(input.body === undefined ? {} : { body: JSON.stringify(input.body) }),
+        ...(input.multipart === undefined ? {} : { body: new Uint8Array(input.multipart.bytes) }),
         signal: controller.signal,
         // No redirect following: an upstream 3xx is a misconfiguration, and
         // following one could send the credential to an unintended origin.

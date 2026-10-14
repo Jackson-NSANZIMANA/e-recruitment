@@ -96,6 +96,8 @@ const OFFICER_ID = randomUUID();
 const APPLICATION_ID = randomUUID();
 const NID_A = "1199012345678901";
 const NID_B = "1199087654321098";
+const PHONE_A = "0788000111";
+const PHONE_B = "0799000222";
 
 interface StubState {
   /** Every upstream path called, in order. The no-retry proof reads this. */
@@ -138,7 +140,17 @@ const state: StubState = {
   submitCalls: [],
 };
 
-function officerToken(agency: "RDF" | "RNP"): string {
+/** The roles a fully-staffed test officer holds (every operational post). */
+const ALL_POSTS = [
+  "agency_admin",
+  "screening_officer",
+  "field_supervisor",
+  "medical_officer",
+  "adjudicator",
+  "decision_authority",
+];
+
+function officerToken(agency: "RDF" | "RNP", roles: string[] = ALL_POSTS): string {
   const privateKeyPem = Buffer.from(
     process.env["AUTH_JWT_PRIVATE_KEY_B64"] ?? "",
     "base64",
@@ -151,16 +163,21 @@ function officerToken(agency: "RDF" | "RNP"): string {
     sub: OFFICER_ID,
     kind: "officer",
     agency,
-    roles: ["OFFICER"],
+    roles,
     issuedAt: now.toISOString(),
     expiresAt: new Date(now.getTime() + 3_600_000).toISOString(),
   };
   return signAuthToken(privateKeyPem, claims);
 }
 
+let lastRawBody = Buffer.alloc(0);
+let lastUpstreamContentType = "";
+
 async function readBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
   for await (const chunk of req) chunks.push(chunk as Buffer);
+  lastRawBody = Buffer.concat(chunks);
+  lastUpstreamContentType = String(req.headers["content-type"] ?? "");
   if (chunks.length === 0) return null;
   try {
     return JSON.parse(Buffer.concat(chunks).toString("utf8"));
@@ -195,6 +212,13 @@ async function stubHandler(
 
     case "POST /v1/auth/officer/login": {
       const handle = (body as { loginHandle?: unknown } | null)?.loginHandle;
+      if (handle === "rdf.reviewer") {
+        // A read-only post: valid token, valid agency, almost no permissions.
+        return send(res, 200, {
+          token: officerToken("RDF", ["reviewer"]),
+          expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+        });
+      }
       if (handle === "rdf.officer") {
         return send(res, 200, {
           token: officerToken("RDF"),
@@ -273,11 +297,22 @@ async function stubHandler(
         toStatus: "SHORTLISTED",
       });
 
+    case "POST /v1/applicants/auth/onboarding/begin": {
+      const b = body as { nationalId?: unknown; dateOfBirth?: unknown } | null;
+      if (b?.nationalId === NID_A && b.dateOfBirth === "2002-05-14") {
+        return send(res, 200, {
+          onboardingToken: "stub-onboarding-token",
+          expiresAt: new Date(Date.now() + 900_000).toISOString(),
+        });
+      }
+      return send(res, 422, { error: "IDENTITY_NOT_CONFIRMED" });
+    }
+
     case "POST /v1/applicants/auth/otp/request": {
-      const nid = (body as { nationalId?: unknown } | null)?.nationalId;
-      // The stub DISAGREES about the two identities on purpose. If the edge ever
+      const phone = (body as { phoneNumber?: unknown } | null)?.phoneNumber;
+      // The stub DISAGREES about the two numbers on purpose. If the edge ever
       // let that difference through, this is where it would show.
-      if (nid === NID_A) return send(res, 202, { status: "CHALLENGED" });
+      if (phone === PHONE_A) return send(res, 202, { status: "CHALLENGED" });
       return send(res, 202, { status: "CHALLENGED", hint: "unknown-citizen" });
     }
 
@@ -289,6 +324,17 @@ async function stubHandler(
         expiresAt: new Date(Date.now() + 1_800_000).toISOString(),
       });
     }
+
+    case "POST /v1/applicants/me/applications/documents":
+      // The stub answers with a verdict on purpose: if the edge ever relayed
+      // it, the proof below would see it.
+      return send(res, 201, {
+        status: "UPLOADED",
+        documentId: "11111111-2222-4333-8444-555555555555",
+        documentType: "NATIONAL_ID_COPY",
+        lane: "GREEN",
+        score: 0.97,
+      });
 
     case "POST /v1/applicants/auth/logout":
       return send(res, 204, undefined);
@@ -816,7 +862,7 @@ async function main(): Promise<void> {
     jar.clear();
     await call("GET", "/edge/v1/session"); // seed a CSRF cookie for the anonymous OTP flow
     const otpVerify = await call("POST", "/edge/v1/auth/applicant/otp/verify", {
-      body: { nationalId: NID_A, otp: "123456" },
+      body: { onboardingToken: "stub-onboarding-token", phoneNumber: PHONE_A, otp: "123456" },
     });
     check(
       "OTP verification is 204 with no body",
@@ -865,7 +911,7 @@ async function main(): Promise<void> {
 
     // CSRF first: an unsafe method without the token never reaches upstream.
     const submitNoCsrf = await call("POST", "/edge/v1/me/applications", {
-      body: { category: "GENERAL_ENLISTMENT", nesaIndexNumber: "RW2026/1001" },
+      body: { category: "GENERAL_ENLISTMENT", campaignCode: "RDF-2026-A", nesaIndexNumber: "RW2026/1001" },
       csrf: null,
       extraHeaders: { "idempotency-key": SUBMIT_KEY },
     });
@@ -877,11 +923,11 @@ async function main(): Promise<void> {
 
     // The key contract: required, UUID, exactly one.
     const noKey = await call("POST", "/edge/v1/me/applications", {
-      body: { category: "GENERAL_ENLISTMENT" },
+      body: { category: "GENERAL_ENLISTMENT", campaignCode: "RDF-2026-A" },
     });
     check("submit without an Idempotency-Key is 400", noKey.status === 400);
     const badKey = await call("POST", "/edge/v1/me/applications", {
-      body: { category: "GENERAL_ENLISTMENT" },
+      body: { category: "GENERAL_ENLISTMENT", campaignCode: "RDF-2026-A" },
       extraHeaders: { "idempotency-key": "not-a-uuid" },
     });
     check("submit with a non-UUID key is 400", badKey.status === 400);
@@ -889,7 +935,7 @@ async function main(): Promise<void> {
     // ("k1, k2") — Node comma-joins duplicates — so sending the joined value
     // IS the duplicate-header case, byte for byte.
     const dupKey = await call("POST", "/edge/v1/me/applications", {
-      body: { category: "GENERAL_ENLISTMENT" },
+      body: { category: "GENERAL_ENLISTMENT", campaignCode: "RDF-2026-A" },
       extraHeaders: { "idempotency-key": `${randomUUID()}, ${randomUUID()}` },
     });
     check(
@@ -901,7 +947,7 @@ async function main(): Promise<void> {
     // the key after trimming — and must forward the TRIMMED value (the
     // canonical UUID), never the padded raw header.
     const paddedKey = await call("POST", "/edge/v1/me/applications", {
-      body: { category: "GENERAL_ENLISTMENT" },
+      body: { category: "GENERAL_ENLISTMENT", campaignCode: "RDF-2026-A" },
       extraHeaders: { "idempotency-key": `  ${SUBMIT_KEY}  ` },
     });
     check(
@@ -926,7 +972,7 @@ async function main(): Promise<void> {
 
     // Self-binding: identity fields are refused at the boundary.
     const forgedApplicant = await call("POST", "/edge/v1/me/applications", {
-      body: { applicantId: randomUUID(), category: "GENERAL_ENLISTMENT" },
+      body: { applicantId: randomUUID(), category: "GENERAL_ENLISTMENT", campaignCode: "RDF-2026-A" },
       extraHeaders: { "idempotency-key": randomUUID() },
     });
     check(
@@ -938,10 +984,20 @@ async function main(): Promise<void> {
       forgedApplicant.text.includes("FORBIDDEN_FIELD"),
     );
     const forgedChannel = await call("POST", "/edge/v1/me/applications", {
-      body: { category: "GENERAL_ENLISTMENT", channel: "USSD" },
+      body: { category: "GENERAL_ENLISTMENT", campaignCode: "RDF-2026-A", channel: "USSD" },
       extraHeaders: { "idempotency-key": randomUUID() },
     });
     check("a body channel is REFUSED with 400", forgedChannel.status === 400);
+    const noCampaign = await call("POST", "/edge/v1/me/applications", {
+      body: { category: "GENERAL_ENLISTMENT", nesaIndexNumber: "RW2026/1001" },
+      extraHeaders: { "idempotency-key": randomUUID() },
+    });
+    check("a submission without a campaignCode is REFUSED with 400", noCampaign.status === 400, noCampaign.text);
+    const badCampaign = await call("POST", "/edge/v1/me/applications", {
+      body: { category: "GENERAL_ENLISTMENT", campaignCode: "not a code!", nesaIndexNumber: "RW2026/1001" },
+      extraHeaders: { "idempotency-key": randomUUID() },
+    });
+    check("a malformed campaignCode is REFUSED with 400", badCampaign.status === 400, badCampaign.text);
     const badCategory = await call("POST", "/edge/v1/me/applications", {
       body: { category: "NOT_A_CATEGORY" },
       extraHeaders: { "idempotency-key": randomUUID() },
@@ -958,7 +1014,7 @@ async function main(): Promise<void> {
     // First submission: 201, identifiers, no replay header, exact key +
     // allowlisted body + built-from-scratch headers upstream.
     const first = await call("POST", "/edge/v1/me/applications", {
-      body: { category: "GENERAL_ENLISTMENT", nesaIndexNumber: "RW2026/1001" },
+      body: { category: "GENERAL_ENLISTMENT", campaignCode: "RDF-2026-A", nesaIndexNumber: "RW2026/1001" },
       extraHeaders: {
         "idempotency-key": SUBMIT_KEY,
         // Browser junk a proxy might forward; the edge must not.
@@ -995,7 +1051,7 @@ async function main(): Promise<void> {
         typeof firstCall?.body === "object" &&
         Object.keys(firstCall.body as Record<string, unknown>)
           .sort()
-          .join(",") === "category,nesaIndexNumber",
+          .join(",") === "campaignCode,category,nesaIndexNumber",
       JSON.stringify(firstCall?.body),
     );
     const firstHeaders = Object.keys(firstCall?.headers ?? {})
@@ -1025,7 +1081,7 @@ async function main(): Promise<void> {
     // Replay: same key, same body → 200, same identifiers, the header.
     state.submitAnswer = "replay";
     const replay = await call("POST", "/edge/v1/me/applications", {
-      body: { category: "GENERAL_ENLISTMENT", nesaIndexNumber: "RW2026/1001" },
+      body: { category: "GENERAL_ENLISTMENT", campaignCode: "RDF-2026-A", nesaIndexNumber: "RW2026/1001" },
       extraHeaders: { "idempotency-key": SUBMIT_KEY },
     });
     check("a replay is 200, not 201", replay.status === 200, replay.text);
@@ -1057,6 +1113,7 @@ async function main(): Promise<void> {
       },
       body: JSON.stringify({
         category: "GENERAL_ENLISTMENT",
+        campaignCode: "RDF-2026-A",
         nesaIndexNumber: "RW2026/1001",
       }),
     });
@@ -1106,7 +1163,7 @@ async function main(): Promise<void> {
     // Live duplicate: identifiers KEPT.
     state.submitAnswer = "alreadyApplied";
     const duplicate = await call("POST", "/edge/v1/me/applications", {
-      body: { category: "GENERAL_ENLISTMENT", nesaIndexNumber: "RW2026/1001" },
+      body: { category: "GENERAL_ENLISTMENT", campaignCode: "RDF-2026-A", nesaIndexNumber: "RW2026/1001" },
       extraHeaders: { "idempotency-key": randomUUID() },
     });
     check(
@@ -1126,7 +1183,7 @@ async function main(): Promise<void> {
     // padded-key accept, the first submit, the replay, the CORS replay and
     // the live duplicate).
     const rateLimited = await call("POST", "/edge/v1/me/applications", {
-      body: { category: "GENERAL_ENLISTMENT", nesaIndexNumber: "RW2026/1001" },
+      body: { category: "GENERAL_ENLISTMENT", campaignCode: "RDF-2026-A", nesaIndexNumber: "RW2026/1001" },
       extraHeaders: { "idempotency-key": randomUUID() },
     });
     check(
@@ -1144,7 +1201,7 @@ async function main(): Promise<void> {
     await call("POST", "/edge/v1/auth/applicant/logout");
     await call("GET", "/edge/v1/session"); // seed a fresh CSRF cookie (§14's pattern)
     const reLogin = await call("POST", "/edge/v1/auth/applicant/otp/verify", {
-      body: { nationalId: NID_A, otp: "123456" },
+      body: { onboardingToken: "stub-onboarding-token", phoneNumber: PHONE_A, otp: "123456" },
     });
     check(
       "citizen re-login for the second half is 204",
@@ -1154,7 +1211,7 @@ async function main(): Promise<void> {
     // Key reuse: identifier-free even when upstream misbehaves.
     state.submitAnswer = "keyReused";
     const reused = await call("POST", "/edge/v1/me/applications", {
-      body: { category: "GENERAL_ENLISTMENT", nesaIndexNumber: "RW2026/1002" },
+      body: { category: "GENERAL_ENLISTMENT", campaignCode: "RDF-2026-A", nesaIndexNumber: "RW2026/1002" },
       extraHeaders: { "idempotency-key": randomUUID() },
     });
     check(
@@ -1185,7 +1242,7 @@ async function main(): Promise<void> {
     state.submitAnswer = "unavailable";
     const callsBeforeUnavailable = state.submitCalls.length;
     const unavailable = await call("POST", "/edge/v1/me/applications", {
-      body: { category: "GENERAL_ENLISTMENT", nesaIndexNumber: "RW2026/1003" },
+      body: { category: "GENERAL_ENLISTMENT", campaignCode: "RDF-2026-A", nesaIndexNumber: "RW2026/1003" },
       extraHeaders: { "idempotency-key": randomUUID() },
     });
     check(
@@ -1205,21 +1262,115 @@ async function main(): Promise<void> {
       !auditRecords.some((a) => JSON.stringify(a).includes(SUBMIT_KEY)),
     );
 
+    section("Onboarding step 1: NID + DOB, one body for every non-match");
+    const beginOk = await call("POST", "/edge/v1/auth/applicant/identity", {
+      body: { nationalId: NID_A, dateOfBirth: "2002-05-14" },
+    });
+    const beginWrongDob = await call("POST", "/edge/v1/auth/applicant/identity", {
+      body: { nationalId: NID_A, dateOfBirth: "1990-01-01" },
+    });
+    const beginUnknown = await call("POST", "/edge/v1/auth/applicant/identity", {
+      body: { nationalId: NID_B, dateOfBirth: "2002-05-14" },
+    });
+    check("matching NID + DOB returns an onboarding token",
+      beginOk.status === 200 && beginOk.text.includes("onboardingToken"), beginOk.text);
+    check("a wrong DOB and an unknown NID are BYTE-IDENTICAL 422s",
+      beginWrongDob.status === 422 && beginWrongDob.text === beginUnknown.text, `${beginWrongDob.text} vs ${beginUnknown.text}`);
+    const beginBadDob = await call("POST", "/edge/v1/auth/applicant/identity", {
+      body: { nationalId: NID_A, dateOfBirth: "2002-02-31" },
+    });
+    check("an impossible calendar date is 400 before any upstream call", beginBadDob.status === 400);
+
+    // ── 14b. Citizen document upload (BUILD-002) ─────────────────────
+    section("Document upload: composed server-side, verdict never relayed");
+    async function upload(
+      parts: Record<string, string | Blob>,
+      extraHeaders: Record<string, string> = {},
+    ): Promise<{ status: number; text: string }> {
+      const form = new FormData();
+      for (const [k, v] of Object.entries(parts)) {
+        if (typeof v === "string") form.append(k, v);
+        else form.append(k, v, "scan.pdf");
+      }
+      const headers: Record<string, string> = {};
+      const cookie = jar.header();
+      if (cookie.length > 0) headers.cookie = cookie;
+      const token = jar.get(CSRF_COOKIE);
+      if (token !== undefined) headers["x-csrf-token"] = token;
+      Object.assign(headers, extraHeaders);
+      const response = await fetch(`${base}/edge/v1/me/applications/documents`, {
+        method: "POST",
+        headers,
+        body: form,
+      });
+      jar.absorb(response);
+      return { status: response.status, text: await response.text() };
+    }
+    const pdf = new Blob([Buffer.from("%PDF-1.4\n%stub\n")], { type: "application/pdf" });
+    const goodApplicationId = randomUUID();
+    const uploaded = await upload({
+      applicationId: goodApplicationId,
+      documentType: "NATIONAL_ID_COPY",
+      file: pdf,
+    });
+    check("a valid upload is 201", uploaded.status === 201, uploaded.text);
+    check(
+      "only { status, documentId, documentType } crosses (no lane, no score)",
+      uploaded.text.includes("documentId") &&
+        !uploaded.text.includes("lane") &&
+        !uploaded.text.includes("score") &&
+        !uploaded.text.includes("GREEN"),
+      uploaded.text,
+    );
+    const upstreamBody = lastRawBody.toString("latin1");
+    check(
+      "the upstream multipart was COMPOSED by the edge (its own boundary)",
+      lastUpstreamContentType.startsWith("multipart/form-data; boundary=usrp-"),
+      lastUpstreamContentType,
+    );
+    check(
+      "the upstream form carries exactly applicationId, documentType, file",
+      upstreamBody.includes('name="applicationId"') &&
+        upstreamBody.includes('name="documentType"') &&
+        upstreamBody.includes('name="file"') &&
+        !upstreamBody.includes('name="applicantId"') &&
+        !upstreamBody.includes("scan.pdf"),
+    );
+    const forgedSubject = await upload({
+      applicantId: randomUUID(),
+      applicationId: goodApplicationId,
+      documentType: "NATIONAL_ID_COPY",
+      file: pdf,
+    });
+    check("a browser applicantId part is REFUSED (400)", forgedSubject.status === 400, forgedSubject.text);
+    const wrongType = await upload({
+      applicationId: goodApplicationId,
+      documentType: "NATIONAL_ID_COPY",
+      file: new Blob([Buffer.from("MZ")], { type: "application/x-msdownload" }),
+    });
+    check("a disallowed media type is 422 before any upstream call", wrongType.status === 422, wrongType.text);
+    const noFile = await upload({ applicationId: goodApplicationId, documentType: "NATIONAL_ID_COPY" });
+    check("a missing file part is 400", noFile.status === 400, noFile.text);
+    const badAppId = await upload({ applicationId: "not-a-uuid", documentType: "NATIONAL_ID_COPY", file: pdf });
+    check("a non-UUID applicationId is 400", badAppId.status === 400, badAppId.text);
+    const noCsrf = await upload({ applicationId: goodApplicationId, documentType: "NATIONAL_ID_COPY", file: pdf }, { "x-csrf-token": "wrong" });
+    check("a wrong CSRF token is refused (403)", noCsrf.status === 403, String(noCsrf.status));
+
     // ── 15. Anti-enumeration ───────────────────────────────────
     section("OTP request reveals nothing about the subject");
     const otpKnown = await call("POST", "/edge/v1/auth/applicant/otp/request", {
-      body: { nationalId: NID_A },
+      body: { onboardingToken: "stub-onboarding-token", phoneNumber: PHONE_A },
     });
     const otpUnknown = await call(
       "POST",
       "/edge/v1/auth/applicant/otp/request",
       {
-        body: { nationalId: NID_B },
+        body: { onboardingToken: "stub-onboarding-token", phoneNumber: PHONE_B },
       },
     );
     check("OTP request is 202", otpKnown.status === 202);
     check(
-      "known and unknown National IDs are BYTE-IDENTICAL",
+      "any two well-formed requests are BYTE-IDENTICAL",
       otpKnown.text === otpUnknown.text &&
         otpKnown.status === otpUnknown.status,
       `${otpKnown.text} vs ${otpUnknown.text}`,
@@ -1237,11 +1388,11 @@ async function main(): Promise<void> {
       "POST",
       "/edge/v1/auth/applicant/otp/request",
       {
-        body: { nationalId: "123" },
+        body: { onboardingToken: "stub-onboarding-token", phoneNumber: "123" },
       },
     );
     check(
-      "a structurally invalid National ID is 400",
+      "a structurally invalid phone number is 400",
       malformed.status === 400,
     );
     check(
@@ -1309,6 +1460,51 @@ async function main(): Promise<void> {
       "officer routes carried a Bearer credential upstream",
       state.lastAuthorization?.startsWith("Bearer ") === true,
     );
+
+    // ── 18. WHAT, not just WHO (BUILD-004 §D) ───────────────────────
+    section("A valid officer session is not a permission");
+    jar.clear();
+    await call("GET", "/edge/v1/session");
+    const reviewerLogin = await call("POST", "/edge/v1/auth/officer/login", {
+      body: { loginHandle: "rdf.reviewer", password: "x" },
+    });
+    check("the reviewer logs in", reviewerLogin.status === 204);
+    const view = await call("GET", "/edge/v1/session");
+    check(
+      "the session view lists permissions, read-only for a reviewer",
+      view.text.includes('"application.read"') && !view.text.includes('"decision.final"'),
+      view.text,
+    );
+    const callsBefore = state.calls.length;
+    const deniedFinal = await call("POST", "/edge/v1/applications/final-decision", {
+      body: { applicationId: randomUUID(), decision: "SHORTLIST" },
+    });
+    check("a reviewer's final decision is 403 PERMISSION_DENIED", deniedFinal.status === 403 && deniedFinal.text.includes("PERMISSION_DENIED"), deniedFinal.text);
+    const deniedMedical = await call("POST", "/edge/v1/applications/medical-review", {
+      body: { applicationId: randomUUID(), fitnessStatus: "FIT" },
+    });
+    const deniedAccept = await call("POST", "/edge/v1/applications/accept", {
+      body: { applicationId: randomUUID() },
+    });
+    const deniedWalkIn = await call("POST", "/edge/v1/applications/walk-in/register", {
+      body: { applicantId: randomUUID(), category: "GENERAL_ENLISTMENT" },
+    });
+    check(
+      "medical review, accept and walk-in registration are refused too",
+      deniedMedical.status === 403 && deniedAccept.status === 403 && deniedWalkIn.status === 403,
+      `${String(deniedMedical.status)}/${String(deniedAccept.status)}/${String(deniedWalkIn.status)}`,
+    );
+    check(
+      "NO upstream call was made for any refused operation",
+      state.calls.length === callsBefore,
+      state.calls.slice(callsBefore).join(", "),
+    );
+    check(
+      "the refusal does not name the role or the permission",
+      !deniedFinal.text.includes("decision.final") && !deniedFinal.text.includes("reviewer"),
+    );
+    const allowedRead = await call("GET", "/edge/v1/applications");
+    check("the same session may still READ (application.read)", allowedRead.status === 200, allowedRead.text);
   } finally {
     await server.stop();
     await new Promise<void>((resolve) => stub.close(() => resolve()));

@@ -28,6 +28,7 @@ import {
   officerLogoutHandler,
 } from './adapters/http/officer-auth.controller.js';
 import {
+  beginApplicantOnboardingHandler,
   logoutApplicantHandler,
   requestApplicantOtpHandler,
   verifyApplicantOtpHandler,
@@ -63,6 +64,7 @@ import {
   getMyErasureRequestHandler,
   listMyApplicationsHandler,
   submitMyApplicationHandler,
+  uploadMyDocumentHandler,
   withdrawMyApplicationHandler,
 } from './adapters/http/citizen.controller.js';
 import {
@@ -85,6 +87,7 @@ export function edgeHandlers(deps: EdgeDeps): Record<EdgeOperationId, RouteHandl
     officerLogin: officerLoginHandler(deps),
     officerLogout: officerLogoutHandler(deps),
 
+    beginApplicantOnboarding: beginApplicantOnboardingHandler(deps),
     requestApplicantOtp: requestApplicantOtpHandler(deps),
     verifyApplicantOtp: verifyApplicantOtpHandler(deps),
     logoutApplicant: logoutApplicantHandler(deps),
@@ -117,6 +120,7 @@ export function edgeHandlers(deps: EdgeDeps): Record<EdgeOperationId, RouteHandl
 
     listMyApplications: listMyApplicationsHandler(deps),
     submitMyApplication: submitMyApplicationHandler(deps),
+    uploadMyDocument: uploadMyDocumentHandler(deps),
     withdrawMyApplication: withdrawMyApplicationHandler(deps),
     getMyErasureRequest: getMyErasureRequestHandler(deps),
     fileMyErasureRequest: fileMyErasureRequestHandler(deps),
