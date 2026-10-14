@@ -59,7 +59,7 @@ export function officerTransitionRoutes(
       method: 'POST',
       path: MEDICAL_REVIEW_PATH,
       handler: withAuth(verify, { kind: 'officer' }, async (ctx, principal): Promise<HttpResult> => {
-  requireOfficerPermission(principal, 'medical.review');
+        requireOfficerPermission(principal, 'medical.review');
         const body = await ctx.json<TransitionBody>();
         const applicationId = requireApplicationId(body.applicationId);
         // Two agency MODES (ADR-013): BOARD (RDF) sends fitnessStatus;
@@ -97,7 +97,7 @@ export function officerTransitionRoutes(
       method: 'POST',
       path: FINAL_DECISION_PATH,
       handler: withAuth(verify, { kind: 'officer' }, async (ctx, principal): Promise<HttpResult> => {
-  requireOfficerPermission(principal, 'decision.final');
+        requireOfficerPermission(principal, 'decision.final');
         const body = await ctx.json<TransitionBody>();
         const applicationId = requireApplicationId(body.applicationId);
         const decision = body.decision;
@@ -119,7 +119,7 @@ export function officerTransitionRoutes(
       method: 'POST',
       path: ACCEPT_PATH,
       handler: withAuth(verify, { kind: 'officer' }, async (ctx, principal): Promise<HttpResult> => {
-  requireOfficerPermission(principal, 'application.accept');
+        requireOfficerPermission(principal, 'application.accept');
         const body = await ctx.json<TransitionBody>();
         const applicationId = requireApplicationId(body.applicationId);
         const command: AcceptCommand = {
@@ -134,7 +134,7 @@ export function officerTransitionRoutes(
       method: 'POST',
       path: ADJUDICATE_PATH,
       handler: withAuth(verify, { kind: 'officer' }, async (ctx, principal): Promise<HttpResult> => {
-  requireOfficerPermission(principal, 'adjudication.decide');
+        requireOfficerPermission(principal, 'adjudication.decide');
         const body = await ctx.json<TransitionBody>();
         const applicationId = requireApplicationId(body.applicationId);
         const decision = body.decision;

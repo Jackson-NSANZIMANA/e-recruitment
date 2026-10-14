@@ -27,7 +27,7 @@ export function erasureRoute(service: EraseIdentityService, verify: AuthVerifier
     method: 'POST',
     path: ERASURE_PATH,
     handler: withAuth(verify, { kind: ['officer'] }, async (ctx, principal): Promise<HttpResult> => {
-  requireOfficerPermission(principal, 'erasure.decide');
+      requireOfficerPermission(principal, 'erasure.decide');
       const body = await ctx.json<ErasureRequestBody>();
       const applicantId = body.applicantId;
       if (typeof applicantId !== 'string' || !UUID_RE.test(applicantId)) {

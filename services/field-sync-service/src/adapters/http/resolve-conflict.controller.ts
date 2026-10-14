@@ -34,7 +34,7 @@ export function resolveConflictRoute(service: ResolveConflictService, verify: Au
     method: 'POST',
     path: RESOLVE_CONFLICT_PATH,
     handler: withAuth(verify, { kind: 'officer' }, async (ctx, principal): Promise<HttpResult> => {
-  requireOfficerPermission(principal, 'field.conflict.resolve');
+      requireOfficerPermission(principal, 'field.conflict.resolve');
       if (principal.kind !== 'officer') {
         throw new HttpError(403, 'FORBIDDEN', 'Officer principal required.');
       }

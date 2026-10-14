@@ -48,7 +48,7 @@ export function walkInRoutes(service: WalkInService, verify: AuthVerifier): Rout
       method: 'POST',
       path: WALK_IN_REGISTER_PATH,
       handler: withAuth(verify, { kind: 'officer' }, async (ctx, principal): Promise<HttpResult> => {
-  requireOfficerPermission(principal, 'walkin.register');
+        requireOfficerPermission(principal, 'walkin.register');
         const body = await ctx.json<RegisterBody>();
         const applicantId = requireUuid(body.applicantId, 'applicantId');
         const category = body.category;
@@ -78,7 +78,7 @@ export function walkInRoutes(service: WalkInService, verify: AuthVerifier): Rout
       method: 'POST',
       path: WALK_IN_VET_PATH,
       handler: withAuth(verify, { kind: 'officer' }, async (ctx, principal): Promise<HttpResult> => {
-  requireOfficerPermission(principal, 'walkin.vet');
+        requireOfficerPermission(principal, 'walkin.vet');
         const body = await ctx.json<VetBody>();
         const applicationId = requireUuid(body.applicationId, 'applicationId');
 

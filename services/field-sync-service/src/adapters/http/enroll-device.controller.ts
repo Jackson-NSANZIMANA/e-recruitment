@@ -34,7 +34,7 @@ export function enrollDeviceRoute(service: EnrollDeviceService, verify: AuthVeri
     method: 'POST',
     path: ENROLL_DEVICE_PATH,
     handler: withAuth(verify, { kind: 'officer' }, async (ctx, principal): Promise<HttpResult> => {
-  requireOfficerPermission(principal, 'field.device.enroll');
+      requireOfficerPermission(principal, 'field.device.enroll');
       if (principal.kind !== 'officer') {
         throw new HttpError(403, 'FORBIDDEN', 'Officer principal required.');
       }

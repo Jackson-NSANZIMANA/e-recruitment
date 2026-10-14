@@ -101,7 +101,7 @@ export function syncScoresRoute(service: SyncFieldScoresService, verify: AuthVer
     method: 'POST',
     path: SYNC_SCORES_PATH,
     handler: withAuth(verify, { kind: 'officer' }, async (ctx, principal): Promise<HttpResult> => {
-  requireOfficerPermission(principal, 'field.score.sync');
+      requireOfficerPermission(principal, 'field.score.sync');
       if (principal.kind !== 'officer') {
         throw new HttpError(403, 'FORBIDDEN', 'Officer principal required.');
       }
