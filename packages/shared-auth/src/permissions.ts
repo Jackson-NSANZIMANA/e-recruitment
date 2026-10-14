@@ -54,6 +54,11 @@ export const OPERATION_PERMISSION_LIST = [
   'field.conflict.resolve',
   /** Exam-day biometric check-in. */
   'biometric.verify',
+  /**
+   * Clear a required document by seeing the paper at the venue (ADR-032,
+   * owner decision 2026-10-14: the front-door check-in officer).
+   */
+  'document.verify.venue',
   /** Record the medical board / certificate verdict. */
   'medical.review',
   /** Record an adjudication on an amber/red document review. */
@@ -118,6 +123,7 @@ const ROLE_PERMISSIONS: Readonly<Record<KnownRole, ReadonlySet<Permission>>> = {
     'walkin.vet',
     'identity.verify',
     'biometric.verify',
+    'document.verify.venue',
     'field.device.enroll',
     'field.score.sync',
     ...READ,

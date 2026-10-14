@@ -235,6 +235,12 @@ export const rnpDocumentRecords = rnpOps.table(
     humanReviewedById: uuid('human_reviewed_by_id'),
     humanReviewedAt: timestamp('human_reviewed_at', { withTimezone: true }),
     humanReviewDecision: varchar('human_review_decision', { length: 10 }),
+
+    // Venue verification (rls/0030, ADR-032): the check-in officer saw the
+    // paper. Write-once. At most one per (application, type) — enforced by the
+    // partial unique index uq_rnp_docs_venue_once, asserted live, not mirrored.
+    venueVerifiedById: uuid('venue_verified_by_id'),
+    venueVerifiedAt: timestamp('venue_verified_at', { withTimezone: true }),
     uploadedAt: timestamp('uploaded_at', { withTimezone: true }).defaultNow().notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
