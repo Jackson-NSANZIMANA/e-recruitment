@@ -54,7 +54,7 @@ process.env['AUTH_JWT_PUBLIC_KEY_B64'] = Buffer.from(
 ).toString('base64');
 
 const { createIamService, loadIamConfig, serviceTokenRoutes } = await import('@usrp/iam-service');
-const { createApplicationService, loadApplicationConfig, byApplicantRoute } = await import(
+const { createApplicationService, loadApplicationConfig, byApplicantRoute, documentChecklistRoutes } = await import(
   '@usrp/application-service'
 );
 const {
@@ -235,7 +235,7 @@ async function main(): Promise<void> {
     serviceName: 'application-applicant-auth-selfcheck',
     port: 0,
     host: '127.0.0.1',
-    routes: [byApplicantRoute(appService.list, appVerify)],
+    routes: [byApplicantRoute(appService.list, appVerify), ...documentChecklistRoutes(appService.documentChecklist, appVerify)],
     handleSignals: false,
   });
 
@@ -389,6 +389,21 @@ async function main(): Promise<void> {
     check('sees the RNP application (cross-agency)', mine.text.includes(RNP_CODE));
     check("does NOT see another citizen's application", !mine.text.includes(CTRL_CODE));
     check('response carries NO NID hash and NO phone', !mine.text.includes(CITIZEN_NID_HASH) && !mine.text.includes(MOCK_PHONE_FRAGMENT));
+
+    console.log('\n── 4b. ADR-032: the citizen reads their OWN advisory document checklist ──');
+    const checklistRes = await fetch(`${idServer.url}/v1/applicants/me/applications/document-checklist?applicationId=${RDF_APP}`, {
+      headers: { authorization: `Bearer ${session}` },
+    });
+    const checklistText = await checklistRes.text();
+    check('own application → 200 checklist', checklistRes.status === 200 && checklistText.includes('"items"'), checklistText);
+    check('…from the announcements table (no policy bound to this legacy fixture)', checklistText.includes('GROUND_TRUTH_TABLE'));
+    check('…NATIONAL_ID is API_VERIFIED (the NIDA-verified identity waives the paper)',
+      /"documentType":"NATIONAL_ID","satisfaction":"API_VERIFIED"/.test(checklistText), checklistText);
+    check('…and carries no NID hash, phone or score', !checklistText.includes(CITIZEN_NID_HASH) && !/score|flag|phone/i.test(checklistText));
+    const strangerRes = await fetch(`${idServer.url}/v1/applicants/me/applications/document-checklist?applicationId=${CTRL_APP}`, {
+      headers: { authorization: `Bearer ${session}` },
+    });
+    check("another citizen's application → 404", strangerRes.status === 404);
 
     console.log('\n── 5. The citizen door never widens an officer: by-applicant → 403 ──');
     const officerProbe = await fetch(

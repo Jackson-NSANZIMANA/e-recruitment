@@ -49,6 +49,7 @@ export const OTP_REQUEST_PATH = '/v1/applicants/auth/otp/request';
 export const OTP_VERIFY_PATH = '/v1/applicants/auth/otp/verify';
 export const ME_APPLICATIONS_PATH = '/v1/applicants/me/applications';
 export const ME_WITHDRAW_PATH = '/v1/applicants/me/applications/withdraw';
+export const ME_DOCUMENT_CHECKLIST_PATH = '/v1/applicants/me/applications/document-checklist';
 export const LOGOUT_PATH = '/v1/applicants/auth/logout';
 
 /** Request header carrying the citizen's retry identity (ADR-027). */
@@ -265,6 +266,27 @@ export function applicantAuthRoutes(
           throw mapDomainError(err);
         }
         return mapSubmitResult(result);
+      },
+    },
+    {
+      method: 'GET',
+      path: ME_DOCUMENT_CHECKLIST_PATH,
+      handler: async (ctx): Promise<HttpResult> => {
+        // The subject is the session; the application must be theirs (404 otherwise).
+        const applicantId = await authenticate(authHeader(ctx.headers['authorization']), service);
+        const applicationId = ctx.query.get('applicationId')?.trim() ?? '';
+        if (!UUID_RE.test(applicationId)) {
+          throw new HttpError(400, 'INVALID_REQUEST', 'Query "applicationId" must be a UUID.');
+        }
+        let result;
+        try {
+          result = await applications.documentChecklist(applicantId, applicationId);
+        } catch (err) {
+          throw mapDomainError(err);
+        }
+        return result.kind === 'OK'
+          ? { status: 200, body: result.checklist }
+          : { status: 404, body: { status: 'NOT_FOUND' } };
       },
     },
     {

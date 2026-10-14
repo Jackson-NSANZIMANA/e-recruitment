@@ -72,7 +72,25 @@ export type ApplicantSubmitResult =
   | { readonly kind: 'DEPENDENCY_UNAVAILABLE' }
   | { readonly kind: 'UNEXPECTED_UPSTREAM_RESPONSE' };
 
+/** The citizen's advisory document checklist (ADR-032), as allowlisted. */
+export interface DocumentChecklistView {
+  readonly agency: string;
+  readonly source: string;
+  readonly complete: boolean;
+  readonly items: readonly {
+    readonly documentType: string;
+    readonly satisfaction: string;
+    readonly registry: string | null;
+  }[];
+}
+
+export type DocumentChecklistResult =
+  | { readonly kind: 'OK'; readonly checklist: DocumentChecklistView }
+  | { readonly kind: 'NOT_FOUND' };
+
 export interface ApplicationsGateway {
+  /** The citizen's OWN application's advisory checklist (ADR-032). */
+  documentChecklist(applicantId: string, applicationId: string): Promise<DocumentChecklistResult>;
   /** All of one applicant's applications, cross-agency. */
   listForApplicant(applicantId: string): Promise<readonly ApplicantApplication[]>;
   /** Withdraw the citizen's OWN application (ADR-020) — ownership enforced upstream. */

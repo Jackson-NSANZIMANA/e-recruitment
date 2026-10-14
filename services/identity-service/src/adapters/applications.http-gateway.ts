@@ -15,6 +15,7 @@ import type {
   ApplicantSubmitInput,
   ApplicantSubmitResult,
   ApplicationsGateway,
+  DocumentChecklistResult,
   WithdrawApplicationResult,
 } from '../ports/applications-gateway.js';
 
@@ -75,6 +76,50 @@ export class HttpApplicationsGateway implements ApplicationsGateway {
     }
     const body = (await res.json()) as { applications?: ApplicantApplication[] };
     return body.applications ?? [];
+  }
+
+  async documentChecklist(applicantId: string, applicationId: string): Promise<DocumentChecklistResult> {
+    const token = await this.#systemToken();
+    let res: Response;
+    try {
+      res = await this.#fetch(
+        `${this.#opts.applicationBaseUrl}/v1/applications/document-checklist/by-applicant` +
+          `?applicantId=${encodeURIComponent(applicantId)}&applicationId=${encodeURIComponent(applicationId)}`,
+        { method: 'GET', headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(this.#timeoutMs) },
+      );
+    } catch (cause) {
+      throw new UpstreamUnavailableError('application-service unreachable', { cause });
+    }
+    if (res.status === 401) this.#cached = null;
+    if (res.status === 404) return { kind: 'NOT_FOUND' };
+    if (res.status !== 200) {
+      throw new UpstreamUnavailableError(`application-service checklist responded ${String(res.status)}`);
+    }
+    const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+    const items = body?.['items'];
+    if (
+      body === null || typeof body['agency'] !== 'string' || typeof body['source'] !== 'string' ||
+      typeof body['complete'] !== 'boolean' || !Array.isArray(items)
+    ) {
+      throw new UpstreamUnavailableError('application-service checklist body malformed');
+    }
+    // Rebuilt field by field: nothing upstream adds can reach the citizen.
+    return {
+      kind: 'OK',
+      checklist: {
+        agency: body['agency'],
+        source: body['source'],
+        complete: body['complete'],
+        items: items.map((raw) => {
+          const i = (raw ?? {}) as Record<string, unknown>;
+          return {
+            documentType: String(i['documentType'] ?? ''),
+            satisfaction: String(i['satisfaction'] ?? ''),
+            registry: typeof i['registry'] === 'string' ? i['registry'] : null,
+          };
+        }),
+      },
+    };
   }
 
   async withdrawApplication(
