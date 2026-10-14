@@ -82,14 +82,16 @@ export interface ApplicationService {
  * only the event bus does.
  */
 export function createApplicationService(
-  _config: ApplicationServiceConfig,
+  config: ApplicationServiceConfig,
   eventBus: EventBus,
 ): ApplicationService {
   const identityReader = new PgIdentityReader();
   const campaignReader = new PgCampaignReader();
   const repository = new PgApplicationRepository();
   const readRepository = new PgApplicationReadRepository();
-  const officerTransitionRepository = new PgOfficerTransitionRepository();
+  const officerTransitionRepository = new PgOfficerTransitionRepository(
+    config.separationOfDuties,
+  );
   // Outbox fast path (ADR-025) for the use cases already converted. The rest
   // still publish directly and are listed as the mechanical follow-up.
   const events = new PgOutboxDispatcher(eventBus);

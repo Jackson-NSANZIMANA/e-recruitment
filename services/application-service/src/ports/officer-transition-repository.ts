@@ -109,7 +109,19 @@ export type OfficerTransitionOutcome =
   | { readonly kind: 'NO_CHANGE'; readonly currentStatus: ApplicationStatus }
   | { readonly kind: 'NOT_APPLICABLE'; readonly currentStatus: ApplicationStatus }
   | { readonly kind: 'NOT_FOUND' }
-  | { readonly kind: 'CROSS_AGENCY_LOCKED'; readonly lockedByAgency: Agency };
+  | { readonly kind: 'CROSS_AGENCY_LOCKED'; readonly lockedByAgency: Agency }
+  | SeparationOfDutiesOutcome;
+
+/**
+ * Four-eyes refusal (BUILD-004 §D): the permission to act was held, but this
+ * SAME officer already performed the preceding step on THIS application. A
+ * hold-safe no-op — nothing written, nothing audited as a transition. `rule`
+ * is a closed identifier, never a person.
+ */
+export interface SeparationOfDutiesOutcome {
+  readonly kind: 'SEPARATION_OF_DUTIES';
+  readonly rule: 'FINAL_DECISION_EXCLUDES_MEDICAL_REVIEWER' | 'ACCEPT_EXCLUDES_FINAL_DECIDER';
+}
 
 /**
  * Outcome of an officer acceptance. Same shape as the generic transition, but
@@ -129,7 +141,8 @@ export type AcceptOutcome =
   | { readonly kind: 'NO_CHANGE'; readonly currentStatus: ApplicationStatus }
   | { readonly kind: 'NOT_APPLICABLE'; readonly currentStatus: ApplicationStatus }
   | { readonly kind: 'NOT_FOUND' }
-  | { readonly kind: 'CROSS_AGENCY_LOCKED'; readonly lockedByAgency: Agency };
+  | { readonly kind: 'CROSS_AGENCY_LOCKED'; readonly lockedByAgency: Agency }
+  | SeparationOfDutiesOutcome;
 
 /**
  * Outcome of an officer adjudication (ADR-011). Extends the transition shape:

@@ -334,7 +334,7 @@ async function main(): Promise<void> {
 
     const officerClaims: AuthTokenClaims = {
       v: 1, iss: 'usrp', aud: 'usrp-services', sub: 'selfcheck-officer', kind: 'officer',
-      agency: 'RDF', roles: [], issuedAt: '2026-01-01T00:00:00.000Z', expiresAt: '2999-01-01T00:00:00.000Z',
+      agency: 'RDF', roles: ['screening_officer', 'field_supervisor', 'medical_officer', 'adjudicator', 'decision_authority', 'reviewer'], issuedAt: '2026-01-01T00:00:00.000Z', expiresAt: '2999-01-01T00:00:00.000Z',
     };
     const officerToken = signAuthToken(AUTH_KEYS.privateKeyPem, officerClaims);
     const wrongKind = await call('POST', SUBMIT_APPLICATION_PATH, {

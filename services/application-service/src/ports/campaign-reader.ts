@@ -16,6 +16,12 @@ import type { Agency, ApplicationCategory } from '@usrp/shared-types';
 export interface OpenCampaign {
   readonly campaignId: string;
   readonly campaignLabel: string;
+  /**
+   * The immutable policy version the campaign points at NOW. Captured onto the
+   * application at filing so later amendments never rewrite its evaluation.
+   * Null for campaigns published before BUILD-001.
+   */
+  readonly policyVersionId: string | null;
 }
 
 export interface CampaignReader {
@@ -25,6 +31,21 @@ export interface CampaignReader {
    * `category`. Returns null when none qualifies.
    */
   findOpenCampaign(agency: Agency, category: ApplicationCategory): Promise<OpenCampaign | null>;
+
+  /**
+   * Resolve the campaign the citizen CHOSE by its public code (BUILD-002).
+   * Same qualification rules as `findOpenCampaign` — REGISTRATION_OPEN,
+   * window contains now, agency matches, category targeted — but over exactly
+   * one named campaign, so two simultaneous openings can never be confused.
+   * Null covers "no such code", "not open", and "does not accept this
+   * category": the public code is not a secret, but the distinction is not
+   * worth an oracle either.
+   */
+  findOpenCampaignByCode(
+    publicCode: string,
+    agency: Agency,
+    category: ApplicationCategory,
+  ): Promise<OpenCampaign | null>;
 
   /**
    * Find the campaign a WALK-IN registration attaches to (ADR-012). Walk-in

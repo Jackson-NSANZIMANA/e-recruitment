@@ -29,8 +29,8 @@ export class PgCampaignReader implements CampaignReader {
     try {
       return await sql.begin(async (tx) => {
         await tx`SET LOCAL ROLE ${sql(SYSTEM_ROLE)}`;
-        const rows = await tx<{ id: string; campaign_label: string }[]>`
-          SELECT id, campaign_label
+        const rows = await tx<{ id: string; campaign_label: string; current_policy_version_id: string | null }[]>`
+          SELECT id, campaign_label, current_policy_version_id
           FROM public_core.recruitment_campaigns
           WHERE agency = ${agency}::public_core.agency
             AND status = 'REGISTRATION_OPEN'
@@ -42,10 +42,46 @@ export class PgCampaignReader implements CampaignReader {
         `;
         const row = rows[0];
         if (!row) return null;
-        return { campaignId: row.id, campaignLabel: row.campaign_label };
+        return {
+          campaignId: row.id,
+          campaignLabel: row.campaign_label,
+          policyVersionId: row.current_policy_version_id,
+        };
       });
     } catch (cause) {
       throw new ApplicationReadError('Failed to resolve an open campaign', { cause });
+    }
+  }
+
+  async findOpenCampaignByCode(
+    publicCode: string,
+    agency: Agency,
+    category: ApplicationCategory,
+  ): Promise<OpenCampaign | null> {
+    try {
+      return await sql.begin(async (tx) => {
+        await tx`SET LOCAL ROLE ${sql(SYSTEM_ROLE)}`;
+        const rows = await tx<{ id: string; campaign_label: string; current_policy_version_id: string | null }[]>`
+          SELECT id, campaign_label, current_policy_version_id
+          FROM public_core.recruitment_campaigns
+          WHERE public_code = ${publicCode}
+            AND agency = ${agency}::public_core.agency
+            AND status = 'REGISTRATION_OPEN'
+            AND registration_opens_at <= now()
+            AND registration_closes_at > now()
+            AND jsonb_exists(target_categories::jsonb, ${category})
+          LIMIT 1
+        `;
+        const row = rows[0];
+        if (!row) return null;
+        return {
+          campaignId: row.id,
+          campaignLabel: row.campaign_label,
+          policyVersionId: row.current_policy_version_id,
+        };
+      });
+    } catch (cause) {
+      throw new ApplicationReadError('Failed to resolve the chosen campaign', { cause });
     }
   }
 
@@ -62,8 +98,8 @@ export class PgCampaignReader implements CampaignReader {
         // against current_date::text is exact for that format. The campaign
         // must explicitly allow walk-ins and be in an ACTIVE state (a campaign
         // still open for registration whose exam window has started counts).
-        const rows = await tx<{ id: string; campaign_label: string }[]>`
-          SELECT id, campaign_label
+        const rows = await tx<{ id: string; campaign_label: string; current_policy_version_id: string | null }[]>`
+          SELECT id, campaign_label, current_policy_version_id
           FROM public_core.recruitment_campaigns
           WHERE agency = ${agency}::public_core.agency
             AND allows_walk_in = true
@@ -76,7 +112,11 @@ export class PgCampaignReader implements CampaignReader {
         `;
         const row = rows[0];
         if (!row) return null;
-        return { campaignId: row.id, campaignLabel: row.campaign_label };
+        return {
+          campaignId: row.id,
+          campaignLabel: row.campaign_label,
+          policyVersionId: row.current_policy_version_id,
+        };
       });
     } catch (cause) {
       throw new ApplicationReadError('Failed to resolve a walk-in campaign', { cause });

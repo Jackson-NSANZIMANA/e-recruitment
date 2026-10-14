@@ -171,7 +171,7 @@ function mint(kind: 'officer' | 'system', sub: string, agency: 'RDF' | 'RNP' = '
     expiresAt: '2999-01-01T00:00:00.000Z',
   };
   const claims: AuthTokenClaims =
-    kind === 'officer' ? { ...base, kind, agency, roles: [] } : { ...base, kind };
+    kind === 'officer' ? { ...base, kind, agency, roles: ['screening_officer', 'field_supervisor', 'medical_officer', 'adjudicator', 'decision_authority', 'reviewer'] } : { ...base, kind };
   return signAuthToken(AUTH_KEYS.privateKeyPem, claims);
 }
 

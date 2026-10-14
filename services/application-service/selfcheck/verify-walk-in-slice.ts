@@ -86,7 +86,7 @@ function check(label: string, condition: boolean, detail = ""): void {
 
 function mint(
   kind: "officer" | "system",
-  opts: { agency?: "RDF" | "RNP"; sub?: string } = {},
+  opts: { agency?: "RDF" | "RNP"; sub?: string; roles?: string[] } = {},
 ): string {
   const base = {
     v: 1 as const,
@@ -98,7 +98,7 @@ function mint(
   };
   const claims: AuthTokenClaims =
     kind === "officer"
-      ? { ...base, kind, agency: opts.agency ?? "RDF", roles: [] }
+      ? { ...base, kind, agency: opts.agency ?? "RDF", roles: opts.roles ?? ['screening_officer', 'field_supervisor', 'medical_officer', 'adjudicator', 'reviewer'] }
       : { ...base, kind };
   return signAuthToken(AUTH_KEYS.privateKeyPem, claims);
 }
@@ -206,6 +206,11 @@ async function main(): Promise<void> {
   const rdfHeaders = {
     "content-type": "application/json",
     authorization: `Bearer ${mint("officer", { agency: "RDF", sub: RDF_OFFICER_ID })}`,
+  };
+  // The decision authority is a different person from the medical officer.
+  const rdfDirectorHeaders = {
+    "content-type": "application/json",
+    authorization: `Bearer ${mint("officer", { agency: "RDF", sub: "5a000000-0000-4000-8000-00000000ffd1", roles: ["decision_authority"] })}`,
   };
   const post = async (
     path: string,
@@ -687,13 +692,13 @@ async function main(): Promise<void> {
       applicationId: appId,
       decision: "SHORTLIST",
       notes: "Walk-in shortlisted",
-    });
+    }, rdfDirectorHeaders);
     check(
       "final SHORTLIST → FINAL_SHORTLIST",
       fin.status === 200 && fin.json["toStatus"] === "FINAL_SHORTLIST",
       fin.text,
     );
-    const acc = await post(ACCEPT_PATH, { applicationId: appId });
+    const acc = await post(ACCEPT_PATH, { applicationId: appId }, rdfDirectorHeaders);
     check(
       "accept → ACCEPTED (a walk-in completes the SAME funnel as the digital lane)",
       acc.status === 200 && acc.json["toStatus"] === "ACCEPTED",

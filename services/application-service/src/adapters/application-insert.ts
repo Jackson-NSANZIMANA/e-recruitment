@@ -32,6 +32,10 @@ export interface FrontDoorApplicationRow {
   readonly category: ApplicationCategory;
   readonly nesaIndexNumber: string | null;
   readonly hecRegistrationNumber: string | null;
+  /** The campaign's policy version at filing (BUILD-002). Write-once. */
+  readonly policyVersionId?: string | null;
+  /** Calendar date (Africa/Kigali) every consumer evaluates against. Write-once. */
+  readonly evaluationDate?: string | null;
 }
 
 /**
@@ -123,7 +127,8 @@ export async function insertSubmittedApplication(
       ? await tx<{ id: string; processing_code: string }[]>`
           INSERT INTO ${schema}.applications
             (processing_code, applicant_id, campaign_id, category, status,
-             nesa_index_number, hec_registration_number, submitted_at)
+             nesa_index_number, hec_registration_number, submitted_at,
+             policy_version_id, evaluation_date)
           VALUES (
             ${target.codePrefix} || '-' || lpad(nextval(${seqName}::regclass)::text, 5, '0'),
             ${input.applicantId},
@@ -132,14 +137,17 @@ export async function insertSubmittedApplication(
             'SUBMITTED',
             ${input.nesaIndexNumber},
             ${input.hecRegistrationNumber},
-            now()
+            now(),
+            ${input.policyVersionId ?? null},
+            ${input.evaluationDate ?? null}::date
           )
           RETURNING id, processing_code
         `
       : await tx<{ id: string; processing_code: string }[]>`
           INSERT INTO ${schema}.applications
             (id, processing_code, applicant_id, campaign_id, category, status,
-             nesa_index_number, hec_registration_number, submitted_at)
+             nesa_index_number, hec_registration_number, submitted_at,
+             policy_version_id, evaluation_date)
           VALUES (
             ${identifiers.applicationId},
             ${identifiers.processingCode},
@@ -149,7 +157,9 @@ export async function insertSubmittedApplication(
             'SUBMITTED',
             ${input.nesaIndexNumber},
             ${input.hecRegistrationNumber},
-            now()
+            now(),
+            ${input.policyVersionId ?? null},
+            ${input.evaluationDate ?? null}::date
           )
           RETURNING id, processing_code
         `;

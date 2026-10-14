@@ -37,6 +37,8 @@ export interface CreateApplicationInput {
   readonly hecRegistrationNumber: string | null;
   /** Correlation id of the causal chain — recorded on the history row. */
   readonly correlationId: string;
+  readonly policyVersionId?: string | null;
+  readonly evaluationDate?: string | null;
 }
 
 /** Identifiers of the created application. */

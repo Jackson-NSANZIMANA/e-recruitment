@@ -57,6 +57,13 @@ export interface SubmitApplicationCommand {
   readonly nesaIndexNumber?: string | null;
   readonly hecRegistrationNumber?: string | null;
   /**
+   * The public code of the campaign the citizen CHOSE (BUILD-002). The server
+   * resolves the authoritative campaign and its policy from it; it is never a
+   * UUID, a policy hash or an agency. Omitted ⇒ legacy resolution (the newest
+   * open campaign for agency + category), kept for system callers.
+   */
+  readonly campaignCode?: string;
+  /**
    * The caller's retry identity (`Idempotency-Key`). Re-sending the SAME key
    * with the SAME body replays the first result instead of filing again.
    * Omitted ⇒ a fresh key is minted and the request has no retry identity.
@@ -109,6 +116,8 @@ export interface SubmitApplicationDeps {
   readonly ledger: SubmissionLedger;
   /** Post-commit dispatch of the staged announcement (the outbox fast path). */
   readonly events: EventDispatcher;
+  /** Injectable clock for the evaluation date (tests). */
+  readonly now?: () => Date;
 }
 
 export class SubmitApplicationService {
@@ -139,6 +148,7 @@ export class SubmitApplicationService {
       channel: command.channel,
       nesaIndexNumber: academic.resolved.nesaIndexNumber,
       hecRegistrationNumber: academic.resolved.hecRegistrationNumber,
+      campaignCode: command.campaignCode ?? null,
     });
 
     // 3. ANSWER A KEY WE HAVE ALREADY ANSWERED — before anything mutable is
@@ -185,7 +195,14 @@ export class SubmitApplicationService {
     }
 
     // 5. Resolve the open campaign for this agency+category (server-side).
-    const campaign = await this.deps.campaignReader.findOpenCampaign(agency, command.category);
+    const campaign =
+      command.campaignCode === undefined
+        ? await this.deps.campaignReader.findOpenCampaign(agency, command.category)
+        : await this.deps.campaignReader.findOpenCampaignByCode(
+            command.campaignCode,
+            agency,
+            command.category,
+          );
     if (campaign === null) {
       return { kind: 'NO_OPEN_CAMPAIGN', agency };
     }
@@ -198,6 +215,10 @@ export class SubmitApplicationService {
     // transaction and the one dispatched/returned after it are the same event.
     const envelope = newEnvelope(context);
     const nationalIdHash = identity.nationalIdHash;
+    // The decision-relevant date, fixed NOW and carried on the event so a
+    // delayed or replayed consumer evaluates the same day the citizen filed.
+    const evaluationDate = kigaliDate((this.deps.now ?? ((): Date => new Date()))());
+    const policyVersionId = campaign.policyVersionId;
     const nesaIndexNumber = academic.resolved.nesaIndexNumber;
     const hecRegistrationNumber = academic.resolved.hecRegistrationNumber;
     const announce = (created: SubmissionIdentifiers): ApplicantSubmittedEvent => ({
@@ -211,6 +232,8 @@ export class SubmitApplicationService {
       channel: command.channel,
       nesaIndexNumber,
       hecRegistrationNumber,
+      referenceDate: evaluationDate,
+      policyVersionId,
     });
 
     // A keyless caller still gets a ledger row, so the write stays uniform and
@@ -231,6 +254,8 @@ export class SubmitApplicationService {
         nesaIndexNumber,
         hecRegistrationNumber,
         correlationId: context.correlationId,
+        policyVersionId,
+        evaluationDate,
       },
       (c) => [announce(c)],
     );
@@ -275,4 +300,14 @@ export class SubmitApplicationService {
       event,
     };
   }
+}
+
+/** Calendar date in Rwanda (Africa/Kigali, UTC+2, no DST) as YYYY-MM-DD. */
+export function kigaliDate(at: Date): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Kigali',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(at);
 }

@@ -19,7 +19,7 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { HttpError, type HttpResult, type Route } from '@usrp/shared-http';
-import { withAuth, type AuthVerifier } from '@usrp/shared-auth';
+import { requireOfficerPermission, withAuth, type AuthVerifier } from '@usrp/shared-auth';
 import { ApplicationReadError } from '../../domain/application.errors.js';
 import type {
   AmberQueueOutcome,
@@ -58,6 +58,7 @@ export function listApplicationsRoute(
     method: 'GET',
     path: LIST_APPLICATIONS_PATH,
     handler: withAuth(verify, { kind: 'officer' }, async (_ctx, principal): Promise<HttpResult> => {
+  requireOfficerPermission(principal, 'application.read');
       let outcome: ListApplicationsOutcome;
       try {
         outcome = await service.list({ actor: principal });
@@ -80,6 +81,7 @@ export function amberQueueRoute(service: ListApplicationsService, verify: AuthVe
     method: 'GET',
     path: AMBER_QUEUE_PATH,
     handler: withAuth(verify, { kind: 'officer' }, async (_ctx, principal): Promise<HttpResult> => {
+  requireOfficerPermission(principal, 'adjudication.read');
       let outcome: AmberQueueOutcome;
       try {
         outcome = await service.amberQueue({ actor: principal });
@@ -148,6 +150,7 @@ export function byIdRoute(service: ListApplicationsService, verify: AuthVerifier
     method: 'GET',
     path: BY_ID_PATH,
     handler: withAuth(verify, { kind: 'officer' }, async (ctx, principal): Promise<HttpResult> => {
+  requireOfficerPermission(principal, 'application.read');
       const applicationId = requireApplicationId(ctx.query);
       let outcome: FindApplicationOutcome;
       try {
@@ -186,6 +189,7 @@ export function statusHistoryRoute(service: ListApplicationsService, verify: Aut
     method: 'GET',
     path: STATUS_HISTORY_PATH,
     handler: withAuth(verify, { kind: 'officer' }, async (ctx, principal): Promise<HttpResult> => {
+  requireOfficerPermission(principal, 'application.read');
       const applicationId = requireApplicationId(ctx.query);
       let outcome: StatusHistoryOutcome;
       try {

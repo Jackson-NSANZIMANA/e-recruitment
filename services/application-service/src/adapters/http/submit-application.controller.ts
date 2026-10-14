@@ -60,6 +60,9 @@ const CHANNELS: ReadonlySet<string> = new Set(APPLICATION_CHANNELS);
 // a server fault. Shape only; existence is the use case's APPLICANT_NOT_FOUND.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** A public campaign code: short, upper-case, hyphen-separated (shape only). */
+const CAMPAIGN_CODE_RE = /^[A-Z0-9][A-Z0-9-]{2,63}$/;
+
 /** Wire shape of the request body — every field validated before use. */
 interface SubmitRequestBody {
   readonly applicantId?: unknown;
@@ -67,6 +70,7 @@ interface SubmitRequestBody {
   readonly channel?: unknown;
   readonly nesaIndexNumber?: unknown;
   readonly hecRegistrationNumber?: unknown;
+  readonly campaignCode?: unknown;
 }
 
 /**
@@ -109,6 +113,10 @@ export function submitApplicationRoute(
       // domain rule, keyed off category) but, if present, must be strings.
       const nesaIndexNumber = optionalString(body.nesaIndexNumber, 'nesaIndexNumber');
       const hecRegistrationNumber = optionalString(body.hecRegistrationNumber, 'hecRegistrationNumber');
+      const campaignCode = optionalString(body.campaignCode, 'campaignCode')?.trim().toUpperCase() ?? null;
+      if (campaignCode !== null && !CAMPAIGN_CODE_RE.test(campaignCode)) {
+        throw new HttpError(400, 'INVALID_CAMPAIGN_CODE', 'Field "campaignCode" is not a valid campaign code.');
+      }
       const idempotencyKey = readIdempotencyKey(ctx.headers[IDEMPOTENCY_KEY_HEADER]);
 
       let outcome: SubmitApplicationOutcome;
@@ -119,6 +127,7 @@ export function submitApplicationRoute(
           channel: channel as ApplicationChannel,
           nesaIndexNumber,
           hecRegistrationNumber,
+          ...(campaignCode === null ? {} : { campaignCode }),
           ...(idempotencyKey === null ? {} : { idempotencyKey }),
           // Seed the event trace from the inbound HTTP correlation id.
           context: { correlationId: ctx.correlationId, causationId: ctx.correlationId },
