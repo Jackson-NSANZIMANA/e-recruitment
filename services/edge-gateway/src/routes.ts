@@ -60,6 +60,11 @@ import {
 } from './adapters/http/campaigns.controller.js';
 import { verifyIdentityHandler } from './adapters/http/identity.controller.js';
 import {
+  getDocumentChecklistHandler,
+  getMyDocumentChecklistHandler,
+  verifyDocumentAtVenueHandler,
+} from './adapters/http/document-checklist.controller.js';
+import {
   fileMyErasureRequestHandler,
   getMyErasureRequestHandler,
   listMyApplicationsHandler,
@@ -113,6 +118,8 @@ export function edgeHandlers(deps: EdgeDeps): Record<EdgeOperationId, RouteHandl
     acceptApplication: acceptApplicationHandler(deps),
     adjudicateApplication: adjudicateApplicationHandler(deps),
 
+    getDocumentChecklist: getDocumentChecklistHandler(deps),
+    verifyDocumentAtVenue: verifyDocumentAtVenueHandler(deps),
     registerWalkIn: registerWalkInHandler(deps),
     vetWalkIn: vetWalkInHandler(deps),
 
@@ -120,6 +127,7 @@ export function edgeHandlers(deps: EdgeDeps): Record<EdgeOperationId, RouteHandl
 
     listMyApplications: listMyApplicationsHandler(deps),
     submitMyApplication: submitMyApplicationHandler(deps),
+    getMyDocumentChecklist: getMyDocumentChecklistHandler(deps),
     uploadMyDocument: uploadMyDocumentHandler(deps),
     withdrawMyApplication: withdrawMyApplicationHandler(deps),
     getMyErasureRequest: getMyErasureRequestHandler(deps),

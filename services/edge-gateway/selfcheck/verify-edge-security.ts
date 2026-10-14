@@ -170,6 +170,19 @@ function officerToken(agency: "RDF" | "RNP", roles: string[] = ALL_POSTS): strin
   return signAuthToken(privateKeyPem, claims);
 }
 
+const LEAKY_CHECKLIST = {
+  agency: "RDF",
+  source: "POLICY_VERSION",
+  complete: false,
+  // Fields the edge must DROP: they exist upstream-side only.
+  forensicsScore: 0.42,
+  reviewerId: "11111111-1111-4111-8111-111111111111",
+  items: [
+    { documentType: "NATIONAL_ID", satisfaction: "API_VERIFIED", registry: "NIDA", minioObjectKey: "rdf/x" },
+    { documentType: "GOOD_CONDUCT_CERTIFICATE", satisfaction: "MISSING", registry: null },
+  ],
+};
+
 let lastRawBody = Buffer.alloc(0);
 let lastUpstreamContentType = "";
 
@@ -324,6 +337,13 @@ async function stubHandler(
         expiresAt: new Date(Date.now() + 1_800_000).toISOString(),
       });
     }
+
+    case "GET /v1/applications/document-checklist":
+    case "GET /v1/applicants/me/applications/document-checklist":
+      return send(res, 200, LEAKY_CHECKLIST);
+
+    case "POST /v1/applications/documents/verify-at-venue":
+      return send(res, 200, { status: "RECORDED", checklist: LEAKY_CHECKLIST, officerId: "leak" });
 
     case "POST /v1/applicants/me/applications/documents":
       // The stub answers with a verdict on purpose: if the edge ever relayed
@@ -1356,6 +1376,17 @@ async function main(): Promise<void> {
     const noCsrf = await upload({ applicationId: goodApplicationId, documentType: "NATIONAL_ID_COPY", file: pdf }, { "x-csrf-token": "wrong" });
     check("a wrong CSRF token is refused (403)", noCsrf.status === 403, String(noCsrf.status));
 
+    section("Citizen document checklist: allowlist projection (ADR-032)");
+    const myChecklist = await call("GET", `/edge/v1/me/applications/document-checklist?applicationId=${randomUUID()}`);
+    check("the citizen reads their checklist (200)", myChecklist.status === 200, myChecklist.text);
+    check(
+      "…rebuilt from the allowlist: no score, reviewer id or object key crosses",
+      !/forensicsScore|reviewerId|minioObjectKey|rdf\/x/.test(myChecklist.text) && myChecklist.text.includes('"satisfaction":"API_VERIFIED"'),
+      myChecklist.text,
+    );
+    const badChecklistId = await call("GET", "/edge/v1/me/applications/document-checklist?applicationId=nope");
+    check("a non-UUID applicationId is 400", badChecklistId.status === 400);
+
     // ── 15. Anti-enumeration ───────────────────────────────────
     section("OTP request reveals nothing about the subject");
     const otpKnown = await call("POST", "/edge/v1/auth/applicant/otp/request", {
@@ -1505,6 +1536,31 @@ async function main(): Promise<void> {
     );
     const allowedRead = await call("GET", "/edge/v1/applications");
     check("the same session may still READ (application.read)", allowedRead.status === 200, allowedRead.text);
+    const reviewerChecklist = await call("GET", `/edge/v1/applications/document-checklist?applicationId=${randomUUID()}`);
+    check("…including the advisory document checklist", reviewerChecklist.status === 200 && !reviewerChecklist.text.includes("forensicsScore"), reviewerChecklist.text);
+    const venueCallsBefore = state.calls.length;
+    const reviewerVenue = await call("POST", "/edge/v1/applications/documents/verify-at-venue", {
+      body: { applicationId: randomUUID(), documentType: "GOOD_CONDUCT_CERTIFICATE" },
+    });
+    check(
+      "a reviewer cannot clear a paper at the venue (403) and nothing reached upstream",
+      reviewerVenue.status === 403 && reviewerVenue.text.includes("PERMISSION_DENIED") && state.calls.length === venueCallsBefore,
+      reviewerVenue.text,
+    );
+
+    section("The check-in post clears a paper at the venue (ADR-032)");
+    jar.clear();
+    await call("GET", "/edge/v1/session");
+    await call("POST", "/edge/v1/auth/officer/login", { body: { loginHandle: "rdf.officer", password: "x" } });
+    const venue = await call("POST", "/edge/v1/applications/documents/verify-at-venue", {
+      body: { applicationId: randomUUID(), documentType: "GOOD_CONDUCT_CERTIFICATE" },
+    });
+    check("the screening post → 200 RECORDED", venue.status === 200 && venue.text.includes('"status":"RECORDED"'), venue.text);
+    check("…the echoed checklist is projected (no officerId, no score)", !/officerId|forensicsScore|minioObjectKey/.test(venue.text), venue.text);
+    const venueBadType = await call("POST", "/edge/v1/applications/documents/verify-at-venue", {
+      body: { applicationId: randomUUID(), documentType: "not a type" },
+    });
+    check("a malformed document type is 400 before any upstream call", venueBadType.status === 400);
   } finally {
     await server.stop();
     await new Promise<void>((resolve) => stub.close(() => resolve()));

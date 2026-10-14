@@ -69,6 +69,8 @@ export const UPSTREAM = Object.freeze({
   // opaque session, derives the subject, and forwards to document-forensics
   // under its OWN system token. The edge never talks to forensics.
   myDocumentUpload: op('myDocumentUpload', 'identity', 'POST', '/v1/applicants/me/applications/documents', 'applicant-opaque'),
+  // ADR-032: the citizen's own advisory document checklist (subject from the session).
+  myDocumentChecklist: op('myDocumentChecklist', 'identity', 'GET', '/v1/applicants/me/applications/document-checklist', 'applicant-opaque'),
   // identity-service — erasure-request.controller.ts (session-authenticated half)
   myErasureRequestGet: op('myErasureRequestGet', 'identity', 'GET', '/v1/applicants/me/erasure-request', 'applicant-opaque'),
   myErasureRequestFile: op('myErasureRequestFile', 'identity', 'POST', '/v1/applicants/me/erasure-request', 'applicant-opaque'),
@@ -87,6 +89,10 @@ export const UPSTREAM = Object.freeze({
   finalDecision: op('finalDecision', 'application', 'POST', '/v1/applications/final-decision', 'officer-jwt'),
   accept: op('accept', 'application', 'POST', '/v1/applications/accept', 'officer-jwt'),
   adjudicate: op('adjudicate', 'application', 'POST', '/v1/applications/adjudicate', 'officer-jwt'),
+
+  // application-service — document-checklist.controller.ts (ADR-032)
+  documentChecklist: op('documentChecklist', 'application', 'GET', '/v1/applications/document-checklist', 'officer-jwt'),
+  verifyDocumentAtVenue: op('verifyDocumentAtVenue', 'application', 'POST', '/v1/applications/documents/verify-at-venue', 'officer-jwt'),
 
   // application-service — walk-in.controller.ts
   walkInRegister: op('walkInRegister', 'application', 'POST', '/v1/applications/walk-in/register', 'officer-jwt'),
