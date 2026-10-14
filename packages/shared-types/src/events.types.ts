@@ -39,6 +39,14 @@ export interface ApplicantSubmittedEvent extends BaseEvent {
   // Academic verification inputs
   readonly nesaIndexNumber: string | null;      // null for degree holders
   readonly hecRegistrationNumber: string | null; // null for NESA-verified applicants
+  /**
+   * BUILD-002: the calendar date (YYYY-MM-DD, Africa/Kigali) every consumer
+   * must evaluate against — never the consumer's own clock. Optional for
+   * events staged before campaign-bound submission existed.
+   */
+  readonly referenceDate?: string;
+  /** BUILD-002: the immutable policy version that governs this application. */
+  readonly policyVersionId?: string | null;
 }
 
 // ── Topic: vetting.nida ───────────────────────────────────────────

@@ -27,6 +27,7 @@ export {
 export { corsPreflightHeaders, corsResponseHeaders, isAllowedOrigin } from './cors.js';
 export {
   parseMultipartFormData,
+  buildMultipartFormData,
   rawContentType,
   type MultipartFile,
   type MultipartForm,

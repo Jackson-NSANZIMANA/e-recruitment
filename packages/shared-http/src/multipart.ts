@@ -29,6 +29,7 @@
 // ══════════════════════════════════════════════════════════════════
 
 import type { IncomingHttpHeaders } from 'node:http';
+import { randomBytes } from 'node:crypto';
 import { HttpError } from './errors.js';
 
 /** One uploaded file part. `bytes` is the exact, unmodified part content. */
@@ -279,4 +280,54 @@ export function parseMultipartFormData(
     throw malformed('The closing boundary delimiter is missing (truncated upload).');
   }
   return { fields, files };
+}
+
+// ── Building (the inverse of the parser) ──────────────────────────
+
+/**
+ * Build a `multipart/form-data` body from validated text fields and ONE file.
+ *
+ * Used by tiers that RE-COMPOSE an upload rather than forwarding the client's
+ * bytes: the subject and field set are then the server's, not the browser's.
+ *
+ * Field names and values must already be validated by the caller; this
+ * function additionally refuses anything that could break part framing (CR/LF
+ * or quotes in a name, a CR/LF in a value, a boundary collision in the file).
+ * The client's filename is deliberately not a parameter — stores derive their
+ * own object keys.
+ */
+export function buildMultipartFormData(
+  fields: Readonly<Record<string, string>>,
+  file: { readonly fieldName: string; readonly contentType: string; readonly bytes: Buffer },
+): { readonly body: Buffer; readonly contentType: string } {
+  const unsafe = /[\r\n"]/;
+  const boundary = `usrp-${randomBytes(16).toString('hex')}`;
+  const chunks: Buffer[] = [];
+  for (const [name, value] of Object.entries(fields)) {
+    if (unsafe.test(name) || /[\r\n]/.test(value)) {
+      throw new Error('multipart field is not safe to frame');
+    }
+    chunks.push(
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`,
+        'utf8',
+      ),
+    );
+  }
+  if (unsafe.test(file.fieldName) || /[\r\n]/.test(file.contentType)) {
+    throw new Error('multipart file part is not safe to frame');
+  }
+  if (file.bytes.includes(Buffer.from(`--${boundary}`, 'utf8'))) {
+    throw new Error('multipart boundary collides with file content');
+  }
+  chunks.push(
+    Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="${file.fieldName}"; filename="upload"\r\n` +
+        `Content-Type: ${file.contentType}\r\n\r\n`,
+      'utf8',
+    ),
+    file.bytes,
+    Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8'),
+  );
+  return { body: Buffer.concat(chunks), contentType: `multipart/form-data; boundary=${boundary}` };
 }
