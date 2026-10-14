@@ -140,6 +140,7 @@ export class HttpApplicationsGateway implements ApplicationsGateway {
     const body = {
       applicantId,
       category: input.category,
+      campaignCode: input.campaignCode,
       channel: 'WEB' as const,
       ...(input.nesaIndexNumber === null || input.nesaIndexNumber === undefined
         ? {}

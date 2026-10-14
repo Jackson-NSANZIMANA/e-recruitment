@@ -92,7 +92,7 @@ function mint(kind: 'officer' | 'system', sub = `selfcheck-${kind}`): string {
     expiresAt: '2999-01-01T00:00:00.000Z',
   };
   const claims: AuthTokenClaims =
-    kind === 'officer' ? { ...base, kind, agency: 'RDF', roles: [] } : { ...base, kind };
+    kind === 'officer' ? { ...base, kind, agency: 'RDF', roles: ['dpo'] } : { ...base, kind };
   return signAuthToken(AUTH_KEYS.privateKeyPem, claims);
 }
 

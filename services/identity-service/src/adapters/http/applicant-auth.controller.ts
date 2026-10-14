@@ -2,7 +2,7 @@
 // identity-service — HTTP ingress for applicant authentication (ADR-018)
 //
 // Six routes, three auth postures:
-//   • otp/request, otp/verify — PUBLIC (they are what authenticates a
+//   • onboarding/begin, otp/request, otp/verify — PUBLIC (they are what authenticates a
 //     citizen, so they cannot demand a token) with iam-grade discipline:
 //     shape errors → 400; everything else about otp/request is one uniform
 //     202 (no enumeration), everything failing in otp/verify is one
@@ -44,6 +44,7 @@ import type {
   ApplicationsGateway,
 } from '../../ports/applications-gateway.js';
 
+export const ONBOARDING_BEGIN_PATH = '/v1/applicants/auth/onboarding/begin';
 export const OTP_REQUEST_PATH = '/v1/applicants/auth/otp/request';
 export const OTP_VERIFY_PATH = '/v1/applicants/auth/otp/verify';
 export const ME_APPLICATIONS_PATH = '/v1/applicants/me/applications';
@@ -60,16 +61,27 @@ const CATEGORIES: ReadonlySet<string> = ALL_CATEGORIES;
 /** Same bound as the edge's walk-in lane: an academic registry reference. */
 const MAX_ACADEMIC_REF = 64;
 const MAX_NID = 32;
+const MAX_TOKEN = 512;
+const MAX_PHONE = 32;
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_OTP = 12;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-interface OtpRequestBody {
+interface OnboardingBeginBody {
   readonly nationalId?: unknown;
+  readonly dateOfBirth?: unknown;
+  readonly channel?: unknown;
+}
+
+interface OtpRequestBody {
+  readonly onboardingToken?: unknown;
+  readonly phoneNumber?: unknown;
   readonly channel?: unknown;
 }
 
 interface OtpVerifyBody {
-  readonly nationalId?: unknown;
+  readonly onboardingToken?: unknown;
+  readonly phoneNumber?: unknown;
   readonly otp?: unknown;
   readonly channel?: unknown;
 }
@@ -85,6 +97,7 @@ interface SubmitOwnRequestBody {
   readonly channel?: unknown;
   readonly nesaIndexNumber?: unknown;
   readonly hecRegistrationNumber?: unknown;
+  readonly campaignCode?: unknown;
 }
 
 /** All four applicant-auth routes, bound to the use case + gateway. */
@@ -95,21 +108,58 @@ export function applicantAuthRoutes(
   return [
     {
       method: 'POST',
-      path: OTP_REQUEST_PATH,
+      path: ONBOARDING_BEGIN_PATH,
       handler: async (ctx): Promise<HttpResult> => {
-        const body = await ctx.json<OtpRequestBody>();
+        const body = await ctx.json<OnboardingBeginBody>();
         const nationalId = requireNid(body.nationalId);
+        const dateOfBirth = requireIsoDate(body.dateOfBirth);
         const channel = requireChannel(body.channel);
+        let outcome;
         try {
-          await service.requestOtp({
+          outcome = await service.beginOnboarding({
             rawNationalId: nationalId,
+            dateOfBirth,
             channel,
             context: { correlationId: ctx.correlationId, causationId: ctx.correlationId },
           });
         } catch (err) {
           throw mapDomainError(err);
         }
-        // Uniform 202 whatever happened internally — no enumeration.
+        if (outcome.kind === 'NOT_CONFIRMED') {
+          // One body for unknown NID, non-citizen and DOB mismatch.
+          throw new HttpError(422, 'IDENTITY_NOT_CONFIRMED', 'The details could not be confirmed.');
+        }
+        return {
+          status: 200,
+          body: { onboardingToken: outcome.onboardingToken, expiresAt: outcome.expiresAt },
+        };
+      },
+    },
+    {
+      method: 'POST',
+      path: OTP_REQUEST_PATH,
+      handler: async (ctx): Promise<HttpResult> => {
+        const body = await ctx.json<OtpRequestBody>();
+        const onboardingToken = requireBounded(body.onboardingToken, 'onboardingToken', MAX_TOKEN);
+        const phoneNumber = requireBounded(body.phoneNumber, 'phoneNumber', MAX_PHONE);
+        const channel = requireChannel(body.channel);
+        let outcome;
+        try {
+          outcome = await service.requestOtp({
+            onboardingToken,
+            rawPhoneNumber: phoneNumber,
+            channel,
+            context: { correlationId: ctx.correlationId, causationId: ctx.correlationId },
+          });
+        } catch (err) {
+          throw mapDomainError(err);
+        }
+        if (outcome.kind === 'ONBOARDING_INVALID') {
+          throw new HttpError(401, 'ONBOARDING_EXPIRED', 'Start again from the National ID step.');
+        }
+        if (outcome.kind === 'PHONE_INVALID') {
+          throw new HttpError(400, 'INVALID_PHONE_NUMBER', 'A Rwandan MTN or Airtel mobile number is required.');
+        }
         return { status: 202, body: { status: 'CHALLENGED' } };
       },
     },
@@ -118,7 +168,8 @@ export function applicantAuthRoutes(
       path: OTP_VERIFY_PATH,
       handler: async (ctx): Promise<HttpResult> => {
         const body = await ctx.json<OtpVerifyBody>();
-        const nationalId = requireNid(body.nationalId);
+        const onboardingToken = requireBounded(body.onboardingToken, 'onboardingToken', MAX_TOKEN);
+        const phoneNumber = requireBounded(body.phoneNumber, 'phoneNumber', MAX_PHONE);
         const channel = requireChannel(body.channel);
         const otp = body.otp;
         if (typeof otp !== 'string' || otp.length === 0 || otp.length > MAX_OTP) {
@@ -127,7 +178,8 @@ export function applicantAuthRoutes(
         let outcome;
         try {
           outcome = await service.verifyOtp({
-            rawNationalId: nationalId,
+            onboardingToken,
+            rawPhoneNumber: phoneNumber,
             otp,
             channel,
             context: { correlationId: ctx.correlationId, causationId: ctx.correlationId },
@@ -188,6 +240,9 @@ export function applicantAuthRoutes(
         //    upstream); academic references are optional strings here —
         //    WHICH one is required is application-service's domain rule.
         const category = requireCategory(body.category);
+        // The citizen names the campaign by its PUBLIC code; the server
+        // resolves the authoritative campaign and policy downstream.
+        const campaignCode = requireCampaignCode(body.campaignCode);
         const nesaIndexNumber = optionalAcademicRef(body.nesaIndexNumber, 'nesaIndexNumber');
         const hecRegistrationNumber = optionalAcademicRef(
           body.hecRegistrationNumber,
@@ -200,6 +255,7 @@ export function applicantAuthRoutes(
             applicantId,
             {
               category,
+              campaignCode,
               nesaIndexNumber,
               hecRegistrationNumber,
             },
@@ -274,7 +330,7 @@ export function applicantAuthRoutes(
 }
 
 /** Node's IncomingHttpHeaders value → the single header string (or null). */
-function authHeader(value: string | string[] | undefined): string | null {
+export function authHeader(value: string | string[] | undefined): string | null {
   if (Array.isArray(value)) return value[0] ?? null;
   return value ?? null;
 }
@@ -289,7 +345,7 @@ function bearer(header: string | null): string {
 }
 
 /** Resolve a live session to its applicant, or one uniform 401. */
-async function authenticate(header: string | null, service: ApplicantAuthService): Promise<string> {
+export async function authenticate(header: string | null, service: ApplicantAuthService): Promise<string> {
   const token = bearer(header);
   let applicantId: string | null;
   try {
@@ -306,6 +362,37 @@ async function authenticate(header: string | null, service: ApplicantAuthService
 function requireNid(value: unknown): string {
   if (typeof value !== 'string' || value.trim().length === 0 || value.length > MAX_NID) {
     throw new HttpError(400, 'INVALID_REQUEST', 'Field "nationalId" is required.');
+  }
+  return value;
+}
+
+/** A public campaign code (shape only — upper-case, hyphenated, ≤64). */
+function requireCampaignCode(value: unknown): string {
+  if (typeof value !== 'string') {
+    throw new HttpError(400, 'INVALID_CAMPAIGN_CODE', 'Field "campaignCode" is required.');
+  }
+  const code = value.trim().toUpperCase();
+  if (!/^[A-Z0-9][A-Z0-9-]{2,63}$/.test(code)) {
+    throw new HttpError(400, 'INVALID_CAMPAIGN_CODE', 'Field "campaignCode" is not a valid campaign code.');
+  }
+  return code;
+}
+
+function requireBounded(value: unknown, field: string, max: number): string {
+  if (typeof value !== 'string' || value.length === 0 || value.length > max) {
+    throw new HttpError(400, 'INVALID_REQUEST', `Field "${field}" is required.`);
+  }
+  return value;
+}
+
+/** A real calendar date, YYYY-MM-DD (rejects 2000-02-31 and the like). */
+function requireIsoDate(value: unknown): string {
+  if (typeof value !== 'string' || !ISO_DATE_RE.test(value)) {
+    throw new HttpError(400, 'INVALID_REQUEST', 'Field "dateOfBirth" must be YYYY-MM-DD.');
+  }
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
+    throw new HttpError(400, 'INVALID_REQUEST', 'Field "dateOfBirth" is not a valid date.');
   }
   return value;
 }

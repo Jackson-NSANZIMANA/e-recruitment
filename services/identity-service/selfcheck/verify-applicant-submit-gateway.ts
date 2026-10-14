@@ -232,7 +232,7 @@ async function main(): Promise<void> {
     const response = await fetch(`${base}${ME_APPLICATIONS_PATH}`, {
       method: 'POST',
       headers,
-      body: JSON.stringify(options.body ?? { category: 'GENERAL_ENLISTMENT', nesaIndexNumber: 'RW2026/1001' }),
+      body: JSON.stringify(options.body ?? { category: 'GENERAL_ENLISTMENT', campaignCode: 'RDF-2026-A', nesaIndexNumber: 'RW2026/1001' }),
     });
     return { status: response.status, text: await response.text(), headers: response.headers };
   }
@@ -253,7 +253,7 @@ async function main(): Promise<void> {
         },
       );
       req.on('error', reject);
-      req.end(JSON.stringify({ category: 'GENERAL_ENLISTMENT', nesaIndexNumber: 'RW2026/1001' }));
+      req.end(JSON.stringify({ category: 'GENERAL_ENLISTMENT', campaignCode: 'RDF-2026-A', nesaIndexNumber: 'RW2026/1001' }));
     });
   }
 
@@ -300,7 +300,7 @@ async function main(): Promise<void> {
       appCall?.body !== null &&
         typeof appCall?.body === 'object' &&
         Object.keys(appCall.body as Record<string, unknown>).sort().join(',') ===
-          'applicantId,category,channel,nesaIndexNumber',
+          'applicantId,campaignCode,category,channel,nesaIndexNumber',
       JSON.stringify(appCall?.body),
     );
     const iamCall = upstream.iamCalls[upstream.iamCalls.length - 1];
@@ -332,7 +332,7 @@ async function main(): Promise<void> {
     );
 
     const forged = await call({
-      body: { applicantId: '00000000-0000-4000-8000-0000000000ff', category: 'GENERAL_ENLISTMENT' },
+      body: { applicantId: '00000000-0000-4000-8000-0000000000ff', category: 'GENERAL_ENLISTMENT', campaignCode: 'RDF-2026-A' },
     });
     check('a body applicantId is REFUSED with 400', forged.status === 400, forged.text);
     check(
@@ -346,7 +346,7 @@ async function main(): Promise<void> {
     );
 
     const channelForged = await call({
-      body: { category: 'GENERAL_ENLISTMENT', channel: 'USSD' },
+      body: { category: 'GENERAL_ENLISTMENT', campaignCode: 'RDF-2026-A', channel: 'USSD' },
     });
     check('a body channel is REFUSED with 400', channelForged.status === 400, channelForged.text);
     check('the channel forgery never reached application-service either', upstream.appCalls.every((c) => (c.body as Record<string, unknown>)?.['channel'] === 'WEB'));
@@ -439,7 +439,7 @@ async function main(): Promise<void> {
     check('IDENTITY_NOT_VERIFIED stays a 409', unverified.status === 409 && unverified.text.includes('IDENTITY_NOT_VERIFIED'), unverified.text);
 
     upstream.scriptNextApp(() => json(422, { status: 'INVALID_ACADEMIC_INPUT', reason: 'Category "GENERAL_ENLISTMENT" requires a NESA index number.' }));
-    const academic = await call({ body: { category: 'GENERAL_ENLISTMENT' } });
+    const academic = await call({ body: { category: 'GENERAL_ENLISTMENT', campaignCode: 'RDF-2026-A' } });
     check('INVALID_ACADEMIC_INPUT stays a 422 with its reason', academic.status === 422 && academic.text.includes('INVALID_ACADEMIC_INPUT') && academic.text.includes('NESA'), academic.text);
 
     upstream.scriptNextApp(() => json(409, { status: 'NO_OPEN_CAMPAIGN', agency: 'RDF' }));

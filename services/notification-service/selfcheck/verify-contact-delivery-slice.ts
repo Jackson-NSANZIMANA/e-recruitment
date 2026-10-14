@@ -56,8 +56,10 @@ const ADMIN_URL =
 const admin = postgres(ADMIN_URL, { onnotice: () => {} });
 
 // ── Fixtures (ad210000) ─────────────────────────────────────────────
-const CITIZEN_NID = '1200380123456789'; // UWIMANA Jean Pierre — NIDA mock, WITH a registered phone
-const MOCK_PHONE_FRAGMENT = '380-X789'; // distinctive tail of the mock's registered phone
+const CITIZEN_NID = '1200380123456789'; // UWIMANA Jean Pierre — NIDA mock
+const CITIZEN_DOB = '2003-03-15'; // the NIDA record's date of birth (the onboarding second factor)
+const STATED_PHONE = '0788380789'; // the number the citizen TYPES — NIDA holds none (ADR-029)
+const MOCK_PHONE_FRAGMENT = '788380789'; // distinctive tail of that number
 const CAMPAIGN_ID = 'ad210000-0000-4000-8000-0000000000c1';
 const APP_ID = 'ad210000-0000-4000-8000-00000000a001';
 const CODE = 'RDF-99101';
@@ -146,18 +148,33 @@ async function main(): Promise<void> {
 
   const otpSms = new LogSmsChannel();
   const applicantAuth = createApplicantAuthService(idConfig, idBus, otpSms);
-  const challenged = await applicantAuth.requestOtp({ rawNationalId: CITIZEN_NID, channel: 'WEB' });
+  const begun = await applicantAuth.beginOnboarding({
+    rawNationalId: CITIZEN_NID,
+    dateOfBirth: CITIZEN_DOB,
+    channel: 'WEB',
+  });
+  if (begun.kind !== 'READY') throw new Error('onboarding not confirmed');
+  const challenged = await applicantAuth.requestOtp({
+    onboardingToken: begun.onboardingToken,
+    rawPhoneNumber: STATED_PHONE,
+    channel: 'WEB',
+  });
   check('OTP requested → CHALLENGED', challenged.kind === 'CHALLENGED');
   const otpCode = (otpSms.sent[otpSms.sent.length - 1]?.body ?? '').match(/\b\d{6}\b/)?.[0] ?? '';
-  check('OTP SMS captured (6-digit code, to the NIDA phone)',
+  check('OTP SMS captured (6-digit code, to the STATED phone)',
     otpCode.length === 6 && (otpSms.sent[0]?.destination.includes(MOCK_PHONE_FRAGMENT) ?? false));
 
-  const authed = await applicantAuth.verifyOtp({ rawNationalId: CITIZEN_NID, otp: otpCode, channel: 'WEB' });
+  const authed = await applicantAuth.verifyOtp({
+    onboardingToken: begun.onboardingToken,
+    rawPhoneNumber: STATED_PHONE,
+    otp: otpCode,
+    channel: 'WEB',
+  });
   check('OTP verified → AUTHENTICATED', authed.kind === 'AUTHENTICATED', authed.kind);
 
   const captured = await contactRow();
   check('encrypted_phone_number captured', captured.ciphertext !== null);
-  check('ciphertext decrypts to the NIDA-registered phone',
+  check('ciphertext decrypts to the STATED phone',
     (captured.phone ?? '').includes(MOCK_PHONE_FRAGMENT), captured.phone ?? 'null');
   check('stored value is ciphertext, not plaintext',
     !(captured.ciphertext ?? '').includes(MOCK_PHONE_FRAGMENT));

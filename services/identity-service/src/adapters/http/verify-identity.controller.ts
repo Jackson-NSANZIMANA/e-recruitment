@@ -14,7 +14,7 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { HttpError, type HttpResult, type Route } from '@usrp/shared-http';
-import { withAuth, type AuthVerifier } from '@usrp/shared-auth';
+import { requireOfficerPermission, withAuth, type AuthVerifier } from '@usrp/shared-auth';
 import { APPLICATION_CHANNELS, type ApplicationChannel } from '@usrp/shared-types';
 import {
   IdentityPersistenceError,
@@ -51,7 +51,11 @@ export function verifyIdentityRoute(service: VerifyIdentityService, verify: Auth
   return {
     method: 'POST',
     path: VERIFY_IDENTITY_PATH,
-    handler: withAuth(verify, { kind: ['system', 'officer'] }, async (ctx, _principal): Promise<HttpResult> => {
+    handler: withAuth(verify, { kind: ['system', 'officer'] }, async (ctx, principal): Promise<HttpResult> => {
+      // The service-internal path (system token) is unchanged. A HUMAN caller
+      // must hold identity.verify — the walk-in lane's in-person NIDA check
+      // is a screening-post duty, not something every officer token may do.
+      if (principal.kind === 'officer') requireOfficerPermission(principal, 'identity.verify');
       const body = await ctx.json<VerifyRequestBody>();
 
       const rawNationalId = body.nationalId;

@@ -557,6 +557,9 @@ importers:
       '@usrp/application-service':
         specifier: workspace:*
         version: link:../application-service
+      '@usrp/document-forensics-service':
+        specifier: workspace:*
+        version: link:../document-forensics-service
       '@usrp/iam-service':
         specifier: workspace:*
         version: link:../iam-service

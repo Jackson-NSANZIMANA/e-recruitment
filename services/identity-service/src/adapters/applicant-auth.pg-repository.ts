@@ -66,6 +66,73 @@ export class PgApplicantAuthRepository implements ApplicantAuthRepository {
     }
   }
 
+  async findOnboardingLock(nationalIdHash: string, now: Date): Promise<Date | null> {
+    try {
+      return await sql.begin(async (tx) => {
+        await tx`SET LOCAL ROLE ${sql(SYSTEM_ROLE)}`;
+        const rows = await tx<{ locked_until: Date }[]>`
+          SELECT locked_until FROM public_core.onboarding_attempts
+          WHERE national_id_hash = ${nationalIdHash}
+            AND locked_until IS NOT NULL
+            AND locked_until > ${now.toISOString()}::timestamptz
+        `;
+        return rows[0]?.locked_until ?? null;
+      });
+    } catch (cause) {
+      throw wrap(cause, 'Failed to read onboarding lock');
+    }
+  }
+
+  async recordOnboardingFailure(input: {
+    readonly nationalIdHash: string;
+    readonly now: Date;
+    readonly windowSeconds: number;
+    readonly maxFailures: number;
+    readonly lockSeconds: number;
+  }): Promise<void> {
+    const now = input.now.toISOString();
+    try {
+      await sql.begin(async (tx) => {
+        await tx`SET LOCAL ROLE ${sql(SYSTEM_ROLE)}`;
+        // One statement: insert, or bump inside the window / restart after it.
+        // The row lock taken by ON CONFLICT serialises concurrent guesses.
+        await tx`
+          INSERT INTO public_core.onboarding_attempts
+            (national_id_hash, failed_count, window_started_at)
+          VALUES (${input.nationalIdHash}, 1, ${now}::timestamptz)
+          ON CONFLICT (national_id_hash) DO UPDATE SET
+            failed_count = CASE
+              WHEN onboarding_attempts.window_started_at
+                   + make_interval(secs => ${input.windowSeconds}) <= ${now}::timestamptz
+                THEN 1 ELSE onboarding_attempts.failed_count + 1 END,
+            window_started_at = CASE
+              WHEN onboarding_attempts.window_started_at
+                   + make_interval(secs => ${input.windowSeconds}) <= ${now}::timestamptz
+                THEN ${now}::timestamptz ELSE onboarding_attempts.window_started_at END
+        `;
+        await tx`
+          UPDATE public_core.onboarding_attempts
+          SET locked_until = ${now}::timestamptz + make_interval(secs => ${input.lockSeconds})
+          WHERE national_id_hash = ${input.nationalIdHash}
+            AND failed_count >= ${input.maxFailures}
+        `;
+      });
+    } catch (cause) {
+      throw wrap(cause, 'Failed to record onboarding failure');
+    }
+  }
+
+  async clearOnboardingFailures(nationalIdHash: string): Promise<void> {
+    try {
+      await sql.begin(async (tx) => {
+        await tx`SET LOCAL ROLE ${sql(SYSTEM_ROLE)}`;
+        await tx`DELETE FROM public_core.onboarding_attempts WHERE national_id_hash = ${nationalIdHash}`;
+      });
+    } catch (cause) {
+      throw wrap(cause, 'Failed to clear onboarding failures');
+    }
+  }
+
   async createChallenge(input: CreateChallengeInput): Promise<void> {
     try {
       await sql.begin(async (tx) => {

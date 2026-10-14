@@ -70,6 +70,25 @@ export interface ApplicantAuthRepository {
   /** Revoke a session (logout / administrative kill). Idempotent. */
   terminateSession(sessionToken: string): Promise<void>;
 
+  /** `locked_until` for this NID hash if it is locked at `now`, else null. */
+  findOnboardingLock(nationalIdHash: string, now: Date): Promise<Date | null>;
+
+  /**
+   * Count a DOB mismatch inside a rolling window; lock once `maxFailures` is
+   * reached. Atomic (one transaction) so concurrent guesses cannot all slip
+   * under the threshold.
+   */
+  recordOnboardingFailure(input: {
+    readonly nationalIdHash: string;
+    readonly now: Date;
+    readonly windowSeconds: number;
+    readonly maxFailures: number;
+    readonly lockSeconds: number;
+  }): Promise<void>;
+
+  /** A confirmed identity clears the counter. */
+  clearOnboardingFailures(nationalIdHash: string): Promise<void>;
+
   /**
    * Stamp phone_number_hash + phone_verified_at + the encrypted stored
    * contact (ADR-021) after a successful OTP. Re-stamping overwrites, so a

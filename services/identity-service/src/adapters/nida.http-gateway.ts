@@ -37,7 +37,6 @@ interface NidaLookupWire {
     readonly gender?: unknown;
     readonly homeDistrict?: unknown;
     readonly homeProvince?: unknown;
-    readonly registeredPhoneNumber?: unknown;
     readonly citizenshipStatus?: unknown;
   };
 }
@@ -152,14 +151,12 @@ export class NidaHttpGateway implements NidaGateway {
       throw new NidaUnavailableError('NIDA citizen record is missing required fields', requestId);
     }
 
-    const phone = raw.registeredPhoneNumber;
     return {
       fullName,
       dateOfBirth,
       gender: gender as Gender,
       homeDistrict,
       homeProvince,
-      registeredPhoneNumber: typeof phone === 'string' ? phone : null,
       citizenshipStatus,
     };
   }

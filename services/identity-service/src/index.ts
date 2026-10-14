@@ -22,6 +22,9 @@ import { ApplicantAuthService } from './application/applicant-auth.service.js';
 import type { SmsChannel } from '@usrp/shared-sms';
 import {
   APPLICANT_SESSION_TTL_SECONDS,
+  ONBOARDING_FAILURE_WINDOW_SECONDS,
+  ONBOARDING_LOCK_SECONDS,
+  ONBOARDING_MAX_FAILURES,
   OTP_MAX_ATTEMPTS,
   OTP_TTL_SECONDS,
   type IdentityServiceConfig,
@@ -63,8 +66,8 @@ export function createBiometricResultProjector(
 }
 
 /**
- * Assemble the applicant-auth use case (ADR-018): OTP to the NIDA-registered
- * phone → opaque DB session. The SmsChannel is caller-supplied so dev/proofs
+ * Assemble the applicant-auth use case (ADR-018): NID + DOB → phone → OTP
+ * → opaque DB session. The SmsChannel is caller-supplied so dev/proofs
  * inject LogSmsChannel and production a real telecom adapter.
  */
 export function createApplicantAuthService(
@@ -79,12 +82,16 @@ export function createApplicantAuthService(
       hmacSecret: config.nida.hmacSecret,
       timeoutMs: config.nida.timeoutMs,
     }),
+    identity: createIdentityService(config, eventBus),
     sms,
     eventBus,
     nationalIdHmacKey: config.security.nationalIdHmacKey,
     config: {
       otpTtlSeconds: OTP_TTL_SECONDS,
       otpMaxAttempts: OTP_MAX_ATTEMPTS,
+      onboardingMaxFailures: ONBOARDING_MAX_FAILURES,
+      onboardingFailureWindowSeconds: ONBOARDING_FAILURE_WINDOW_SECONDS,
+      onboardingLockSeconds: ONBOARDING_LOCK_SECONDS,
       sessionTtlSeconds: APPLICANT_SESSION_TTL_SECONDS,
     },
   });
@@ -155,6 +162,7 @@ export type {
   DeclineRequestInput,
 } from './ports/erasure-request.repository.js';
 export {
+  ONBOARDING_BEGIN_PATH,
   OTP_REQUEST_PATH,
   OTP_VERIFY_PATH,
   ME_APPLICATIONS_PATH,
@@ -164,6 +172,9 @@ export {
   IDEMPOTENCY_REPLAYED_HEADER,
   applicantAuthRoutes,
 } from './adapters/http/applicant-auth.controller.js';
+export { applicantDocumentRoutes, ME_DOCUMENTS_PATH } from './adapters/http/applicant-documents.controller.js';
+export { HttpDocumentUploadGateway } from './adapters/document-upload.http-gateway.js';
+export type { DocumentUploadGateway, DocumentUploadInput, DocumentUploadResult } from './ports/document-upload-gateway.js';
 export { ApplicantAuthService } from './application/applicant-auth.service.js';
 export type {
   ApplicantAuthConfig,

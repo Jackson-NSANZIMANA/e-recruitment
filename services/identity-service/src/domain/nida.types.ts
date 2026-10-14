@@ -18,7 +18,8 @@ export interface NidaCitizen {
   readonly gender: Gender;
   readonly homeDistrict: string;
   readonly homeProvince: string;
-  readonly registeredPhoneNumber: string | null;
+  // No phone: NIDA does not hold SIM-registration numbers (ADR-029). The
+  // citizen states a phone and proves control of it with an OTP.
   readonly citizenshipStatus: string;
 }
 

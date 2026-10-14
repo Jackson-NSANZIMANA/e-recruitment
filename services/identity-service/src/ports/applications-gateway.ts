@@ -39,6 +39,8 @@ export type WithdrawApplicationResult =
  */
 export interface ApplicantSubmitInput {
   readonly category: ApplicationCategory;
+  /** The public code of the campaign the citizen chose (BUILD-002). */
+  readonly campaignCode: string;
   readonly nesaIndexNumber?: string | null;
   readonly hecRegistrationNumber?: string | null;
 }
