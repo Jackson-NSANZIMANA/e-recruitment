@@ -9,7 +9,7 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { HttpError, type HttpResult, type Route } from '@usrp/shared-http';
-import { withAuth, type AuthVerifier } from '@usrp/shared-auth';
+import { requireOfficerPermission, withAuth, type AuthVerifier } from '@usrp/shared-auth';
 import type { EnrollDeviceService } from '../../application/enroll-device.service.js';
 
 export const ENROLL_DEVICE_PATH = '/v1/field-sync/devices';
@@ -34,6 +34,7 @@ export function enrollDeviceRoute(service: EnrollDeviceService, verify: AuthVeri
     method: 'POST',
     path: ENROLL_DEVICE_PATH,
     handler: withAuth(verify, { kind: 'officer' }, async (ctx, principal): Promise<HttpResult> => {
+  requireOfficerPermission(principal, 'field.device.enroll');
       if (principal.kind !== 'officer') {
         throw new HttpError(403, 'FORBIDDEN', 'Officer principal required.');
       }

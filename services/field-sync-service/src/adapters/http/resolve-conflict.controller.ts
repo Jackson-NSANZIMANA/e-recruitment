@@ -9,7 +9,7 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { HttpError, type HttpResult, type Route } from '@usrp/shared-http';
-import { withAuth, type AuthVerifier } from '@usrp/shared-auth';
+import { requireOfficerPermission, withAuth, type AuthVerifier } from '@usrp/shared-auth';
 import type { ResolveConflictService } from '../../application/resolve-conflict.service.js';
 
 export const RESOLVE_CONFLICT_PATH = '/v1/field-sync/conflicts/resolve';
@@ -34,6 +34,7 @@ export function resolveConflictRoute(service: ResolveConflictService, verify: Au
     method: 'POST',
     path: RESOLVE_CONFLICT_PATH,
     handler: withAuth(verify, { kind: 'officer' }, async (ctx, principal): Promise<HttpResult> => {
+  requireOfficerPermission(principal, 'field.conflict.resolve');
       if (principal.kind !== 'officer') {
         throw new HttpError(403, 'FORBIDDEN', 'Officer principal required.');
       }
