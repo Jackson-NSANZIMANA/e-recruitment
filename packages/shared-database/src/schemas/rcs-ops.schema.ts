@@ -16,13 +16,14 @@ import {
   uuid,
   varchar,
   timestamp,
+  date,
   integer,
   boolean,
   jsonb,
   index,
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
-import { applicantIdentities } from './public-core.schema.js';
+import { applicantIdentities, campaignPolicyVersions } from './public-core.schema.js';
 
 export const rcsOps = pgSchema('rcs_ops');
 
@@ -196,6 +197,10 @@ export const rcsApplications = rcsOps.table(
     finalDecisionNotes: varchar('final_decision_notes', { length: 1000 }),
 
     submittedAt: timestamp('submitted_at', { withTimezone: true }),
+    // BUILD-002 (rls/0029): the policy version and calendar date that governed
+    // this application. Write-once (trigger); consumers read these, not "now".
+    policyVersionId: uuid('policy_version_id').references(() => campaignPolicyVersions.id),
+    evaluationDate: date('evaluation_date'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },

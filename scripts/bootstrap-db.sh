@@ -211,9 +211,16 @@ apply_sql "${RLS_DIR}/0026_campaign_control_plane.sql" "rls/0026 (campaign contr
 #     writes to registered_count and pre-control-plane rows remain unchanged.
 apply_sql "${RLS_DIR}/0027_campaign_command_functions.sql" "rls/0027 (campaign command functions)"
 
+# 23g. Onboarding attempt lockout (ADR-029): durable per-NID brake on DOB guessing.
+apply_sql "${RLS_DIR}/0028_onboarding_attempts.sql" "rls/0028 (onboarding attempt lockout)"
+
+# 23h. Application ↔ policy-version binding (BUILD-002): write-once
+#     policy_version_id + evaluation_date on every agency applications table.
+apply_sql "${RLS_DIR}/0029_application_policy_binding.sql" "rls/0029 (application policy binding)"
+
 printf '\n'
 
-ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts + applicant auth + erasure requests + stored contact + edge sessions + event outbox + slot reservations + submission integrity + walk-in outbox grant + shared rate-limit buckets + required extensions + campaign control plane + functions-only command boundary in place"
+ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts + applicant auth + erasure requests + stored contact + edge sessions + event outbox + slot reservations + submission integrity + walk-in outbox grant + shared rate-limit buckets + required extensions + campaign control plane + functions-only command boundary + onboarding lockout + application policy binding in place"
 
 # 24. Dev officer accounts (one per agency). A CONVENIENCE seed so the officer
 #     console / manual login smoke tests have real credentials to drive —
@@ -227,7 +234,7 @@ else
   log "seeding dev officer accounts (best-effort)"
   if DATABASE_URL="$DATABASE_URL" DEV_SEED_DATABASE_URL="$DATABASE_URL" \
       pnpm --filter @usrp/iam-service exec tsx scripts/seed-dev-officers.ts; then
-    ok "dev officer accounts seeded (login handles: rdf.officer / rnp.officer / rcs.officer)"
+    ok "dev officer accounts seeded (login handles: <agency>.officer for the examination day and medical verdict, <agency>.director for final decision + accept)"
   else
     log "dev officer seed skipped — set NODE_ENV=development and a privileged local URL, then: pnpm --filter @usrp/iam-service seed:dev"
   fi
