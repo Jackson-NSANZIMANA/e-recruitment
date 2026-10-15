@@ -71,11 +71,14 @@ test('tee cannot hide a failed proof; its stdout/stderr and log path survive the
   assert.ok(existsSync(join(logs, 'services/application-service/selfcheck/verify-pipeline-e2e.log')));
 });
 
-test('a passing run stays green and retains service-relative proof logs', (t) => {
+test('a passing run stays green, reports its skip honestly, and retains service-relative proof logs', (t) => {
   const root = fixture(t);
   const { result, logs } = run(root, '');
   assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.match(result.stdout, /ALL PROOFS GREEN/u);
+  // run() blanks FIRST_ADMIN_DATABASE_URL, so the direct provisioner proof is
+  // SKIPPED: a passing run with a skip must say so and never claim ALL GREEN.
+  assert.match(result.stdout, /PROOFS PASSED WITH 1 SKIPPED CHECK\(S\)/u);
+  assert.doesNotMatch(result.stdout, /ALL PROOFS GREEN/u);
   const identity = join(logs, 'services/identity-service/selfcheck/verify-slice.log');
   const biometric = join(logs, 'services/biometric-service/selfcheck/verify-biometric-slice.log');
   assert.ok(readFileSync(identity, 'utf8').includes('services/identity-service/'));

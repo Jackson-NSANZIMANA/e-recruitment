@@ -114,8 +114,8 @@ async function cleanup(): Promise<void> {
 }
 
 async function seedAccounts(): Promise<void> {
-  // Seed AS usrp_iam_service — proves the rls/0015 grant + WITH CHECK policy
-  // on the service credential store (not via the admin superuser escape hatch).
+  // Service clients are seeded AS usrp_iam_service — proves the rls/0015 grant
+  // + WITH CHECK policy on the service credential store.
   await sql.begin(async (tx) => {
     await tx`SET LOCAL ROLE ${sql('usrp_iam_service')}`;
     await tx`
@@ -123,10 +123,12 @@ async function seedAccounts(): Promise<void> {
       VALUES
         (${SERVICE_ID}, ${CLIENT_ID}, ${hashPassword(SECRET)}, 'selfcheck client', 'active'),
         (${DISABLED_SERVICE_ID}, ${DISABLED_CLIENT_ID}, ${hashPassword(SECRET)}, 'selfcheck disabled', 'disabled')`;
-    await tx`
-      INSERT INTO public_core.officer_accounts (officer_id, login_handle, credential, agency, roles, status)
-      VALUES (${OFFICER_ID}, ${HANDLE}, ${hashPassword(PASSWORD)}, 'RDF', ${sql.array(['reviewer'])}, 'active')`;
   });
+  // Officer accounts are provisioning-owned (rls/0010: the issuer is
+  // SELECT-only there), so the officer fixture goes in as the operator.
+  await admin`
+    INSERT INTO public_core.officer_accounts (officer_id, login_handle, credential, agency, roles, status)
+    VALUES (${OFFICER_ID}, ${HANDLE}, ${hashPassword(PASSWORD)}, 'RDF', ${admin.array(['reviewer'])}, 'active')`;
 }
 
 async function seedApplicant(): Promise<void> {
