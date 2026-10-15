@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { REQUIRED_DOCUMENTS, type DocumentType } from '@usrp/shared-types';
+import { AGENCY_DOCUMENT_TYPES, REQUIRED_DOCUMENTS, agencyForCategory, type ApplicationCategory, type DocumentType } from '@usrp/shared-types';
 import {
   REGISTRY_FOR_DOCUMENT,
   evaluateDocumentChecklist,
@@ -127,4 +127,11 @@ test('the notarised item follows the CATEGORY registry (RCS General Enlistee is 
   const c = evaluateDocumentChecklist('GENERAL_ENLISTEE', req, allPassed, [doc('DEGREE_DIPLOMA_NOTARIZED', { forensicsLane: 'GREEN' })]);
   assert.equal(c.items[0]?.registry, 'NESA');
   assert.equal(c.items[0]?.satisfaction, 'UPLOADED_CLEARED');
+});
+
+test("every announced requirement is a type its agency can actually store", () => {
+  for (const [category, types] of Object.entries(REQUIRED_DOCUMENTS)) {
+    const agency = agencyForCategory(category as ApplicationCategory);
+    for (const t of types) assert.ok(AGENCY_DOCUMENT_TYPES[agency].has(t), `${category} (${agency}) requires ${t}`);
+  }
 });

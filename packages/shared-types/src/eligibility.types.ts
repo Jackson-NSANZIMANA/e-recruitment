@@ -372,6 +372,43 @@ export const REQUIRED_DOCUMENTS: Readonly<
   ],
 } as const;
 
+// ── Accepted Document Types Per Agency ───────────────────────────
+// Mirrors each ops schema's OWN document_type enum (rdf/rnp/rcs_ops differ:
+// CELIBACY_CERTIFICATE exists only in rcs_ops, OLEVEL_CERTIFICATE only in
+// rdf_ops). The single source for every service that must refuse a type the
+// agency cannot store — before it becomes a raw enum-cast error. Every
+// REQUIRED_DOCUMENTS list is a subset of its category's agency set (asserted
+// by application-service's document-requirements tests).
+
+export const AGENCY_DOCUMENT_TYPES: Readonly<Record<'RDF' | 'RNP' | 'RCS', ReadonlySet<DocumentType>>> = {
+  RDF: new Set<DocumentType>([
+    'NATIONAL_ID',
+    'OLEVEL_CERTIFICATE',
+    'ALEVEL_CERTIFICATE',
+    'DEGREE_DIPLOMA_COPY',
+    'GOOD_CONDUCT_CERTIFICATE',
+    'NON_CONVICTION_CERTIFICATE',
+  ]),
+  RNP: new Set<DocumentType>([
+    'NATIONAL_ID',
+    'APPLICATION_FORM_WITH_PHOTO',
+    'ALEVEL_CERTIFICATE',
+    'DEGREE_DIPLOMA_COPY',
+    'GOOD_CONDUCT_CERTIFICATE',
+  ]),
+  RCS: new Set<DocumentType>([
+    'NATIONAL_ID',
+    'APPLICATION_FORM_WITH_PHOTO',
+    'BIRTH_CERTIFICATE',
+    'ALEVEL_CERTIFICATE',
+    'DEGREE_DIPLOMA_NOTARIZED',
+    'GOOD_CONDUCT_CERTIFICATE',
+    'NON_CONVICTION_CERTIFICATE',
+    'CELIBACY_CERTIFICATE',
+    'MEDICAL_CERTIFICATE_GOVT',
+  ]),
+};
+
 // ── NESA Subject Result (for academic vetting) ────────────────────
 
 export interface NESASubjectResult {

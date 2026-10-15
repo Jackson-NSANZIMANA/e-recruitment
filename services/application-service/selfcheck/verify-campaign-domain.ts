@@ -107,6 +107,15 @@ function main(): void {
       },
     },
   }, ['GENERAL_ENLISTMENT'])) === digest);
+  expectThrow('a required document type the agency cannot store is rejected (RDF has no celibacy certificate)', () => normalizeCampaignPolicy({
+    ...policyInput,
+    policyDocument: {
+      GENERAL_ENLISTMENT: {
+        ...(policyInput.policyDocument as Record<string, Record<string, unknown>>)['GENERAL_ENLISTMENT'],
+        requiredDocumentTypes: ['NATIONAL_ID', 'CELIBACY_CERTIFICATE'],
+      },
+    },
+  }, ['GENERAL_ENLISTMENT']));
   expectThrow('policy must cover exactly the targeted categories', () => normalizeCampaignPolicy(policyInput, ['CADET_OFFICER']));
   expectThrow('incomplete policy category rejected', () => normalizeCampaignPolicy({
     ...policyInput,

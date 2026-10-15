@@ -9,7 +9,7 @@
 
 import { newEnvelope, type EventBus, type EventContext } from '@usrp/shared-events';
 import { dbRoleForPrincipal, type Principal } from '@usrp/shared-auth';
-import type { Agency, ApplicationStatus, AuditEvent, DocumentType } from '@usrp/shared-types';
+import { AGENCY_DOCUMENT_TYPES, type Agency, type ApplicationStatus, type AuditEvent, type DocumentType } from '@usrp/shared-types';
 import {
   evaluateDocumentChecklist,
   resolveRequiredDocuments,
@@ -34,6 +34,8 @@ export type VenueVerificationOutcome =
   | { readonly kind: 'NOT_FOUND' }
   /** The type is not on this application's required list — nothing to clear. */
   | { readonly kind: 'NOT_REQUIRED' }
+  /** The agency cannot store this type at all (a legacy/foreign policy entry). */
+  | { readonly kind: 'UNSUPPORTED_DOCUMENT_TYPE' }
   /** The application is terminal; no further documents are taken. */
   | { readonly kind: 'NOT_APPLICABLE'; readonly currentStatus: ApplicationStatus };
 
@@ -88,6 +90,7 @@ export class DocumentChecklistService {
     if (TERMINAL.has(facts.status)) return { kind: 'NOT_APPLICABLE', currentStatus: facts.status };
     const required = resolveRequiredDocuments(facts.category, facts.policyRequired);
     if (!required.types.includes(documentType)) return { kind: 'NOT_REQUIRED' };
+    if (!AGENCY_DOCUMENT_TYPES[facts.agency].has(documentType)) return { kind: 'UNSUPPORTED_DOCUMENT_TYPE' };
 
     const write = await this.deps.repository.recordVenueVerification({
       ...scope,

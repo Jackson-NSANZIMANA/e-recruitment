@@ -112,7 +112,10 @@ export function verifyDocumentAtVenueHandler(deps: EdgeDeps): RouteHandler {
     if (upstream.status === 404) return NOT_FOUND;
     if (upstream.status === 403) return { status: 403, body: { error: 'PERMISSION_DENIED' } };
     if (upstream.status === 409) return { status: 409, body: { error: 'NOT_APPLICABLE' } };
-    if (upstream.status === 422) return { status: 422, body: { error: 'NOT_REQUIRED' } };
+    if (upstream.status === 422) {
+      const code = (upstream.body as { error?: unknown } | null)?.error;
+      return { status: 422, body: { error: code === 'UNSUPPORTED_DOCUMENT_TYPE' ? 'UNSUPPORTED_DOCUMENT_TYPE' : 'NOT_REQUIRED' } };
+    }
     if (upstream.status === 400) return { status: 400, body: { error: 'INVALID_REQUEST' } };
     return MISMATCH;
   });

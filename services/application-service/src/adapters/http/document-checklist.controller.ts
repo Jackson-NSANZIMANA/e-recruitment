@@ -115,6 +115,8 @@ export function documentChecklistRoutes(service: DocumentChecklistService, verif
               return { status: 404, body: { error: 'NOT_FOUND' } };
             case 'NOT_REQUIRED':
               return { status: 422, body: { error: 'NOT_REQUIRED' } };
+            case 'UNSUPPORTED_DOCUMENT_TYPE':
+              return { status: 422, body: { error: 'UNSUPPORTED_DOCUMENT_TYPE' } };
             case 'NOT_APPLICABLE':
               return { status: 409, body: { error: 'NOT_APPLICABLE', currentStatus: outcome.currentStatus } };
           }
