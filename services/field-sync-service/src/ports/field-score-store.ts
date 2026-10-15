@@ -62,7 +62,14 @@ export type SyncOutcome =
    * issued) — the device signed a score for a candidate who did not present
    * that application's invitation. Never stored.
    */
-  | { readonly kind: 'TICKET_MISMATCH' };
+  | { readonly kind: 'TICKET_MISMATCH' }
+  /**
+   * Digital lane only: the ticket is genuine but was never admitted at the
+   * venue gate (BUILD-003, ADR-034). A score for a candidate the gate did not
+   * let in is not evidence of anything. Never stored. Walk-ins are registered
+   * on site, so their registration is their admission.
+   */
+  | { readonly kind: 'NOT_ADMITTED' };
 
 export interface ResolveConflictInput {
   readonly applicationId: string;
