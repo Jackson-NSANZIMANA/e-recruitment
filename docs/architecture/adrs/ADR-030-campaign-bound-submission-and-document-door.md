@@ -29,10 +29,12 @@ upload documents: document-forensics accepts uploads only under a system token.
    token. A client `applicantId` is refused at both tiers. The response is
    `{ documentId, documentType }` — never lane/score/flags.
 
-## Not decided here (needs a policy owner)
-- **The required-documents gate.** What documents an application needs before
-  eligibility may turn green is policy content (`requiredDocumentTypes` in the
-  campaign policy document), and no official list is invented here. The
-  transport and the policy binding now exist; the gate is the next increment.
+## Superseded / follow-ups
+- **Required documents — CORRECTION.** An earlier draft said "no official list
+  is invented here". That was wrong: `REQUIRED_DOCUMENTS` in shared-types
+  already transcribes each agency's announced list per category, and campaign
+  policy versions carry `requiredDocumentTypes`. The model and the owner
+  decisions (advisory; API waives paper; venue clearing by the check-in post;
+  notarised = upload then registry) are in **ADR-032**.
 - Education/vetting consumers still stamp their own clock for audit fields;
   only the age decision is date-bound today.

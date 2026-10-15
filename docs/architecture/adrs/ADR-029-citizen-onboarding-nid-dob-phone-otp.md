@@ -30,5 +30,17 @@ could never receive an OTP.
   correct DOB. Unknown NIDs are never counted (no table growth). Known
   trade-off: an attacker can lock a victim out for an hour; recovery is to
   wait or use the walk-in lane.
+- Only a **VERIFIED** identity is issued a token (an existing PENDING / FAILED
+  / EXPIRED row gets the uniform answer) — the bar the pre-ADR-029 login held.
+- The edge's per-phone OTP bucket keys on the canonical subscriber number
+  (last nine digits), so spacing or prefix variants share one bucket.
+- **Residual risk — contact replacement.** Whoever holds a citizen's NID AND
+  DOB can complete onboarding with their own phone, which replaces the stored
+  contact (stampPhoneVerified overwrites). The DOB factor narrows this; it does
+  not remove it. Recommended (not implemented): notify the previously verified
+  number when the stored contact changes, and require venue face-match before
+  any irreversible step.
+- The onboarding token is a 15-minute bearer of "knew NID + DOB"; it is held in
+  page memory only and is not bound to the browser session (accepted for now).
 - No SMS provider is chosen: delivery uses `LogSmsChannel` (fails closed).
 - Account recovery for a lost phone = repeat the flow with NID + DOB.
