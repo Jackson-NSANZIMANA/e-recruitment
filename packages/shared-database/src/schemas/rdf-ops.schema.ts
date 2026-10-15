@@ -8,6 +8,7 @@ import {
   uuid,
   varchar,
   timestamp,
+  text,
   date,
   integer,
   boolean,
@@ -188,6 +189,9 @@ export const rdfApplications = rdfOps.table(
     // this application. Write-once (trigger); consumers read these, not "now".
     policyVersionId: uuid('policy_version_id').references(() => campaignPolicyVersions.id),
     evaluationDate: date('evaluation_date'),
+    // rls/0031 (ADR-033): the signed exam invitation (USRP-SLOT.v1…) the citizen
+    // downloads as a QR. Write-once (trigger); shape CHECK not modelled here.
+    qrSignedToken: text('qr_signed_token'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },

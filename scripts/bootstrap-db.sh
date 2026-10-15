@@ -221,9 +221,12 @@ apply_sql "${RLS_DIR}/0029_application_policy_binding.sql" "rls/0029 (applicatio
 # 23i. Venue verification of documents + system read of policy versions (ADR-032).
 apply_sql "${RLS_DIR}/0030_document_venue_verification.sql" "rls/0030 (document venue verification)"
 
+# 23j. The signed exam invitation persisted on the application (ADR-033).
+apply_sql "${RLS_DIR}/0031_application_exam_invitation.sql" "rls/0031 (application exam invitation)"
+
 printf '\n'
 
-ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts + applicant auth + erasure requests + stored contact + edge sessions + event outbox + slot reservations + submission integrity + walk-in outbox grant + shared rate-limit buckets + required extensions + campaign control plane + functions-only command boundary + onboarding lockout + application policy binding + document venue verification in place"
+ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts + applicant auth + erasure requests + stored contact + edge sessions + event outbox + slot reservations + submission integrity + walk-in outbox grant + shared rate-limit buckets + required extensions + campaign control plane + functions-only command boundary + onboarding lockout + application policy binding + document venue verification + exam invitation in place"
 
 # 24. Dev officer accounts (one per agency). A CONVENIENCE seed so the officer
 #     console / manual login smoke tests have real credentials to drive —
