@@ -49,6 +49,9 @@ export async function startSlotAssignedConsumer(
         assignedVenueName: event.venueName,
         examDate: event.examDate,
         qrInvitationCode: event.qrInvitationCode,
+        ...(typeof event.qrSignedToken === 'string' && event.qrSignedToken.startsWith('USRP-SLOT.v1.')
+          ? { qrSignedToken: event.qrSignedToken }
+          : {}),
         correlationId: event.correlationId,
       },
       agency: event.agency,

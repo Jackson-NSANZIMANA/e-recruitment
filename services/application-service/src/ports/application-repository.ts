@@ -37,6 +37,8 @@ export interface CreateApplicationInput {
   readonly hecRegistrationNumber: string | null;
   /** Correlation id of the causal chain — recorded on the history row. */
   readonly correlationId: string;
+  readonly policyVersionId?: string | null;
+  readonly evaluationDate?: string | null;
 }
 
 /** Identifiers of the created application. */
@@ -129,6 +131,12 @@ export interface SlotAssignmentResult {
   /** Exam date (YYYY-MM-DD) — stamped as physical_test_scheduled_at. */
   readonly examDate: string;
   readonly qrInvitationCode: string;
+  /**
+   * The signed exam invitation (ADR-009) the citizen downloads as a QR
+   * (ADR-033). Optional so a pre-ADR-033 event replays cleanly; when present
+   * it is stored write-once.
+   */
+  readonly qrSignedToken?: string;
   readonly correlationId: string;
 }
 

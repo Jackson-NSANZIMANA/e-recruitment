@@ -101,6 +101,12 @@ const RCS_CAMPAIGN = '4d000000-0000-4000-8000-0000000000c3';
 const RDF_OFFICER_ID = '4d000000-0000-4000-8000-00000000ff01';
 const RNP_OFFICER_ID = '4d000000-0000-4000-8000-00000000ff02';
 const RCS_OFFICER_ID = '4d000000-0000-4000-8000-00000000ff03';
+// The decision authority is a DIFFERENT person from the medical officer
+// (BUILD-004 §D: separation of duties, and role separation by construction).
+const RDF_DIRECTOR_ID = '4d000000-0000-4000-8000-00000000ffd1';
+const RNP_DIRECTOR_ID = '4d000000-0000-4000-8000-00000000ffd2';
+const RCS_DIRECTOR_ID = '4d000000-0000-4000-8000-00000000ffd3';
+const DIRECTOR_ROLES = ['decision_authority'];
 
 // One RDF app per scenario, plus RNP/RCS apps for the cross-agency probe and
 // the CERTIFICATE-mode lanes (ADR-013). Lock-slice apps (ADR-014): a second
@@ -128,7 +134,7 @@ function check(label: string, condition: boolean, detail = ''): void {
 
 function mint(
   kind: 'officer' | 'system',
-  opts: { agency?: 'RDF' | 'RNP' | 'RCS'; sub?: string } = {},
+  opts: { agency?: 'RDF' | 'RNP' | 'RCS'; sub?: string; roles?: string[] } = {},
 ): string {
   const base = {
     v: 1 as const,
@@ -140,7 +146,7 @@ function mint(
   };
   const claims: AuthTokenClaims =
     kind === 'officer'
-      ? { ...base, kind, agency: opts.agency ?? 'RDF', roles: [] }
+      ? { ...base, kind, agency: opts.agency ?? 'RDF', roles: opts.roles ?? ['screening_officer', 'field_supervisor', 'medical_officer', 'adjudicator', 'reviewer'] }
       : { ...base, kind };
   return signAuthToken(AUTH_KEYS.privateKeyPem, claims);
 }
@@ -342,6 +348,9 @@ async function main(): Promise<void> {
   }
 
   const rdfOfficer = mint('officer', { agency: 'RDF', sub: RDF_OFFICER_ID });
+  const rdfDirector = mint('officer', { agency: 'RDF', sub: RDF_DIRECTOR_ID, roles: DIRECTOR_ROLES });
+  const rnpDirector = mint('officer', { agency: 'RNP', sub: RNP_DIRECTOR_ID, roles: DIRECTOR_ROLES });
+  const rcsDirector = mint('officer', { agency: 'RCS', sub: RCS_DIRECTOR_ID, roles: DIRECTOR_ROLES });
   const auditEntries = (): Record<string, unknown>[] =>
     bus.published.filter((e) => asRecord(e)['eventType'] === 'AUDIT_ENTRY').map(asRecord);
 
@@ -358,15 +367,32 @@ async function main(): Promise<void> {
     check('  medical_fitness_status = FIT', row['medical_fitness_status'] === 'FIT', String(row['medical_fitness_status']));
     check('  medical_reviewed_at stamped', row['medical_reviewed_at'] != null);
 
-    const fin = await post(FINAL_DECISION_PATH, { applicationId: APP_HAPPY, decision: 'SHORTLIST', notes: 'Strong candidate' }, rdfOfficer);
+    // BUILD-004 §D — WHAT, then WHO-ELSE. A reviewer (read-only post) holds a
+    // valid officer token and the right agency and still may not decide; and an
+    // officer who holds BOTH posts may not finalise what they medically cleared.
+    const reviewerOnly = mint('officer', { agency: 'RDF', sub: RDF_OFFICER_ID, roles: ['reviewer'] });
+    const deniedFinal = await post(FINAL_DECISION_PATH, { applicationId: APP_HAPPY, decision: 'SHORTLIST' }, reviewerOnly);
+    check('reviewer-only → final-decision 403 PERMISSION_DENIED',
+      deniedFinal.status === 403 && deniedFinal.json['error'] === 'PERMISSION_DENIED', deniedFinal.text);
+    const deniedAccept = await post(ACCEPT_PATH, { applicationId: APP_HAPPY }, reviewerOnly);
+    check('reviewer-only → accept 403 PERMISSION_DENIED', deniedAccept.status === 403 && deniedAccept.json['error'] === 'PERMISSION_DENIED');
+    const sameHatBoth = mint('officer', { agency: 'RDF', sub: RDF_OFFICER_ID, roles: ['medical_officer', 'decision_authority'] });
+    const sod = await post(FINAL_DECISION_PATH, { applicationId: APP_HAPPY, decision: 'SHORTLIST' }, sameHatBoth);
+    check('the medical reviewer finalising their own case → 403 SEPARATION_OF_DUTIES',
+      sod.status === 403 && sod.json['status'] === 'SEPARATION_OF_DUTIES' &&
+      sod.json['rule'] === 'FINAL_DECISION_EXCLUDES_MEDICAL_REVIEWER', sod.text);
+    check('…and the application did not move', (await appRow('rdf_ops', APP_HAPPY))['status'] === 'MEDICAL_REVIEW');
+    check('…and no final decision was stamped', (await appRow('rdf_ops', APP_HAPPY))['final_decision_by_id'] == null);
+
+    const fin = await post(FINAL_DECISION_PATH, { applicationId: APP_HAPPY, decision: 'SHORTLIST', notes: 'Strong candidate' }, rdfDirector);
     check('final-decision SHORTLIST → 200 APPLIED', fin.status === 200 && fin.json['status'] === 'APPLIED', fin.text);
     check('  transition MEDICAL_REVIEW → FINAL_SHORTLIST',
       fin.json['fromStatus'] === 'MEDICAL_REVIEW' && fin.json['toStatus'] === 'FINAL_SHORTLIST');
     row = await appRow('rdf_ops', APP_HAPPY);
-    check('  final_decision_by_id = officer UUID', row['final_decision_by_id'] === RDF_OFFICER_ID);
+    check('  final_decision_by_id = officer UUID', row['final_decision_by_id'] === RDF_DIRECTOR_ID);
     check('  final_decision_notes stored', row['final_decision_notes'] === 'Strong candidate');
 
-    const acc = await post(ACCEPT_PATH, { applicationId: APP_HAPPY }, rdfOfficer);
+    const acc = await post(ACCEPT_PATH, { applicationId: APP_HAPPY }, rdfDirector);
     check('accept → 200 APPLIED', acc.status === 200 && acc.json['status'] === 'APPLIED', acc.text);
     check('  transition FINAL_SHORTLIST → ACCEPTED',
       acc.json['fromStatus'] === 'FINAL_SHORTLIST' && acc.json['toStatus'] === 'ACCEPTED');
@@ -377,7 +403,7 @@ async function main(): Promise<void> {
     console.log('\n── 2. Idempotent re-apply ──');
     const histBefore = await historyCount('rdf_ops');
     const auditBefore = auditEntries().length;
-    const again = await post(ACCEPT_PATH, { applicationId: APP_HAPPY }, rdfOfficer);
+    const again = await post(ACCEPT_PATH, { applicationId: APP_HAPPY }, rdfDirector);
     check('accept on ACCEPTED → 200 NO_CHANGE', again.status === 200 && again.json['status'] === 'NO_CHANGE', again.text);
     check('  currentStatus = ACCEPTED', again.json['currentStatus'] === 'ACCEPTED');
     check('  no history appended by a no-op', (await historyCount('rdf_ops')) === histBefore);
@@ -390,13 +416,13 @@ async function main(): Promise<void> {
     row = await appRow('rdf_ops', APP_UNFIT);
     check('  DB status = REJECTED, fitness = UNFIT', row['status'] === 'REJECTED' && row['medical_fitness_status'] === 'UNFIT');
 
-    const finRej = await post(FINAL_DECISION_PATH, { applicationId: APP_FINAL, decision: 'REJECT', notes: 'Failed final vetting' }, rdfOfficer);
+    const finRej = await post(FINAL_DECISION_PATH, { applicationId: APP_FINAL, decision: 'REJECT', notes: 'Failed final vetting' }, rdfDirector);
     check('final-decision REJECT (from MEDICAL_REVIEW) → REJECTED', finRej.status === 200 && finRej.json['toStatus'] === 'REJECTED', finRej.text);
     check('  DB status = REJECTED', (await appRow('rdf_ops', APP_FINAL))['status'] === 'REJECTED');
 
     // ── 4. Hold-safe: acting out of order ──
     console.log('\n── 4. Hold-safe (wrong prior status) ──');
-    const hold = await post(ACCEPT_PATH, { applicationId: APP_HOLD }, rdfOfficer);
+    const hold = await post(ACCEPT_PATH, { applicationId: APP_HOLD }, rdfDirector);
     check('accept while PHYSICAL_TEST_COMPLETE → 409 NOT_APPLICABLE', hold.status === 409 && hold.json['status'] === 'NOT_APPLICABLE', hold.text);
     check('  currentStatus reported = PHYSICAL_TEST_COMPLETE', hold.json['currentStatus'] === 'PHYSICAL_TEST_COMPLETE');
     check('  row untouched (still PHYSICAL_TEST_COMPLETE)', (await appRow('rdf_ops', APP_HOLD))['status'] === 'PHYSICAL_TEST_COMPLETE');
@@ -407,7 +433,7 @@ async function main(): Promise<void> {
     check('RDF officer acting on an RNP app → 404 NOT_FOUND', cross.status === 404 && cross.json['status'] === 'NOT_FOUND', cross.text);
     check('  RNP app untouched (still PHYSICAL_TEST_COMPLETE)', (await statusOf('rnp_ops', RNP_APP)) === 'PHYSICAL_TEST_COMPLETE');
     // And an RNP officer likewise cannot reach into rdf_ops.
-    const crossBack = await post(ACCEPT_PATH, { applicationId: APP_HAPPY }, mint('officer', { agency: 'RNP', sub: RNP_OFFICER_ID }));
+    const crossBack = await post(ACCEPT_PATH, { applicationId: APP_HAPPY }, rnpDirector);
     check('RNP officer acting on an RDF app → 404 NOT_FOUND', crossBack.status === 404 && crossBack.json['status'] === 'NOT_FOUND', crossBack.text);
 
     // Medical review is mode-split (ADR-013): RNP/RCS verify a physician
@@ -422,7 +448,7 @@ async function main(): Promise<void> {
     console.log('\n── 6. Auth gate ──');
     check('no token → 401', (await post(MEDICAL_REVIEW_PATH, { applicationId: APP_HAPPY, fitnessStatus: 'FIT' })).status === 401);
     check('system token → 403', (await post(MEDICAL_REVIEW_PATH, { applicationId: APP_HAPPY, fitnessStatus: 'FIT' }, mint('system'))).status === 403);
-    check('bad applicationId → 400', (await post(ACCEPT_PATH, { applicationId: 'not-a-uuid' }, rdfOfficer)).status === 400);
+    check('bad applicationId → 400', (await post(ACCEPT_PATH, { applicationId: 'not-a-uuid' }, rdfDirector)).status === 400);
     check('bad fitnessStatus → 400', (await post(MEDICAL_REVIEW_PATH, { applicationId: APP_HOLD, fitnessStatus: 'MAYBE' }, rdfOfficer)).status === 400);
 
     // ── 7. Audit trail + append-only history: one entry per genuine transition ──
@@ -430,7 +456,15 @@ async function main(): Promise<void> {
     // Genuine transitions this run: happy(3) + unfit(1) + finalReject(1) = 5.
     const entries = auditEntries();
     check('exactly 5 AUDIT_ENTRY events (one per genuine transition)', entries.length === 5, `got ${entries.length}`);
-    check('all audit entries performedBy the officer UUID', entries.every((e) => e['performedBy'] === RDF_OFFICER_ID));
+    check(
+      'each audit entry is attributed to the RIGHT post: medical → officer, decision/accept → director',
+      entries.every((e) => {
+        const stage = asRecord(e['metadata'])['stage'];
+        return stage === 'MEDICAL_REVIEW'
+          ? e['performedBy'] === RDF_OFFICER_ID
+          : e['performedBy'] === RDF_DIRECTOR_ID;
+      }),
+    );
     check('all audit entries are APPLICATION scoped', entries.every((e) => e['entityType'] === 'APPLICATION'));
     check('reject transitions use action APPLICATION_REJECTED',
       entries.filter((e) => e['newStatus'] === 'REJECTED').every((e) => e['action'] === 'APPLICATION_REJECTED'));
@@ -463,8 +497,8 @@ async function main(): Promise<void> {
     const rnpRow = await certRow('rnp_ops', RNP_APP);
     check('  rnp_ops cert columns stamped (0012 landing)',
       rnpRow['medical_cert_verified'] === true && rnpRow['medical_cert_verified_at'] !== null && rnpRow['medical_cert_physician_name'] === PHYSICIAN);
-    const rnpFin = await post(FINAL_DECISION_PATH, { applicationId: RNP_APP, decision: 'SHORTLIST' }, rnpOfficer);
-    const rnpAcc = await post(ACCEPT_PATH, { applicationId: RNP_APP }, rnpOfficer);
+    const rnpFin = await post(FINAL_DECISION_PATH, { applicationId: RNP_APP, decision: 'SHORTLIST' }, rnpDirector);
+    const rnpAcc = await post(ACCEPT_PATH, { applicationId: RNP_APP }, rnpDirector);
     check('RNP reaches ACCEPTED (the 501 dead-end is retired)',
       rnpFin.status === 200 && rnpAcc.status === 200 && (await statusOf('rnp_ops', RNP_APP)) === 'ACCEPTED');
 
@@ -473,8 +507,8 @@ async function main(): Promise<void> {
     check('RCS cert-verify APPLIED → MEDICAL_REVIEW', rcsVerify.status === 200 && rcsVerify.json['toStatus'] === 'MEDICAL_REVIEW', rcsVerify.text);
     const rcsAgain = await post(MEDICAL_REVIEW_PATH, { applicationId: RCS_APP, certVerdict: 'CERT_VERIFIED', physicianName: 'Dr. Nkurunziza J.' }, rcsOfficer);
     check('RCS cert-verify re-apply → NO_CHANGE (idempotent)', rcsAgain.status === 200 && rcsAgain.json['status'] === 'NO_CHANGE', rcsAgain.text);
-    const rcsFin = await post(FINAL_DECISION_PATH, { applicationId: RCS_APP, decision: 'SHORTLIST' }, rcsOfficer);
-    const rcsAcc = await post(ACCEPT_PATH, { applicationId: RCS_APP }, rcsOfficer);
+    const rcsFin = await post(FINAL_DECISION_PATH, { applicationId: RCS_APP, decision: 'SHORTLIST' }, rcsDirector);
+    const rcsAcc = await post(ACCEPT_PATH, { applicationId: RCS_APP }, rcsDirector);
     check('RCS reaches ACCEPTED', rcsFin.status === 200 && rcsAcc.status === 200 && (await statusOf('rcs_ops', RCS_APP)) === 'ACCEPTED');
 
     // CERT_REJECTED: REJECTED + history are the record; cert columns stay honest.
@@ -491,7 +525,7 @@ async function main(): Promise<void> {
     const rnpHistory = await admin<{ performed_by: string }[]>`
       SELECT performed_by FROM rnp_ops.application_status_history
       WHERE application_id = ${RNP_APP} ORDER BY performed_at`;
-    check('rnp history performed_by = RNP officer UUID', rnpHistory.every((r) => r.performed_by === RNP_OFFICER_ID));
+    check('rnp history performed_by is the RNP officer (medical) or RNP director (decision/accept)', rnpHistory.every((r) => r.performed_by === RNP_OFFICER_ID || r.performed_by === RNP_DIRECTOR_ID));
 
     // The physician name reaches the DB column and NOWHERE else: not in the
     // audit stream, not in any HTTP response.
@@ -518,7 +552,7 @@ async function main(): Promise<void> {
     // name the holder, and write nothing.
     const rnpHistBefore = await historyCount('rnp_ops');
     const auditBeforeLock = auditEntries().length;
-    const blocked = await post(ACCEPT_PATH, { applicationId: RNP_LOCK_APP }, rnpOfficer);
+    const blocked = await post(ACCEPT_PATH, { applicationId: RNP_LOCK_APP }, rnpDirector);
     check('RNP accept of RDF-accepted citizen → 409 CROSS_AGENCY_LOCKED',
       blocked.status === 409 && blocked.json['status'] === 'CROSS_AGENCY_LOCKED', blocked.text);
     check('  response names the holding agency (RDF)', blocked.json['lockedByAgency'] === 'RDF', blocked.text);
@@ -529,7 +563,7 @@ async function main(): Promise<void> {
 
     // Idempotent re-accept by the HOLDING agency still returns NO_CHANGE —
     // the status guard fires before the lock check ever runs.
-    const holderAgain = await post(ACCEPT_PATH, { applicationId: APP_HAPPY }, rdfOfficer);
+    const holderAgain = await post(ACCEPT_PATH, { applicationId: APP_HAPPY }, rdfDirector);
     check('holder re-accept → 200 NO_CHANGE (status guard precedes lock)',
       holderAgain.status === 200 && holderAgain.json['status'] === 'NO_CHANGE', holderAgain.text);
 
@@ -537,8 +571,8 @@ async function main(): Promise<void> {
     // once. FOR UPDATE on the shared identity row serializes them — exactly
     // ONE 200 APPLIED, exactly one 409, and the lock names the winner.
     const [raceRnp, raceRcs] = await Promise.all([
-      post(ACCEPT_PATH, { applicationId: RACE_RNP_APP }, rnpOfficer),
-      post(ACCEPT_PATH, { applicationId: RACE_RCS_APP }, rcsOfficer),
+      post(ACCEPT_PATH, { applicationId: RACE_RNP_APP }, rnpDirector),
+      post(ACCEPT_PATH, { applicationId: RACE_RCS_APP }, rcsDirector),
     ]);
     const outcomes = [raceRnp, raceRcs].map((r) => r.json['status']);
     check('raced accepts → exactly one APPLIED and one CROSS_AGENCY_LOCKED',

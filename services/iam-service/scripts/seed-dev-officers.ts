@@ -11,7 +11,8 @@
 //   DEV_SEED_DATABASE_URL='postgresql://usrp_admin:...@localhost:5432/usrp_db' pnpm --filter @usrp/iam-service seed:dev
 // Supply the privileged local operator URL; the shared usrp_app login is denied.
 //
-// Idempotent: ON CONFLICT (login_handle) DO NOTHING. Re-running is a no-op.
+// Idempotent: ON CONFLICT (login_handle) refreshes ROLES only (the posts are
+// the part that evolves); the credential is never overwritten. Safe to re-run.
 // ══════════════════════════════════════════════════════════════════
 
 import postgres from 'postgres';
@@ -46,10 +47,27 @@ interface DevOfficer {
   readonly roles: readonly string[];
 }
 
+// DEV ONLY. Two posts per agency so the four-eyes rule can be exercised end to
+// end: the `.officer` runs the examination day and the medical verdict; the
+// `.director` is the only post that may sign the final decision and accept
+// (BUILD-004 §D). Neither can do the other's job, and no dev account is
+// `agency_admin` — campaign authoring uses the separately provisioned admin.
+const OFFICER_ROLES = [
+  'reviewer',
+  'screening_officer',
+  'field_supervisor',
+  'medical_officer',
+  'adjudicator',
+] as const;
+const DIRECTOR_ROLES = ['decision_authority'] as const;
+
 const DEV_OFFICERS: readonly DevOfficer[] = [
-  { officerId: '11111111-1111-4111-8111-111111111111', loginHandle: 'rdf.officer', agency: 'RDF', roles: ['reviewer'] },
-  { officerId: '22222222-2222-4222-8222-222222222222', loginHandle: 'rnp.officer', agency: 'RNP', roles: ['reviewer'] },
-  { officerId: '33333333-3333-4333-8333-333333333333', loginHandle: 'rcs.officer', agency: 'RCS', roles: ['reviewer'] },
+  { officerId: '11111111-1111-4111-8111-111111111111', loginHandle: 'rdf.officer', agency: 'RDF', roles: OFFICER_ROLES },
+  { officerId: '22222222-2222-4222-8222-222222222222', loginHandle: 'rnp.officer', agency: 'RNP', roles: OFFICER_ROLES },
+  { officerId: '33333333-3333-4333-8333-333333333333', loginHandle: 'rcs.officer', agency: 'RCS', roles: OFFICER_ROLES },
+  { officerId: '11111111-1111-4111-8111-1111111111d1', loginHandle: 'rdf.director', agency: 'RDF', roles: DIRECTOR_ROLES },
+  { officerId: '22222222-2222-4222-8222-2222222222d2', loginHandle: 'rnp.director', agency: 'RNP', roles: DIRECTOR_ROLES },
+  { officerId: '33333333-3333-4333-8333-3333333333d3', loginHandle: 'rcs.director', agency: 'RCS', roles: DIRECTOR_ROLES },
 ];
 
 async function main(): Promise<void> {
@@ -94,17 +112,18 @@ async function main(): Promise<void> {
       const inserted = await database.begin(async (tx) => {
         // The privileged development operator inserts under its authenticated
         // session; usrp_iam_service is intentionally SELECT-only for this table.
-        const rows = await tx<{ officer_id: string }[]>`
+        const rows = await tx<{ inserted: boolean }[]>`
           INSERT INTO public_core.officer_accounts
             (officer_id, login_handle, credential, agency, roles)
           VALUES (
             ${officer.officerId}, ${officer.loginHandle}, ${credential},
             ${officer.agency}, ${tx.array(officer.roles as string[])}
           )
-          ON CONFLICT (login_handle) DO NOTHING
-          RETURNING officer_id
+          ON CONFLICT (login_handle) DO UPDATE SET roles = EXCLUDED.roles
+          RETURNING (xmax = 0) AS inserted
         `;
-        return rows.length > 0;
+        // xmax = 0 → a fresh row; otherwise an existing post had its roles refreshed.
+        return rows[0]?.inserted === true;
       });
       seeded += inserted ? 1 : 0;
       console.log(

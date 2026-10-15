@@ -10,36 +10,12 @@
 // a raw enum-cast DB error.
 // ══════════════════════════════════════════════════════════════════
 
+import { AGENCY_DOCUMENT_TYPES } from '@usrp/shared-types';
 import type { Agency, DocumentType } from '@usrp/shared-types';
 
-export const AGENCY_DOCUMENT_TYPES: Readonly<Record<Agency, ReadonlySet<DocumentType>>> = {
-  RDF: new Set<DocumentType>([
-    'NATIONAL_ID',
-    'OLEVEL_CERTIFICATE',
-    'ALEVEL_CERTIFICATE',
-    'DEGREE_DIPLOMA_COPY',
-    'GOOD_CONDUCT_CERTIFICATE',
-    'NON_CONVICTION_CERTIFICATE',
-  ]),
-  RNP: new Set<DocumentType>([
-    'NATIONAL_ID',
-    'APPLICATION_FORM_WITH_PHOTO',
-    'ALEVEL_CERTIFICATE',
-    'DEGREE_DIPLOMA_COPY',
-    'GOOD_CONDUCT_CERTIFICATE',
-  ]),
-  RCS: new Set<DocumentType>([
-    'NATIONAL_ID',
-    'APPLICATION_FORM_WITH_PHOTO',
-    'BIRTH_CERTIFICATE',
-    'ALEVEL_CERTIFICATE',
-    'DEGREE_DIPLOMA_NOTARIZED',
-    'GOOD_CONDUCT_CERTIFICATE',
-    'NON_CONVICTION_CERTIFICATE',
-    'CELIBACY_CERTIFICATE',
-    'MEDICAL_CERTIFICATE_GOVT',
-  ]),
-};
+// The set itself now lives in @usrp/shared-types (one source for forensics,
+// application-service policy validation and venue verification).
+export { AGENCY_DOCUMENT_TYPES };
 
 export function isDocumentTypeSupported(agency: Agency, documentType: DocumentType): boolean {
   return AGENCY_DOCUMENT_TYPES[agency].has(documentType);

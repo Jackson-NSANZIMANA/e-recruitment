@@ -265,8 +265,9 @@ export class PgApplicationRepository implements ApplicationRepository {
           applicant_id: string;
           venue_assignment_id: string | null;
           qr_invitation_code: string | null;
+          qr_signed_token: string | null;
         }[]>`
-          SELECT status, applicant_id, venue_assignment_id, qr_invitation_code
+          SELECT status, applicant_id, venue_assignment_id, qr_invitation_code, qr_signed_token
           FROM ${schema}.applications
           WHERE id = ${result.applicationId}
           FOR UPDATE
@@ -276,9 +277,6 @@ export class PgApplicationRepository implements ApplicationRepository {
         // ops applications, so assert it here rather than silently succeed.
         if (!current) return { kind: 'NOT_FOUND' };
 
-        // Already at the assigned stage ⇒ idempotent redelivery, write nothing.
-        if (current.status === 'SLOT_ASSIGNED') return { kind: 'NO_CHANGE' };
-
         // Scheduling deliberately re-announces the same immutable assignment on
         // a retry. Notification delivery may have advanced the application before
         // that replay arrives, so recognize the stored venue + ticket identity as
@@ -286,10 +284,24 @@ export class PgApplicationRepository implements ApplicationRepository {
         const sameStoredAssignment =
           current.venue_assignment_id === result.venueAssignmentId &&
           current.qr_invitation_code === result.qrInvitationCode;
-        if (
-          sameStoredAssignment &&
-          APPLICATION_STATUSES.indexOf(current.status) > slotAssignedRank
-        ) {
+        const alreadyAssigned =
+          current.status === 'SLOT_ASSIGNED' ||
+          (sameStoredAssignment && APPLICATION_STATUSES.indexOf(current.status) > slotAssignedRank);
+        if (alreadyAssigned) {
+          // ADR-033 backfill: an assignment stored before the token was
+          // persisted has no QR to give the citizen. A redelivery of the SAME
+          // assignment may fill it — only into an empty column (the trigger
+          // forbids replacing an issued token) and only for the same ticket.
+          if (
+            sameStoredAssignment &&
+            current.qr_signed_token === null &&
+            result.qrSignedToken !== undefined
+          ) {
+            await tx`
+              UPDATE ${schema}.applications SET qr_signed_token = ${result.qrSignedToken}, updated_at = now()
+              WHERE id = ${result.applicationId} AND qr_signed_token IS NULL
+            `;
+          }
           return { kind: 'NO_CHANGE' };
         }
 
@@ -308,6 +320,7 @@ export class PgApplicationRepository implements ApplicationRepository {
             physical_test_scheduled_at = ${result.examDate}::date,
             qr_invitation_code = ${result.qrInvitationCode},
             qr_invitation_issued_at = now(),
+            qr_signed_token = ${result.qrSignedToken ?? null},
             status = 'SLOT_ASSIGNED'::${schema}.application_status,
             updated_at = now()
           WHERE id = ${result.applicationId}

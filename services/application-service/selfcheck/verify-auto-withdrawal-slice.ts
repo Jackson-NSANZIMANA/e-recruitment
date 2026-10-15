@@ -100,7 +100,7 @@ function mintOfficer(): string {
     sub: RDF_OFFICER_ID,
     kind: 'officer',
     agency: 'RDF',
-    roles: [],
+    roles: ['screening_officer', 'field_supervisor', 'medical_officer', 'adjudicator', 'decision_authority', 'reviewer'],
     issuedAt: '2026-01-01T00:00:00.000Z',
     expiresAt: '2999-01-01T00:00:00.000Z',
   };

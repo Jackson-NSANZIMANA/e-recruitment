@@ -56,6 +56,8 @@ import {
 } from './adapters/http/list-applications.controller.js';
 import { officerTransitionRoutes } from './adapters/http/officer-transitions.controller.js';
 import { withdrawOwnRoute } from './adapters/http/self-withdrawal.controller.js';
+import { documentChecklistRoutes } from './adapters/http/document-checklist.controller.js';
+import { examInvitationRoute } from './adapters/http/exam-invitation.controller.js';
 import { walkInRoutes } from './adapters/http/walk-in.controller.js';
 import { startVettingResultConsumer } from './adapters/events/vetting-result.consumer.js';
 import { startSlotAssignedConsumer } from './adapters/events/slot-assigned.consumer.js';
@@ -122,6 +124,30 @@ async function main(): Promise<void> {
   outboxRelay.start();
   console.log(JSON.stringify({ msg: 'outbox_relay_started', producer: OUTBOX_PRODUCER }));
 
+  // Scheduling deferrals are not terminal: re-offer stalled clearances on a
+  // bounded cadence (ReannounceStalledClearancesService). A failed tick is
+  // logged and retried on the next one; it never takes the service down.
+  let slotRetryTimer: NodeJS.Timeout | null = null;
+  if (config.slotRetry.intervalMs > 0) {
+    let running = false;
+    slotRetryTimer = setInterval(() => {
+      if (running) return;
+      running = true;
+      service.slotRetry
+        .sweep()
+        .then((count) => {
+          if (count > 0) console.log(JSON.stringify({ msg: 'slot_retry_reannounced', count }));
+        })
+        .catch((error: unknown) => {
+          console.error(JSON.stringify({ msg: 'slot_retry_failed', error: error instanceof Error ? error.message : 'unknown' }));
+        })
+        .finally(() => {
+          running = false;
+        });
+    }, config.slotRetry.intervalMs);
+    slotRetryTimer.unref();
+  }
+
   const server = await startHttpServer({
     serviceName: config.runtime.serviceName,
     port: config.runtime.port,
@@ -138,6 +164,8 @@ async function main(): Promise<void> {
       statusHistoryRoute(service.list, verify), // GET /v1/applications/status-history?applicationId=
       byApplicantRoute(service.list, verify), // system-token: applicant portal's cross-agency self read (ADR-018)
       withdrawOwnRoute(service.selfWithdrawal, verify), // system-token: the citizen's own voluntary withdrawal (ADR-020)
+      ...documentChecklistRoutes(service.documentChecklist, verify), // ADR-032 advisory checklist + venue verification
+      examInvitationRoute(service.examInvitation, verify), // ADR-033 system-token: the citizen's downloadable exam QR
       // officer-token writes: medical-review / final-decision / accept / adjudicate
       ...officerTransitionRoutes(service.officerTransitions, verify),
       // officer-token writes: exam-day walk-in register + on-site vet (RDF, ADR-012)
@@ -154,6 +182,7 @@ async function main(): Promise<void> {
     },
     onShutdown: async (): Promise<void> => {
       console.log(JSON.stringify({ msg: 'service_stopping', service: config.runtime.serviceName }));
+      if (slotRetryTimer !== null) clearInterval(slotRetryTimer);
       await outboxRelay.stop();
       await bus.disconnect();
       await sql.end({ timeout: 5 });

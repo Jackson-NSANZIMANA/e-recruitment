@@ -18,10 +18,23 @@ export {
   type CampaignPermission,
 } from './campaign-permissions.js';
 
+export {
+  ALL_PERMISSIONS,
+  KNOWN_ROLES,
+  OPERATION_PERMISSION_LIST,
+  permissionsForRoles,
+  principalHasPermission,
+  rolesHavePermission,
+  type KnownRole,
+  type OperationPermission,
+  type Permission,
+} from './permissions.js';
+
 export { signAuthToken, verifyAuthToken, type VerifyAuthTokenOptions } from './token.js';
 
 export {
   makeAuthVerifier,
+  requireOfficerPermission,
   withAuth,
   type AuthedHandler,
   type AuthVerifier,

@@ -25,6 +25,7 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { sql } from '@usrp/shared-database';
+import type { SeparationOfDutiesConfig } from '../config.js';
 import type {
   AcademicEligibilityStatus,
   AgeEligibilityStatus,
@@ -54,6 +55,16 @@ const ADJUDICABLE: ReadonlySet<ApplicationStatus> = new Set<ApplicationStatus>([
 ]);
 
 export class PgOfficerTransitionRepository implements OfficerTransitionRepository {
+  readonly #sod: SeparationOfDutiesConfig;
+
+  constructor(separationOfDuties?: SeparationOfDutiesConfig) {
+    // Default = the roadmap's stated rule only; see config.ts.
+    this.#sod = separationOfDuties ?? {
+      finalDecisionExcludesMedicalReviewer: true,
+      acceptExcludesFinalDecider: false,
+    };
+  }
+
   async medicalReview(input: MedicalReviewInput): Promise<OfficerTransitionOutcome> {
     const { actor, applicationId } = input;
     // THE LANE-MERGE POINT (ADR-012): medical review accepts the digital
@@ -151,6 +162,26 @@ export class PgOfficerTransitionRepository implements OfficerTransitionRepositor
         const outcome = decide(rows[0]?.status, requiredFrom, target);
         if (outcome.kind !== 'APPLIED') return outcome;
 
+        // Four-eyes: the officer who moved this application INTO medical
+        // review (BOARD or CERTIFICATE — the history row is the one record
+        // both modes share) may not also finalise it. Read under the same
+        // row lock as the transition, so it cannot be raced.
+        if (this.#sod.finalDecisionExcludesMedicalReviewer) {
+          const reviewer = await tx<{ performed_by: string }[]>`
+            SELECT performed_by::text AS performed_by
+            FROM ${schema}.application_status_history
+            WHERE application_id = ${applicationId} AND to_status = 'MEDICAL_REVIEW'
+            ORDER BY performed_at DESC
+            LIMIT 1
+          `;
+          if (reviewer[0]?.performed_by === actor.officerId) {
+            return {
+              kind: 'SEPARATION_OF_DUTIES',
+              rule: 'FINAL_DECISION_EXCLUDES_MEDICAL_REVIEWER',
+            };
+          }
+        }
+
         await tx`
           UPDATE ${schema}.applications SET
             final_decision_by_id = ${actor.officerId},
@@ -195,15 +226,29 @@ export class PgOfficerTransitionRepository implements OfficerTransitionRepositor
             applicant_id: string;
             campaign_id: string;
             category: ApplicationCategory;
+            final_decision_by_id: string | null;
           }[]
         >`
-          SELECT status, applicant_id, campaign_id, category FROM ${schema}.applications
+          SELECT status, applicant_id, campaign_id, category,
+                 final_decision_by_id::text AS final_decision_by_id
+          FROM ${schema}.applications
           WHERE id = ${applicationId} FOR UPDATE
         `;
         const current = rows[0];
         const outcome = decide(current?.status, requiredFrom, target);
         if (outcome.kind !== 'APPLIED') return outcome;
         if (current === undefined) return { kind: 'NOT_FOUND' }; // unreachable: decide() maps a missing row to NOT_FOUND
+
+        // Four-eyes (policy-gated): the signer of the final decision may not
+        // also enlist the applicant. Checked BEFORE the cross-agency lock so a
+        // refusal never touches the shared identity row.
+        if (
+          this.#sod.acceptExcludesFinalDecider &&
+          current.final_decision_by_id !== null &&
+          current.final_decision_by_id === actor.officerId
+        ) {
+          return { kind: 'SEPARATION_OF_DUTIES', rule: 'ACCEPT_EXCLUDES_FINAL_DECIDER' };
+        }
 
         // ── Cross-agency accept-lock (ADR-014) ──────────────────────
         // ONE citizen, ONE acceptance, platform-wide. The shared identity

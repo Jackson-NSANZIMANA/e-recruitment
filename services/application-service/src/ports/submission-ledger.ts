@@ -57,6 +57,10 @@ export interface RecordSubmissionInput {
   readonly hecRegistrationNumber: string | null;
   /** Correlation id of the causal chain — recorded on the history row. */
   readonly correlationId: string;
+  /** Policy version bound to this application (BUILD-002); null when the campaign has none. */
+  readonly policyVersionId?: string | null;
+  /** Evaluation date (YYYY-MM-DD, Africa/Kigali) bound to this application. */
+  readonly evaluationDate?: string | null;
 }
 
 /** The identifiers a citizen is given back, however the request resolved. */

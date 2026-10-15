@@ -15,7 +15,7 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { HttpError, type HttpResult, type Route } from '@usrp/shared-http';
-import { withAuth, type AuthVerifier } from '@usrp/shared-auth';
+import { requireOfficerPermission, withAuth, type AuthVerifier } from '@usrp/shared-auth';
 import { ALL_CATEGORIES, type ApplicationCategory } from '@usrp/shared-types';
 import { ApplicationPersistenceError, ApplicationReadError } from '../../domain/application.errors.js';
 import type {
@@ -48,6 +48,7 @@ export function walkInRoutes(service: WalkInService, verify: AuthVerifier): Rout
       method: 'POST',
       path: WALK_IN_REGISTER_PATH,
       handler: withAuth(verify, { kind: 'officer' }, async (ctx, principal): Promise<HttpResult> => {
+        requireOfficerPermission(principal, 'walkin.register');
         const body = await ctx.json<RegisterBody>();
         const applicantId = requireUuid(body.applicantId, 'applicantId');
         const category = body.category;
@@ -77,6 +78,7 @@ export function walkInRoutes(service: WalkInService, verify: AuthVerifier): Rout
       method: 'POST',
       path: WALK_IN_VET_PATH,
       handler: withAuth(verify, { kind: 'officer' }, async (ctx, principal): Promise<HttpResult> => {
+        requireOfficerPermission(principal, 'walkin.vet');
         const body = await ctx.json<VetBody>();
         const applicationId = requireUuid(body.applicationId, 'applicationId');
 

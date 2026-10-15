@@ -38,7 +38,7 @@ export async function startApplicantSubmittedConsumer(
       // an applicationId-bearing AGE_ELIGIBILITY_COMPLETED the projection can land.
       applicationId: event.applicationId,
       // Campaign submission cutoff / event occurrence date ensures deterministic evaluation (F1 fix)
-      referenceDate: (event as { referenceDate?: string }).referenceDate ?? event.occurredAt,
+      referenceDate: event.referenceDate ?? event.occurredAt,
       // Preserve the trace: same correlationId, caused by THIS submitted event.
       context: deriveContext(event),
     });

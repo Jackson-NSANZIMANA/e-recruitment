@@ -16,7 +16,7 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { HttpError, type HttpResult, type Route } from '@usrp/shared-http';
-import { withAuth, type AuthVerifier } from '@usrp/shared-auth';
+import { requireOfficerPermission, withAuth, type AuthVerifier } from '@usrp/shared-auth';
 import { IdentityPersistenceError } from '../../domain/identity.errors.js';
 import type { ApplicantAuthService } from '../../application/applicant-auth.service.js';
 import type { ErasureRequestService } from '../../application/erasure-request.service.js';
@@ -87,7 +87,8 @@ export function erasureRequestRoutes(
     {
       method: 'GET',
       path: ERASURE_REQUESTS_QUEUE_PATH,
-      handler: withAuth(verify, { kind: 'officer' }, async (): Promise<HttpResult> => {
+      handler: withAuth(verify, { kind: 'officer' }, async (_ctx, principal): Promise<HttpResult> => {
+        requireOfficerPermission(principal, 'erasure.queue.read');
         let queue;
         try {
           queue = await service.pendingQueue();
@@ -110,6 +111,7 @@ export function erasureRequestRoutes(
       method: 'POST',
       path: ERASURE_REQUEST_DECLINE_PATH,
       handler: withAuth(verify, { kind: 'officer' }, async (ctx, principal): Promise<HttpResult> => {
+        requireOfficerPermission(principal, 'erasure.decide');
         if (principal.kind !== 'officer') {
           // withAuth already enforced this; narrow for the type system.
           throw new HttpError(403, 'FORBIDDEN', 'Declining requires an officer principal.');

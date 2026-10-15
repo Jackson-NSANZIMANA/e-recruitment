@@ -15,6 +15,7 @@ import {
   loadEnv,
   loadRuntimeConfig,
   loadSecurityConfig,
+  optional,
   string,
   url,
   withDefault,
@@ -41,6 +42,11 @@ export interface IdentityServiceConfig {
 export const OTP_TTL_SECONDS = 5 * 60;
 /** Failed guesses before a challenge locks (a fresh request is the reset). */
 export const OTP_MAX_ATTEMPTS = 5;
+
+/** DOB-factor lockout (ADR-029): this many mismatches inside the window lock the NID. */
+export const ONBOARDING_MAX_FAILURES = 5;
+export const ONBOARDING_FAILURE_WINDOW_SECONDS = 60 * 60;
+export const ONBOARDING_LOCK_SECONDS = 60 * 60;
 /** Applicant session lifetime: 30 minutes sliding — citizens check status
  * briefly; a shorter window than the officer hour bounds a stolen opaque
  * token, and the DB row makes revocation immediate anyway. */
@@ -84,6 +90,35 @@ export function loadApplicantPortalConfig(source: EnvSource = process.env): Appl
     applicationBaseUrl: env.APPLICATION_SERVICE_BASE_URL,
     clientId: env.IDENTITY_CLIENT_ID,
     clientSecret: env.IDENTITY_CLIENT_SECRET,
+  };
+}
+
+/**
+ * Where citizen document uploads are forwarded (BUILD-002). OPTIONAL: without
+ * it the upload route answers 503 rather than the service refusing to boot.
+ */
+export interface DocumentUploadConfig {
+  readonly forensicsBaseUrl: string | null;
+  readonly maxFileSizeBytes: number;
+  readonly allowedMediaTypes: readonly string[];
+}
+
+export function loadDocumentUploadConfig(source: EnvSource = process.env): DocumentUploadConfig {
+  const env = loadEnv(
+    {
+      DOCUMENT_FORENSICS_BASE_URL: optional(url({ protocols: ['http', 'https'] })),
+      FORENSICS_MAX_FILE_SIZE_MB: withDefault(integer({ min: 1, max: 50 }), 10),
+      FORENSICS_ALLOWED_MIME_TYPES: withDefault(
+        string({ minLength: 3 }),
+        'image/jpeg,image/png,application/pdf',
+      ),
+    },
+    source,
+  );
+  return {
+    forensicsBaseUrl: env.DOCUMENT_FORENSICS_BASE_URL ?? null,
+    maxFileSizeBytes: env.FORENSICS_MAX_FILE_SIZE_MB * 1024 * 1024,
+    allowedMediaTypes: env.FORENSICS_ALLOWED_MIME_TYPES.split(',').map((t) => t.trim()).filter((t) => t.length > 0),
   };
 }
 

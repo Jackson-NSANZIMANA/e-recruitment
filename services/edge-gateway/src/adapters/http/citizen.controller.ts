@@ -23,7 +23,13 @@
 // key is what makes the CITIZEN'S retry safe.
 // ══════════════════════════════════════════════════════════════════
 
-import { HttpError, type RouteHandler } from '@usrp/shared-http';
+import {
+  HttpError,
+  buildMultipartFormData,
+  parseMultipartFormData,
+  rawContentType,
+  type RouteHandler,
+} from '@usrp/shared-http';
 import { ALL_CATEGORIES } from '@usrp/shared-types';
 import { UPSTREAM } from '../../domain/upstream-operations.js';
 import { field, projectMyApplications } from './projections.js';
@@ -41,6 +47,104 @@ const IDEMPOTENCY_KEY_HEADER = 'idempotency-key';
 /** Outbound response header, set only when a stored answer was replayed. */
 const IDEMPOTENCY_REPLAYED_HEADER = 'Idempotency-Replayed';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Closed shape of a document type name (the forensics service owns the set). */
+const DOCUMENT_TYPE_RE = /^[A-Z][A-Z0-9_]{2,63}$/;
+const ALLOWED_UPLOAD_TYPES: ReadonlySet<string> = new Set([
+  'image/jpeg',
+  'image/png',
+  'application/pdf',
+]);
+
+/**
+ * The citizen's document upload (BUILD-002).
+ *
+ * The browser's multipart is PARSED here under hard structural limits and a
+ * NEW body is composed from the three validated parts — it is never forwarded.
+ * A browser-supplied `applicantId` part is refused. The 201 carries only
+ * { documentId, documentType }: no lane, score or flag ever crosses.
+ *
+ * Not retryable at this tier: a failed upload is re-attempted by the citizen.
+ */
+export function uploadMyDocumentHandler(deps: EdgeDeps): RouteHandler {
+  return withApplicantSession(deps, 'uploadMyDocument', async (ctx, session) => {
+    let form;
+    try {
+      form = parseMultipartFormData(await ctx.rawBody(), rawContentType(ctx.headers), {
+        maxParts: 6,
+        maxFiles: 1,
+        maxFieldBytes: 1_024,
+      });
+    } catch (err) {
+      if (err instanceof HttpError) throw err;
+      throw new HttpError(400, 'INVALID_REQUEST', 'The upload is not a valid multipart form.');
+    }
+    if (form.fields.has('applicantId') || form.fields.has('channel')) {
+      throw new HttpError(400, 'FORBIDDEN_FIELD', 'That field is not accepted at the browser boundary.');
+    }
+    const applicationId = form.fields.get('applicationId');
+    if (applicationId === undefined || !UUID_RE.test(applicationId)) {
+      throw new HttpError(400, 'INVALID_REQUEST', 'Field "applicationId" must be a UUID.');
+    }
+    const documentType = form.fields.get('documentType');
+    if (documentType === undefined || !DOCUMENT_TYPE_RE.test(documentType)) {
+      throw new HttpError(400, 'INVALID_REQUEST', 'Field "documentType" is required.');
+    }
+    const file = form.files[0];
+    if (file === undefined || file.fieldName !== 'file' || file.bytes.length === 0) {
+      throw new HttpError(400, 'MISSING_FILE', 'A non-empty file part named "file" is required.');
+    }
+    if (!ALLOWED_UPLOAD_TYPES.has(file.contentType)) {
+      throw new HttpError(422, 'UNSUPPORTED_FILE_TYPE', 'That file type is not accepted.');
+    }
+
+    await enforceRateLimit(
+      deps.limiter,
+      sessionBucketKey(session.sessionId, 'uploadMyDocument'),
+      deps.config.rateLimits.applicantSubmitPerMinute,
+    );
+
+    const composed = buildMultipartFormData(
+      { applicationId, documentType },
+      { fieldName: 'file', contentType: file.contentType, bytes: file.bytes },
+    );
+    const upstream = await deps.upstream.call({
+      operation: UPSTREAM.myDocumentUpload,
+      correlationId: ctx.correlationId,
+      credential: session.upstreamCredential,
+      multipart: { contentType: composed.contentType, bytes: composed.body },
+    });
+
+    if (upstream.status === 401) return { status: 401, body: { reason: 'revoked' } };
+    if (upstream.status === 201) {
+      const documentId = field(upstream.body, 'documentId');
+      const echoedType = field(upstream.body, 'documentType');
+      if (typeof documentId !== 'string' || typeof echoedType !== 'string') {
+        return { status: 502, body: { error: 'UPSTREAM_CONTRACT_MISMATCH' } };
+      }
+      return { status: 201, body: { status: 'UPLOADED', documentId, documentType: echoedType } };
+    }
+    if (upstream.status >= 400 && upstream.status < 500) {
+      const code = field(upstream.body, 'error');
+      // A closed set of refusal codes; anything else is a contract problem.
+      const SAFE = new Set([
+        'APPLICATION_NOT_FOUND',
+        'NOT_ACCEPTING_DOCUMENTS',
+        'UNSUPPORTED_DOCUMENT_TYPE',
+        'UNSUPPORTED_FILE_CONTENT',
+        'CONTENT_TYPE_MISMATCH',
+        'DOCUMENT_REJECTED_MALWARE',
+        'FILE_TOO_LARGE',
+        'UNSUPPORTED_FILE_TYPE',
+      ]);
+      if (typeof code === 'string' && SAFE.has(code)) {
+        return { status: upstream.status === 404 ? 404 : upstream.status, body: { error: code } };
+      }
+      return { status: 502, body: { error: 'UPSTREAM_CONTRACT_MISMATCH' } };
+    }
+    return { status: 503, body: { error: 'UPSTREAM_UNAVAILABLE' } };
+  });
+}
 
 export function listMyApplicationsHandler(deps: EdgeDeps): RouteHandler {
   return withApplicantSession(deps, 'listMyApplications', async (ctx, session) => {
@@ -106,6 +210,12 @@ export function submitMyApplicationHandler(deps: EdgeDeps): RouteHandler {
       throw new HttpError(400, 'INVALID_REQUEST', 'Field "category" is not an accepted value.');
     }
     const category = body.category;
+    // The campaign the citizen CHOSE, by its public code. Never an internal
+    // UUID, policy hash or agency — the server resolves those.
+    if (typeof body.campaignCode !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9-]{2,63}$/.test(body.campaignCode.trim())) {
+      throw new HttpError(400, 'INVALID_REQUEST', 'Field "campaignCode" is required.');
+    }
+    const campaignCode = body.campaignCode.trim().toUpperCase();
     const nesaIndexNumber = optionalBounded(body.nesaIndexNumber, 'nesaIndexNumber');
     const hecRegistrationNumber = optionalBounded(body.hecRegistrationNumber, 'hecRegistrationNumber');
 
@@ -140,6 +250,7 @@ export function submitMyApplicationHandler(deps: EdgeDeps): RouteHandler {
       idempotencyKey,
       body: {
         category,
+        campaignCode,
         ...(nesaIndexNumber === undefined ? {} : { nesaIndexNumber }),
         ...(hecRegistrationNumber === undefined ? {} : { hecRegistrationNumber }),
       },

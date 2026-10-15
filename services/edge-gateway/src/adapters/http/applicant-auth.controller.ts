@@ -3,13 +3,16 @@
 //
 // `202` MEANS THE REQUEST WAS ACCEPTED. NOTHING MORE.
 //
-// It does not indicate that the National ID exists, that a citizen record was
-// found, or that an SMS was sent. Any of those would make this an
-// unauthenticated national-identity enumeration oracle. So the 202 body is
-// byte-identical for every input the edge accepts, and the ONLY 400 is a
-// structurally invalid National ID. Rate limiting is a correctness requirement
-// here rather than hardening: without it the silence still leaks by timing and
-// volume — and in production the counters are SHARED across replicas.
+// (OTP request) It does not indicate that an SMS was sent. The 202 body is
+// byte-identical for every well-formed request. The only 400s are a
+// structurally invalid token/phone; an expired token is 401.
+//
+// The identity step (National ID + DOB) DOES tell the caller whether the
+// details matched NIDA — that is the point of confirming citizenship before
+// asking for a phone — so it is DOB-gated, answers one body for every
+// non-match, and is rate limited hard per National ID and per client.
+// Rate limiting is a correctness requirement here rather than hardening, and
+// in production the counters are SHARED across replicas.
 //
 // CHANNEL IS SERVER-SET. Only WEB describes a browser; USSD arrives from a telco
 // gateway and IREMBO_KIOSK from a kiosk integration, so `channel` is not in the
@@ -23,21 +26,109 @@ import { clientBucketKey, enforceRateLimit, targetBucketKey } from './rate-limit
 import { field } from './projections.js';
 import { CREDENTIAL_REJECTED } from './outcomes.js';
 import { withAnonymous, withOptionalSession, type EdgeDeps } from './guards.js';
-import { readJsonBody, requireNationalId } from './validation.js';
+import {
+  readJsonBody,
+  requireDateOfBirth,
+  requireNationalId,
+  requirePhoneNumberShape,
+} from './validation.js';
 
 /** The browser is the WEB channel. It does not get to claim another one. */
 const BROWSER_CHANNEL = 'WEB';
 const OTP_RE = /^\d{6}$/;
+/** Onboarding-begin attempts per National ID per minute (DOB is guessable). */
+const ONBOARDING_BEGIN_PER_NID_PER_MINUTE = 5;
 
-export function requestApplicantOtpHandler(deps: EdgeDeps): RouteHandler {
-  return withAnonymous(deps, 'requestApplicantOtp', async (ctx) => {
+/**
+ * The rate-limit identity of a phone number: its last nine digits (the
+ * Rwandan subscriber number), so `0788 123 456`, `0788123456` and
+ * `+250788123456` share ONE bucket. Keying on the typed string let a caller
+ * flood one handset by varying spaces or the country prefix. This is only a
+ * bucket key — deliverability is identity-service's decision.
+ */
+export function phoneBucketTarget(raw: string): string {
+  const digits = raw.replace(/\D/g, '');
+  return digits.length >= 9 ? digits.slice(-9) : digits;
+}
+
+function requireOnboardingToken(value: unknown): string {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 512) {
+    throw new HttpError(400, 'INVALID_REQUEST', 'An onboarding token is required.');
+  }
+  return value;
+}
+
+/**
+ * Step 1 — National ID + date of birth.
+ *
+ * The DOB is a SECOND FACTOR taken from NIDA's own record: since the OTP only
+ * proves control of a phone the citizen names, this is what stops someone who
+ * merely knows a National ID from enrolling their own phone against it. The
+ * answer is one body for unknown NID, non-citizen and DOB mismatch.
+ *
+ * Because DOB is guessable by enumeration, the per-NID bucket here is far
+ * stricter than the OTP buckets. It is the fast brake; the DURABLE one is
+ * identity-service's per-NID lockout (rls/0028: 5 mismatches lock the ID for
+ * an hour, uniformly, without consulting NIDA).
+ */
+export function beginApplicantOnboardingHandler(deps: EdgeDeps): RouteHandler {
+  return withAnonymous(deps, 'beginApplicantOnboarding', async (ctx) => {
     const body = await readJsonBody(ctx);
     const nationalId = requireNationalId(body.nationalId);
+    const dateOfBirth = requireDateOfBirth(body.dateOfBirth);
 
     const limits = deps.config.rateLimits;
     const key = deps.config.session.handleHmacKey;
-    // The target key is a KEYED HASH of the National ID — never a plaintext index.
-    await enforceRateLimit(deps.limiter, targetBucketKey(key, 'otp', nationalId), limits.otpPerMinute);
+    await enforceRateLimit(
+      deps.limiter,
+      targetBucketKey(key, 'onboardingBegin', nationalId),
+      Math.min(limits.otpPerMinute, ONBOARDING_BEGIN_PER_NID_PER_MINUTE),
+    );
+    await enforceRateLimit(
+      deps.limiter,
+      `${clientBucketKey(ctx, limits.trustedProxyHops)}:onboardingBegin`,
+      limits.otpPerMinute,
+    );
+
+    const upstream = await deps.upstream.call({
+      operation: UPSTREAM.onboardingBegin,
+      correlationId: ctx.correlationId,
+      body: { nationalId, dateOfBirth, channel: BROWSER_CHANNEL },
+    });
+
+    if (upstream.status === 200) {
+      const onboardingToken = field(upstream.body, 'onboardingToken');
+      const expiresAt = field(upstream.body, 'expiresAt');
+      if (typeof onboardingToken !== 'string' || onboardingToken.length === 0) {
+        return { status: 502, body: { error: 'UPSTREAM_CONTRACT_MISMATCH' } };
+      }
+      return {
+        status: 200,
+        body: { onboardingToken, expiresAt: typeof expiresAt === 'string' ? expiresAt : null },
+      };
+    }
+    if (upstream.status === 422) {
+      return { status: 422, body: { error: 'IDENTITY_NOT_CONFIRMED' } };
+    }
+    if (upstream.status === 400) return { status: 400, body: { error: 'INVALID_REQUEST' } };
+    return { status: 503, body: { error: 'UPSTREAM_UNAVAILABLE' } };
+  });
+}
+
+/** Step 2 — the phone number the citizen states; the OTP is sent THERE. */
+export function requestApplicantOtpHandler(deps: EdgeDeps): RouteHandler {
+  return withAnonymous(deps, 'requestApplicantOtp', async (ctx) => {
+    const body = await readJsonBody(ctx);
+    const onboardingToken = requireOnboardingToken(body.onboardingToken);
+    const phoneNumber = requirePhoneNumberShape(body.phoneNumber);
+
+    const limits = deps.config.rateLimits;
+    const key = deps.config.session.handleHmacKey;
+    // Keyed on the TOKEN as well as the number: one confirmed identity cannot
+    // be used to SMS-bomb many numbers, and one number cannot be flooded from
+    // many identities.
+    await enforceRateLimit(deps.limiter, targetBucketKey(key, 'otp', onboardingToken), limits.otpPerMinute);
+    await enforceRateLimit(deps.limiter, targetBucketKey(key, 'otpPhone', phoneBucketTarget(phoneNumber)), limits.otpPerMinute);
     await enforceRateLimit(
       deps.limiter,
       `${clientBucketKey(ctx, limits.trustedProxyHops)}:otp`,
@@ -47,27 +138,32 @@ export function requestApplicantOtpHandler(deps: EdgeDeps): RouteHandler {
     const upstream = await deps.upstream.call({
       operation: UPSTREAM.otpRequest,
       correlationId: ctx.correlationId,
-      body: { nationalId, channel: BROWSER_CHANNEL },
+      body: { onboardingToken, phoneNumber, channel: BROWSER_CHANNEL },
     });
 
-    // ONE body, whatever happened.
     if (upstream.status === 202 || upstream.status === 200) {
       return { status: 202, body: { accepted: true } };
     }
-    if (upstream.status === 400) {
-      // The edge already enforced 16 digits, so this is an upstream shape
-      // disagreement. Reported as a bare 400 with no subject information.
-      return { status: 400, body: { error: 'INVALID_REQUEST' } };
+    if (upstream.status === 401) {
+      return { status: 401, body: { error: 'ONBOARDING_EXPIRED' } };
     }
-    // Anything else is a dependency fault, not information about the subject.
+    if (upstream.status === 400) {
+      const code = field(upstream.body, 'error');
+      return {
+        status: 400,
+        body: { error: code === 'INVALID_PHONE_NUMBER' ? 'INVALID_PHONE_NUMBER' : 'INVALID_REQUEST' },
+      };
+    }
     return { status: 503, body: { error: 'UPSTREAM_UNAVAILABLE' } };
   });
 }
 
+/** Step 3 — the code, bound to that number, opens the session. */
 export function verifyApplicantOtpHandler(deps: EdgeDeps): RouteHandler {
   return withAnonymous(deps, 'verifyApplicantOtp', async (ctx) => {
     const body = await readJsonBody(ctx);
-    const nationalId = requireNationalId(body.nationalId);
+    const onboardingToken = requireOnboardingToken(body.onboardingToken);
+    const phoneNumber = requirePhoneNumberShape(body.phoneNumber);
     const otp = body.otp;
     if (typeof otp !== 'string' || !OTP_RE.test(otp)) {
       throw new HttpError(400, 'INVALID_REQUEST', 'A one-time code is six digits.');
@@ -77,7 +173,7 @@ export function verifyApplicantOtpHandler(deps: EdgeDeps): RouteHandler {
     const key = deps.config.session.handleHmacKey;
     await enforceRateLimit(
       deps.limiter,
-      targetBucketKey(key, 'otpVerify', nationalId),
+      targetBucketKey(key, 'otpVerify', onboardingToken),
       limits.otpPerMinute,
     );
     await enforceRateLimit(
@@ -89,7 +185,7 @@ export function verifyApplicantOtpHandler(deps: EdgeDeps): RouteHandler {
     const upstream = await deps.upstream.call({
       operation: UPSTREAM.otpVerify,
       correlationId: ctx.correlationId,
-      body: { nationalId, otp, channel: BROWSER_CHANNEL },
+      body: { onboardingToken, phoneNumber, otp, channel: BROWSER_CHANNEL },
     });
 
     if (upstream.status !== 200) return CREDENTIAL_REJECTED;

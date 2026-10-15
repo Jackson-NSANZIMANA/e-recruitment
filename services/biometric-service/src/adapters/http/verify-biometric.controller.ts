@@ -10,7 +10,7 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { HttpError, type HttpResult, type Route } from '@usrp/shared-http';
-import { withAuth, type AuthVerifier } from '@usrp/shared-auth';
+import { requireOfficerPermission, withAuth, type AuthVerifier } from '@usrp/shared-auth';
 import type { VerifyBiometricOutcome, VerifyBiometricService } from '../../application/verify-biometric.service.js';
 import { BiometricMatchError } from '../../domain/biometric.errors.js';
 
@@ -26,6 +26,7 @@ export function verifyBiometricRoute(service: VerifyBiometricService, verify: Au
     method: 'POST',
     path: VERIFY_BIOMETRIC_PATH,
     handler: withAuth(verify, { kind: 'officer' }, async (ctx, principal): Promise<HttpResult> => {
+      requireOfficerPermission(principal, 'biometric.verify');
       const body = await ctx.json<VerifyBody>();
 
       const qrSignedToken = body.qrSignedToken;

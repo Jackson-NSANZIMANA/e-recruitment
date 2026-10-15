@@ -123,6 +123,29 @@ export function requireNationalId(value: unknown): string {
   return value.trim();
 }
 
+/** A real calendar date, YYYY-MM-DD. Shape only: NIDA decides whether it matches. */
+export function requireDateOfBirth(value: unknown): string {
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const parsed = new Date(`${value}T00:00:00.000Z`);
+    if (!Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value) {
+      return value;
+    }
+  }
+  throw new HttpError(400, 'INVALID_REQUEST', 'A date of birth must be a valid YYYY-MM-DD date.');
+}
+
+/**
+ * A phone number as TYPED: bounded and character-restricted, nothing more. The
+ * deliverable-number policy (MTN/Airtel prefixes) lives in identity-service,
+ * which owns the SMS decision; the edge only refuses obvious junk.
+ */
+export function requirePhoneNumberShape(value: unknown): string {
+  if (typeof value !== 'string' || !/^\+?[0-9][0-9 -]{7,18}$/.test(value.trim())) {
+    throw new HttpError(400, 'INVALID_REQUEST', 'A phone number is required.');
+  }
+  return value.trim();
+}
+
 export function requireBoundedString(value: unknown, field: string, maxLength: number): string {
   if (typeof value !== 'string' || value.length === 0 || value.length > maxLength) {
     throw new HttpError(

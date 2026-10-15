@@ -27,6 +27,7 @@
 
 import { HttpError, type HttpResult, type RequestContext, type RouteHandler } from '@usrp/shared-http';
 import type { Agency } from '@usrp/shared-types';
+import { rolesHavePermission } from '@usrp/shared-auth';
 import { edgeOperation, type EdgeOperationId } from '../../domain/edge-operations.js';
 import type { EdgeSession, SessionEndedReason } from '../../domain/session.types.js';
 import { UpstreamUnavailableError } from '../../domain/edge.errors.js';
@@ -224,6 +225,18 @@ export function withOfficerSession(
           deps.config.session.handleHmacKey,
           csrfBindingFor(session),
         );
+      }
+      // WHAT, after WHO and WHICH AGENCY (BUILD-004 §D). Refused before any
+      // upstream spend; the owning service enforces the same rule again.
+      if (operation.permission !== undefined && !rolesHavePermission(session.roles, operation.permission)) {
+        deps.audit.log({
+          action: 'EDGE_PERMISSION_DENIED',
+          operationId,
+          correlationId: ctx.correlationId,
+          sessionId: session.sessionId,
+          sessionKind: 'officer',
+        });
+        return { status: 403, body: { error: 'PERMISSION_DENIED' } };
       }
       return handler(ctx, session, agency);
     });

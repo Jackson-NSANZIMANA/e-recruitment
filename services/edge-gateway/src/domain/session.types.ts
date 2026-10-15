@@ -8,6 +8,7 @@
 // Aligned with existing guards.ts expectations for backward compatibility.
 // ══════════════════════════════════════════════════════════════════
 
+import { permissionsForRoles } from '@usrp/shared-auth';
 import type { Agency } from '@usrp/shared-types';
 
 /** The two kinds of authenticated sessions the edge supports. */
@@ -49,6 +50,12 @@ export interface OfficerSessionView {
   readonly kind: 'officer';
   readonly agency: Agency;
   readonly roles: readonly string[];
+  /**
+   * What the roles confer, for the UI to hide controls it cannot use. A
+   * convenience only — never an authorization input: the edge and the owning
+   * service re-check on every call.
+   */
+  readonly permissions: readonly string[];
   readonly idleExpiresAt: string;
   readonly absoluteExpiresAt: string;
 }
@@ -78,6 +85,7 @@ export function toSessionView(session: EdgeSession): SessionView {
       kind: 'officer',
       agency: session.agency,
       roles: session.roles,
+      permissions: permissionsForRoles(session.roles),
       idleExpiresAt: session.idleExpiresAt.toISOString(),
       absoluteExpiresAt: session.absoluteExpiresAt.toISOString(),
     };

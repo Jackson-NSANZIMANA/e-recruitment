@@ -265,6 +265,7 @@ run_ts "edge-gateway: shared rate-limit store (rls/0024 — shared, lossless, fa
 # Deterministic crypto proofs first — no infra, fastest signal.
 run_ts "shared-security: signed slot invitation"  packages/shared-security/selfcheck/verify-slot-invitation.ts
 run_ts "shared-security: password KDF (scrypt)"   packages/shared-security/selfcheck/verify-password-kdf.ts
+run_ts "shared-auth: permission model (fail-closed, no god role, separation by construction)" packages/shared-auth/selfcheck/verify-permissions.ts
 run_ts "shared-auth: signed bearer token + enforcement" packages/shared-auth/selfcheck/verify-auth-token.ts
 run_ts "shared-events: Kafka round-trip"          packages/shared-events/selfcheck/verify-kafka-roundtrip.ts
 # ADR-025: a poison message costs one retry budget, never a partition. Right
@@ -280,6 +281,11 @@ run_ts "application-service: front-door submit"   services/application-service/s
 # DUPLICATED submission does not quietly become a second application. Its
 # section 0 is a zero-infrastructure completeness manifest — the guard against
 # this slice ever shipping as its SQL migration alone again.
+run_ts "identity-service: citizen document door LIVE (iam -> forensics -> ClamAV -> MinIO -> PostgreSQL)" services/identity-service/selfcheck/verify-applicant-document-door.ts
+run_ts "application-service: document checklist + venue verification (advisory, attributed, write-once)" services/application-service/selfcheck/verify-document-checklist.ts
+run_ts "application-service: citizen exam QR (persisted, owner-scoped, verifies offline, write-once)" services/application-service/selfcheck/verify-exam-invitation.ts
+run_ts "application-service: stalled clearances re-offered to scheduling (bounded, outbox-staged)" services/application-service/selfcheck/verify-slot-retry.ts
+run_ts "application-service: campaign-bound submission (chosen code, policy + evaluation-date binding, write-once)" services/application-service/selfcheck/verify-campaign-bound-submission.ts
 run_ts "application-service: submission integrity (idempotent retry, key reuse, live-intent duplicates, walk-in)" services/application-service/selfcheck/verify-submission-integrity.ts
 run_ts "application-service: officer auth + RLS"  services/application-service/selfcheck/verify-auth-slice.ts
 # This proof existed since 2026-08-22 but was never registered here, so it had

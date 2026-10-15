@@ -30,13 +30,15 @@ import {
   createApplicantAuthService,
   createErasureRequestService,
 } from './index.js';
-import { loadApplicantPortalConfig, loadIdentityConfig } from './config.js';
+import { loadApplicantPortalConfig, loadDocumentUploadConfig, loadIdentityConfig } from './config.js';
 import { verifyIdentityRoute } from './adapters/http/verify-identity.controller.js';
 import { erasureRoute } from './adapters/http/erasure.controller.js';
 import { applicantAuthRoutes } from './adapters/http/applicant-auth.controller.js';
 import { erasureRequestRoutes } from './adapters/http/erasure-request.controller.js';
 import { LogSmsChannel } from '@usrp/shared-sms';
 import { HttpApplicationsGateway } from './adapters/applications.http-gateway.js';
+import { HttpDocumentUploadGateway } from './adapters/document-upload.http-gateway.js';
+import { applicantDocumentRoutes } from './adapters/http/applicant-documents.controller.js';
 import { startBiometricResultConsumer } from './adapters/events/biometric-result.consumer.js';
 
 function createEventBus(serviceName: string, transport: EventTransport): EventBus {
@@ -104,6 +106,17 @@ async function main(): Promise<void> {
     clientSecret: portal.clientSecret,
   });
 
+  const uploadConfig = loadDocumentUploadConfig();
+  const documentGateway =
+    uploadConfig.forensicsBaseUrl === null
+      ? null
+      : new HttpDocumentUploadGateway({
+          iamBaseUrl: portal.iamBaseUrl,
+          forensicsBaseUrl: uploadConfig.forensicsBaseUrl,
+          clientId: portal.clientId,
+          clientSecret: portal.clientSecret,
+        });
+
   const server = await startHttpServer({
     serviceName: config.runtime.serviceName,
     port: config.runtime.port,
@@ -111,6 +124,8 @@ async function main(): Promise<void> {
       verifyIdentityRoute(service, verify),
       erasureRoute(createEraseIdentityService(config, bus, smsChannel), verify),
       ...applicantAuthRoutes(applicantAuth, applicationsGateway),
+      // BUILD-002: the citizen's document door (session-authenticated bridge).
+      ...applicantDocumentRoutes(applicantAuth, documentGateway, uploadConfig),
       // ADR-020: citizen erasure-request intake + officer/DPO queue routes
       ...erasureRequestRoutes(createErasureRequestService(config, bus, smsChannel), applicantAuth, verify),
     ],

@@ -9,7 +9,7 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { HttpError, type HttpResult, type Route } from '@usrp/shared-http';
-import { withAuth, type AuthVerifier } from '@usrp/shared-auth';
+import { requireOfficerPermission, withAuth, type AuthVerifier } from '@usrp/shared-auth';
 import { IdentityPersistenceError } from '../../domain/identity.errors.js';
 import type { EraseIdentityService } from '../../application/erase-identity.service.js';
 import type { EraseIdentityOutcome } from '../../ports/erasure-repository.js';
@@ -27,6 +27,7 @@ export function erasureRoute(service: EraseIdentityService, verify: AuthVerifier
     method: 'POST',
     path: ERASURE_PATH,
     handler: withAuth(verify, { kind: ['officer'] }, async (ctx, principal): Promise<HttpResult> => {
+      requireOfficerPermission(principal, 'erasure.decide');
       const body = await ctx.json<ErasureRequestBody>();
       const applicantId = body.applicantId;
       if (typeof applicantId !== 'string' || !UUID_RE.test(applicantId)) {

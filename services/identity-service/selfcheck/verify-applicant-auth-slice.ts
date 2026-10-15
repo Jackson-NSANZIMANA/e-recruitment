@@ -2,15 +2,15 @@
 // identity-service — Live applicant-auth self-check (ADR-018)
 //
 // Proves the citizen door end-to-end against live infra, THREE real
-// services booted in-proc: identity-service (OTP + sessions + me-routes),
+// services booted in-proc: identity-service (onboarding + OTP + sessions + me-routes),
 // iam-service (client-credentials token mint, ADR-016 — its first
 // production-shaped consumer), and application-service (the cross-agency
 // by-applicant read).
 //
 // What it asserts:
-//   • OTP request → uniform 202; the code goes to the NIDA-registered
-//     phone (LogSmsChannel captures it in-proc); an unknown NID gets the
-//     SAME 202 and sends nothing (no enumeration);
+//   • onboarding: NID + DOB → token (unknown NID / wrong DOB → one 422);
+//     phone → OTP to the number the citizen STATED (LogSmsChannel captures
+//     it in-proc); DOB mismatches lock the NID durably (ADR-029);
 //   • wrong code ×5 locks the challenge — the RIGHT code then fails too;
 //     a fresh challenge authenticates → opaque session (D5), ~30 min;
 //   • me/applications with the session → 200, the citizen's OWN
@@ -54,7 +54,7 @@ process.env['AUTH_JWT_PUBLIC_KEY_B64'] = Buffer.from(
 ).toString('base64');
 
 const { createIamService, loadIamConfig, serviceTokenRoutes } = await import('@usrp/iam-service');
-const { createApplicationService, loadApplicationConfig, byApplicantRoute } = await import(
+const { createApplicationService, loadApplicationConfig, byApplicantRoute, documentChecklistRoutes, examInvitationRoute } = await import(
   '@usrp/application-service'
 );
 const {
@@ -76,9 +76,11 @@ const ADMIN_URL =
 const admin = postgres(ADMIN_URL, { onnotice: () => {} });
 
 // ── Deterministic fixtures (ad180000 — unique to this proof) ──────
-const CITIZEN_NID = '1200380123456789'; // UWIMANA Jean Pierre — in the NIDA mock, WITH a registered phone
+const CITIZEN_NID = '1200380123456789'; // UWIMANA Jean Pierre — in the NIDA mock
 const UNKNOWN_NID = '1200380123400000'; // valid shape, absent from the NIDA seed AND from USRP
-const MOCK_PHONE_FRAGMENT = '380-X789'; // distinctive tail of the mock's registered phone
+const CITIZEN_DOB = '2003-03-15'; // the NIDA mock's date of birth for CITIZEN_NID
+const STATED_PHONE = '0788123456'; // what the citizen TYPES — NIDA holds no phone
+const MOCK_PHONE_FRAGMENT = '788123456'; // distinctive tail of the stated number
 
 const CTRL_APPLICANT = 'ad180000-0000-4000-8000-000000000002'; // another citizen — must stay invisible
 const CTRL_NID_HASH = 'ad18ad18'.repeat(8);
@@ -114,7 +116,7 @@ function mintOfficer(): string {
     sub: OFFICER_ID,
     kind: 'officer',
     agency: 'RDF',
-    roles: [],
+    roles: ['dpo'],
     issuedAt: '2026-01-01T00:00:00.000Z',
     expiresAt: '2999-01-01T00:00:00.000Z',
   };
@@ -149,6 +151,7 @@ async function cleanup(): Promise<void> {
       DELETE FROM public_core.applicant_otp_challenges WHERE applicant_id IN
         (SELECT id FROM public_core.applicant_identities
          WHERE national_id_hash = ANY(${hashes}) OR id = ${CTRL_APPLICANT})`;
+    await tx`DELETE FROM public_core.onboarding_attempts WHERE national_id_hash = ANY(${hashes})`;
     await tx`DELETE FROM public_core.recruitment_campaigns WHERE id IN ${tx([RDF_CAMPAIGN, RNP_CAMPAIGN, RCS_CAMPAIGN])}`;
     await tx`
       DELETE FROM public_core.applicant_identities
@@ -232,7 +235,7 @@ async function main(): Promise<void> {
     serviceName: 'application-applicant-auth-selfcheck',
     port: 0,
     host: '127.0.0.1',
-    routes: [byApplicantRoute(appService.list, appVerify)],
+    routes: [byApplicantRoute(appService.list, appVerify), ...documentChecklistRoutes(appService.documentChecklist, appVerify), examInvitationRoute(appService.examInvitation, appVerify)],
     handleSignals: false,
   });
 
@@ -304,36 +307,52 @@ async function main(): Promise<void> {
     return { status: res.status, text: await res.text() };
   }
 
+  let onboardingToken = '';
+  const otpBody = (otp: string): Record<string, unknown> => ({
+    onboardingToken,
+    phoneNumber: STATED_PHONE,
+    otp,
+    channel: 'WEB',
+  });
   const lastOtp = (): string => {
     const body = sms.sent[sms.sent.length - 1]?.body ?? '';
     return /\b(\d{6})\b/.exec(body)?.[1] ?? '';
   };
 
   try {
-    console.log('\n── 1. OTP request → uniform 202; code to the NIDA phone; no enumeration ──');
-    const req = await post('/v1/applicants/auth/otp/request', { nationalId: CITIZEN_NID, channel: 'WEB' });
-    check('known citizen → 202 CHALLENGED', req.status === 202, `got ${req.status} ${req.text}`);
-    check('one SMS captured, to the NIDA-registered phone', sms.sent.length === 1 && (sms.sent[0]?.destination.includes(MOCK_PHONE_FRAGMENT) ?? false));
+    console.log('\n── 1. NID + DOB → token; phone → OTP to the STATED number ──');
+    const wrongDob = await post('/v1/applicants/auth/onboarding/begin', { nationalId: CITIZEN_NID, dateOfBirth: '1999-01-01', channel: 'WEB' });
+    const unknownBegin = await post('/v1/applicants/auth/onboarding/begin', { nationalId: UNKNOWN_NID, dateOfBirth: CITIZEN_DOB, channel: 'WEB' });
+    check('wrong DOB → 422', wrongDob.status === 422, `got ${wrongDob.status} ${wrongDob.text}`);
+    check('unknown NID → byte-identical 422 (no enumeration)', unknownBegin.status === 422 && unknownBegin.text === wrongDob.text, unknownBegin.text);
+    const begin = await post('/v1/applicants/auth/onboarding/begin', { nationalId: CITIZEN_NID, dateOfBirth: CITIZEN_DOB, channel: 'WEB' });
+    check('matching NID + DOB → 200 with an onboarding token', begin.status === 200 && typeof begin.json['onboardingToken'] === 'string', `got ${begin.status} ${begin.text}`);
+    onboardingToken = String(begin.json['onboardingToken'] ?? '');
+    check('the token response carries no NID, DOB or phone', !begin.text.includes(CITIZEN_NID) && !begin.text.includes(CITIZEN_DOB));
+    const badToken = await post('/v1/applicants/auth/otp/request', { onboardingToken: 'x.y', phoneNumber: STATED_PHONE, channel: 'WEB' });
+    check('a forged token → 401 and nothing sent', badToken.status === 401 && sms.sent.length === 0, `got ${badToken.status}`);
+    const badPhone = await post('/v1/applicants/auth/otp/request', { onboardingToken, phoneNumber: '0711111111', channel: 'WEB' });
+    check('an undeliverable number → 400 and nothing sent', badPhone.status === 400 && sms.sent.length === 0, `got ${badPhone.status}`);
+    const req = await post('/v1/applicants/auth/otp/request', { onboardingToken, phoneNumber: STATED_PHONE, channel: 'WEB' });
+    check('OTP request → 202 CHALLENGED', req.status === 202, `got ${req.status} ${req.text}`);
+    check('one SMS captured, to the number the citizen STATED', sms.sent.length === 1 && sms.sent[0]?.destination === '+250788123456', sms.sent[0]?.destination);
     check('the SMS carries a 6-digit code', lastOtp().length === 6);
     check('202 response carries NO phone and NO code', !req.text.includes(MOCK_PHONE_FRAGMENT) && !req.text.includes(lastOtp()));
-    const unknown = await post('/v1/applicants/auth/otp/request', { nationalId: UNKNOWN_NID, channel: 'WEB' });
-    check('unknown NID → byte-identical 202', unknown.status === 202 && unknown.text === req.text, unknown.text);
-    check('…and NOTHING was sent for it', sms.sent.length === 1);
 
     console.log(`\n── 2. Lockout: ${OTP_MAX_ATTEMPTS} wrong guesses kill the challenge ──`);
     const goodCode = lastOtp();
     const wrong = goodCode === '000000' ? '000001' : '000000';
     let last = { status: 0, text: '' };
     for (let i = 0; i < OTP_MAX_ATTEMPTS; i += 1) {
-      last = await post('/v1/applicants/auth/otp/verify', { nationalId: CITIZEN_NID, otp: wrong, channel: 'WEB' });
+      last = await post('/v1/applicants/auth/otp/verify', otpBody(wrong));
     }
     check(`wrong code ×${OTP_MAX_ATTEMPTS} → every one 401`, last.status === 401, `got ${last.status}`);
-    const lockedGood = await post('/v1/applicants/auth/otp/verify', { nationalId: CITIZEN_NID, otp: goodCode, channel: 'WEB' });
+    const lockedGood = await post('/v1/applicants/auth/otp/verify', otpBody(goodCode));
     check('the RIGHT code on a locked challenge → 401', lockedGood.status === 401, `got ${lockedGood.status}`);
 
     console.log('\n── 3. Fresh challenge → authenticated: opaque DB session (D5) ──');
-    await post('/v1/applicants/auth/otp/request', { nationalId: CITIZEN_NID, channel: 'WEB' });
-    const auth = await post('/v1/applicants/auth/otp/verify', { nationalId: CITIZEN_NID, otp: lastOtp(), channel: 'WEB' });
+    await post('/v1/applicants/auth/otp/request', { onboardingToken, phoneNumber: STATED_PHONE, channel: 'WEB' });
+    const auth = await post('/v1/applicants/auth/otp/verify', otpBody(lastOtp()));
     check('correct fresh code → 200 with a session', auth.status === 200 && typeof auth.json['sessionToken'] === 'string', `got ${auth.status} ${auth.text}`);
     const session = String(auth.json['sessionToken'] ?? '');
     const ttlMs = Date.parse(String(auth.json['expiresAt'])) - Date.now();
@@ -342,7 +361,7 @@ async function main(): Promise<void> {
       ttlMs > (APPLICANT_SESSION_TTL_SECONDS - 120) * 1000 && ttlMs <= APPLICANT_SESSION_TTL_SECONDS * 1000,
       `${Math.round(ttlMs / 1000)}s`,
     );
-    const replay = await post('/v1/applicants/auth/otp/verify', { nationalId: CITIZEN_NID, otp: lastOtp(), channel: 'WEB' });
+    const replay = await post('/v1/applicants/auth/otp/verify', otpBody(lastOtp()));
     check('replaying the consumed code → 401', replay.status === 401, `got ${replay.status}`);
     const stamped = await admin<{ phone_number_hash: string | null; phone_verified_at: Date | null }[]>`
       SELECT phone_number_hash, phone_verified_at FROM public_core.applicant_identities WHERE id = ${applicantId}`;
@@ -355,7 +374,7 @@ async function main(): Promise<void> {
              pgp_sym_decrypt(encrypted_phone_number::bytea, ${idConfig.security.encryptionKey}) AS phone
       FROM public_core.applicant_identities WHERE id = ${applicantId}`;
     check(
-      'encrypted_phone_number captured (ADR-021); decrypts to the NIDA phone',
+      'encrypted_phone_number captured (ADR-021); decrypts to the STATED phone',
       (contact[0]?.phone ?? '').includes(MOCK_PHONE_FRAGMENT),
     );
     check(
@@ -370,6 +389,35 @@ async function main(): Promise<void> {
     check('sees the RNP application (cross-agency)', mine.text.includes(RNP_CODE));
     check("does NOT see another citizen's application", !mine.text.includes(CTRL_CODE));
     check('response carries NO NID hash and NO phone', !mine.text.includes(CITIZEN_NID_HASH) && !mine.text.includes(MOCK_PHONE_FRAGMENT));
+
+    console.log('\n── 4b. ADR-032: the citizen reads their OWN advisory document checklist ──');
+    const checklistRes = await fetch(`${idServer.url}/v1/applicants/me/applications/document-checklist?applicationId=${RDF_APP}`, {
+      headers: { authorization: `Bearer ${session}` },
+    });
+    const checklistText = await checklistRes.text();
+    check('own application → 200 checklist', checklistRes.status === 200 && checklistText.includes('"items"'), checklistText);
+    check('…from the announcements table (no policy bound to this legacy fixture)', checklistText.includes('GROUND_TRUTH_TABLE'));
+    check('…NATIONAL_ID is API_VERIFIED (the NIDA-verified identity waives the paper)',
+      /"documentType":"NATIONAL_ID","satisfaction":"API_VERIFIED"/.test(checklistText), checklistText);
+    check('…and carries no NID hash, phone or score', !checklistText.includes(CITIZEN_NID_HASH) && !/score|flag|phone/i.test(checklistText));
+    const strangerRes = await fetch(`${idServer.url}/v1/applicants/me/applications/document-checklist?applicationId=${CTRL_APP}`, {
+      headers: { authorization: `Bearer ${session}` },
+    });
+    check("another citizen's application → 404", strangerRes.status === 404);
+
+    console.log('\n── 4c. ADR-033: the exam-QR bridge (owner-scoped, closed shape) ──');
+    const qrRes = await fetch(`${idServer.url}/v1/applicants/me/applications/exam-invitation?applicationId=${RDF_APP}`, {
+      headers: { authorization: `Bearer ${session}` },
+    });
+    const qrText = await qrRes.text();
+    check('own application → 200 with a state (terminal fixture ⇒ no payload)',
+      qrRes.status === 200 && /"state":"(CLOSED|COMPLETED)"/.test(qrText) && !qrText.includes('qrPayload'), qrText);
+    const qrStranger = await fetch(`${idServer.url}/v1/applicants/me/applications/exam-invitation?applicationId=${CTRL_APP}`, {
+      headers: { authorization: `Bearer ${session}` },
+    });
+    check("another citizen's application → 404", qrStranger.status === 404);
+    const qrNoSession = await fetch(`${idServer.url}/v1/applicants/me/applications/exam-invitation?applicationId=${RDF_APP}`);
+    check('no session → 401', qrNoSession.status === 401);
 
     console.log('\n── 5. The citizen door never widens an officer: by-applicant → 403 ──');
     const officerProbe = await fetch(
@@ -395,8 +443,8 @@ async function main(): Promise<void> {
 
     console.log('\n── 8. Erasure integration (ADR-015): sessions + challenges die with the identity ──');
     // Establish a LIVE session first, then erase (both apps are terminal).
-    await post('/v1/applicants/auth/otp/request', { nationalId: CITIZEN_NID, channel: 'WEB' });
-    const auth2 = await post('/v1/applicants/auth/otp/verify', { nationalId: CITIZEN_NID, otp: lastOtp(), channel: 'WEB' });
+    await post('/v1/applicants/auth/otp/request', { onboardingToken, phoneNumber: STATED_PHONE, channel: 'WEB' });
+    const auth2 = await post('/v1/applicants/auth/otp/verify', otpBody(lastOtp()));
     const session2 = String(auth2.json['sessionToken'] ?? '');
     check('second login works (fresh challenge)', auth2.status === 200);
     const erased = await fetch(`${idServer.url}/v1/identities/erasure`, {
@@ -411,6 +459,21 @@ async function main(): Promise<void> {
         (SELECT count(*) FROM public_core.applicant_otp_challenges WHERE applicant_id = ${applicantId})::text AS c`;
     check('zero sessions + zero challenges survive erasure', remnants[0]?.s === '0' && remnants[0]?.c === '0', JSON.stringify(remnants[0]));
     check('the live session died with the identity → 401', (await me(session2)).status === 401);
+
+    console.log('\n── 9. DOB lockout (ADR-029): durable, per NID, uniform, skips NIDA ──');
+    for (let i = 0; i < 5; i += 1) {
+      const miss = await post('/v1/applicants/auth/onboarding/begin', { nationalId: CITIZEN_NID, dateOfBirth: `1990-01-0${String(i + 1)}`, channel: 'WEB' });
+      if (miss.status !== 422) check(`wrong DOB #${String(i + 1)} → 422`, false, `got ${miss.status}`);
+    }
+    const lockRow = await admin<{ failed_count: number; locked: boolean }[]>`
+      SELECT failed_count, (locked_until IS NOT NULL AND locked_until > now()) AS locked
+      FROM public_core.onboarding_attempts WHERE national_id_hash = ${CITIZEN_NID_HASH}`;
+    check('5 mismatches recorded and the NID is locked', lockRow[0]?.failed_count === 5 && lockRow[0]?.locked === true, JSON.stringify(lockRow[0]));
+    const lockedCorrect = await post('/v1/applicants/auth/onboarding/begin', { nationalId: CITIZEN_NID, dateOfBirth: CITIZEN_DOB, channel: 'WEB' });
+    check('the CORRECT DOB while locked → the same uniform 422', lockedCorrect.status === 422 && lockedCorrect.text === wrongDob.text, `got ${lockedCorrect.status} ${lockedCorrect.text}`);
+    const lockHash = await admin<{ n: string }[]>`
+      SELECT count(*)::text AS n FROM public_core.onboarding_attempts WHERE national_id_hash = ${UNKNOWN_NID}`;
+    check('no lockout row is ever stored under a raw NID', lockHash[0]?.n === '0');
   } finally {
     await cleanup();
     await Promise.all([idServer.stop(), appServer.stop(), iamServer.stop()]);

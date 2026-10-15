@@ -40,7 +40,7 @@ function mintToken(kind: 'system' | 'officer'): string {
     issuedAt: '2026-01-01T00:00:00.000Z', expiresAt: '2999-01-01T00:00:00.000Z',
   };
   const claims: AuthTokenClaims =
-    kind === 'officer' ? { ...base, kind, agency: 'RDF', roles: [] } : { ...base, kind };
+    kind === 'officer' ? { ...base, kind, agency: 'RDF', roles: ['screening_officer', 'field_supervisor', 'medical_officer', 'adjudicator', 'decision_authority', 'reviewer', 'dpo'] } : { ...base, kind };
   return signAuthToken(AUTH_KEYS.privateKeyPem, claims);
 }
 

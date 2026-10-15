@@ -104,16 +104,26 @@ async function cleanup(): Promise<void> {
 }
 
 async function seedOfficers(): Promise<void> {
-  // Seed AS usrp_iam_service — proves the grant + WITH CHECK policy on the
-  // credential store (not via the admin superuser escape hatch).
-  await sql.begin(async (tx) => {
-    await tx`SET LOCAL ROLE ${sql('usrp_iam_service')}`;
-    await tx`
-      INSERT INTO public_core.officer_accounts (officer_id, login_handle, credential, agency, roles, status)
-      VALUES
-        (${OFFICER_ID}, ${HANDLE}, ${hashPassword(PASSWORD)}, 'RDF', ${sql.array(['reviewer'])}, 'active'),
-        (${DISABLED_ID}, ${DISABLED_HANDLE}, ${hashPassword(PASSWORD)}, 'RDF', ${sql.array(['reviewer'])}, 'disabled')`;
-  });
+  // rls/0010: usrp_iam_service is SELECT-only on the credential store; account
+  // writes belong to provisioning. Prove the issuer CANNOT write an account,
+  // then seed through the privileged operator connection (as seed:dev does).
+  let iamWriteRefused = false;
+  try {
+    await sql.begin(async (tx) => {
+      await tx`SET LOCAL ROLE ${sql('usrp_iam_service')}`;
+      await tx`
+        INSERT INTO public_core.officer_accounts (officer_id, login_handle, credential, agency, roles, status)
+        VALUES (${OFFICER_ID}, ${HANDLE}, ${hashPassword(PASSWORD)}, 'RDF', ${sql.array(['reviewer'])}, 'active')`;
+    });
+  } catch (error) {
+    iamWriteRefused = (error as { code?: string }).code === '42501';
+  }
+  check('usrp_iam_service cannot INSERT an officer account (rls/0010 SELECT-only)', iamWriteRefused);
+  await admin`
+    INSERT INTO public_core.officer_accounts (officer_id, login_handle, credential, agency, roles, status)
+    VALUES
+      (${OFFICER_ID}, ${HANDLE}, ${hashPassword(PASSWORD)}, 'RDF', ${admin.array(['reviewer'])}, 'active'),
+      (${DISABLED_ID}, ${DISABLED_HANDLE}, ${hashPassword(PASSWORD)}, 'RDF', ${admin.array(['reviewer'])}, 'disabled')`;
 }
 
 async function seedApplication(): Promise<void> {

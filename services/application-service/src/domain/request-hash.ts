@@ -51,6 +51,12 @@ export interface CanonicalSubmission {
   readonly channel: ApplicationChannel;
   readonly nesaIndexNumber: string | null;
   readonly hecRegistrationNumber: string | null;
+  /**
+   * The public campaign code the citizen chose (BUILD-002). OPTIONAL and
+   * appended to the encoding ONLY when present, so every hash recorded before
+   * campaign-bound submission existed stays valid for a replay.
+   */
+  readonly campaignCode?: string | null;
 }
 
 /**
@@ -77,7 +83,9 @@ function encodeValue(value: string | null): string {
  * between delimiter-bearing values) rather than only the digest.
  */
 export function canonicalRequestString(submission: CanonicalSubmission): string {
-  return FIELD_ORDER.map((field) => `${field}=${encodeValue(submission[field])}`).join('\n');
+  const base = FIELD_ORDER.map((field) => `${field}=${encodeValue(submission[field])}`).join('\n');
+  const code = submission.campaignCode ?? null;
+  return code === null ? base : `${base}\ncampaignCode=${encodeValue(code)}`;
 }
 
 /**

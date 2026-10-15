@@ -19,6 +19,7 @@ import {
   type District,
   type DocumentType,
   type Province,
+  AGENCY_DOCUMENT_TYPES,
 } from '@usrp/shared-types';
 
 const DOCUMENT_TYPES: ReadonlySet<string> = new Set([
@@ -282,6 +283,16 @@ function asPolicy(value: unknown, category: string): CampaignCategoryPolicy {
     `${category}.requiredDocumentTypes`,
     DOCUMENT_TYPES,
   ) as readonly DocumentType[];
+  // A required type the category's agency cannot store could never be
+  // uploaded or verified — refuse it at authoring time, not at the gate.
+  const owner = CATEGORY_TO_AGENCY.get(category);
+  const foreign = owner === undefined ? [] : documents.filter((d) => !AGENCY_DOCUMENT_TYPES[owner].has(d));
+  if (foreign.length > 0) {
+    fail(
+      'INVALID_POLICY',
+      `Category "${category}" requires document type(s) its agency does not accept: ${foreign.join(', ')}.`,
+    );
+  }
   const legalBasis = record(policy.legalBasis, `policyDocument.${category}.legalBasis`);
   exactKeys(legalBasis, ['code', 'reference'], [], `policyDocument.${category}.legalBasis`);
 

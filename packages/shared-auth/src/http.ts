@@ -15,6 +15,7 @@ import { HttpError, type HttpResult, type RequestContext, type RouteHandler } fr
 import { verifyAuthToken } from './token.js';
 import type { PrincipalKind } from './claims.js';
 import type { Principal } from './principal.js';
+import { principalHasPermission, type Permission } from './permissions.js';
 
 /** A route handler that also receives the verified caller. */
 export type AuthedHandler = (
@@ -92,4 +93,20 @@ export function withAuth(
     }
     return handler(ctx, principal);
   };
+}
+
+/**
+ * Require that a verified OFFICER principal holds `permission`; otherwise 403.
+ *
+ * `withAuth({ kind: 'officer' })` has already proven who and which agency.
+ * This answers WHAT. The refusal names neither the role nor the permission:
+ * a caller learns "not permitted", not the shape of the permission table.
+ * A system principal is refused too — no service token acts as a human
+ * decision-maker (callers that legitimately admit system tokens branch on
+ * `principal.kind` before calling this).
+ */
+export function requireOfficerPermission(principal: Principal, permission: Permission): void {
+  if (!principalHasPermission(principal, permission)) {
+    throw new HttpError(403, 'PERMISSION_DENIED', 'Your role does not permit this operation.');
+  }
 }

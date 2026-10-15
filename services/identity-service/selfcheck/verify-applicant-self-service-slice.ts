@@ -110,7 +110,7 @@ function mintOfficer(): string {
     sub: OFFICER_ID,
     kind: 'officer',
     agency: 'RDF',
-    roles: [],
+    roles: ['dpo'],
     issuedAt: '2026-01-01T00:00:00.000Z',
     expiresAt: '2999-01-01T00:00:00.000Z',
   };
@@ -305,11 +305,15 @@ async function main(): Promise<void> {
   };
 
   async function login(): Promise<string> {
+    const begun = await idFetch('POST', '/v1/applicants/auth/onboarding/begin', {
+      body: { nationalId: CITIZEN_NID, dateOfBirth: '1999-11-08', channel: 'WEB' },
+    });
+    const onboardingToken = String(begun.json['onboardingToken'] ?? '');
     await idFetch('POST', '/v1/applicants/auth/otp/request', {
-      body: { nationalId: CITIZEN_NID, channel: 'WEB' },
+      body: { onboardingToken, phoneNumber: '0788123456', channel: 'WEB' },
     });
     const auth = await idFetch('POST', '/v1/applicants/auth/otp/verify', {
-      body: { nationalId: CITIZEN_NID, otp: lastOtp(), channel: 'WEB' },
+      body: { onboardingToken, phoneNumber: '0788123456', otp: lastOtp(), channel: 'WEB' },
     });
     if (auth.status !== 200) throw new Error(`login failed: ${auth.status} ${auth.text}`);
     return String(auth.json['sessionToken'] ?? '');

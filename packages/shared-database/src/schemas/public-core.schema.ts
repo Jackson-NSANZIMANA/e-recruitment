@@ -572,6 +572,16 @@ export const applicantOtpChallenges = publicCore.table(
   (t) => [index('idx_pc_otp_applicant').on(t.applicantId, t.createdAt.desc())],
 );
 
+// ── onboarding_attempts ───────────────────────────────────────────
+// Durable per-National-ID-hash lockout for the DOB factor of citizen
+// onboarding (ADR-029). Mirrors rls/0028 (the readable source of truth).
+export const onboardingAttempts = publicCore.table('onboarding_attempts', {
+  nationalIdHash: varchar('national_id_hash', { length: 64 }).primaryKey(),
+  failedCount: integer('failed_count').notNull().default(0),
+  windowStartedAt: timestamp('window_started_at', { withTimezone: true }).notNull(),
+  lockedUntil: timestamp('locked_until', { withTimezone: true }),
+});
+
 // ── erasure_requests ──────────────────────────────────────────────
 // The DPO intake queue (ADR-020, owner D10). A citizen's erasure demand is
 // QUEUED here rather than executed directly — an OTP session is too weak an

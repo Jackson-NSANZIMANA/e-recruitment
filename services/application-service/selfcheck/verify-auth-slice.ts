@@ -78,7 +78,7 @@ function mint(
   };
   const claims: AuthTokenClaims =
     kind === 'officer'
-      ? { ...base, kind, agency: opts.agency ?? 'RDF', roles: [] }
+      ? { ...base, kind, agency: opts.agency ?? 'RDF', roles: ['screening_officer', 'field_supervisor', 'medical_officer', 'adjudicator', 'decision_authority', 'reviewer'] }
       : { ...base, kind };
   return signAuthToken(opts.key ?? AUTH_KEYS.privateKeyPem, claims);
 }

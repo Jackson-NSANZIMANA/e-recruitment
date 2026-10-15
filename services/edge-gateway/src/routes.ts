@@ -28,6 +28,7 @@ import {
   officerLogoutHandler,
 } from './adapters/http/officer-auth.controller.js';
 import {
+  beginApplicantOnboardingHandler,
   logoutApplicantHandler,
   requestApplicantOtpHandler,
   verifyApplicantOtpHandler,
@@ -58,11 +59,18 @@ import {
   publishCampaignHandler,
 } from './adapters/http/campaigns.controller.js';
 import { verifyIdentityHandler } from './adapters/http/identity.controller.js';
+import { getMyExamInvitationHandler } from './adapters/http/exam-invitation.controller.js';
+import {
+  getDocumentChecklistHandler,
+  getMyDocumentChecklistHandler,
+  verifyDocumentAtVenueHandler,
+} from './adapters/http/document-checklist.controller.js';
 import {
   fileMyErasureRequestHandler,
   getMyErasureRequestHandler,
   listMyApplicationsHandler,
   submitMyApplicationHandler,
+  uploadMyDocumentHandler,
   withdrawMyApplicationHandler,
 } from './adapters/http/citizen.controller.js';
 import {
@@ -85,6 +93,7 @@ export function edgeHandlers(deps: EdgeDeps): Record<EdgeOperationId, RouteHandl
     officerLogin: officerLoginHandler(deps),
     officerLogout: officerLogoutHandler(deps),
 
+    beginApplicantOnboarding: beginApplicantOnboardingHandler(deps),
     requestApplicantOtp: requestApplicantOtpHandler(deps),
     verifyApplicantOtp: verifyApplicantOtpHandler(deps),
     logoutApplicant: logoutApplicantHandler(deps),
@@ -110,6 +119,8 @@ export function edgeHandlers(deps: EdgeDeps): Record<EdgeOperationId, RouteHandl
     acceptApplication: acceptApplicationHandler(deps),
     adjudicateApplication: adjudicateApplicationHandler(deps),
 
+    getDocumentChecklist: getDocumentChecklistHandler(deps),
+    verifyDocumentAtVenue: verifyDocumentAtVenueHandler(deps),
     registerWalkIn: registerWalkInHandler(deps),
     vetWalkIn: vetWalkInHandler(deps),
 
@@ -117,6 +128,9 @@ export function edgeHandlers(deps: EdgeDeps): Record<EdgeOperationId, RouteHandl
 
     listMyApplications: listMyApplicationsHandler(deps),
     submitMyApplication: submitMyApplicationHandler(deps),
+    getMyExamInvitation: getMyExamInvitationHandler(deps),
+    getMyDocumentChecklist: getMyDocumentChecklistHandler(deps),
+    uploadMyDocument: uploadMyDocumentHandler(deps),
     withdrawMyApplication: withdrawMyApplicationHandler(deps),
     getMyErasureRequest: getMyErasureRequestHandler(deps),
     fileMyErasureRequest: fileMyErasureRequestHandler(deps),

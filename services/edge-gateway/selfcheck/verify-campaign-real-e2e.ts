@@ -390,8 +390,12 @@ async function main(): Promise<void> {
     const reviewerSession = await loginAtEdge(reviewerHandle, reviewerPassword);
     const reviewerAttempt = await postCampaign(reviewerSession, draftBody(reviewerCode));
     const reviewerBody = await reviewerAttempt.json() as Record<string, unknown>;
-    check('reviewer session is denied by application campaign permissions',
-      reviewerAttempt.status === 403 && reviewerBody['error'] === 'FORBIDDEN' &&
+    // The edge now refuses first (BUILD-004 §D: the registry declares
+    // campaign.create and the reviewer role does not confer it). The
+    // application service's own check of the same rule is proven in
+    // verify-campaign-control-plane; either refusal is a 403 that creates nothing.
+    check('reviewer session is denied (edge permission mirror) and nothing is created',
+      reviewerAttempt.status === 403 && reviewerBody['error'] === 'PERMISSION_DENIED' &&
       (await proof<{ n: number }[]>`SELECT count(*)::int AS n FROM public_core.recruitment_campaigns WHERE public_code = ${reviewerCode}`)[0]?.n === 0);
 
     const logout = await fetch(`${edgeBaseUrl}/edge/v1/auth/officer/logout`, {

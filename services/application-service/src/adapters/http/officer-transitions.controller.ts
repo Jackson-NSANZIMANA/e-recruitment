@@ -16,7 +16,7 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { HttpError, type HttpResult, type Route } from '@usrp/shared-http';
-import { withAuth, type AuthVerifier } from '@usrp/shared-auth';
+import { requireOfficerPermission, withAuth, type AuthVerifier } from '@usrp/shared-auth';
 import { ApplicationPersistenceError } from '../../domain/application.errors.js';
 import type {
   AcceptCommand,
@@ -59,6 +59,7 @@ export function officerTransitionRoutes(
       method: 'POST',
       path: MEDICAL_REVIEW_PATH,
       handler: withAuth(verify, { kind: 'officer' }, async (ctx, principal): Promise<HttpResult> => {
+        requireOfficerPermission(principal, 'medical.review');
         const body = await ctx.json<TransitionBody>();
         const applicationId = requireApplicationId(body.applicationId);
         // Two agency MODES (ADR-013): BOARD (RDF) sends fitnessStatus;
@@ -96,6 +97,7 @@ export function officerTransitionRoutes(
       method: 'POST',
       path: FINAL_DECISION_PATH,
       handler: withAuth(verify, { kind: 'officer' }, async (ctx, principal): Promise<HttpResult> => {
+        requireOfficerPermission(principal, 'decision.final');
         const body = await ctx.json<TransitionBody>();
         const applicationId = requireApplicationId(body.applicationId);
         const decision = body.decision;
@@ -117,6 +119,7 @@ export function officerTransitionRoutes(
       method: 'POST',
       path: ACCEPT_PATH,
       handler: withAuth(verify, { kind: 'officer' }, async (ctx, principal): Promise<HttpResult> => {
+        requireOfficerPermission(principal, 'application.accept');
         const body = await ctx.json<TransitionBody>();
         const applicationId = requireApplicationId(body.applicationId);
         const command: AcceptCommand = {
@@ -131,6 +134,7 @@ export function officerTransitionRoutes(
       method: 'POST',
       path: ADJUDICATE_PATH,
       handler: withAuth(verify, { kind: 'officer' }, async (ctx, principal): Promise<HttpResult> => {
+        requireOfficerPermission(principal, 'adjudication.decide');
         const body = await ctx.json<TransitionBody>();
         const applicationId = requireApplicationId(body.applicationId);
         const decision = body.decision;
@@ -220,6 +224,10 @@ function mapOutcome(outcome: OfficerCommandOutcome): HttpResult {
       // without the signing physician. Caller error — 422, and the reason
       // says exactly which mode the agency uses. (Retires the Slice-4 501.)
       return { status: 422, body: { status: 'INVALID_MEDICAL_INPUT', reason: outcome.reason } };
+    case 'SEPARATION_OF_DUTIES':
+      // Permitted role, same person as the preceding step on THIS record.
+      // 403, with the closed rule id — never who did the earlier step.
+      return { status: 403, body: { status: 'SEPARATION_OF_DUTIES', rule: outcome.rule } };
     case 'CROSS_AGENCY_LOCKED':
       // One citizen, one acceptance (ADR-014): this person is already
       // accepted — by the named agency (possibly the officer's own, via a

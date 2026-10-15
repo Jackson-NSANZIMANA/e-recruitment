@@ -11,7 +11,7 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { HttpError, type HttpResult, type Route } from '@usrp/shared-http';
-import { withAuth, type AuthVerifier } from '@usrp/shared-auth';
+import { requireOfficerPermission, withAuth, type AuthVerifier } from '@usrp/shared-auth';
 import type { FieldScoreRecord, PhysicalTestMetrics } from '@usrp/shared-types';
 import type { SyncFieldScoresService } from '../../application/sync-field-scores.service.js';
 
@@ -101,6 +101,7 @@ export function syncScoresRoute(service: SyncFieldScoresService, verify: AuthVer
     method: 'POST',
     path: SYNC_SCORES_PATH,
     handler: withAuth(verify, { kind: 'officer' }, async (ctx, principal): Promise<HttpResult> => {
+      requireOfficerPermission(principal, 'field.score.sync');
       if (principal.kind !== 'officer') {
         throw new HttpError(403, 'FORBIDDEN', 'Officer principal required.');
       }

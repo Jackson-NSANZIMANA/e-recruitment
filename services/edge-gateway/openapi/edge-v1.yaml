@@ -79,10 +79,25 @@ paths:
         '403':
           description: CSRF invalid
 
+  /edge/v1/auth/applicant/identity:
+    post:
+      operationId: beginApplicantOnboarding
+      summary: Confirm National ID and date of birth against NIDA (onboarding step 1)
+      tags: [applicant-auth]
+      x-usrp-session: anonymous
+      x-usrp-csrf: true
+      responses:
+        '200':
+          description: Confirmed; a short-lived onboarding token is returned
+        '422':
+          description: Details could not be confirmed (one body for every non-match)
+        '429':
+          description: Rate limited
+
   /edge/v1/auth/applicant/otp/request:
     post:
       operationId: requestApplicantOtp
-      summary: Request OTP
+      summary: Send an OTP to the stated phone number (onboarding step 2)
       tags: [applicant-auth]
       x-usrp-session: anonymous
       x-usrp-csrf: true
@@ -90,13 +105,15 @@ paths:
       responses:
         '202':
           description: OTP request accepted
+        '401':
+          description: Onboarding token missing or expired
         '429':
           description: Rate limited
 
   /edge/v1/auth/applicant/otp/verify:
     post:
       operationId: verifyApplicantOtp
-      summary: Verify OTP
+      summary: Verify the OTP and open the applicant session (onboarding step 3)
       tags: [applicant-auth]
       x-usrp-session: anonymous
       x-usrp-csrf: true
@@ -692,6 +709,102 @@ paths:
         '503':
           description: Dependency failure (fail closed).
 
+  /edge/v1/me/applications/exam-invitation:
+    get:
+      operationId: getMyExamInvitation
+      summary: The citizen's exam QR — the signed slot invitation to download and present at the physical screening (ADR-033)
+      tags: [citizen]
+      x-usrp-session: applicant
+      x-usrp-csrf: false
+      x-usrp-retry-on-g2g: true
+      parameters:
+        - { name: applicationId, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: "{ state, agency, processingCode, campaignLabel, currentStatus, invitation? } — invitation only when state is READY (slot assigned, not expired, not on hold)"
+        '404':
+          description: Not this citizen's application
+        '502':
+          description: UPSTREAM_CONTRACT_MISMATCH — a malformed payload is never relayed
+  /edge/v1/me/applications/document-checklist:
+    get:
+      operationId: getMyDocumentChecklist
+      summary: The citizen's advisory document checklist for one of their applications (ADR-032)
+      tags: [citizen]
+      x-usrp-session: applicant
+      x-usrp-csrf: false
+      x-usrp-retry-on-g2g: true
+      parameters:
+        - { name: applicationId, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: "{ agency, source, complete, items: [{ documentType, satisfaction, registry }] } — advisory, never a gate"
+        '404':
+          description: Not this citizen's application (same answer as nonexistent)
+  /edge/v1/applications/document-checklist:
+    get:
+      operationId: getDocumentChecklist
+      summary: Advisory document checklist for an application of the officer's agency (ADR-032)
+      tags: [officer]
+      x-usrp-session: officer
+      x-usrp-csrf: false
+      x-usrp-retry-on-g2g: true
+      parameters:
+        - { name: applicationId, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The checklist
+        '403':
+          description: PERMISSION_DENIED (needs application.read)
+        '404':
+          description: Not in the officer's agency
+  /edge/v1/applications/documents/verify-at-venue:
+    post:
+      operationId: verifyDocumentAtVenue
+      summary: The check-in officer records seeing a required document's paper at the venue (ADR-032)
+      tags: [officer]
+      x-usrp-session: officer
+      x-usrp-csrf: true
+      responses:
+        '200':
+          description: RECORDED or ALREADY_RECORDED (idempotent), with the updated checklist
+        '403':
+          description: PERMISSION_DENIED (needs document.verify.venue — the check-in post)
+        '404':
+          description: Not in the officer's agency
+        '409':
+          description: NOT_APPLICABLE — the application is terminal
+        '422':
+          description: NOT_REQUIRED — the type is not on this application's list
+  /edge/v1/me/applications/documents:
+    post:
+      operationId: uploadMyDocument
+      summary: Upload a required document for the citizen's own application
+      tags: [citizen]
+      x-usrp-session: applicant
+      x-usrp-csrf: true
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [applicationId, documentType, file]
+              properties:
+                applicationId: { type: string, format: uuid }
+                documentType: { type: string }
+                file: { type: string, format: binary }
+      responses:
+        '201':
+          description: Stored; only { documentId, documentType } is returned (never a verdict)
+        '404':
+          description: No such application for this citizen
+        '409':
+          description: The application is not accepting documents
+        '422':
+          description: Unsupported, mislabelled or infected file
+        '503':
+          description: A dependency is unavailable
   /edge/v1/me/applications/withdraw:
     post:
       operationId: withdrawMyApplication

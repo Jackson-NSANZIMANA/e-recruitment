@@ -15,13 +15,15 @@ import {
   uuid,
   varchar,
   timestamp,
+  text,
+  date,
   integer,
   boolean,
   jsonb,
   index,
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
-import { applicantIdentities } from './public-core.schema.js';
+import { applicantIdentities, campaignPolicyVersions } from './public-core.schema.js';
 
 export const rnpOps = pgSchema('rnp_ops');
 
@@ -170,6 +172,13 @@ export const rnpApplications = rnpOps.table(
     finalDecisionNotes: varchar('final_decision_notes', { length: 1000 }),
 
     submittedAt: timestamp('submitted_at', { withTimezone: true }),
+    // BUILD-002 (rls/0029): the policy version and calendar date that governed
+    // this application. Write-once (trigger); consumers read these, not "now".
+    policyVersionId: uuid('policy_version_id').references(() => campaignPolicyVersions.id),
+    evaluationDate: date('evaluation_date'),
+    // rls/0031 (ADR-033): the signed exam invitation (USRP-SLOT.v1…) the citizen
+    // downloads as a QR. Write-once (trigger); shape CHECK not modelled here.
+    qrSignedToken: text('qr_signed_token'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -230,6 +239,12 @@ export const rnpDocumentRecords = rnpOps.table(
     humanReviewedById: uuid('human_reviewed_by_id'),
     humanReviewedAt: timestamp('human_reviewed_at', { withTimezone: true }),
     humanReviewDecision: varchar('human_review_decision', { length: 10 }),
+
+    // Venue verification (rls/0030, ADR-032): the check-in officer saw the
+    // paper. Write-once. At most one per (application, type) — enforced by the
+    // partial unique index uq_rnp_docs_venue_once, asserted live, not mirrored.
+    venueVerifiedById: uuid('venue_verified_by_id'),
+    venueVerifiedAt: timestamp('venue_verified_at', { withTimezone: true }),
     uploadedAt: timestamp('uploaded_at', { withTimezone: true }).defaultNow().notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },

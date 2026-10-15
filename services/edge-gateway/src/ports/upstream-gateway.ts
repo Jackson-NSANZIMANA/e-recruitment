@@ -26,6 +26,12 @@ export interface UpstreamCallInput {
   /** Request body (JSON-serializable). */
   readonly body?: unknown;
   /**
+   * A server-COMPOSED multipart body (citizen document upload). Mutually
+   * exclusive with `body`. The bytes are built by the edge from validated
+   * parts — never the browser's own multipart, which is never forwarded.
+   */
+  readonly multipart?: { readonly contentType: string; readonly bytes: Buffer };
+  /**
    * The credential to present upstream (officer JWT or applicant session
    * handle). The edge asserts this matches what the operation declares it
    * needs, so a refactor cannot quietly send an applicant token to an officer

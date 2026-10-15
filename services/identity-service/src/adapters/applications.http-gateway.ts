@@ -15,6 +15,10 @@ import type {
   ApplicantSubmitInput,
   ApplicantSubmitResult,
   ApplicationsGateway,
+  DocumentChecklistResult,
+  DocumentChecklistView,
+  ExamInvitationResult,
+  ExamInvitationView,
   WithdrawApplicationResult,
 } from '../ports/applications-gateway.js';
 
@@ -75,6 +79,108 @@ export class HttpApplicationsGateway implements ApplicationsGateway {
     }
     const body = (await res.json()) as { applications?: ApplicantApplication[] };
     return body.applications ?? [];
+  }
+
+  async documentChecklist(applicantId: string, applicationId: string): Promise<DocumentChecklistResult> {
+    const token = await this.#systemToken();
+    let res: Response;
+    try {
+      res = await this.#fetch(
+        `${this.#opts.applicationBaseUrl}/v1/applications/document-checklist/by-applicant` +
+          `?applicantId=${encodeURIComponent(applicantId)}&applicationId=${encodeURIComponent(applicationId)}`,
+        { method: 'GET', headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(this.#timeoutMs) },
+      );
+    } catch (cause) {
+      throw new UpstreamUnavailableError('application-service unreachable', { cause });
+    }
+    if (res.status === 401) this.#cached = null;
+    if (res.status === 404) return { kind: 'NOT_FOUND' };
+    if (res.status !== 200) {
+      throw new UpstreamUnavailableError(`application-service checklist responded ${String(res.status)}`);
+    }
+    const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+    const items = body?.['items'];
+    if (
+      body === null || typeof body['agency'] !== 'string' || typeof body['source'] !== 'string' ||
+      typeof body['complete'] !== 'boolean' || !Array.isArray(items)
+    ) {
+      throw new UpstreamUnavailableError('application-service checklist body malformed');
+    }
+    // Rebuilt field by field: nothing upstream adds can reach the citizen, and
+    // an item whose fields are not strings is a contract break, not a value to
+    // coerce ("[object Object]" must never be rendered to a citizen).
+    const projected: DocumentChecklistView['items'][number][] = [];
+    for (const raw of items) {
+      const i = (raw ?? {}) as Record<string, unknown>;
+      const documentType = i['documentType'];
+      const satisfaction = i['satisfaction'];
+      const registry = i['registry'];
+      if (typeof documentType !== 'string' || typeof satisfaction !== 'string') {
+        throw new UpstreamUnavailableError('application-service checklist item malformed');
+      }
+      projected.push({ documentType, satisfaction, registry: typeof registry === 'string' ? registry : null });
+    }
+    return {
+      kind: 'OK',
+      checklist: { agency: body['agency'], source: body['source'], complete: body['complete'], items: projected },
+    };
+  }
+
+  async examInvitation(applicantId: string, applicationId: string): Promise<ExamInvitationResult> {
+    const token = await this.#systemToken();
+    let res: Response;
+    try {
+      res = await this.#fetch(
+        `${this.#opts.applicationBaseUrl}/v1/applications/exam-invitation/by-applicant` +
+          `?applicantId=${encodeURIComponent(applicantId)}&applicationId=${encodeURIComponent(applicationId)}`,
+        { method: 'GET', headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(this.#timeoutMs) },
+      );
+    } catch (cause) {
+      throw new UpstreamUnavailableError('application-service unreachable', { cause });
+    }
+    if (res.status === 401) this.#cached = null;
+    if (res.status === 404) return { kind: 'NOT_FOUND' };
+    if (res.status !== 200) {
+      throw new UpstreamUnavailableError(`application-service exam invitation responded ${String(res.status)}`);
+    }
+    const b = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+    if (
+      b === null || typeof b['state'] !== 'string' || typeof b['agency'] !== 'string' ||
+      typeof b['processingCode'] !== 'string' || typeof b['currentStatus'] !== 'string'
+    ) {
+      throw new UpstreamUnavailableError('application-service exam invitation body malformed');
+    }
+    const view: ExamInvitationView = {
+      state: b['state'],
+      agency: b['agency'],
+      processingCode: b['processingCode'],
+      campaignLabel: typeof b['campaignLabel'] === 'string' ? b['campaignLabel'] : null,
+      currentStatus: b['currentStatus'],
+    };
+    if (b['state'] !== 'READY') return { kind: 'OK', view };
+    const i = (b['invitation'] ?? null) as Record<string, unknown> | null;
+    if (
+      i === null || typeof i['qrPayload'] !== 'string' || typeof i['ticketId'] !== 'string' ||
+      typeof i['venueName'] !== 'string' || typeof i['examDate'] !== 'string' ||
+      typeof i['reportingTimeHour'] !== 'number' || typeof i['validUntil'] !== 'string'
+    ) {
+      throw new UpstreamUnavailableError('application-service exam invitation payload malformed');
+    }
+    // Rebuilt field by field: nothing else upstream adds reaches the citizen.
+    return {
+      kind: 'OK',
+      view: {
+        ...view,
+        invitation: {
+          qrPayload: i['qrPayload'],
+          ticketId: i['ticketId'],
+          venueName: i['venueName'],
+          examDate: i['examDate'],
+          reportingTimeHour: i['reportingTimeHour'],
+          validUntil: i['validUntil'],
+        },
+      },
+    };
   }
 
   async withdrawApplication(
@@ -140,6 +246,7 @@ export class HttpApplicationsGateway implements ApplicationsGateway {
     const body = {
       applicantId,
       category: input.category,
+      campaignCode: input.campaignCode,
       channel: 'WEB' as const,
       ...(input.nesaIndexNumber === null || input.nesaIndexNumber === undefined
         ? {}

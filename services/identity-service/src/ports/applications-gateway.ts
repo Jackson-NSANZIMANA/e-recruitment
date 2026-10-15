@@ -39,6 +39,8 @@ export type WithdrawApplicationResult =
  */
 export interface ApplicantSubmitInput {
   readonly category: ApplicationCategory;
+  /** The public code of the campaign the citizen chose (BUILD-002). */
+  readonly campaignCode: string;
   readonly nesaIndexNumber?: string | null;
   readonly hecRegistrationNumber?: string | null;
 }
@@ -70,7 +72,48 @@ export type ApplicantSubmitResult =
   | { readonly kind: 'DEPENDENCY_UNAVAILABLE' }
   | { readonly kind: 'UNEXPECTED_UPSTREAM_RESPONSE' };
 
+/** The citizen's advisory document checklist (ADR-032), as allowlisted. */
+export interface DocumentChecklistView {
+  readonly agency: string;
+  readonly source: string;
+  readonly complete: boolean;
+  readonly items: readonly {
+    readonly documentType: string;
+    readonly satisfaction: string;
+    readonly registry: string | null;
+  }[];
+}
+
+export type DocumentChecklistResult =
+  | { readonly kind: 'OK'; readonly checklist: DocumentChecklistView }
+  | { readonly kind: 'NOT_FOUND' };
+
+/** The citizen's exam QR view (ADR-033), allowlisted field by field. */
+export interface ExamInvitationView {
+  readonly state: string;
+  readonly agency: string;
+  readonly processingCode: string;
+  readonly campaignLabel: string | null;
+  readonly currentStatus: string;
+  readonly invitation?: {
+    readonly qrPayload: string;
+    readonly ticketId: string;
+    readonly venueName: string;
+    readonly examDate: string;
+    readonly reportingTimeHour: number;
+    readonly validUntil: string;
+  };
+}
+
+export type ExamInvitationResult =
+  | { readonly kind: 'OK'; readonly view: ExamInvitationView }
+  | { readonly kind: 'NOT_FOUND' };
+
 export interface ApplicationsGateway {
+  /** The citizen's OWN application's exam QR (ADR-033). */
+  examInvitation(applicantId: string, applicationId: string): Promise<ExamInvitationResult>;
+  /** The citizen's OWN application's advisory checklist (ADR-032). */
+  documentChecklist(applicantId: string, applicationId: string): Promise<DocumentChecklistResult>;
   /** All of one applicant's applications, cross-agency. */
   listForApplicant(applicantId: string): Promise<readonly ApplicantApplication[]>;
   /** Withdraw the citizen's OWN application (ADR-020) — ownership enforced upstream. */

@@ -78,7 +78,6 @@ app.post('/v1/citizen/lookup', validateHMAC, (req, res) => {
         gender: citizen.gender,
         homeDistrict: citizen.homeDistrict,
         homeProvince: citizen.homeProvince,
-        registeredPhoneNumber: citizen.registeredPhoneNumber,
         citizenshipStatus: citizen.citizenshipStatus
       },
       requestId,

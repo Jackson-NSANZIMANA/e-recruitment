@@ -1,0 +1,162 @@
+// ══════════════════════════════════════════════════════════════════
+// @usrp/shared-auth — The permission model (BUILD-004 §D)
+//
+// A valid officer token proves WHO and WHICH AGENCY. It must not be the whole
+// of WHAT: a screening officer at a venue is not a medical board, and neither
+// is the person who signs a final decision. Authorization is therefore a
+// separate, explicit check — role → permission → operation — applied by the
+// service that owns the operation (authoritative) and mirrored at the edge
+// (fail fast, no upstream spend).
+//
+// SCOPE IS NOT HERE. A permission says "may perform this KIND of action". It
+// never widens WHERE: the agency always comes from the verified principal and
+// is enforced again by FORCE'd RLS. No role grants cross-agency reach.
+//
+// FAIL CLOSED. An unknown role grants nothing. An empty role list grants
+// nothing. There is no wildcard and no "superadmin".
+//
+// THE TABLE BELOW IS A PROVISIONAL DEFAULT, NOT POLICY. Which post may sign a
+// final decision is the agencies' decision (handbook §8: engineers flag
+// authorization limits, they do not decide them). This file is the ONE place
+// that mapping lives, so ratifying or changing it is a reviewed one-file edit.
+// ══════════════════════════════════════════════════════════════════
+
+import type { Principal } from './principal.js';
+
+/** BUILD-001 campaign-control permissions (unchanged names). */
+export const CAMPAIGN_PERMISSION_LIST = [
+  'campaign.create',
+  'campaign.policy.create',
+  'campaign.session.configure',
+  'campaign.publish',
+  'campaign.registration.close',
+  'campaign.complete',
+  'campaign.cancel',
+  'campaign.read.public',
+  'campaign.read.admin',
+] as const;
+
+/** Recruitment-operation permissions (BUILD-002..004). */
+export const OPERATION_PERMISSION_LIST = [
+  /** Read the agency's application list, detail and status history. */
+  'application.read',
+  /** Read the amber (document-review) queue. */
+  'adjudication.read',
+  /** Register / vet a walk-in candidate on exam day (RDF lane). */
+  'walkin.register',
+  'walkin.vet',
+  /** Establish an identity in person via the brokered NIDA check. */
+  'identity.verify',
+  /** Enrol a tablet; upload captured scores. */
+  'field.device.enroll',
+  'field.score.sync',
+  /** Resolve a field-score conflict (authority over physical evidence). */
+  'field.conflict.resolve',
+  /** Exam-day biometric check-in. */
+  'biometric.verify',
+  /**
+   * Clear a required document by seeing the paper at the venue (ADR-032,
+   * owner decision 2026-10-14: the front-door check-in officer).
+   */
+  'document.verify.venue',
+  /** Record the medical board / certificate verdict. */
+  'medical.review',
+  /** Record an adjudication on an amber/red document review. */
+  'adjudication.decide',
+  /** Record the final recruitment decision. */
+  'decision.final',
+  /** Accept (enlist) a shortlisted applicant. */
+  'application.accept',
+  /** Data-protection office: see and decide erasure requests. */
+  'erasure.queue.read',
+  'erasure.decide',
+] as const;
+
+export const ALL_PERMISSIONS = [
+  ...CAMPAIGN_PERMISSION_LIST,
+  ...OPERATION_PERMISSION_LIST,
+] as const;
+
+export type Permission = (typeof ALL_PERMISSIONS)[number];
+export type OperationPermission = (typeof OPERATION_PERMISSION_LIST)[number];
+
+/**
+ * The role vocabulary. `agency_admin` and `reviewer` pre-date this module
+ * (BUILD-001); the rest name the posts an examination day actually has.
+ */
+export const KNOWN_ROLES = [
+  'agency_admin',
+  'reviewer',
+  'screening_officer',
+  'field_supervisor',
+  'medical_officer',
+  'adjudicator',
+  'decision_authority',
+  'dpo',
+] as const;
+
+export type KnownRole = (typeof KNOWN_ROLES)[number];
+
+const READ: readonly Permission[] = ['application.read', 'adjudication.read'];
+
+/**
+ * role → permissions. PROVISIONAL (see header). Deliberately narrow:
+ *   • agency_admin  runs the campaign; does NOT decide candidates.
+ *   • reviewer      read-only.
+ *   • decision_authority is the only post that may finalise and accept.
+ */
+const ROLE_PERMISSIONS: Readonly<Record<KnownRole, ReadonlySet<Permission>>> = {
+  agency_admin: new Set<Permission>([
+    'campaign.create',
+    'campaign.policy.create',
+    'campaign.session.configure',
+    'campaign.publish',
+    'campaign.registration.close',
+    'campaign.complete',
+    'campaign.cancel',
+    'campaign.read.admin',
+    ...READ,
+  ]),
+  reviewer: new Set<Permission>(['campaign.read.admin', ...READ]),
+  screening_officer: new Set<Permission>([
+    'walkin.register',
+    'walkin.vet',
+    'identity.verify',
+    'biometric.verify',
+    'document.verify.venue',
+    'field.device.enroll',
+    'field.score.sync',
+    ...READ,
+  ]),
+  field_supervisor: new Set<Permission>([
+    'field.device.enroll',
+    'field.score.sync',
+    'field.conflict.resolve',
+    ...READ,
+  ]),
+  medical_officer: new Set<Permission>(['medical.review', ...READ]),
+  adjudicator: new Set<Permission>(['adjudication.decide', ...READ]),
+  decision_authority: new Set<Permission>(['decision.final', 'application.accept', ...READ]),
+  dpo: new Set<Permission>(['erasure.queue.read', 'erasure.decide']),
+};
+
+function isKnownRole(role: string): role is KnownRole {
+  return Object.prototype.hasOwnProperty.call(ROLE_PERMISSIONS, role);
+}
+
+/** PURE. True iff any held role grants `permission`. Unknown roles grant nothing. */
+export function rolesHavePermission(roles: readonly string[], permission: Permission): boolean {
+  // The public read is for anonymous callers; no officer role confers it.
+  if (permission === 'campaign.read.public') return false;
+  return roles.some((role) => isKnownRole(role) && ROLE_PERMISSIONS[role].has(permission));
+}
+
+/** PURE. Officers only; a system principal holds no human permission. */
+export function principalHasPermission(principal: Principal, permission: Permission): boolean {
+  return principal.kind === 'officer' && rolesHavePermission(principal.roles, permission);
+}
+
+/** Every permission a role set confers (for the session view; never a security input). */
+export function permissionsForRoles(roles: readonly string[]): readonly Permission[] {
+  return ALL_PERMISSIONS.filter((p) => rolesHavePermission(roles, p));
+}

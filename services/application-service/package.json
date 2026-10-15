@@ -2,7 +2,7 @@
   "name": "@usrp/application-service",
   "version": "1.0.0",
   "private": true,
-  "description": "USRP Application Service — the front door: turns a verified applicant's agency+category choice into an application and emits APPLICANT_SUBMITTED",
+  "description": "USRP Application Service \u2014 the front door: turns a verified applicant's agency+category choice into an application and emits APPLICANT_SUBMITTED",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -22,7 +22,8 @@
     "lint": "eslint 'src/**/*.ts'",
     "selfcheck": "tsx selfcheck/verify-submit-http-slice.ts",
     "selfcheck:pipeline": "tsx selfcheck/verify-pipeline-e2e.ts",
-    "selfcheck:detail-reads": "tsx selfcheck/verify-application-detail-reads.ts"
+    "selfcheck:detail-reads": "tsx selfcheck/verify-application-detail-reads.ts",
+    "selfcheck:campaign-bound": "tsx selfcheck/verify-campaign-bound-submission.ts"
   },
   "dependencies": {
     "@usrp/shared-logging": "workspace:*",

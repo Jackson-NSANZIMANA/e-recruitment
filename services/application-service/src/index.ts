@@ -12,6 +12,12 @@
 // main.ts, not here, so composing the service in a proof starts no timers.
 // ══════════════════════════════════════════════════════════════════
 
+import { DocumentChecklistService } from './application/document-checklist.service.js';
+import { ExamInvitationService } from './application/exam-invitation.service.js';
+import { ReannounceStalledClearancesService } from './application/reannounce-stalled-clearances.service.js';
+import { PgStalledClearanceRepository } from './adapters/stalled-clearance.pg-repository.js';
+import { PgExamInvitationReader } from './adapters/exam-invitation.pg-reader.js';
+import { PgDocumentChecklistRepository } from './adapters/document-checklist.pg-repository.js';
 import type { EventBus } from '@usrp/shared-events';
 import { PgIdentityReader } from './adapters/identity.pg-reader.js';
 import { PgCampaignReader } from './adapters/campaign.pg-reader.js';
@@ -68,6 +74,12 @@ export interface ApplicationService {
   readonly withdrawalProjector: ProjectApplicationAcceptedService;
   /** HTTP system-token write — the citizen's OWN voluntary withdrawal (ADR-020). */
   readonly selfWithdrawal: SelfWithdrawalService;
+  /** Advisory document checklist + venue verification (ADR-032). */
+  readonly documentChecklist: DocumentChecklistService;
+  /** The citizen's downloadable exam QR (ADR-033). */
+  readonly examInvitation: ExamInvitationService;
+  /** Re-offers clearances scheduling deferred (no venue / no capacity) to scheduling. */
+  readonly slotRetry: ReannounceStalledClearancesService;
   /** Officer-authorized BUILD-001 campaign aggregate writes. */
   readonly campaignControl: CampaignControlService;
   /** Anonymous published-campaign allowlist reads. */
@@ -82,14 +94,16 @@ export interface ApplicationService {
  * only the event bus does.
  */
 export function createApplicationService(
-  _config: ApplicationServiceConfig,
+  config: ApplicationServiceConfig,
   eventBus: EventBus,
 ): ApplicationService {
   const identityReader = new PgIdentityReader();
   const campaignReader = new PgCampaignReader();
   const repository = new PgApplicationRepository();
   const readRepository = new PgApplicationReadRepository();
-  const officerTransitionRepository = new PgOfficerTransitionRepository();
+  const officerTransitionRepository = new PgOfficerTransitionRepository(
+    config.separationOfDuties,
+  );
   // Outbox fast path (ADR-025) for the use cases already converted. The rest
   // still publish directly and are listed as the mechanical follow-up.
   const events = new PgOutboxDispatcher(eventBus);
@@ -122,6 +136,16 @@ export function createApplicationService(
     forensicsProjector: new ProjectForensicsResultService({ repository, eventBus }),
     withdrawalProjector: new ProjectApplicationAcceptedService({
       repository: new PgWithdrawalRepository(),
+      eventBus,
+    }),
+    examInvitation: new ExamInvitationService({ reader: new PgExamInvitationReader() }),
+    slotRetry: new ReannounceStalledClearancesService({
+      repository: new PgStalledClearanceRepository(),
+      events,
+      policy: { graceMs: config.slotRetry.graceMs, batchSize: config.slotRetry.batchSize },
+    }),
+    documentChecklist: new DocumentChecklistService({
+      repository: new PgDocumentChecklistRepository(),
       eventBus,
     }),
     selfWithdrawal: new SelfWithdrawalService({
@@ -395,3 +419,32 @@ export {
   ApplicationReadError,
   ApplicationPersistenceError,
 } from './domain/application.errors.js';
+
+// ── Document checklist (ADR-032) ──
+export { DocumentChecklistService } from './application/document-checklist.service.js';
+export { PgDocumentChecklistRepository } from './adapters/document-checklist.pg-repository.js';
+export {
+  documentChecklistRoutes,
+  DOCUMENT_CHECKLIST_PATH,
+  DOCUMENT_CHECKLIST_BY_APPLICANT_PATH,
+  VERIFY_DOCUMENT_AT_VENUE_PATH,
+} from './adapters/http/document-checklist.controller.js';
+export {
+  evaluateDocumentChecklist,
+  resolveRequiredDocuments,
+  REGISTRY_FOR_DOCUMENT,
+  BOTH_REQUIRED,
+  SATISFIED,
+} from './domain/document-requirements.js';
+
+// ── Exam invitation (ADR-033) ──
+export { ExamInvitationService } from './application/exam-invitation.service.js';
+export {
+  ReannounceStalledClearancesService,
+  clearanceEvents,
+  type SlotRetryPolicy,
+} from './application/reannounce-stalled-clearances.service.js';
+export { PgStalledClearanceRepository } from './adapters/stalled-clearance.pg-repository.js';
+export { PgExamInvitationReader } from './adapters/exam-invitation.pg-reader.js';
+export { examInvitationRoute, EXAM_INVITATION_BY_APPLICANT_PATH } from './adapters/http/exam-invitation.controller.js';
+export { decideInvitation, readInvitationClaims } from './domain/exam-invitation.js';
