@@ -2210,44 +2210,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public_core.onboarding_attempts": {
-      "name": "onboarding_attempts",
-      "schema": "public_core",
-      "columns": {
-        "national_id_hash": {
-          "name": "national_id_hash",
-          "type": "varchar(64)",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "failed_count": {
-          "name": "failed_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "window_started_at": {
-          "name": "window_started_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "locked_until": {
-          "name": "locked_until",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public_core.recruitment_campaigns": {
       "name": "recruitment_campaigns",
       "schema": "public_core",
@@ -3177,24 +3139,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "policy_version_id": {
-          "name": "policy_version_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "evaluation_date": {
-          "name": "evaluation_date",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "qr_signed_token": {
-          "name": "qr_signed_token",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -3376,20 +3320,6 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
-        },
-        "applications_policy_version_id_campaign_policy_versions_id_fk": {
-          "name": "applications_policy_version_id_campaign_policy_versions_id_fk",
-          "tableFrom": "applications",
-          "tableTo": "campaign_policy_versions",
-          "schemaTo": "public_core",
-          "columnsFrom": [
-            "policy_version_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -3545,18 +3475,6 @@
         "human_review_decision": {
           "name": "human_review_decision",
           "type": "varchar(10)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "venue_verified_by_id": {
-          "name": "venue_verified_by_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "venue_verified_at": {
-          "name": "venue_verified_at",
-          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },
@@ -4182,24 +4100,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "policy_version_id": {
-          "name": "policy_version_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "evaluation_date": {
-          "name": "evaluation_date",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "qr_signed_token": {
-          "name": "qr_signed_token",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -4381,20 +4281,6 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
-        },
-        "applications_policy_version_id_campaign_policy_versions_id_fk": {
-          "name": "applications_policy_version_id_campaign_policy_versions_id_fk",
-          "tableFrom": "applications",
-          "tableTo": "campaign_policy_versions",
-          "schemaTo": "public_core",
-          "columnsFrom": [
-            "policy_version_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -4537,18 +4423,6 @@
         "human_review_decision": {
           "name": "human_review_decision",
           "type": "varchar(10)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "venue_verified_by_id": {
-          "name": "venue_verified_by_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "venue_verified_at": {
-          "name": "venue_verified_at",
-          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },
@@ -5219,24 +5093,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "policy_version_id": {
-          "name": "policy_version_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "evaluation_date": {
-          "name": "evaluation_date",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "qr_signed_token": {
-          "name": "qr_signed_token",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -5403,20 +5259,6 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
-        },
-        "applications_policy_version_id_campaign_policy_versions_id_fk": {
-          "name": "applications_policy_version_id_campaign_policy_versions_id_fk",
-          "tableFrom": "applications",
-          "tableTo": "campaign_policy_versions",
-          "schemaTo": "public_core",
-          "columnsFrom": [
-            "policy_version_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -5559,18 +5401,6 @@
         "human_review_decision": {
           "name": "human_review_decision",
           "type": "varchar(10)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "venue_verified_by_id": {
-          "name": "venue_verified_by_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "venue_verified_at": {
-          "name": "venue_verified_at",
-          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },
