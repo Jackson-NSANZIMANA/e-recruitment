@@ -16,6 +16,7 @@ import type {
   ApplicantSubmitResult,
   ApplicationsGateway,
   DocumentChecklistResult,
+  DocumentChecklistView,
   WithdrawApplicationResult,
 } from '../ports/applications-gateway.js';
 
@@ -103,22 +104,23 @@ export class HttpApplicationsGateway implements ApplicationsGateway {
     ) {
       throw new UpstreamUnavailableError('application-service checklist body malformed');
     }
-    // Rebuilt field by field: nothing upstream adds can reach the citizen.
+    // Rebuilt field by field: nothing upstream adds can reach the citizen, and
+    // an item whose fields are not strings is a contract break, not a value to
+    // coerce ("[object Object]" must never be rendered to a citizen).
+    const projected: DocumentChecklistView['items'][number][] = [];
+    for (const raw of items) {
+      const i = (raw ?? {}) as Record<string, unknown>;
+      const documentType = i['documentType'];
+      const satisfaction = i['satisfaction'];
+      const registry = i['registry'];
+      if (typeof documentType !== 'string' || typeof satisfaction !== 'string') {
+        throw new UpstreamUnavailableError('application-service checklist item malformed');
+      }
+      projected.push({ documentType, satisfaction, registry: typeof registry === 'string' ? registry : null });
+    }
     return {
       kind: 'OK',
-      checklist: {
-        agency: body['agency'],
-        source: body['source'],
-        complete: body['complete'],
-        items: items.map((raw) => {
-          const i = (raw ?? {}) as Record<string, unknown>;
-          return {
-            documentType: String(i['documentType'] ?? ''),
-            satisfaction: String(i['satisfaction'] ?? ''),
-            registry: typeof i['registry'] === 'string' ? i['registry'] : null,
-          };
-        }),
-      },
+      checklist: { agency: body['agency'], source: body['source'], complete: body['complete'], items: projected },
     };
   }
 

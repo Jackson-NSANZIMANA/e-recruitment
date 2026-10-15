@@ -31,7 +31,10 @@ function citizen(over: Partial<{ dateOfBirth: string; citizenshipStatus: string 
   };
 }
 
-function harness(nidaResult: Awaited<ReturnType<NidaGateway['lookupCitizen']>>) {
+function harness(
+  nidaResult: Awaited<ReturnType<NidaGateway['lookupCitizen']>>,
+  verifiedApplicant: string | null = APPLICANT,
+) {
   const sent: OutboundSms[] = [];
   const challenges: (OtpChallengeRecord & { consumed: boolean })[] = [];
   const stamped: { applicantId: string; phoneHash: string; phone: string }[] = [];
@@ -49,7 +52,7 @@ function harness(nidaResult: Awaited<ReturnType<NidaGateway['lookupCitizen']>>) 
       return Promise.resolve();
     },
     clearOnboardingFailures: () => { failures = 0; lock = null; return Promise.resolve(); },
-    findVerifiedApplicantByNidHash: () => Promise.resolve(APPLICANT),
+    findVerifiedApplicantByNidHash: () => Promise.resolve(verifiedApplicant),
     createChallenge: (i) => {
       challenges.push({ id: `c${String(challenges.length)}`, applicantId: i.applicantId, otpHash: i.otpHash, expiresAt: i.expiresAt, attempts: 0, consumed: false });
       return Promise.resolve();
@@ -195,4 +198,10 @@ test('an unknown NID is never counted toward the lockout table', async () => {
     await h.service.beginOnboarding({ rawNationalId: NID, dateOfBirth: DOB, channel: 'WEB' });
   }
   assert.equal(h.lockedUntil(), null);
+});
+
+test('an existing identity that is not VERIFIED is never issued a token', async () => {
+  const h = harness(citizen(), null); // the row exists (ALREADY_EXISTS) but is PENDING/FAILED/EXPIRED
+  const r = await h.service.beginOnboarding({ rawNationalId: NID, dateOfBirth: DOB, channel: 'WEB' });
+  assert.deepEqual(r, { kind: 'NOT_CONFIRMED' });
 });

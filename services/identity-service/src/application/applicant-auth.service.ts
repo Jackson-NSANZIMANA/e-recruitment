@@ -161,6 +161,11 @@ export class ApplicantAuthService {
     if (identity.kind !== 'CREATED' && identity.kind !== 'ALREADY_EXISTS') {
       return { kind: 'NOT_CONFIRMED' };
     }
+    // ALREADY_EXISTS says nothing about the row's status. Only a VERIFIED
+    // identity may be issued a token — the same bar the pre-ADR-029 login held
+    // (a PENDING / FAILED / EXPIRED identity gets the uniform answer).
+    const verifiedId = await this.deps.repository.findVerifiedApplicantByNidHash(nationalIdHash);
+    if (verifiedId !== identity.applicantId) return { kind: 'NOT_CONFIRMED' };
 
     const issued = issueOnboardingToken(
       this.deps.nationalIdHmacKey,
