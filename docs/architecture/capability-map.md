@@ -19,11 +19,12 @@ Legend: ✅ built and proven by a live selfcheck · 🟡 partial · ❌ missing 
 | Apply to a chosen campaign (public code), idempotent | ✅ **(S)** | ADR-030; `verify-campaign-bound-submission.ts` |
 | Policy version + evaluation date bound at filing | ✅ **(S)** | rls/0029 write-once; event `referenceDate`/`policyVersionId` |
 | Upload documents (scanned, sealed, no verdict to citizen) | ✅ **(S)** | `verify-applicant-document-door.ts` (real ClamAV, MinIO) |
-| Advisory document checklist | ✅ backend+edge **(S)** · ❌ screen | ADR-032; `verify-document-checklist.ts`; api-client hooks exist |
+| Advisory document checklist | ✅ backend+edge **(S)** · ❌ screen | ADR-032 (RCS General Enlistee: A2 via NESA, no notarised degree); `verify-document-checklist.ts`; api-client hooks exist |
 | Application list / status | 🟡 | list exists; no authoritative timeline projection (BUILD-005) |
-| Exam invitation + QR in the portal | ❌ | QR goes by SMS only |
+| Exam invitation + QR in the portal (download PNG / print) | ✅ **(S)** | ADR-033; rls/0031; `verify-exam-invitation.ts`; portal `/applications/:id/exam-qr` (jsQR round-trip test) |
+| Deferred scheduling retried (no venue yet / venue full) | ✅ **(S)** | application-service re-announce sweep, bounded and outbox-staged; `verify-slot-retry.ts` |
 | Withdraw, erasure request | ✅ | ADR-020, ADR-015 |
-| Real SMS delivery | ❌ | `LogSmsChannel` only (provider not chosen) |
+| Real SMS delivery | ❌ known gap | `LogSmsChannel` only (provider not available); the portal is the QR channel meanwhile |
 | USSD / kiosk channels | ❌ | channel enum only |
 
 ## 2. Administrative officer dashboard

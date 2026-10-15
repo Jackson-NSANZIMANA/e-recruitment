@@ -53,4 +53,13 @@ download and bring to the screening.
   matched at the gate (biometric check / ID) — admission is BUILD-003.
 - Key rotation is enabled by `keyId` but not implemented; the private key must
   move to an HSM/KMS before production (ADR-009 residual, unchanged).
+- **Scheduling deferrals no longer strand the citizen at PENDING.** A
+  clearance scheduling could not place (no venue published for the district,
+  venue full or inactive) used to be audited and never retried. Application-
+  service now re-announces `APPLICATION_ELIGIBILITY_CLEARED` for rows stuck at
+  `DOCUMENT_REVIEW_GREEN` with no slot, at most once per grace period per row
+  (`SLOT_RETRY_*`, default 6 h), only for campaigns that can still hold an exam,
+  staged in the outbox. Scheduling is idempotent per application (ADR-026), so a
+  retry either places the citizen, re-announces the original slot, or records
+  another deferral. Proven by `verify-slot-retry.ts`.
 - SMS delivery of the QR remains a **known gap**.
