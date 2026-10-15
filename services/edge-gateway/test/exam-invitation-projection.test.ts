@@ -28,3 +28,16 @@ test('a malformed QR payload or unknown state is a contract fault (null), never 
   assert.equal(projectExamInvitation({ ...READY, state: 'ADMIT_ANYWAY' }), null);
   assert.equal(projectExamInvitation({ ...READY, invitation: undefined }), null);
 });
+
+test('ADMITTED carries where and when the QR was spent, and never a payload (ADR-034)', () => {
+  const base = { ...READY, state: 'ADMITTED', currentStatus: 'PHYSICAL_TEST_SCHEDULED' };
+  const { invitation: _dropped, ...noInvitation } = base;
+  const v = projectExamInvitation({ ...noInvitation, admission: { venueName: 'ULK Stadium', admittedAt: '2026-12-01T06:01:00.000Z', officerId: 'leak-4' } });
+  assert.ok(v !== null);
+  assert.deepEqual(v['admission'], { venueName: 'ULK Stadium', admittedAt: '2026-12-01T06:01:00.000Z' });
+  assert.ok(!('invitation' in v));
+  assert.ok(!JSON.stringify(v).includes('leak-'));
+  // A spent QR relayed alongside ADMITTED is a contract fault, not something to pass on.
+  assert.equal(projectExamInvitation({ ...base, admission: { venueName: 'ULK Stadium', admittedAt: '2026-12-01T06:01:00.000Z' } }), null);
+  assert.equal(projectExamInvitation({ ...noInvitation }), null, 'ADMITTED without the admission detail');
+});

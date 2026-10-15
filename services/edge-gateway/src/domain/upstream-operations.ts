@@ -80,6 +80,11 @@ export const UPSTREAM = Object.freeze({
   // identity-service — verify-identity.controller.ts (service-internal, BROKERED per ADR-012 D1)
   verifyIdentity: op('verifyIdentity', 'identity', 'POST', '/v1/identities/verify', 'officer-jwt'),
 
+  // identity-service — gate-admission.controller.ts (BUILD-003, ADR-034). The
+  // gate's front door: it hashes the card's national ID (sole key holder) and
+  // forwards to application-service under this same officer credential.
+  admitAtGate: op('admitAtGate', 'identity', 'POST', '/v1/gate/admissions', 'officer-jwt'),
+
   // application-service — list-applications.controller.ts
   listApplications: op('listApplications', 'application', 'GET', '/v1/applications', 'officer-jwt'),
   amberQueue: op('amberQueue', 'application', 'GET', '/v1/applications/amber-queue', 'officer-jwt'),

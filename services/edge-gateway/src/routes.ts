@@ -59,6 +59,7 @@ import {
   publishCampaignHandler,
 } from './adapters/http/campaigns.controller.js';
 import { verifyIdentityHandler } from './adapters/http/identity.controller.js';
+import { admitAtGateHandler } from './adapters/http/gate-admission.controller.js';
 import { getMyExamInvitationHandler } from './adapters/http/exam-invitation.controller.js';
 import {
   getDocumentChecklistHandler,
@@ -121,6 +122,7 @@ export function edgeHandlers(deps: EdgeDeps): Record<EdgeOperationId, RouteHandl
 
     getDocumentChecklist: getDocumentChecklistHandler(deps),
     verifyDocumentAtVenue: verifyDocumentAtVenueHandler(deps),
+    admitAtGate: admitAtGateHandler(deps),
     registerWalkIn: registerWalkInHandler(deps),
     vetWalkIn: vetWalkInHandler(deps),
 
