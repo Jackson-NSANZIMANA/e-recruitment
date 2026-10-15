@@ -47,3 +47,12 @@ test('a missing, malformed or foreign token is UNAVAILABLE, never handed out', (
   assert.equal(decideInvitation(APP, 'SLOT_ASSIGNED', token({ applicationId: '22222222-2222-4222-8222-222222222222' }), NOW).state, 'UNAVAILABLE');
   assert.equal(readInvitationClaims('USRP-SLOT.v1.notbase64json.sig'), null);
 });
+
+test('a QR spent at the gate is never shown again (ADR-034): ADMITTED, not READY', () => {
+  assert.equal(decideInvitation(APP, 'SLOT_ASSIGNED', token(), NOW, true).state, 'ADMITTED');
+  assert.equal(decideInvitation(APP, 'PHYSICAL_TEST_SCHEDULED', token(), NOW, true).state, 'ADMITTED');
+  // Later stages keep their own meaning; admission does not mask a withdrawal.
+  assert.equal(decideInvitation(APP, 'PHYSICAL_TEST_COMPLETE', token(), NOW, true).state, 'COMPLETED');
+  assert.equal(decideInvitation(APP, 'WITHDRAWN', token(), NOW, true).state, 'CLOSED');
+  assert.equal(decideInvitation(APP, 'SLOT_ASSIGNED', token(), NOW, false).state, 'READY');
+});

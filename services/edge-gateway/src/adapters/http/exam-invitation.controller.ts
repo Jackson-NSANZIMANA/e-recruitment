@@ -8,6 +8,8 @@
 // allowlist and every response is already `cache-control: no-store`
 // (shared-http). The payload must look like a USRP-SLOT.v1 token or the whole
 // answer is a contract fault — a malformed QR is worse than none at the gate.
+// ADMITTED (ADR-034) carries no payload at all: an upstream that sends one
+// alongside it is a contract fault too.
 // ══════════════════════════════════════════════════════════════════
 
 import type { HttpResult, RouteHandler } from '@usrp/shared-http';
@@ -16,7 +18,7 @@ import { NOT_FOUND } from './outcomes.js';
 import { withApplicantSession, type EdgeDeps } from './guards.js';
 import { requireApplicationIdQuery } from './validation.js';
 
-const STATES = new Set(['READY', 'PENDING', 'ON_HOLD', 'COMPLETED', 'CLOSED', 'EXPIRED', 'UNAVAILABLE', 'WALK_IN']);
+const STATES = new Set(['READY', 'ADMITTED', 'PENDING', 'ON_HOLD', 'COMPLETED', 'CLOSED', 'EXPIRED', 'UNAVAILABLE', 'WALK_IN']);
 const TOKEN_RE = /^USRP-SLOT\.v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
 const MISMATCH: HttpResult = { status: 502, body: { error: 'UPSTREAM_CONTRACT_MISMATCH' } };
 
@@ -36,6 +38,17 @@ export function projectExamInvitation(value: unknown): Record<string, unknown> |
     campaignLabel: typeof v['campaignLabel'] === 'string' ? v['campaignLabel'] : null,
     currentStatus: v['currentStatus'],
   };
+  if (state === 'ADMITTED') {
+    // ADR-034: a spent QR is never re-sent. Only where and when it was used.
+    const a = v['admission'];
+    if (a === null || typeof a !== 'object') return null;
+    const adm = a as Record<string, unknown>;
+    if (typeof adm['venueName'] !== 'string' || typeof adm['admittedAt'] !== 'string' || Number.isNaN(Date.parse(adm['admittedAt']))) {
+      return null;
+    }
+    if (v['invitation'] !== undefined) return null;
+    return { ...base, admission: { venueName: adm['venueName'], admittedAt: adm['admittedAt'] } };
+  }
   if (state !== 'READY') return base;
   const i = v['invitation'];
   if (i === null || typeof i !== 'object') return null;

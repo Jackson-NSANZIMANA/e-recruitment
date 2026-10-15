@@ -335,3 +335,47 @@ export const rdfPhysicalTestScores = rdfOps.table(
     index('idx_rdf_scores_captured').on(t.capturedAt),
   ],
 );
+
+// ── Gate admission (rls/0032, BUILD-003, ADR-034) ─────────────────
+// One immutable row per admitted application; single use is the pair of
+// unique indexes. Append-only by trigger (not modelled here), as is the
+// attempts log, which records every scan, refused or not, PII-free.
+
+export const rdfGateAdmissions = rdfOps.table(
+  'gate_admissions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    applicationId: uuid('application_id')
+      .references(() => rdfApplications.id)
+      .notNull(),
+    ticketId: varchar('ticket_id', { length: 64 }).notNull(),
+    campaignId: uuid('campaign_id').notNull(),
+    venueName: varchar('venue_name', { length: 200 }).notNull(),
+    examDate: date('exam_date').notNull(),
+    identityMethod: varchar('identity_method', { length: 32 }).notNull(),
+    admittedById: uuid('admitted_by_id').notNull(),
+    admittedAt: timestamp('admitted_at', { withTimezone: true }).defaultNow().notNull(),
+    correlationId: varchar('correlation_id', { length: 128 }),
+  },
+  (t) => [
+    uniqueIndex('idx_rdf_gate_admissions_application').on(t.applicationId),
+    uniqueIndex('idx_rdf_gate_admissions_ticket').on(t.ticketId),
+  ],
+);
+
+export const rdfGateAdmissionAttempts = rdfOps.table(
+  'gate_admission_attempts',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    applicationId: uuid('application_id'),
+    ticketId: varchar('ticket_id', { length: 64 }),
+    outcome: varchar('outcome', { length: 32 }).notNull(),
+    gateVenueName: varchar('gate_venue_name', { length: 200 }).notNull(),
+    officerId: uuid('officer_id').notNull(),
+    attemptedAt: timestamp('attempted_at', { withTimezone: true }).defaultNow().notNull(),
+    correlationId: varchar('correlation_id', { length: 128 }),
+  },
+  (t) => [
+    index('idx_rdf_gate_attempts_application').on(t.applicationId),
+  ],
+);

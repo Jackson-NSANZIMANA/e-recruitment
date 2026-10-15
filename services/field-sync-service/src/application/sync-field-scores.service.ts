@@ -43,7 +43,8 @@ export type RejectReason =
   | 'REVOKED_DEVICE'
   | 'AGENCY_MISMATCH'
   | 'BAD_SIGNATURE'
-  | 'TICKET_MISMATCH';
+  | 'TICKET_MISMATCH'
+  | 'NOT_ADMITTED';
 
 export interface RecordSyncResult {
   readonly applicationId: string;
@@ -167,6 +168,9 @@ export class SyncFieldScoresService {
         // A validly-signed record for a candidate who did not present this
         // application's invitation. Rejected and audited like any forgery.
         return this.reject(base, 'TICKET_MISMATCH', agency, context);
+      case 'NOT_ADMITTED':
+        // A genuine ticket the venue gate never admitted (ADR-034).
+        return this.reject(base, 'NOT_ADMITTED', agency, context);
     }
   }
 

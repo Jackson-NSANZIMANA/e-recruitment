@@ -23,6 +23,10 @@
 // the venue and it is signed into the record. It is compared here, under the
 // same row lock, BEFORE any merge — a mismatch (or no issued ticket at all)
 // is TICKET_MISMATCH and nothing is written.
+//
+// ADMISSION BINDING (BUILD-003, ADR-034). Holding the ticket is not the same as
+// having been let in. For the digital lane the application must also carry a
+// gate admission (rls/0032); otherwise NOT_ADMITTED and nothing is written.
 // ══════════════════════════════════════════════════════════════════
 
 import { timingSafeEqual } from 'node:crypto';
@@ -88,6 +92,16 @@ export class PgFieldScoreStore implements FieldScoreStore {
         // neither append a row nor flag a conflict on a genuine one.
         if (!ticketMatches(app.qr_invitation_code, input.qrInvitationCode)) {
           return { kind: 'TICKET_MISMATCH' };
+        }
+
+        // Admission guard (ADR-034): a digital-lane candidate must have been
+        // admitted at the gate. Same lock, before any merge, nothing written.
+        if (!app.is_walk_in) {
+          const admitted = await tx<{ one: number }[]>`
+            SELECT 1 AS one FROM ${schema}.gate_admissions
+            WHERE application_id = ${input.applicationId}
+          `;
+          if (admitted.length === 0) return { kind: 'NOT_ADMITTED' };
         }
 
         const existing = await tx<StoredRow[]>`

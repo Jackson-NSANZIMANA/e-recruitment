@@ -603,6 +603,50 @@ paths:
         '404':
           description: Not found
 
+  /edge/v1/gate/admissions:
+    post:
+      operationId: admitAtGate
+      summary: |
+        Admit a candidate at the venue gate and SPEND their exam QR (BUILD-003,
+        ADR-034). The screening officer scans the QR and types the national ID
+        from the candidate's card. identity-service hashes it (sole key holder);
+        application-service decides under the officer's own credential, in one
+        transaction: genuine stored ticket, not already used, admissible status,
+        this venue, today (Africa/Kigali), card matches. Admission advances
+        SLOT_ASSIGNED → PHYSICAL_TEST_SCHEDULED. Every scan is logged. Never
+        retried by the edge.
+      tags: [gate]
+      x-usrp-session: officer
+      x-usrp-csrf: true
+      x-usrp-retry-on-g2g: false
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [qrToken, nationalId, gateVenueName]
+              properties:
+                qrToken: { type: string, minLength: 1, maxLength: 4096, description: The QR text as scanned (USRP-SLOT.v1…) }
+                nationalId: { type: string, pattern: '^[0-9]{16}$', description: From the physical card; hashed by identity-service, never stored or returned }
+                gateVenueName: { type: string, minLength: 1, maxLength: 200, description: The venue this gate is at }
+      responses:
+        '200':
+          description: "{ outcome: ADMITTED, candidate { applicationId, processingCode, category }, venueName, examDate, reportingTimeHour, admittedAt, statusAdvanced }"
+        '400':
+          description: INVALID_REQUEST — shape only (incl. a national ID that is not 16 digits)
+        '403':
+          description: PERMISSION_DENIED — only the screening post (admission.gate) admits
+        '409':
+          description: "ALREADY_ADMITTED (candidate, admittedAt, venueName, admittedBySelf) | NOT_ADMISSIBLE (candidate, currentStatus) | IDENTITY_MISMATCH (candidate) | WRONG_VENUE (ticketVenueName) | TOO_EARLY | EXPIRED (examDate)"
+        '422':
+          description: "INVALID_TICKET { reason: MALFORMED_TICKET | WRONG_AGENCY | UNKNOWN_TICKET | TICKET_NOT_ISSUED }"
+        '502':
+          description: UPSTREAM_CONTRACT_MISMATCH — an off-contract answer is never relayed
+        '503':
+          description: UPSTREAM_UNAVAILABLE
+
   /edge/v1/me/applications:
     get:
       operationId: listMyApplications
@@ -721,7 +765,7 @@ paths:
         - { name: applicationId, in: query, required: true, schema: { type: string, format: uuid } }
       responses:
         '200':
-          description: "{ state, agency, processingCode, campaignLabel, currentStatus, invitation? } — invitation only when state is READY (slot assigned, not expired, not on hold)"
+          description: "{ state, agency, processingCode, campaignLabel, currentStatus, invitation?, admission? } — invitation only when state is READY (slot assigned, not expired, not on hold, not yet used); admission { venueName, admittedAt } only when state is ADMITTED (the QR was spent at the gate, ADR-034, and is never re-sent)"
         '404':
           description: Not this citizen's application
         '502':

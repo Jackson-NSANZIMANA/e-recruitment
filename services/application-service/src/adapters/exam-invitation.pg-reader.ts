@@ -18,10 +18,19 @@ export class PgExamInvitationReader implements ExamInvitationReader {
         await tx`SET LOCAL ROLE ${sql(SYSTEM_ROLE)}`;
         for (const agency of AGENCIES) {
           const schema = sql(schemaForAgency(agency));
-          const rows = await tx<{ status: ApplicationStatus; processing_code: string; campaign_label: string | null; token: string | null }[]>`
-            SELECT a.status::text AS status, a.processing_code, c.campaign_label, a.qr_signed_token AS token
+          const rows = await tx<{
+            status: ApplicationStatus;
+            processing_code: string;
+            campaign_label: string | null;
+            token: string | null;
+            admitted_at: Date | null;
+            admitted_venue: string | null;
+          }[]>`
+            SELECT a.status::text AS status, a.processing_code, c.campaign_label, a.qr_signed_token AS token,
+                   g.admitted_at, g.venue_name AS admitted_venue
             FROM ${schema}.applications a
             LEFT JOIN public_core.recruitment_campaigns c ON c.id = a.campaign_id
+            LEFT JOIN ${schema}.gate_admissions g ON g.application_id = a.id
             WHERE a.id = ${applicationId} AND a.applicant_id = ${applicantId}
           `;
           const row = rows[0];
@@ -32,6 +41,9 @@ export class PgExamInvitationReader implements ExamInvitationReader {
               processingCode: row.processing_code,
               campaignLabel: row.campaign_label,
               token: row.token,
+              admission: row.admitted_at === null || row.admitted_venue === null
+                ? null
+                : { admittedAt: row.admitted_at.toISOString(), venueName: row.admitted_venue },
             };
           }
         }

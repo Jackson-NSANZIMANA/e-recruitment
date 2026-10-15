@@ -7,6 +7,8 @@
 // is rebuilt from closed fields: the state, the application's public
 // identifiers, and — only when READY — the signed token plus the PII-free
 // claims a citizen needs to read (venue, date, reporting hour, validity).
+// Once ADMITTED (ADR-034) the token is withheld for good and only the venue and
+// time of admission are returned.
 // ══════════════════════════════════════════════════════════════════
 
 import { HttpError, type HttpResult, type Route } from '@usrp/shared-http';
@@ -48,6 +50,13 @@ export function examInvitationRoute(service: ExamInvitationService, verify: Auth
         campaignLabel: outcome.campaignLabel,
         currentStatus: outcome.currentStatus,
       };
+      if (outcome.decision.state === 'ADMITTED' && outcome.admission !== null) {
+        // The spent QR is never re-sent; the citizen sees where and when.
+        return {
+          status: 200,
+          body: { ...base, admission: { venueName: outcome.admission.venueName, admittedAt: outcome.admission.admittedAt } },
+        };
+      }
       if (outcome.decision.state !== 'READY') return { status: 200, body: base };
       const c = outcome.decision.claims;
       return {

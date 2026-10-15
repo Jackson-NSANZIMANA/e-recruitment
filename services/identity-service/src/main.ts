@@ -37,6 +37,8 @@ import { applicantAuthRoutes } from './adapters/http/applicant-auth.controller.j
 import { erasureRequestRoutes } from './adapters/http/erasure-request.controller.js';
 import { LogSmsChannel } from '@usrp/shared-sms';
 import { HttpApplicationsGateway } from './adapters/applications.http-gateway.js';
+import { HttpGateAdmissionGateway } from './adapters/gate-admission.http-gateway.js';
+import { gateAdmissionRoutes } from './adapters/http/gate-admission.controller.js';
 import { HttpDocumentUploadGateway } from './adapters/document-upload.http-gateway.js';
 import { applicantDocumentRoutes } from './adapters/http/applicant-documents.controller.js';
 import { startBiometricResultConsumer } from './adapters/events/biometric-result.consumer.js';
@@ -122,6 +124,13 @@ async function main(): Promise<void> {
     port: config.runtime.port,
     routes: [
       verifyIdentityRoute(service, verify),
+      // BUILD-003 (ADR-034): the venue gate. Hashes the card's national ID and
+      // forwards the admission to application-service under the officer's token.
+      ...gateAdmissionRoutes(
+        new HttpGateAdmissionGateway({ applicationBaseUrl: portal.applicationBaseUrl }),
+        config.security.nationalIdHmacKey,
+        verify,
+      ),
       erasureRoute(createEraseIdentityService(config, bus, smsChannel), verify),
       ...applicantAuthRoutes(applicantAuth, applicationsGateway),
       // BUILD-002: the citizen's document door (session-authenticated bridge).

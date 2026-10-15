@@ -13,6 +13,7 @@ export type ExamInvitationOutcome =
       readonly campaignLabel: string | null;
       readonly currentStatus: string;
       readonly decision: InvitationDecision;
+      readonly admission: { readonly admittedAt: string; readonly venueName: string } | null;
     };
 
 export class ExamInvitationService {
@@ -30,7 +31,8 @@ export class ExamInvitationService {
       processingCode: row.processingCode,
       campaignLabel: row.campaignLabel,
       currentStatus: row.status,
-      decision: decideInvitation(applicationId, row.status, row.token, now),
+      decision: decideInvitation(applicationId, row.status, row.token, now, row.admission !== null),
+      admission: row.admission,
     };
   }
 }

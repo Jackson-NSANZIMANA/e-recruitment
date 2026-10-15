@@ -73,13 +73,15 @@ const APPLICANT_BIO = '5f000000-0000-4000-8000-000000000001';   // has biometric
 const APPLICANT_NOBIO = '5f000000-0000-4000-8000-000000000002'; // no biometric
 const APPLICANT_BIO_2 = '5f000000-0000-4000-8000-000000000003'; // out-of-order scenario
 const APPLICANT_BIO_3 = '5f000000-0000-4000-8000-000000000004'; // conflict scenario
+const APPLICANT_UNADMITTED = '5f000000-0000-4000-8000-000000000005'; // never let in at the gate
 const CAMPAIGN_ID = '5f000000-0000-4000-8000-0000000000c0';
 const APP_ACCEPT = '5f000000-0000-4000-8000-00000000a001';   // happy path → COMPLETE
 const APP_ORDER = '5f000000-0000-4000-8000-00000000a002';    // out-of-order / stale / dup
 const APP_CONFLICT = '5f000000-0000-4000-8000-00000000a003'; // concurrent → held → resolve
 const APP_NOBIO = '5f000000-0000-4000-8000-00000000a004';    // biometric precondition
-const APP_IDS = [APP_ACCEPT, APP_ORDER, APP_CONFLICT, APP_NOBIO];
-const APPLICANT_IDS = [APPLICANT_BIO, APPLICANT_NOBIO, APPLICANT_BIO_2, APPLICANT_BIO_3];
+const APP_UNADMITTED = '5f000000-0000-4000-8000-00000000a005'; // ADR-034: genuine ticket, no gate admission
+const APP_IDS = [APP_ACCEPT, APP_ORDER, APP_CONFLICT, APP_NOBIO, APP_UNADMITTED];
+const APPLICANT_IDS = [APPLICANT_BIO, APPLICANT_NOBIO, APPLICANT_BIO_2, APPLICANT_BIO_3, APPLICANT_UNADMITTED];
 
 const DEV_A = 'DEV-RDF-A';
 const DEV_B = 'DEV-RDF-B';
@@ -156,6 +158,7 @@ async function cleanup(): Promise<void> {
     await tx`SET LOCAL session_replication_role = replica`;
     await tx`DELETE FROM rdf_ops.application_status_history WHERE application_id = ANY(${APP_IDS}::uuid[])`;
     await tx`DELETE FROM rdf_ops.physical_test_scores WHERE application_id = ANY(${APP_IDS}::uuid[])`;
+    await tx`DELETE FROM rdf_ops.gate_admissions WHERE application_id = ANY(${APP_IDS}::uuid[])`;
     await tx`DELETE FROM rdf_ops.applications WHERE id = ANY(${APP_IDS}::uuid[])`;
   });
   await admin`DELETE FROM public_core.field_devices WHERE device_id = ANY(${DEVICE_IDS})`;
@@ -179,6 +182,8 @@ async function seed(): Promise<void> {
       (${APPLICANT_BIO_2}, ${'a3'.repeat(32)}, 'x','x','x','x','MALE','WEB',
        'VERIFIED'::public_core.identity_verification_status, now()),
       (${APPLICANT_BIO_3}, ${'a4'.repeat(32)}, 'x','x','x','x','MALE','WEB',
+       'VERIFIED'::public_core.identity_verification_status, now()),
+      (${APPLICANT_UNADMITTED}, ${'a5'.repeat(32)}, 'x','x','x','x','MALE','WEB',
        'VERIFIED'::public_core.identity_verification_status, now())`;
 
   await admin.begin(async (tx) => {
@@ -208,6 +213,16 @@ async function seed(): Promise<void> {
   await seedApp(APP_ORDER, APPLICANT_BIO_2, 'RDF-90002');
   await seedApp(APP_CONFLICT, APPLICANT_BIO_3, 'RDF-90003');
   await seedApp(APP_NOBIO, APPLICANT_NOBIO, 'RDF-90004');
+  await seedApp(APP_UNADMITTED, APPLICANT_UNADMITTED, 'RDF-90005');
+
+  // ADR-034: the four scored candidates were let in at the venue gate.
+  // APP_UNADMITTED holds a genuine ticket but was never admitted.
+  for (const id of [APP_ACCEPT, APP_ORDER, APP_CONFLICT, APP_NOBIO]) {
+    await admin`
+      INSERT INTO rdf_ops.gate_admissions
+        (application_id, ticket_id, campaign_id, venue_name, exam_date, identity_method, admitted_by_id)
+      VALUES (${id}, ${ticketFor(id)}, ${CAMPAIGN_ID}, 'FIELDSYNC VENUE', '2026-08-01', 'NATIONAL_ID_CARD', ${OFFICER_ID})`;
+  }
 
   // A pre-revoked device (enrolled directly, revoked) to prove revocation-aware verify.
   await admin`
@@ -404,6 +419,12 @@ async function main(): Promise<void> {
     check('forged exam ticket → REJECTED TICKET_MISMATCH', ft.result['status'] === 'REJECTED' && ft.result['reason'] === 'TICKET_MISMATCH', JSON.stringify(ft.result));
     check('forged-ticket record never stored (APP_ORDER still has exactly 1 row)', (await admin`SELECT count(*)::int AS n FROM rdf_ops.physical_test_scores WHERE application_id=${APP_ORDER}`)[0]?.['n'] === 1);
     check('rejection audited as FIELD_SCORE_REJECTED', busMain.published.some((e) => e.eventType === 'AUDIT_ENTRY' && asRecord(e)['action'] === 'FIELD_SCORE_REJECTED' && asRecord(asRecord(e)['metadata'])['reason'] === 'TICKET_MISMATCH'));
+    // ADR-034: the RIGHT ticket, a genuine signature — but the gate never let
+    // this candidate in. A score for someone not admitted is not evidence.
+    const unadmitted = await syncOne(makeRecord(APP_UNADMITTED, keysA.privateKeyPem, DEV_A, { [DEV_A]: 1 }));
+    check('genuine ticket never admitted at the gate → REJECTED NOT_ADMITTED', unadmitted.result['status'] === 'REJECTED' && unadmitted.result['reason'] === 'NOT_ADMITTED', JSON.stringify(unadmitted.result));
+    check('unadmitted record never stored', (await admin`SELECT count(*)::int AS n FROM rdf_ops.physical_test_scores WHERE application_id=${APP_UNADMITTED}`)[0]?.['n'] === 0);
+    check('NOT_ADMITTED audited as FIELD_SCORE_REJECTED', busMain.published.some((e) => e.eventType === 'AUDIT_ENTRY' && asRecord(e)['action'] === 'FIELD_SCORE_REJECTED' && asRecord(asRecord(e)['metadata'])['reason'] === 'NOT_ADMITTED'));
 
     // ── 7. Biometric precondition ──────────────────────────────────
     console.log('\n── 7. Biometric-pass precondition enforced ──');

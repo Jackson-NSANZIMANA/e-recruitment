@@ -196,6 +196,11 @@ export type {
 export { LogSmsChannel } from '@usrp/shared-sms';
 export type { OutboundSms, SmsChannel, SmsDeliveryOutcome } from '@usrp/shared-sms';
 export { HttpApplicationsGateway } from './adapters/applications.http-gateway.js';
+// ── Gate admission front door (BUILD-003, ADR-034) ──
+export { gateAdmissionRoutes, GATE_ADMISSIONS_PATH } from './adapters/http/gate-admission.controller.js';
+export { HttpGateAdmissionGateway, UPSTREAM_GATE_ADMISSION_PATH } from './adapters/gate-admission.http-gateway.js';
+export { projectGateAdmission, type RelayedResult } from './domain/gate-admission-relay.js';
+export type { GateAdmissionGateway, GateAdmissionRequest, GateAdmissionUpstream } from './ports/gate-admission-gateway.js';
 export type { HttpApplicationsGatewayOptions } from './adapters/applications.http-gateway.js';
 export type {
   ApplicantApplication,

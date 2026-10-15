@@ -224,9 +224,15 @@ apply_sql "${RLS_DIR}/0030_document_venue_verification.sql" "rls/0030 (document 
 # 23j. The signed exam invitation persisted on the application (ADR-033).
 apply_sql "${RLS_DIR}/0031_application_exam_invitation.sql" "rls/0031 (application exam invitation)"
 
+# 23k. Single-use admission at the venue gate (BUILD-003, ADR-034): one
+#     immutable admission per application and per ticket, an append-only log
+#     of every scan, and an agency-scoped identity-match function that never
+#     returns the stored national-id hash.
+apply_sql "${RLS_DIR}/0032_gate_admissions.sql" "rls/0032 (gate admissions)"
+
 printf '\n'
 
-ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts + applicant auth + erasure requests + stored contact + edge sessions + event outbox + slot reservations + submission integrity + walk-in outbox grant + shared rate-limit buckets + required extensions + campaign control plane + functions-only command boundary + onboarding lockout + application policy binding + document venue verification + exam invitation in place"
+ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts + applicant auth + erasure requests + stored contact + edge sessions + event outbox + slot reservations + submission integrity + walk-in outbox grant + shared rate-limit buckets + required extensions + campaign control plane + functions-only command boundary + onboarding lockout + application policy binding + document venue verification + exam invitation + gate admissions in place"
 
 # 24. Dev officer accounts (one per agency). A CONVENIENCE seed so the officer
 #     console / manual login smoke tests have real credentials to drive —

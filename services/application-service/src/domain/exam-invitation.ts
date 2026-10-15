@@ -12,7 +12,10 @@
 // later fails vetting walk up to a gate with a credential.
 //
 //   READY        SLOT_ASSIGNED / PHYSICAL_TEST_SCHEDULED, token present, not
-//                expired → the QR.
+//                expired, not yet used → the QR.
+//   ADMITTED     the QR was spent at the venue gate (BUILD-003, ADR-034). It is
+//                single-use, so it is never shown again: re-displaying a spent
+//                credential only invites a second presentation.
 //   PENDING      still being vetted (or green and awaiting a slot).
 //   ON_HOLD      ADJUDICATION_REVIEW — a late hold: the invitation is withheld
 //                until an officer clears it.
@@ -31,6 +34,7 @@ import type { ApplicationStatus } from '@usrp/shared-types';
 
 export type InvitationState =
   | 'READY'
+  | 'ADMITTED'
   | 'PENDING'
   | 'ON_HOLD'
   | 'COMPLETED'
@@ -117,12 +121,14 @@ export function decideInvitation(
   status: ApplicationStatus,
   token: string | null,
   now: Date,
+  admitted = false,
 ): InvitationDecision {
   if (status === 'ADJUDICATION_REVIEW') return { state: 'ON_HOLD' };
   if (COMPLETED_STATUSES.has(status)) return { state: 'COMPLETED' };
   if (PENDING_STATUSES.has(status)) return { state: 'PENDING' };
   if (WALK_IN_STATUSES.has(status)) return { state: 'WALK_IN' };
   if (!READY_STATUSES.has(status)) return { state: 'CLOSED' };
+  if (admitted) return { state: 'ADMITTED' };
   if (token === null) return { state: 'UNAVAILABLE' };
   const claims = readInvitationClaims(token);
   // A token that names another application is never handed out.
