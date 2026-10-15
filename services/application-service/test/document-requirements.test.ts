@@ -122,11 +122,16 @@ test('owner decision: a notarised diploma needs the upload AND THEN the registry
   assert.equal(item?.registry, 'HEC', 'a degree category verifies through HEC');
 });
 
-test('the notarised item follows the CATEGORY registry (RCS General Enlistee is NESA-path)', () => {
-  const req = resolveRequiredDocuments('GENERAL_ENLISTEE', ['DEGREE_DIPLOMA_NOTARIZED']);
-  const c = evaluateDocumentChecklist('GENERAL_ENLISTEE', req, allPassed, [doc('DEGREE_DIPLOMA_NOTARIZED', { forensicsLane: 'GREEN' })]);
-  assert.equal(c.items[0]?.registry, 'NESA');
-  assert.equal(c.items[0]?.satisfaction, 'UPLOADED_CLEARED');
+test('owner decision 2026-10-15: RCS General Enlistee needs the A2 certificate via NESA, never a notarised degree', () => {
+  const req = resolveRequiredDocuments('GENERAL_ENLISTEE', undefined);
+  assert.ok(req.types.includes('ALEVEL_CERTIFICATE'));
+  assert.ok(!req.types.includes('DEGREE_DIPLOMA_NOTARIZED'), 'no notarised degree for General Enlistee');
+  const passed = evaluateDocumentChecklist('GENERAL_ENLISTEE', req, allPassed, []);
+  const a2 = passed.items.find((i) => i.documentType === 'ALEVEL_CERTIFICATE');
+  assert.equal(a2?.registry, 'NESA');
+  assert.equal(a2?.satisfaction, 'API_VERIFIED', 'a successful NESA lookup waives paper, upload and venue sighting');
+  const early = evaluateDocumentChecklist('GENERAL_ENLISTEE', req, pending, []);
+  assert.equal(early.items.find((i) => i.documentType === 'ALEVEL_CERTIFICATE')?.satisfaction, 'MISSING');
 });
 
 test("every announced requirement is a type its agency can actually store", () => {

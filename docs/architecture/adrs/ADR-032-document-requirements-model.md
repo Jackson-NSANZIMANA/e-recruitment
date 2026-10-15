@@ -1,7 +1,6 @@
 # ADR-032 — Document requirements: what is required, and what "satisfied" means
 
-**Status:** Accepted (model + pure domain). **Enforcement is NOT decided** — see
-"Owner decisions".
+**Status:** Accepted. Owner decisions recorded 2026-10-14 and 2026-10-15 (below).
 
 ## Context
 `REQUIRED_DOCUMENTS` (shared-types) transcribes each agency's announced list
@@ -33,12 +32,21 @@ would contradict the very announcements the system encodes.
 | Who clears a document at the venue? | **The front-door on-site officer who checks candidates in** | Permission `document.verify.venue` → `screening_officer` only; `POST /v1/applications/documents/verify-at-venue`; attributed, audited once, write-once (rls/0030) |
 | Notarised diploma: is the registry enough? | **Upload, then registry verification** | `BOTH_REQUIRED`: cleared upload AND the category's academic registry (HEC for degree categories); a venue sighting does not replace the upload; `AWAITING_REGISTRY` in between |
 
-### Flag raised with the decision
-RCS **General Enlistee** lists `DEGREE_DIPLOMA_NOTARIZED`, but the category is
-NESA-path (A-Level), so HEC never runs for it. The rule is implemented as "the
-category's OWN academic registry", which is HEC for every degree category and
-NESA for General Enlistee. Please confirm, or correct the ground-truth entry
-(it may really be a notarised A-Level certificate).
+### RCS General Enlistee — DECIDED 2026-10-15
+The earlier flag (the category listed `DEGREE_DIPLOMA_NOTARIZED` while being
+NESA-path) is resolved by the owner:
+- **Dropped:** the notarised degree/diploma is removed from the General Enlistee
+  ground-truth list (`REQUIRED_DOCUMENTS.GENERAL_ENLISTEE`), replaced by the
+  A-Level (A2) certificate `ALEVEL_CERTIFICATE`.
+- **NESA only:** the category's academic route is NESA at A2
+  (`EDUCATION_REQUIREMENTS.GENERAL_ENLISTEE`: `nesaVerificationRequired: true`,
+  `hecVerificationRequired: false`, `minLevel: A_LEVEL_A2`).
+- **Automated waiver:** a successful NESA lookup makes the item `API_VERIFIED`;
+  no paper, upload or venue sighting is required for the academic credential.
+- `BOTH_REQUIRED` (upload then registry) still governs the notarised diploma
+  where it remains required: RCS Officer one-year and specialist categories (HEC).
+- Proven by `document-requirements.test.ts` ("RCS General Enlistee needs the
+  A2 certificate via NESA, never a notarised degree").
 
 ## Surfaces
 - `GET /v1/applications/document-checklist?applicationId=` — officer, own agency, `application.read`.

@@ -327,11 +327,14 @@ export const REQUIRED_DOCUMENTS: Readonly<
     'GOOD_CONDUCT_CERTIFICATE',
   ],
 
-  // RCS General Enlistee: NID + Notarized cert + Good Conduct +
-  // Non-Conviction + Celibacy + Medical (govt physician)
+  // RCS General Enlistee: NID + A-Level (A2) certificate + Good Conduct +
+  // Non-Conviction + Celibacy + Medical (govt physician).
+  // Owner decision 2026-10-15 (ADR-032): the category is A2-level and verified
+  // through NESA ONLY — no notarised degree/diploma. A successful NESA lookup
+  // is API_VERIFIED and waives the paper entirely.
   GENERAL_ENLISTEE: [
     'NATIONAL_ID',
-    'DEGREE_DIPLOMA_NOTARIZED',     // Notarized — not just copy
+    'ALEVEL_CERTIFICATE',
     'GOOD_CONDUCT_CERTIFICATE',
     'NON_CONVICTION_CERTIFICATE',
     'CELIBACY_CERTIFICATE',
