@@ -14,6 +14,8 @@
 
 import { DocumentChecklistService } from './application/document-checklist.service.js';
 import { ExamInvitationService } from './application/exam-invitation.service.js';
+import { ReannounceStalledClearancesService } from './application/reannounce-stalled-clearances.service.js';
+import { PgStalledClearanceRepository } from './adapters/stalled-clearance.pg-repository.js';
 import { PgExamInvitationReader } from './adapters/exam-invitation.pg-reader.js';
 import { PgDocumentChecklistRepository } from './adapters/document-checklist.pg-repository.js';
 import type { EventBus } from '@usrp/shared-events';
@@ -76,6 +78,8 @@ export interface ApplicationService {
   readonly documentChecklist: DocumentChecklistService;
   /** The citizen's downloadable exam QR (ADR-033). */
   readonly examInvitation: ExamInvitationService;
+  /** Re-offers clearances scheduling deferred (no venue / no capacity) to scheduling. */
+  readonly slotRetry: ReannounceStalledClearancesService;
   /** Officer-authorized BUILD-001 campaign aggregate writes. */
   readonly campaignControl: CampaignControlService;
   /** Anonymous published-campaign allowlist reads. */
@@ -135,6 +139,11 @@ export function createApplicationService(
       eventBus,
     }),
     examInvitation: new ExamInvitationService({ reader: new PgExamInvitationReader() }),
+    slotRetry: new ReannounceStalledClearancesService({
+      repository: new PgStalledClearanceRepository(),
+      events,
+      policy: { graceMs: config.slotRetry.graceMs, batchSize: config.slotRetry.batchSize },
+    }),
     documentChecklist: new DocumentChecklistService({
       repository: new PgDocumentChecklistRepository(),
       eventBus,
@@ -430,6 +439,12 @@ export {
 
 // ── Exam invitation (ADR-033) ──
 export { ExamInvitationService } from './application/exam-invitation.service.js';
+export {
+  ReannounceStalledClearancesService,
+  clearanceEvents,
+  type SlotRetryPolicy,
+} from './application/reannounce-stalled-clearances.service.js';
+export { PgStalledClearanceRepository } from './adapters/stalled-clearance.pg-repository.js';
 export { PgExamInvitationReader } from './adapters/exam-invitation.pg-reader.js';
 export { examInvitationRoute, EXAM_INVITATION_BY_APPLICANT_PATH } from './adapters/http/exam-invitation.controller.js';
 export { decideInvitation, readInvitationClaims } from './domain/exam-invitation.js';

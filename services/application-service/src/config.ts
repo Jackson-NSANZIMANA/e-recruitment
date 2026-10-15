@@ -12,6 +12,7 @@
 
 import {
   boolean,
+  integer,
   loadAuthVerifyConfig,
   loadDatabaseConfig,
   loadEnv,
@@ -31,6 +32,34 @@ export interface ApplicationServiceConfig {
   readonly auth: AuthVerifyConfig;
   /** Separation-of-duties rules enforced per application (BUILD-004 §D). */
   readonly separationOfDuties: SeparationOfDutiesConfig;
+  /** The stalled-clearance re-announce sweep (scheduling deferrals). */
+  readonly slotRetry: SlotRetryConfig;
+}
+
+/**
+ * How often applications stuck at DOCUMENT_REVIEW_GREEN without a slot are
+ * offered to scheduling again. intervalMs = 0 disables the sweep.
+ */
+export interface SlotRetryConfig {
+  readonly intervalMs: number;
+  readonly graceMs: number;
+  readonly batchSize: number;
+}
+
+export function loadSlotRetryConfig(source: EnvSource = process.env): SlotRetryConfig {
+  const env = loadEnv(
+    {
+      SLOT_RETRY_INTERVAL_MS: withDefault(integer({ min: 0 }), 15 * 60_000),
+      SLOT_RETRY_GRACE_MS: withDefault(integer({ min: 60_000 }), 6 * 60 * 60_000),
+      SLOT_RETRY_BATCH_SIZE: withDefault(integer({ min: 1, max: 1000 }), 200),
+    },
+    source,
+  );
+  return {
+    intervalMs: env.SLOT_RETRY_INTERVAL_MS,
+    graceMs: env.SLOT_RETRY_GRACE_MS,
+    batchSize: env.SLOT_RETRY_BATCH_SIZE,
+  };
 }
 
 /**
@@ -69,5 +98,6 @@ export function loadApplicationConfig(source: EnvSource = process.env): Applicat
     database: loadDatabaseConfig(source),
     auth: loadAuthVerifyConfig(source),
     separationOfDuties: loadSeparationOfDutiesConfig(source),
+    slotRetry: loadSlotRetryConfig(source),
   };
 }

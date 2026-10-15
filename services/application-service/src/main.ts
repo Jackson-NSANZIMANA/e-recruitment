@@ -124,6 +124,30 @@ async function main(): Promise<void> {
   outboxRelay.start();
   console.log(JSON.stringify({ msg: 'outbox_relay_started', producer: OUTBOX_PRODUCER }));
 
+  // Scheduling deferrals are not terminal: re-offer stalled clearances on a
+  // bounded cadence (ReannounceStalledClearancesService). A failed tick is
+  // logged and retried on the next one; it never takes the service down.
+  let slotRetryTimer: NodeJS.Timeout | null = null;
+  if (config.slotRetry.intervalMs > 0) {
+    let running = false;
+    slotRetryTimer = setInterval(() => {
+      if (running) return;
+      running = true;
+      service.slotRetry
+        .sweep()
+        .then((count) => {
+          if (count > 0) console.log(JSON.stringify({ msg: 'slot_retry_reannounced', count }));
+        })
+        .catch((error: unknown) => {
+          console.error(JSON.stringify({ msg: 'slot_retry_failed', error: error instanceof Error ? error.message : 'unknown' }));
+        })
+        .finally(() => {
+          running = false;
+        });
+    }, config.slotRetry.intervalMs);
+    slotRetryTimer.unref();
+  }
+
   const server = await startHttpServer({
     serviceName: config.runtime.serviceName,
     port: config.runtime.port,
@@ -158,6 +182,7 @@ async function main(): Promise<void> {
     },
     onShutdown: async (): Promise<void> => {
       console.log(JSON.stringify({ msg: 'service_stopping', service: config.runtime.serviceName }));
+      if (slotRetryTimer !== null) clearInterval(slotRetryTimer);
       await outboxRelay.stop();
       await bus.disconnect();
       await sql.end({ timeout: 5 });
