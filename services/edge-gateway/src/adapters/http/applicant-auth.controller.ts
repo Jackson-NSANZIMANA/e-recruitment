@@ -39,6 +39,18 @@ const OTP_RE = /^\d{6}$/;
 /** Onboarding-begin attempts per National ID per minute (DOB is guessable). */
 const ONBOARDING_BEGIN_PER_NID_PER_MINUTE = 5;
 
+/**
+ * The rate-limit identity of a phone number: its last nine digits (the
+ * Rwandan subscriber number), so `0788 123 456`, `0788123456` and
+ * `+250788123456` share ONE bucket. Keying on the typed string let a caller
+ * flood one handset by varying spaces or the country prefix. This is only a
+ * bucket key — deliverability is identity-service's decision.
+ */
+export function phoneBucketTarget(raw: string): string {
+  const digits = raw.replace(/\D/g, '');
+  return digits.length >= 9 ? digits.slice(-9) : digits;
+}
+
 function requireOnboardingToken(value: unknown): string {
   if (typeof value !== 'string' || value.length === 0 || value.length > 512) {
     throw new HttpError(400, 'INVALID_REQUEST', 'An onboarding token is required.');
@@ -55,8 +67,9 @@ function requireOnboardingToken(value: unknown): string {
  * answer is one body for unknown NID, non-citizen and DOB mismatch.
  *
  * Because DOB is guessable by enumeration, the per-NID bucket here is far
- * stricter than the OTP buckets. A per-minute window is still not a durable
- * lockout; that counter belongs in identity-service's store (tracked).
+ * stricter than the OTP buckets. It is the fast brake; the DURABLE one is
+ * identity-service's per-NID lockout (rls/0028: 5 mismatches lock the ID for
+ * an hour, uniformly, without consulting NIDA).
  */
 export function beginApplicantOnboardingHandler(deps: EdgeDeps): RouteHandler {
   return withAnonymous(deps, 'beginApplicantOnboarding', async (ctx) => {
@@ -115,7 +128,7 @@ export function requestApplicantOtpHandler(deps: EdgeDeps): RouteHandler {
     // be used to SMS-bomb many numbers, and one number cannot be flooded from
     // many identities.
     await enforceRateLimit(deps.limiter, targetBucketKey(key, 'otp', onboardingToken), limits.otpPerMinute);
-    await enforceRateLimit(deps.limiter, targetBucketKey(key, 'otpPhone', phoneNumber), limits.otpPerMinute);
+    await enforceRateLimit(deps.limiter, targetBucketKey(key, 'otpPhone', phoneBucketTarget(phoneNumber)), limits.otpPerMinute);
     await enforceRateLimit(
       deps.limiter,
       `${clientBucketKey(ctx, limits.trustedProxyHops)}:otp`,
