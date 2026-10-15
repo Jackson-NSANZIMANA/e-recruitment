@@ -57,6 +57,7 @@ import {
 import { officerTransitionRoutes } from './adapters/http/officer-transitions.controller.js';
 import { withdrawOwnRoute } from './adapters/http/self-withdrawal.controller.js';
 import { documentChecklistRoutes } from './adapters/http/document-checklist.controller.js';
+import { examInvitationRoute } from './adapters/http/exam-invitation.controller.js';
 import { walkInRoutes } from './adapters/http/walk-in.controller.js';
 import { startVettingResultConsumer } from './adapters/events/vetting-result.consumer.js';
 import { startSlotAssignedConsumer } from './adapters/events/slot-assigned.consumer.js';
@@ -140,6 +141,7 @@ async function main(): Promise<void> {
       byApplicantRoute(service.list, verify), // system-token: applicant portal's cross-agency self read (ADR-018)
       withdrawOwnRoute(service.selfWithdrawal, verify), // system-token: the citizen's own voluntary withdrawal (ADR-020)
       ...documentChecklistRoutes(service.documentChecklist, verify), // ADR-032 advisory checklist + venue verification
+      examInvitationRoute(service.examInvitation, verify), // ADR-033 system-token: the citizen's downloadable exam QR
       // officer-token writes: medical-review / final-decision / accept / adjudicate
       ...officerTransitionRoutes(service.officerTransitions, verify),
       // officer-token writes: exam-day walk-in register + on-site vet (RDF, ADR-012)

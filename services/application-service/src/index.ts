@@ -13,6 +13,8 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { DocumentChecklistService } from './application/document-checklist.service.js';
+import { ExamInvitationService } from './application/exam-invitation.service.js';
+import { PgExamInvitationReader } from './adapters/exam-invitation.pg-reader.js';
 import { PgDocumentChecklistRepository } from './adapters/document-checklist.pg-repository.js';
 import type { EventBus } from '@usrp/shared-events';
 import { PgIdentityReader } from './adapters/identity.pg-reader.js';
@@ -72,6 +74,8 @@ export interface ApplicationService {
   readonly selfWithdrawal: SelfWithdrawalService;
   /** Advisory document checklist + venue verification (ADR-032). */
   readonly documentChecklist: DocumentChecklistService;
+  /** The citizen's downloadable exam QR (ADR-033). */
+  readonly examInvitation: ExamInvitationService;
   /** Officer-authorized BUILD-001 campaign aggregate writes. */
   readonly campaignControl: CampaignControlService;
   /** Anonymous published-campaign allowlist reads. */
@@ -130,6 +134,7 @@ export function createApplicationService(
       repository: new PgWithdrawalRepository(),
       eventBus,
     }),
+    examInvitation: new ExamInvitationService({ reader: new PgExamInvitationReader() }),
     documentChecklist: new DocumentChecklistService({
       repository: new PgDocumentChecklistRepository(),
       eventBus,
@@ -422,3 +427,9 @@ export {
   BOTH_REQUIRED,
   SATISFIED,
 } from './domain/document-requirements.js';
+
+// ── Exam invitation (ADR-033) ──
+export { ExamInvitationService } from './application/exam-invitation.service.js';
+export { PgExamInvitationReader } from './adapters/exam-invitation.pg-reader.js';
+export { examInvitationRoute, EXAM_INVITATION_BY_APPLICANT_PATH } from './adapters/http/exam-invitation.controller.js';
+export { decideInvitation, readInvitationClaims } from './domain/exam-invitation.js';
