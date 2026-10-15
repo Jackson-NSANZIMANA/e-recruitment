@@ -11,6 +11,8 @@ export interface InvitationRow {
   readonly processingCode: string;
   readonly campaignLabel: string | null;
   readonly token: string | null;
+  /** The gate admission, once the QR has been spent (rls/0032). */
+  readonly admission: { readonly admittedAt: string; readonly venueName: string } | null;
 }
 
 export interface ExamInvitationReader {

@@ -25,6 +25,8 @@ import { PgApplicationRepository } from './adapters/application.pg-repository.js
 import { PgApplicationReadRepository } from './adapters/application-read.pg-repository.js';
 import { PgOfficerTransitionRepository } from './adapters/officer-transition.pg-repository.js';
 import { PgWalkInRepository } from './adapters/walk-in.pg-repository.js';
+import { PgGateAdmissionRepository } from './adapters/gate-admission.pg-repository.js';
+import { GateAdmissionService } from './application/gate-admission.service.js';
 import { PgSubmissionLedger } from './adapters/submission-ledger.pg-repository.js';
 import { PgOutboxDispatcher } from './adapters/outbox/pg-event-outbox.js';
 import { SubmitApplicationService } from './application/submit-application.service.js';
@@ -78,6 +80,8 @@ export interface ApplicationService {
   readonly documentChecklist: DocumentChecklistService;
   /** The citizen's downloadable exam QR (ADR-033). */
   readonly examInvitation: ExamInvitationService;
+  /** HTTP officer write — spend the exam QR at the venue gate (BUILD-003, ADR-034). */
+  readonly gateAdmission: GateAdmissionService;
   /** Re-offers clearances scheduling deferred (no venue / no capacity) to scheduling. */
   readonly slotRetry: ReannounceStalledClearancesService;
   /** Officer-authorized BUILD-001 campaign aggregate writes. */
@@ -139,6 +143,7 @@ export function createApplicationService(
       eventBus,
     }),
     examInvitation: new ExamInvitationService({ reader: new PgExamInvitationReader() }),
+    gateAdmission: new GateAdmissionService({ repository: new PgGateAdmissionRepository(), events }),
     slotRetry: new ReannounceStalledClearancesService({
       repository: new PgStalledClearanceRepository(),
       events,
@@ -436,6 +441,22 @@ export {
   BOTH_REQUIRED,
   SATISFIED,
 } from './domain/document-requirements.js';
+
+// ── Gate admission (BUILD-003, ADR-034) ──
+export { GateAdmissionService, type AdmitAtGateCommand } from './application/gate-admission.service.js';
+export { PgGateAdmissionRepository } from './adapters/gate-admission.pg-repository.js';
+export { gateAdmissionRoutes, GATE_ADMISSION_PATH } from './adapters/http/gate-admission.controller.js';
+export {
+  parseGateTicket,
+  decideBeforeIdentity,
+  normalizeVenueName,
+  kigaliDate,
+  GATE_OUTCOMES,
+  ADMISSIBLE_STATUSES,
+  type GateOutcome,
+  type GateTicketClaims,
+} from './domain/gate-admission.js';
+export type { GateAdmissionOutcome, GateCandidate } from './ports/gate-admission-repository.js';
 
 // ── Exam invitation (ADR-033) ──
 export { ExamInvitationService } from './application/exam-invitation.service.js';
