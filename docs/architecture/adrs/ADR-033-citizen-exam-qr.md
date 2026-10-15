@@ -50,7 +50,8 @@ download and bring to the screening.
 ## Consequences
 - A downloaded QR is a credential until the end of exam day (UTC); a screenshot
   shared with someone else is still bound to this application id and must be
-  matched at the gate (biometric check / ID) — admission is BUILD-003.
+  matched at the gate. Admission is now single-use and bound to the national
+  ID card (ADR-034); once used, the page shows ADMITTED and never the QR.
 - Key rotation is enabled by `keyId` but not implemented; the private key must
   move to an HSM/KMS before production (ADR-009 residual, unchanged).
 - **Scheduling deferrals no longer strand the citizen at PENDING.** A

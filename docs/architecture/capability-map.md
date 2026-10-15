@@ -49,7 +49,7 @@ Legend: ✅ built and proven by a live selfcheck · 🟡 partial · ❌ missing 
 |---|---|---|
 | The tablet app itself | ❌ | no app in `e-recruitment-ui/apps`; `OFFLINE_CAPTURE_CAN_SYNC=false` |
 | Officer login, device enrolment | ✅ backend+edge | |
-| QR scan → single-use admission record | ❌ | BUILD-003 (no admission/check-in record exists) |
+| QR scan → single-use admission record | ✅ backend+edge **(S)** · ✅ console screen | BUILD-003, ADR-034: one admission per QR (DB-unique), national ID card bound, every scan logged; advances to PHYSICAL_TEST_SCHEDULED; field scores require it. Online only. |
 | Biometric check-in | 🟡 | service exists; matcher is a **mock that always passes** |
 | Venue document clearing by the check-in post | ✅ backend+edge **(S)** · ❌ screen | ADR-032 `document.verify.venue` |
 | Walk-in register / vet (RDF) | ✅ (permissioned) | |
@@ -71,7 +71,7 @@ Legend: ✅ built and proven by a live selfcheck · 🟡 partial · ❌ missing 
 ## 5. Recommended build order from here
 
 1. **Officer lifecycle** (create, assign posts, disable, revoke; audited; `agency_admin`) — without it the permission model cannot be operated.
-2. **BUILD-003 check-in & admission** — single-use QR admission, venue document clearing in the flow, biometric evidence per attempt.
+2. ~~**BUILD-003 check-in & admission**~~ — single-use QR admission delivered (ADR-034). Remaining: venue document clearing inside the gate flow, biometric evidence per attempt, offline admission queue.
 3. **Tablet PWA** on the field-sync contract.
 4. **Admin dashboard** — campaign control plane (closes the 7 drift findings), queues, exception desk.
 5. **BUILD-005** notification intents + citizen timeline; **BUILD-006** operations.
