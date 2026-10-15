@@ -9,6 +9,7 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { buildMultipartFormData } from '@usrp/shared-http';
+import { logError, summariseError } from '@usrp/shared-logging';
 import type {
   DocumentRefusal,
   DocumentUploadGateway,
@@ -56,7 +57,9 @@ export class HttpDocumentUploadGateway implements DocumentUploadGateway {
     let token: string;
     try {
       token = await this.#systemToken();
-    } catch {
+    } catch (err) {
+      // The citizen sees one opaque 502; the operator must see WHICH hop failed.
+      logError('document_door_dependency_unavailable', { stage: 'iam_token', error: summariseError(err) });
       return { kind: 'DEPENDENCY_UNAVAILABLE' };
     }
     const multipart = buildMultipartFormData(
@@ -72,7 +75,8 @@ export class HttpDocumentUploadGateway implements DocumentUploadGateway {
         body: multipart.body,
         signal: AbortSignal.timeout(this.#opts.timeoutMs ?? DEFAULT_TIMEOUT_MS),
       });
-    } catch {
+    } catch (err) {
+      logError('document_door_dependency_unavailable', { stage: 'forensics_transport', error: summariseError(err) });
       return { kind: 'DEPENDENCY_UNAVAILABLE' };
     }
     if (res.status === 401) this.#cached = null;
@@ -88,6 +92,8 @@ export class HttpDocumentUploadGateway implements DocumentUploadGateway {
     if (res.status >= 400 && res.status < 500 && REFUSALS.has(code)) {
       return { kind: 'REFUSED', httpStatus: res.status, code: code as DocumentRefusal };
     }
+    // Status and closed code only — never the body, which is not ours to log.
+    logError('document_door_dependency_unavailable', { stage: 'forensics_response', status: res.status, code });
     return { kind: 'DEPENDENCY_UNAVAILABLE' };
   }
 
