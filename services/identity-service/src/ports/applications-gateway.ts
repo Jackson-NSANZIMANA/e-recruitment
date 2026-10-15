@@ -88,7 +88,30 @@ export type DocumentChecklistResult =
   | { readonly kind: 'OK'; readonly checklist: DocumentChecklistView }
   | { readonly kind: 'NOT_FOUND' };
 
+/** The citizen's exam QR view (ADR-033), allowlisted field by field. */
+export interface ExamInvitationView {
+  readonly state: string;
+  readonly agency: string;
+  readonly processingCode: string;
+  readonly campaignLabel: string | null;
+  readonly currentStatus: string;
+  readonly invitation?: {
+    readonly qrPayload: string;
+    readonly ticketId: string;
+    readonly venueName: string;
+    readonly examDate: string;
+    readonly reportingTimeHour: number;
+    readonly validUntil: string;
+  };
+}
+
+export type ExamInvitationResult =
+  | { readonly kind: 'OK'; readonly view: ExamInvitationView }
+  | { readonly kind: 'NOT_FOUND' };
+
 export interface ApplicationsGateway {
+  /** The citizen's OWN application's exam QR (ADR-033). */
+  examInvitation(applicantId: string, applicationId: string): Promise<ExamInvitationResult>;
   /** The citizen's OWN application's advisory checklist (ADR-032). */
   documentChecklist(applicantId: string, applicationId: string): Promise<DocumentChecklistResult>;
   /** All of one applicant's applications, cross-agency. */

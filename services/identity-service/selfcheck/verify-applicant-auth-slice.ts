@@ -54,7 +54,7 @@ process.env['AUTH_JWT_PUBLIC_KEY_B64'] = Buffer.from(
 ).toString('base64');
 
 const { createIamService, loadIamConfig, serviceTokenRoutes } = await import('@usrp/iam-service');
-const { createApplicationService, loadApplicationConfig, byApplicantRoute, documentChecklistRoutes } = await import(
+const { createApplicationService, loadApplicationConfig, byApplicantRoute, documentChecklistRoutes, examInvitationRoute } = await import(
   '@usrp/application-service'
 );
 const {
@@ -235,7 +235,7 @@ async function main(): Promise<void> {
     serviceName: 'application-applicant-auth-selfcheck',
     port: 0,
     host: '127.0.0.1',
-    routes: [byApplicantRoute(appService.list, appVerify), ...documentChecklistRoutes(appService.documentChecklist, appVerify)],
+    routes: [byApplicantRoute(appService.list, appVerify), ...documentChecklistRoutes(appService.documentChecklist, appVerify), examInvitationRoute(appService.examInvitation, appVerify)],
     handleSignals: false,
   });
 
@@ -404,6 +404,20 @@ async function main(): Promise<void> {
       headers: { authorization: `Bearer ${session}` },
     });
     check("another citizen's application → 404", strangerRes.status === 404);
+
+    console.log('\n── 4c. ADR-033: the exam-QR bridge (owner-scoped, closed shape) ──');
+    const qrRes = await fetch(`${idServer.url}/v1/applicants/me/applications/exam-invitation?applicationId=${RDF_APP}`, {
+      headers: { authorization: `Bearer ${session}` },
+    });
+    const qrText = await qrRes.text();
+    check('own application → 200 with a state (terminal fixture ⇒ no payload)',
+      qrRes.status === 200 && /"state":"(CLOSED|COMPLETED)"/.test(qrText) && !qrText.includes('qrPayload'), qrText);
+    const qrStranger = await fetch(`${idServer.url}/v1/applicants/me/applications/exam-invitation?applicationId=${CTRL_APP}`, {
+      headers: { authorization: `Bearer ${session}` },
+    });
+    check("another citizen's application → 404", qrStranger.status === 404);
+    const qrNoSession = await fetch(`${idServer.url}/v1/applicants/me/applications/exam-invitation?applicationId=${RDF_APP}`);
+    check('no session → 401', qrNoSession.status === 401);
 
     console.log('\n── 5. The citizen door never widens an officer: by-applicant → 403 ──');
     const officerProbe = await fetch(

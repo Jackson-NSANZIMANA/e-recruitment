@@ -17,6 +17,8 @@ import type {
   ApplicationsGateway,
   DocumentChecklistResult,
   DocumentChecklistView,
+  ExamInvitationResult,
+  ExamInvitationView,
   WithdrawApplicationResult,
 } from '../ports/applications-gateway.js';
 
@@ -121,6 +123,63 @@ export class HttpApplicationsGateway implements ApplicationsGateway {
     return {
       kind: 'OK',
       checklist: { agency: body['agency'], source: body['source'], complete: body['complete'], items: projected },
+    };
+  }
+
+  async examInvitation(applicantId: string, applicationId: string): Promise<ExamInvitationResult> {
+    const token = await this.#systemToken();
+    let res: Response;
+    try {
+      res = await this.#fetch(
+        `${this.#opts.applicationBaseUrl}/v1/applications/exam-invitation/by-applicant` +
+          `?applicantId=${encodeURIComponent(applicantId)}&applicationId=${encodeURIComponent(applicationId)}`,
+        { method: 'GET', headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(this.#timeoutMs) },
+      );
+    } catch (cause) {
+      throw new UpstreamUnavailableError('application-service unreachable', { cause });
+    }
+    if (res.status === 401) this.#cached = null;
+    if (res.status === 404) return { kind: 'NOT_FOUND' };
+    if (res.status !== 200) {
+      throw new UpstreamUnavailableError(`application-service exam invitation responded ${String(res.status)}`);
+    }
+    const b = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+    if (
+      b === null || typeof b['state'] !== 'string' || typeof b['agency'] !== 'string' ||
+      typeof b['processingCode'] !== 'string' || typeof b['currentStatus'] !== 'string'
+    ) {
+      throw new UpstreamUnavailableError('application-service exam invitation body malformed');
+    }
+    const view: ExamInvitationView = {
+      state: b['state'],
+      agency: b['agency'],
+      processingCode: b['processingCode'],
+      campaignLabel: typeof b['campaignLabel'] === 'string' ? b['campaignLabel'] : null,
+      currentStatus: b['currentStatus'],
+    };
+    if (b['state'] !== 'READY') return { kind: 'OK', view };
+    const i = (b['invitation'] ?? null) as Record<string, unknown> | null;
+    if (
+      i === null || typeof i['qrPayload'] !== 'string' || typeof i['ticketId'] !== 'string' ||
+      typeof i['venueName'] !== 'string' || typeof i['examDate'] !== 'string' ||
+      typeof i['reportingTimeHour'] !== 'number' || typeof i['validUntil'] !== 'string'
+    ) {
+      throw new UpstreamUnavailableError('application-service exam invitation payload malformed');
+    }
+    // Rebuilt field by field: nothing else upstream adds reaches the citizen.
+    return {
+      kind: 'OK',
+      view: {
+        ...view,
+        invitation: {
+          qrPayload: i['qrPayload'],
+          ticketId: i['ticketId'],
+          venueName: i['venueName'],
+          examDate: i['examDate'],
+          reportingTimeHour: i['reportingTimeHour'],
+          validUntil: i['validUntil'],
+        },
+      },
     };
   }
 
