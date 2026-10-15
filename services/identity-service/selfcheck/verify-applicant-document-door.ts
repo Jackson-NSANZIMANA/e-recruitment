@@ -164,6 +164,10 @@ async function seed(): Promise<void> {
 
 async function main(): Promise<void> {
   console.log('\n══ identity-service — citizen document door (LIVE, ADR-030) ══');
+  // A fresh MinIO (CI) has no buckets: create ours idempotently, exactly as the
+  // forensics proofs do. 200 = created, 409 = already there.
+  const bucket = await forensics.s3Request(MINIO, 'PUT', `/${BUCKET}`, Buffer.alloc(0));
+  check('selfcheck bucket created (or already exists)', bucket.status === 200 || bucket.status === 409, `PUT bucket → ${String(bucket.status)}`);
   await cleanup();
   await seed();
 
