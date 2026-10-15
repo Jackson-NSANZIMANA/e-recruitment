@@ -157,6 +157,14 @@ export class HttpApplicationsGateway implements ApplicationsGateway {
       campaignLabel: typeof b['campaignLabel'] === 'string' ? b['campaignLabel'] : null,
       currentStatus: b['currentStatus'],
     };
+    if (b['state'] === 'ADMITTED') {
+      const a = (b['admission'] ?? null) as Record<string, unknown> | null;
+      if (a === null || typeof a['venueName'] !== 'string' || typeof a['admittedAt'] !== 'string') {
+        throw new UpstreamUnavailableError('application-service exam invitation admission malformed');
+      }
+      // The spent QR is never relayed; only where and when it was used.
+      return { kind: 'OK', view: { ...view, admission: { venueName: a['venueName'], admittedAt: a['admittedAt'] } } };
+    }
     if (b['state'] !== 'READY') return { kind: 'OK', view };
     const i = (b['invitation'] ?? null) as Record<string, unknown> | null;
     if (

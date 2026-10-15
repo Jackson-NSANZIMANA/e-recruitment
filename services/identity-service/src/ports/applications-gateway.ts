@@ -103,6 +103,11 @@ export interface ExamInvitationView {
     readonly reportingTimeHour: number;
     readonly validUntil: string;
   };
+  /** Present only in state ADMITTED (ADR-034): where and when the QR was spent. */
+  readonly admission?: {
+    readonly venueName: string;
+    readonly admittedAt: string;
+  };
 }
 
 export type ExamInvitationResult =
