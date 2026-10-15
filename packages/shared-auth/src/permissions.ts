@@ -59,6 +59,12 @@ export const OPERATION_PERMISSION_LIST = [
    * owner decision 2026-10-14: the front-door check-in officer).
    */
   'document.verify.venue',
+  /**
+   * Admit a candidate at the venue gate: spend their single-use exam QR after
+   * sighting the national ID card (BUILD-003, ADR-034). The same front-door
+   * post as document.verify.venue.
+   */
+  'admission.gate',
   /** Record the medical board / certificate verdict. */
   'medical.review',
   /** Record an adjudication on an amber/red document review. */
@@ -124,6 +130,7 @@ const ROLE_PERMISSIONS: Readonly<Record<KnownRole, ReadonlySet<Permission>>> = {
     'identity.verify',
     'biometric.verify',
     'document.verify.venue',
+    'admission.gate',
     'field.device.enroll',
     'field.score.sync',
     ...READ,

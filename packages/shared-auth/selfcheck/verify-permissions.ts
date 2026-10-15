@@ -55,6 +55,12 @@ ok('only decision_authority finalises and accepts',
 ok('the screening officer cannot resolve conflicts (authority over evidence)', !rolesHavePermission(['screening_officer'], 'field.conflict.resolve'));
 ok('only the front-door check-in post clears documents at the venue (owner decision 2026-10-14)',
   KNOWN_ROLES.filter((r) => rolesHavePermission([r], 'document.verify.venue')).join() === 'screening_officer');
+ok('only the front-door check-in post admits at the gate (BUILD-003, ADR-034)',
+  KNOWN_ROLES.filter((r) => rolesHavePermission([r], 'admission.gate')).join() === 'screening_officer');
+ok('the gate post cannot decide, accept or review medically (the gate is not a decision)',
+  !rolesHavePermission(['screening_officer'], 'decision.final') &&
+  !rolesHavePermission(['screening_officer'], 'application.accept') &&
+  !rolesHavePermission(['screening_officer'], 'medical.review'));
 ok('the DPO sees no applications', !rolesHavePermission(['dpo'], 'application.read'));
 
 console.log('\n── Composition and compatibility ──');
