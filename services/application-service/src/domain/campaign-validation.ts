@@ -285,7 +285,7 @@ function asPolicy(value: unknown, category: string): CampaignCategoryPolicy {
   ) as readonly DocumentType[];
   // A required type the category's agency cannot store could never be
   // uploaded or verified — refuse it at authoring time, not at the gate.
-  const owner = CATEGORY_TO_AGENCY.get(category as ApplicationCategory);
+  const owner = CATEGORY_TO_AGENCY.get(category);
   const foreign = owner === undefined ? [] : documents.filter((d) => !AGENCY_DOCUMENT_TYPES[owner].has(d));
   if (foreign.length > 0) {
     fail(
