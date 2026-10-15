@@ -338,6 +338,20 @@ async function stubHandler(
       });
     }
 
+    case "GET /v1/applicants/me/applications/exam-invitation": {
+      const appId = url.searchParams.get("applicationId");
+      if (appId === "00000000-0000-4000-8000-0000000000aa") {
+        // A malformed QR from upstream must become a 502, never a QR.
+        return send(res, 200, { state: "READY", agency: "RDF", processingCode: "RDF-1", currentStatus: "SLOT_ASSIGNED",
+          invitation: { qrPayload: "https://evil.example/x", ticketId: "T", venueName: "V", examDate: "2026-12-01", reportingTimeHour: 8, validUntil: "x" } });
+      }
+      return send(res, 200, {
+        state: "READY", agency: "RDF", processingCode: "RDF-00042", campaignLabel: "RDF 2026", currentStatus: "SLOT_ASSIGNED",
+        applicantId: "leak-applicant", nationalIdHash: "leak-hash",
+        invitation: { qrPayload: "USRP-SLOT.v1.eyJ0IjoxfQ.c2ln", ticketId: "TKT-1", venueName: "ULK Stadium", examDate: "2026-12-01", reportingTimeHour: 8, validUntil: "2026-12-01T23:59:59.000Z" },
+      });
+    }
+
     case "GET /v1/applications/document-checklist":
     case "GET /v1/applicants/me/applications/document-checklist":
       return send(res, 200, LEAKY_CHECKLIST);
@@ -1375,6 +1389,14 @@ async function main(): Promise<void> {
     check("a non-UUID applicationId is 400", badAppId.status === 400, badAppId.text);
     const noCsrf = await upload({ applicationId: goodApplicationId, documentType: "NATIONAL_ID_COPY", file: pdf }, { "x-csrf-token": "wrong" });
     check("a wrong CSRF token is refused (403)", noCsrf.status === 403, String(noCsrf.status));
+
+    section("Citizen exam QR: closed shape, no-store, malformed → 502 (ADR-033)");
+    const qr = await call("GET", `/edge/v1/me/applications/exam-invitation?applicationId=${randomUUID()}`);
+    check("the citizen receives their exam QR (200 READY)", qr.status === 200 && qr.text.includes('"state":"READY"') && qr.text.includes("USRP-SLOT.v1."), qr.text);
+    check("…rebuilt from the allowlist (no applicant id or NID hash crosses)", !qr.text.includes("leak-"), qr.text);
+    check("…and never cached (cache-control: no-store)", qr.response.headers.get("cache-control") === "no-store");
+    const badQr = await call("GET", "/edge/v1/me/applications/exam-invitation?applicationId=00000000-0000-4000-8000-0000000000aa");
+    check("a malformed upstream QR payload → 502, never relayed", badQr.status === 502 && !badQr.text.includes("evil"), badQr.text);
 
     section("Citizen document checklist: allowlist projection (ADR-032)");
     const myChecklist = await call("GET", `/edge/v1/me/applications/document-checklist?applicationId=${randomUUID()}`);

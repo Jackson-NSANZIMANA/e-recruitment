@@ -709,6 +709,23 @@ paths:
         '503':
           description: Dependency failure (fail closed).
 
+  /edge/v1/me/applications/exam-invitation:
+    get:
+      operationId: getMyExamInvitation
+      summary: The citizen's exam QR — the signed slot invitation to download and present at the physical screening (ADR-033)
+      tags: [citizen]
+      x-usrp-session: applicant
+      x-usrp-csrf: false
+      x-usrp-retry-on-g2g: true
+      parameters:
+        - { name: applicationId, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: "{ state, agency, processingCode, campaignLabel, currentStatus, invitation? } — invitation only when state is READY (slot assigned, not expired, not on hold)"
+        '404':
+          description: Not this citizen's application
+        '502':
+          description: UPSTREAM_CONTRACT_MISMATCH — a malformed payload is never relayed
   /edge/v1/me/applications/document-checklist:
     get:
       operationId: getMyDocumentChecklist

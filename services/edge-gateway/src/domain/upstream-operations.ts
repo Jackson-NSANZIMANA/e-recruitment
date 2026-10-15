@@ -69,6 +69,8 @@ export const UPSTREAM = Object.freeze({
   // opaque session, derives the subject, and forwards to document-forensics
   // under its OWN system token. The edge never talks to forensics.
   myDocumentUpload: op('myDocumentUpload', 'identity', 'POST', '/v1/applicants/me/applications/documents', 'applicant-opaque'),
+  // ADR-033: the citizen's own exam QR (subject from the session).
+  myExamInvitation: op('myExamInvitation', 'identity', 'GET', '/v1/applicants/me/applications/exam-invitation', 'applicant-opaque'),
   // ADR-032: the citizen's own advisory document checklist (subject from the session).
   myDocumentChecklist: op('myDocumentChecklist', 'identity', 'GET', '/v1/applicants/me/applications/document-checklist', 'applicant-opaque'),
   // identity-service — erasure-request.controller.ts (session-authenticated half)
