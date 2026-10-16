@@ -2,7 +2,7 @@
 
 **Status:** Proposed · 2026-10-16 · **Owner:** platform owner
 **Verified against:** backend `main` 446f90b (+ `feat/rehearsal` 8943aec), frontend `main` e053479 (+ PR #27, `feat/rehearsal`)
-**Companions:** [`000.md`](../../000.md) (handbook) · [`capability-map.md`](../architecture/capability-map.md) (what exists) · frontend `docs/architecture/frontend-revamp-plan-2026-10-15.md` (UI plan) · frontend `docs/product/user-facing-feature-spec-2026-10-15.md` (national baseline, go-live gates G1–G9)
+**Companions:** [`000.md`](../../000.md) (handbook) · [`capability-map.md`](../architecture/capability-map.md) (what exists) · frontend `docs/architecture/frontend-revamp-plan-2026-10-15.md` (UI plan) · frontend `docs/product/usrp-national-baseline-v1.md` (national baseline, go-live gates G1–G9)
 
 > **Running a session?** Start at [`README.md`](README.md) (order, reserved numbers, status board) and [`quality-workflow.md`](quality-workflow.md). Phases 0–3 and the biometric track (B1–B3) have ready-to-run kits with session starters in [`sessions/`](sessions/).
 
@@ -338,13 +338,26 @@ Biometrics are **identity evidence, never an automatic refusal**. They are built
 
 | Needed before | Decision |
 |---|---|
-| S00 | Repository visibility; history rewrite for the August `.env` exposure |
+| S00 | Repository visibility; history rewrite for the August `.env` exposure. **Decided 2026-10-16**, see below |
 | S01 / S06 | Role table ratification (provisional until then); who may assign `decision_authority` |
 | S07 | Hosting provider and residency (two sites in Rwanda proposed); KMS/HSM custody; domains |
 | S08 | Pilot agency and district (fixes the medical mode); paper fallback procedure; device fleet (managed Android model) |
 | S12 | SMS provider contract; G2G authorisations; biometric policy |
 | S14 | Relocation authority and fairness rules |
 | S18 | DPIA, retention and erasure SOP signed; SLOs, RPO and RTO ratified; go/no-go authority |
+
+### Decisions recorded
+
+**S00, owner, 2026-10-16:**
+
+- **Repository visibility: both repositories stay public.** Rationale:
+  - The trees hold no secrets, and that is enforced, not hoped for. The backend gate refuses any tracked secret file, runs before install, and proves itself red with `--selftest`. The frontend runs its hygiene and security scans.
+  - The platform's security comes from its design, not from hiding the code: FORCE'd RLS, server-held sessions, agency taken from the session only, and response allowlists. A design that is only safe while unread is not safe.
+  - Public code lets a national public-sector system be reviewed by its agencies and auditors without granting repository access.
+  - Going private would cut off the frontend CI's backend checkout (`ci.yml` notes that it would need a cross-repo token). On some GitHub plans, branch protection is also unavailable for private repositories.
+  - Revisit if a tracked file ever has to carry deployment-specific detail. Such detail belongs in the infrastructure repository and secret store (S07), not here.
+- **August `.env` exposure: no history rewrite.** Rotation covers it because no production secret has ever existed. Closure: `docs/security/SECRET-ROTATION.md` §5.
+- **Branch protection: enforced on administrators too** (`enforce_admins`). Nobody, the owner included, merges a red or out-of-date PR.
 
 **The external items (SMS, G2G, hosting) have the longest lead times.** They should start now, in parallel with Phase 1, or Phase 4 will stall on them.
 
