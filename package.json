@@ -14,6 +14,7 @@
     "build": "turbo run build",
     "build:affected": "turbo run build --filter=[HEAD^1]",
     "dev": "bash scripts/dev.sh",
+    "dev:sms": "node scripts/dev-sms.mjs",
     "test": "turbo run test",
     "test:scripts": "node --test scripts/test/*.test.mjs",
     "test:e2e": "turbo run test:e2e",

@@ -87,3 +87,6 @@ packages/shared-database/.drift-check/
 # Developer-local proof output: regenerated on every run, never reviewed as
 # source. Share a bundle by attaching it, not by committing it.
 .prove-e2e/
+
+# Dev SMS inbox written by LogSmsChannel under `pnpm dev` (holds OTP codes)
+.dev-sms/

@@ -50,6 +50,15 @@ set +a
 
 printf '\033[0;36m▶ loaded %s\033[0m\n' "$ENV_FILE"
 
+# Dev SMS inbox: OTPs and notices are appended here so citizen sign-in can be
+# completed in a local browser (`pnpm dev:sms` shows the latest). Unset means
+# the default below; an explicit empty DEV_SMS_INBOX_FILE= in .env turns it off.
+# Only LogSmsChannel writes it, and that adapter refuses to boot in production.
+export DEV_SMS_INBOX_FILE="${DEV_SMS_INBOX_FILE-$REPO_ROOT/.dev-sms/inbox.jsonl}"
+if [[ -n "$DEV_SMS_INBOX_FILE" ]]; then
+  printf '\033[0;36m▶ dev SMS inbox: %s  (pnpm dev:sms)\033[0m\n' "$DEV_SMS_INBOX_FILE"
+fi
+
 # A service imports its @usrp/* dependencies through their exports map, whose
 # RUNTIME half is dist/ — gitignored, developer-local state. `tsx watch src/main.ts`
 # can therefore start a service against a build from another branch and die at
