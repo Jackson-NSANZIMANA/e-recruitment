@@ -15,7 +15,8 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint 'src/**/*.ts'"
+    "lint": "eslint 'src/**/*.ts'",
+    "test": "tsc && node --test test/*.test.mjs"
   },
   "dependencies": {
     "@usrp/shared-logging": "workspace:*"

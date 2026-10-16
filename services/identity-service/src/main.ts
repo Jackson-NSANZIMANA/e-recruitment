@@ -99,7 +99,9 @@ async function main(): Promise<void> {
     'LogSmsChannel',
     'applicant OTPs and erasure-decision notices would be written to a log instead of delivered, so no citizen could authenticate',
   );
-  const smsChannel = new LogSmsChannel();
+  // Dev inbox (opt-in, set by scripts/dev.sh): the only way to read an OTP
+  // in a local browser session. Reachable only past the guard above.
+  const smsChannel = new LogSmsChannel({ inboxFile: process.env['DEV_SMS_INBOX_FILE'] });
   const applicantAuth = createApplicantAuthService(config, bus, smsChannel);
   const applicationsGateway = new HttpApplicationsGateway({
     iamBaseUrl: portal.iamBaseUrl,

@@ -19,6 +19,7 @@
       "env": [
         "NODE_ENV",
         "LOG_LEVEL",
+        "DEV_SMS_INBOX_FILE",
         "PORT",
         "PORT_IDENTITY_SERVICE",
         "PORT_ELIGIBILITY_SERVICE",

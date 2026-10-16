@@ -85,7 +85,8 @@ async function main(): Promise<void> {
   );
   const service = createNotificationService(config, bus, {
     resolver: new PgContactResolver(config.security.encryptionKey),
-    sms: new LogSmsChannel(),
+    // Dev inbox (opt-in, set by scripts/dev.sh); reachable only past the guard above.
+    sms: new LogSmsChannel({ inboxFile: process.env['DEV_SMS_INBOX_FILE'] }),
   });
 
   // Subscribe BEFORE serving so a "ready" signal implies we are consuming.
