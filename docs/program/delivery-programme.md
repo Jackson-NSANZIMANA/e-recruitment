@@ -4,6 +4,8 @@
 **Verified against:** backend `main` 446f90b (+ `feat/rehearsal` 8943aec), frontend `main` e053479 (+ PR #27, `feat/rehearsal`)
 **Companions:** [`000.md`](../../000.md) (handbook) · [`capability-map.md`](../architecture/capability-map.md) (what exists) · frontend `docs/architecture/frontend-revamp-plan-2026-10-15.md` (UI plan) · frontend `docs/product/user-facing-feature-spec-2026-10-15.md` (national baseline, go-live gates G1–G9)
 
+> **Running a session?** Start at [`README.md`](README.md) (order, reserved numbers, status board) and [`quality-workflow.md`](quality-workflow.md). Phases 0–3 and the biometric track (B1–B3) have ready-to-run kits with session starters in [`sessions/`](sessions/).
+
 This document divides the remaining work into **sessions**: bounded work packages that one engineer or agent can complete, prove and hand over. It also defines the protocol that lets several sessions run in parallel without breaking each other.
 
 ---
@@ -132,12 +134,14 @@ Merged to `main` with green CI, capability map updated, rehearsal step passing, 
 Phase 0  S00 Programme integrity ─────────────────────────────── (serial, first)
             │
 Phase 1  ├─ S01 Officer lifecycle (BE)      ├─ S02 Frontend foundations      ├─ S03 Release engineering
+         └─ B1 Biometric identity evidence (BE, after S01 merges)
             │
 Phase 2  ├─ S04 Read models I (BE)          ├─ S05 Campaign Studio (FE)       ├─ S07 Deployment topology + staging
          └─ S06 Officer workspace + queues + staff admin (FE, needs S01)
             │
 Phase 3  ├─ S08 Field Station (FE, online)  ├─ S09 Fleet + venue ops (BE)     ├─ S11 Observability + backups
          └─ S10a Citizen timeline + notices (BE) → S10b Citizen completeness (FE)
+         └─ B2 On-device biometric capture (FE, after S08 + B1) → B3 Biometric evaluation + shadow mode
             │
 Phase 4  ├─ S12 Production integrations     ├─ S13 Operations product (BE+FE) ├─ S16 Security assurance
          ├─ S14 Operator relocation (BE+FE) ├─ S15 Durable offline capture     └─ S17 Load + failure drills
@@ -266,6 +270,12 @@ Each card has: **Goal · Depends on · Owns · Delivers · Exit gate · Decision
   - SLO definitions (baseline §15.8 proposals);
   - backups, PITR, a **restore drill with checksums**, and a DR runbook.
 - **Exit gate:** restore proven on staging with a measured RPO/RTO.
+
+### Biometric track (B1–B3)
+
+Biometrics are **identity evidence, never an automatic refusal**. They are built on device-signed, on-device matching against the portrait on the candidate's physical National ID card, while NIDA's portrait service is not yet authorised; NIDA plugs in later behind the same port. Modes are `OFF`, `SHADOW` and `ADVISORY`; there is no automatic mode.
+- **B1** (backend evidence model, ADR-037): [kit](sessions/B1-biometric-evidence.md)
+- **B2** (Field Station capture, liveness and matching, ADR-FE-017) and **B3** (evaluation, thresholds, shadow reporting, ADR-044): [kit](sessions/B2-B3-biometric-capture-and-evaluation.md)
 
 ### Phase 4
 
