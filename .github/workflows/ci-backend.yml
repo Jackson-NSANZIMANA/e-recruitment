@@ -145,7 +145,16 @@ jobs:
       - name: Run all proofs
         env:
           BOOT_TIMEOUT_S: 600
-        run: pnpm verify
+        # tee keeps the runner's own summary line for the evidence bundle; the
+        # step's bash runs with pipefail, so a red proof still fails it.
+        run: pnpm verify 2>&1 | tee proofs.log
+      - name: Upload proofs log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: proofs-log
+          path: proofs.log
+          if-no-files-found: ignore
       # Surface broker/init logs when the proofs fail — Kafka setup is the
       # most common CI-only failure (see kafka-backbone-proof.md).
       - name: Dump infra logs on failure
@@ -172,6 +181,13 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+      # The tracked-secrets gate (SECRET-ROTATION.md §4). Zero dependencies and
+      # before any install, so a registry outage or a broken lockfile cannot
+      # skip it. The selftest runs first: it proves the gate still goes red.
+      - name: Tracked-secrets gate selftest
+        run: node scripts/check-tracked-secrets.mjs --selftest
+      - name: Tracked-secrets gate
+        run: node scripts/check-tracked-secrets.mjs
       # Pinned to a release — @master is an unpinned supply-chain dependency.
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@v0.36.0
@@ -181,3 +197,45 @@ jobs:
           severity: 'CRITICAL,HIGH'
           exit-code: '1'
           ignore-unfixed: true
+
+  evidence:
+    name: Evidence bundle
+    # Runs after every gate, whatever their result, so a red run still leaves a
+    # record of what was measured. W0-04: docs cite this artefact instead of
+    # hand-written counts and SHAs.
+    needs: [typecheck, lint, verify, security-scan]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      EVIDENCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      # The operation inventory is read from the built registry, and the unit
+      # suites import workspace packages from dist/.
+      - run: pnpm build
+      - name: Fetch the proofs log
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: proofs-log
+          path: proofs
+      # Runs every package's unit suite (pnpm verify does not), then writes the
+      # bundle. Exits non-zero on a failed test, after writing it.
+      - name: Write evidence bundle
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: node scripts/evidence-bundle.mjs --out evidence --proofs-log proofs/proofs.log --run-tests --needs "$NEEDS"
+      - name: Upload evidence bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-${{ env.EVIDENCE_HEAD_SHA }}
+          path: evidence/evidence-${{ env.EVIDENCE_HEAD_SHA }}.json
+          if-no-files-found: error
