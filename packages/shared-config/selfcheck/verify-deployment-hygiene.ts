@@ -133,6 +133,76 @@ for (const name of services) {
   );
 }
 
+// ── Supply chain and attestation (ADR-038) ─────────────────────────
+// A tag is a pointer someone else can move; a digest is the bytes Trivy
+// scanned and cosign signed. PORT pins the listening port to EXPOSE so a bare
+// `docker run` cannot drift to the 3000 fallback. HEALTHCHECK makes Compose
+// `--wait` mean "ready". The build ARGs feed GET /version.
+section('Images are digest-pinned, self-describing and attest their build (ADR-038)');
+const DIGEST_FROM = /^FROM\s+\S+@sha256:[0-9a-f]{64}(\s+AS\s+\S+)?\s*$/i;
+for (const name of services) {
+  const dockerfilePath = join(SERVICES, name, 'Dockerfile');
+  if (!existsSync(dockerfilePath)) continue;
+  const dockerfile = readFileSync(dockerfilePath, 'utf8');
+  const froms = dockerfile.split('\n').filter((line) => /^FROM\s/i.test(line));
+  const unpinned = froms.filter((line) => !DIGEST_FROM.test(line.trim()));
+  check(`${name}: every FROM is pinned by digest`, froms.length > 0 && unpinned.length === 0, unpinned.join(' | '));
+
+  const key = portEnvVar(name);
+  const exposed = /^EXPOSE\s+(\d+)/m.exec(dockerfile)?.[1];
+  const portEnv = /^ENV\s+PORT=(\d+)\s*$/m.exec(dockerfile)?.[1];
+  check(`${name}: ENV PORT equals EXPOSE`, portEnv !== undefined && portEnv === exposed, `PORT=${String(portEnv)} EXPOSE=${String(exposed)}`);
+  check(
+    `${name}: HEALTHCHECK probes /ready on ${key} or PORT`,
+    /^HEALTHCHECK\s/m.test(dockerfile) && dockerfile.includes(`(process.env.${key}||process.env.PORT)+'/ready'`),
+  );
+  for (const fact of ['USRP_BUILD_SHA', 'USRP_BUILD_REF', 'USRP_BUILD_TIME']) {
+    check(
+      `${name}: ${fact} is a build ARG carried into the runtime ENV`,
+      new RegExp(`^ARG ${fact}=`, 'm').test(dockerfile) && dockerfile.includes(`${fact}=$${fact}`),
+    );
+  }
+  check(`${name}: runtime stage removes npm/corepack/yarn`, dockerfile.includes('rm -rf /usr/local/lib/node_modules'));
+  check(`${name}: copies patches/ (package.json patches kafkajs)`, /^COPY patches \.\/patches$/m.test(dockerfile));
+}
+check('.dockerignore keeps .env files, .git and node_modules out of the build context', (() => {
+  const path = join(ROOT, '.dockerignore');
+  if (!existsSync(path)) return false;
+  const lines = readFileSync(path, 'utf8').split('\n').map((l) => l.trim());
+  return ['.env', '.env.*', '**/node_modules', '.git'].every((entry) => lines.includes(entry));
+})());
+
+// ── GET /version answers on every service (ADR-038) ────────────────
+// Every service serves HTTP through @usrp/shared-http, so proving the
+// transport serves /version — with validated build facts — proves it for all
+// twelve. The proof also checks that every service really does start through
+// startHttpServer, so a service that grew its own server cannot opt out.
+section('GET /version is served by the shared transport, on every service');
+for (const name of services) {
+  const main = join(SERVICES, name, 'src', 'main.ts');
+  check(`${name}: serves through @usrp/shared-http startHttpServer`, existsSync(main) && /startHttpServer\(/.test(readFileSync(main, 'utf8')));
+}
+{
+  // Relative import: shared-config does not depend on shared-http at runtime.
+  const { startHttpServer } = await import('../../shared-http/src/index.js');
+  const prior = { sha: process.env['USRP_BUILD_SHA'], ref: process.env['USRP_BUILD_REF'] };
+  process.env['USRP_BUILD_SHA'] = 'abc1234';
+  process.env['USRP_BUILD_REF'] = 'not a ref; rm -rf /';
+  const server = await startHttpServer({ serviceName: 'hygiene-probe', port: 0, host: '127.0.0.1', routes: [], handleSignals: false, logger: () => undefined });
+  try {
+    const res = await fetch(`${server.url}/version`);
+    const body = (await res.json()) as { service?: string; build?: { sha?: string; ref?: string } };
+    check('/version answers 200', res.status === 200, String(res.status));
+    check('/version names the service', body.service === 'hygiene-probe');
+    check('/version reports the build SHA from the environment', body.build?.sha === 'abc1234');
+    check('/version refuses to echo a malformed environment value', body.build?.ref === 'unknown', String(body.build?.ref));
+  } finally {
+    await server.stop();
+    if (prior.sha === undefined) delete process.env['USRP_BUILD_SHA']; else process.env['USRP_BUILD_SHA'] = prior.sha;
+    if (prior.ref === undefined) delete process.env['USRP_BUILD_REF']; else process.env['USRP_BUILD_REF'] = prior.ref;
+  }
+}
+
 console.log(`\n\u001b[1m────────────────────────────────────────\u001b[0m`);
 if (fail === 0) {
   console.log(`\u001b[1;32mDEPLOYMENT HYGIENE GREEN — ${String(pass)} checks ✓\u001b[0m`);

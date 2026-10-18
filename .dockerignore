@@ -1,0 +1,22 @@
+# Build context for services/*/Dockerfile (ADR-038). The images compile from
+# source, so local build output and installs are never sent; secrets and dev
+# state never reach a layer.
+**/node_modules
+**/dist
+**/.turbo
+**/test-results
+**/*.tsbuildinfo
+**/*.log
+.git
+.github
+.env
+.env.*
+**/.env
+**/.env.*
+.dev-sms
+.selfcheck-logs
+evidence
+docs
+tools
+infrastructure
+*.md
