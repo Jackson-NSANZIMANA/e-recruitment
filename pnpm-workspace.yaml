@@ -14,3 +14,6 @@ packages:
   # agency — instead of a property of the credential, which nobody can.
   - 'services/*'
   - 'packages/*'
+  # Dev and training tooling that is a real package (typed, linted, tested).
+  # Named, not globbed: tools/native-stack is a script folder, not a package.
+  - 'tools/rehearsal'
