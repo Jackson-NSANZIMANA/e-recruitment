@@ -21,11 +21,13 @@ export {
 export {
   ALL_PERMISSIONS,
   KNOWN_ROLES,
+  OFFICER_ADMIN_PERMISSION_LIST,
   OPERATION_PERMISSION_LIST,
   permissionsForRoles,
   principalHasPermission,
   rolesHavePermission,
   type KnownRole,
+  type OfficerAdminPermission,
   type OperationPermission,
   type Permission,
 } from './permissions.js';

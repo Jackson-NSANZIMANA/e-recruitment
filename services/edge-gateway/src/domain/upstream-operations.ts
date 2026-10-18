@@ -122,6 +122,20 @@ export const UPSTREAM = Object.freeze({
   enrollDevice: op('enrollDevice', 'field-sync', 'POST', '/v1/field-sync/devices', 'officer-jwt'),
   syncScores: op('syncScores', 'field-sync', 'POST', '/v1/field-sync/scores', 'officer-jwt'),
   resolveConflict: op('resolveConflict', 'field-sync', 'POST', '/v1/field-sync/conflicts/resolve', 'officer-jwt'),
+
+  // iam-service — officer-admin.controller.ts (ADR-036). The agency
+  // administrator's officer lifecycle, under the administrator's own officer
+  // credential; iam-service re-checks the permission and the rls/0033
+  // functions re-check the actor's live account. Activation is the one public
+  // route: the one-time code is the credential.
+  officerList: op('officerList', 'iam', 'GET', '/v1/officers', 'officer-jwt'),
+  officerCreate: op('officerCreate', 'iam', 'POST', '/v1/officers', 'officer-jwt'),
+  officerReissueActivation: op('officerReissueActivation', 'iam', 'POST', '/v1/officers/activation/reissue', 'officer-jwt'),
+  officerAssignPosts: op('officerAssignPosts', 'iam', 'POST', '/v1/officers/posts', 'officer-jwt'),
+  officerDisable: op('officerDisable', 'iam', 'POST', '/v1/officers/disable', 'officer-jwt'),
+  officerEnable: op('officerEnable', 'iam', 'POST', '/v1/officers/enable', 'officer-jwt'),
+  officerRevokeSessions: op('officerRevokeSessions', 'iam', 'POST', '/v1/officers/sessions/revoke', 'officer-jwt'),
+  officerActivate: op('officerActivate', 'iam', 'POST', '/v1/auth/officer/activate', 'none'),
 } as const);
 
 export type UpstreamOperationId = keyof typeof UPSTREAM;

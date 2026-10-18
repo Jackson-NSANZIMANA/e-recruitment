@@ -230,9 +230,17 @@ apply_sql "${RLS_DIR}/0031_application_exam_invitation.sql" "rls/0031 (applicati
 #     returns the stored national-id hash.
 apply_sql "${RLS_DIR}/0032_gate_admissions.sql" "rls/0032 (gate admissions)"
 
+# 23l. Officer lifecycle (ADR-036): agency administrators create officers with
+#     a one-time activation code, assign posts, disable/enable and revoke
+#     sessions — only through SECURITY DEFINER functions owned by the NOLOGIN
+#     usrp_officer_command_owner, EXECUTE for usrp_iam_service alone. Disable
+#     and post changes revoke the officer's edge sessions in the same
+#     transaction; every command stages one PII-free AUDIT_ENTRY.
+apply_sql "${RLS_DIR}/0033_officer_lifecycle.sql" "rls/0033 (officer lifecycle)"
+
 printf '\n'
 
-ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts + applicant auth + erasure requests + stored contact + edge sessions + event outbox + slot reservations + submission integrity + walk-in outbox grant + shared rate-limit buckets + required extensions + campaign control plane + functions-only command boundary + onboarding lockout + application policy binding + document venue verification + exam invitation + gate admissions in place"
+ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts + applicant auth + erasure requests + stored contact + edge sessions + event outbox + slot reservations + submission integrity + walk-in outbox grant + shared rate-limit buckets + required extensions + campaign control plane + functions-only command boundary + onboarding lockout + application policy binding + document venue verification + exam invitation + gate admissions + officer lifecycle in place"
 
 # 24. Dev officer accounts (one per agency). A CONVENIENCE seed so the officer
 #     console / manual login smoke tests have real credentials to drive —

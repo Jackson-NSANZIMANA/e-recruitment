@@ -298,6 +298,12 @@ run_ts "application-service: officer lifecycle (medical→final→accept)" servi
 run_ts "application-service: auto-withdrawal on accept (ADR-017)" services/application-service/selfcheck/verify-auto-withdrawal-slice.ts
 run_ts "iam-service: token issuer (mint → officer endpoint accepts)" services/iam-service/selfcheck/verify-iam-issuer-slice.ts
 run_ts "iam-service: service tokens (client-credentials → system route accepts)" services/iam-service/selfcheck/verify-service-token-slice.ts
+# ADR-036 officer lifecycle, live: real IAM + real Edge + a disposable,
+# fully bootstrapped database. Create → one-time code → activate → login;
+# posts change and disable end an ALREADY-OPEN browser session on its next
+# request; a disabled admin's unexpired token is refused by the DB re-check;
+# cross-agency, self-escalation, last-admin, reviewer; PII-free audit.
+run_ts "iam-service: officer lifecycle (create/activate, posts, disable → open session refused, audit)" services/iam-service/selfcheck/verify-officer-lifecycle.ts
 run_ts "identity-service: applicant auth (OTP → session → own applications)" services/identity-service/selfcheck/verify-applicant-auth-slice.ts
 run_ts "identity-service: applicant self-service (withdraw own + erasure intake, ADR-020)" services/identity-service/selfcheck/verify-applicant-self-service-slice.ts
 # ADR-027 follow-up: the submit bridge (POST /v1/applicants/me/applications).

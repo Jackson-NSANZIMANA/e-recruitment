@@ -926,6 +926,260 @@ paths:
         '404':
           description: Not found
 
+  /edge/v1/officers:
+    get:
+      operationId: listOfficers
+      x-usrp-session: officer
+      x-usrp-csrf: false
+      x-usrp-retry-on-g2g: true
+      summary: |
+        List the officers of the session's own agency (ADR-036). agency_admin
+        only (officer.read). Never a credential, activation code or code hash.
+      tags: [officer-admin]
+      responses:
+        '200':
+          description: "{ officers: [ { officerId, loginHandle, posts[], status: active|disabled|pending, createdAt, activatedAt|null, lastLoginAt|null, activationExpiresAt|null } ] }"
+        '401':
+          description: Session ended ({ reason })
+        '403':
+          description: PERMISSION_DENIED — not an active agency administrator
+        '502':
+          description: UPSTREAM_CONTRACT_MISMATCH
+    post:
+      operationId: createOfficer
+      x-usrp-session: officer
+      x-usrp-csrf: true
+      x-usrp-retry-on-g2g: false
+      summary: |
+        Create an officer in the session's own agency with initial posts
+        (officer.create). The account is `pending` until the officer redeems
+        the ONE-TIME activation code returned here exactly once (stored only
+        as a hash; 24 h; single use). agency_admin is not an assignable post.
+        Never retried: a lost answer is recovered with reissueOfficerActivation.
+      tags: [officer-admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [loginHandle, posts]
+              properties:
+                loginHandle: { type: string, pattern: '^[a-z0-9][a-z0-9._-]{2,63}$', description: Unique platform-wide; normalised to lower case }
+                posts:
+                  type: array
+                  minItems: 1
+                  maxItems: 7
+                  uniqueItems: true
+                  items: { type: string, enum: [reviewer, screening_officer, field_supervisor, medical_officer, adjudicator, decision_authority, dpo] }
+      responses:
+        '201':
+          description: "{ outcome: CREATED, officer { …as listOfficers }, activation { code: XXXXX-XXXXX-XXXXX-XXXXX, expiresAt } } — show the code once"
+        '400':
+          description: INVALID_REQUEST — shape only
+        '403':
+          description: PERMISSION_DENIED | AGENCY_ADMIN_NOT_ASSIGNABLE
+        '409':
+          description: HANDLE_TAKEN
+        '422':
+          description: INVALID_HANDLE | INVALID_POSTS | UNKNOWN_POST
+
+  /edge/v1/officers/activation/reissue:
+    post:
+      operationId: reissueOfficerActivation
+      x-usrp-session: officer
+      x-usrp-csrf: true
+      x-usrp-retry-on-g2g: false
+      summary: |
+        Replace the activation code of an officer who has never activated
+        (lost or expired code). Never a password reset (officer.create).
+      tags: [officer-admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [targetOfficerId]
+              properties:
+                targetOfficerId: { type: string, format: uuid }
+      responses:
+        '200':
+          description: "{ outcome: REISSUED, officer, activation { code, expiresAt } }"
+        '403':
+          description: PERMISSION_DENIED | SELF_MODIFICATION
+        '404':
+          description: NOT_FOUND — absent or in another agency (one answer)
+        '409':
+          description: NOT_PENDING_ACTIVATION
+
+  /edge/v1/officers/posts:
+    post:
+      operationId: assignOfficerPosts
+      x-usrp-session: officer
+      x-usrp-csrf: true
+      x-usrp-retry-on-g2g: false
+      summary: |
+        Replace an officer's posts (officer.posts.assign), with a closed reason
+        code. agency_admin can never be added and an existing one is kept. A
+        change ends every edge session of that officer now (POSTS_CHANGED);
+        their next request re-authenticates and carries the new posts.
+      tags: [officer-admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [targetOfficerId, posts, reasonCode]
+              properties:
+                targetOfficerId: { type: string, format: uuid }
+                posts:
+                  type: array
+                  minItems: 1
+                  maxItems: 7
+                  uniqueItems: true
+                  items: { type: string, enum: [reviewer, screening_officer, field_supervisor, medical_officer, adjudicator, decision_authority, dpo] }
+                reasonCode: { type: string, enum: [POSTING_CHANGE, CORRECTION, TEMPORARY_COVER, OTHER] }
+      responses:
+        '200':
+          description: "{ outcome: ASSIGNED|UNCHANGED, officer, sessionsRevoked }"
+        '403':
+          description: PERMISSION_DENIED | SELF_MODIFICATION | AGENCY_ADMIN_NOT_ASSIGNABLE
+        '404':
+          description: NOT_FOUND
+        '422':
+          description: INVALID_POSTS | UNKNOWN_POST | INVALID_REASON
+
+  /edge/v1/officers/disable:
+    post:
+      operationId: disableOfficer
+      x-usrp-session: officer
+      x-usrp-csrf: true
+      x-usrp-retry-on-g2g: false
+      summary: |
+        Disable an officer (officer.disable). Login is refused from now on and
+        every edge session of that officer ends in the same transaction
+        (ACCOUNT_DISABLED): an already-open browser is told 401 revoked on its
+        next request. The last active agency_admin cannot be disabled.
+      tags: [officer-admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [targetOfficerId, reasonCode]
+              properties:
+                targetOfficerId: { type: string, format: uuid }
+                reasonCode: { type: string, enum: [LEFT_SERVICE, SUSPENDED, SECURITY_CONCERN, EXTENDED_LEAVE, OTHER] }
+      responses:
+        '200':
+          description: "{ outcome: DISABLED|UNCHANGED, officer, sessionsRevoked }"
+        '403':
+          description: PERMISSION_DENIED | SELF_MODIFICATION
+        '404':
+          description: NOT_FOUND
+        '409':
+          description: LAST_ACTIVE_ADMIN
+        '422':
+          description: INVALID_REASON
+
+  /edge/v1/officers/enable:
+    post:
+      operationId: enableOfficer
+      x-usrp-session: officer
+      x-usrp-csrf: true
+      x-usrp-retry-on-g2g: false
+      summary: Re-enable a disabled officer (officer.disable). A never-activated account returns to pending.
+      tags: [officer-admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [targetOfficerId, reasonCode]
+              properties:
+                targetOfficerId: { type: string, format: uuid }
+                reasonCode: { type: string, enum: [RETURNED_TO_DUTY, SUSPENSION_LIFTED, CORRECTION, OTHER] }
+      responses:
+        '200':
+          description: "{ outcome: ENABLED|UNCHANGED, officer, sessionsRevoked: 0 }"
+        '403':
+          description: PERMISSION_DENIED | SELF_MODIFICATION
+        '404':
+          description: NOT_FOUND
+        '422':
+          description: INVALID_REASON
+
+  /edge/v1/officers/sessions/revoke:
+    post:
+      operationId: revokeOfficerSessions
+      x-usrp-session: officer
+      x-usrp-csrf: true
+      x-usrp-retry-on-g2g: false
+      summary: End every browser session of an officer now (officer.sessions.revoke; SESSIONS_REVOKED). The account stays active.
+      tags: [officer-admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [targetOfficerId, reasonCode]
+              properties:
+                targetOfficerId: { type: string, format: uuid }
+                reasonCode: { type: string, enum: [DEVICE_LOST, SECURITY_CONCERN, OTHER] }
+      responses:
+        '200':
+          description: "{ outcome: REVOKED, officer, sessionsRevoked }"
+        '403':
+          description: PERMISSION_DENIED | SELF_MODIFICATION
+        '404':
+          description: NOT_FOUND
+        '422':
+          description: INVALID_REASON
+
+  /edge/v1/auth/officer/activate:
+    post:
+      operationId: activateOfficer
+      x-usrp-session: anonymous
+      x-usrp-csrf: true
+      x-usrp-retry-on-g2g: false
+      summary: |
+        The officer redeems their one-time activation code and sets their own
+        password (12–256 characters). Then they sign in with officerLogin.
+        Rate-limited per handle and per client.
+      tags: [officer-auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [loginHandle, activationCode, password]
+              properties:
+                loginHandle: { type: string, maxLength: 64 }
+                activationCode: { type: string, maxLength: 64, description: XXXXX-XXXXX-XXXXX-XXXXX; case and dashes optional }
+                password: { type: string, minLength: 12, maxLength: 256 }
+      responses:
+        '204':
+          description: Activated
+        '400':
+          description: WEAK_PASSWORD (or INVALID_REQUEST for shape)
+        '401':
+          description: ACTIVATION_REJECTED — one answer for unknown handle, wrong/expired/used code, or an account that is not pending
+        '429':
+          description: Rate limited
+
   /edge/health:
     get:
       operationId: edgeHealth
@@ -986,3 +1240,5 @@ tags:
     description: Field sync
   - name: probes
     description: Health probes
+  - name: officer-admin
+    description: Officer lifecycle — agency administrators over their own agency's officers (ADR-036)
