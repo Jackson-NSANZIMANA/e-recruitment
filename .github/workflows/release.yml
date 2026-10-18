@@ -1,0 +1,199 @@
+name: USRP Backend Release
+
+# ADR-038. A v* tag on a commit of main releases the images CI already built,
+# scanned, signed and published for that commit. Nothing is rebuilt: the
+# release PROMOTES the signed digests (adds the version tag), verifies every
+# signature and SBOM attestation against the main-branch workflow identity,
+# and publishes release-<tag>.json — S00's evidence for the commit plus image
+# digests, SBOMs, scan results and signatures — as a GitHub Release.
+#
+# Dry run (once this file is on main): Actions → USRP Backend Release → Run
+# workflow, with a tag name and, before the tag exists, the full commit SHA.
+# It verifies and composes everything and publishes nothing.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (vX.Y.Z or vX.Y.Z-rcN)'
+        required: true
+      sha:
+        description: 'Commit to release (default: the commit the tag points at). Dry runs only.'
+        required: false
+      peer_sha:
+        description: 'Frontend commit released with this tag (default: "peer: <sha>" in the tag annotation)'
+        required: false
+      dry_run:
+        description: 'Verify and compose only; tag nothing, publish nothing'
+        type: boolean
+        default: true
+
+permissions: {}
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release ${{ inputs.tag || github.ref_name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write   # create the GitHub Release
+      packages: write   # add the version tag to the already-signed images
+      actions: read     # download the CI artefacts of the tagged commit
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      TAG: ${{ inputs.tag || github.ref_name }}
+      INPUT_SHA: ${{ inputs.sha }}
+      INPUT_PEER: ${{ inputs.peer_sha }}
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+      COSIGN_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/ci-backend.yml@refs/heads/main
+      COSIGN_ISSUER: https://token.actions.githubusercontent.com
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Resolve the commit and its peer
+        id: resolve
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+            echo "::error::'$TAG' is not a release tag (vX.Y.Z or vX.Y.Z-rcN)."; exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/$TAG" > /dev/null; then
+            sha=$(git rev-parse "refs/tags/$TAG^{commit}")
+            if [ -n "$INPUT_SHA" ] && [ "$INPUT_SHA" != "$sha" ]; then
+              echo "::error::tag $TAG points at $sha, not $INPUT_SHA."; exit 1
+            fi
+            annotation=$(git for-each-ref "refs/tags/$TAG" --format='%(contents)')
+          elif [ "$DRY_RUN" = "true" ] && printf '%s' "$INPUT_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            sha="$INPUT_SHA"; annotation=""
+          else
+            echo "::error::tag $TAG does not exist (a dry run may pass the full 40-hex sha instead)."; exit 1
+          fi
+          if ! git merge-base --is-ancestor "$sha" origin/main; then
+            echo "::error::$sha is not on main. Release only merged commits."; exit 1
+          fi
+          peer="$INPUT_PEER"
+          if [ -z "$peer" ]; then
+            peer=$(printf '%s\n' "$annotation" | sed -nE 's/^peer: ([0-9a-f]{40})$/\1/p' | head -n1)
+          fi
+          if [ -n "$peer" ] && ! printf '%s' "$peer" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::peer sha must be 40 hex characters."; exit 1
+          fi
+          prerelease=false; case "$TAG" in *-*) prerelease=true ;; esac
+          {
+            echo "sha=$sha"
+            echo "peer=$peer"
+            echo "prerelease=$prerelease"
+          } >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG sha=$sha peer=${peer:-none} prerelease=$prerelease dry_run=$DRY_RUN"
+
+      # The images and the evidence are the ones CI produced for this commit
+      # when it landed on main — the release never rebuilds or re-measures.
+      - name: Fetch the main CI run's images and evidence
+        env:
+          SHA: ${{ steps.resolve.outputs.sha }}
+        run: |
+          set -euo pipefail
+          run=$(gh api "repos/$REPO/actions/workflows/ci-backend.yml/runs?head_sha=$SHA&branch=main&event=push&status=success&per_page=1" --jq '.workflow_runs[0].id // empty')
+          if [ -z "$run" ]; then
+            echo "::error::no successful USRP Backend CI push run on main for $SHA (a superseded run publishes nothing: re-run CI for that commit first)."; exit 1
+          fi
+          echo "CI run: $GITHUB_SERVER_URL/$REPO/actions/runs/$run"
+          echo "CI_RUN_URL=$GITHUB_SERVER_URL/$REPO/actions/runs/$run" >> "$GITHUB_ENV"
+          gh run download "$run" --repo "$REPO" --pattern 'image-*' --dir images
+          gh run download "$run" --repo "$REPO" --name "evidence-$SHA" --dir evidence
+          ls images
+
+      - uses: sigstore/cosign-installer@v4.1.2
+        with:
+          cosign-release: v3.1.3
+      # Verified against the main-branch workflow identity: an image signed by
+      # any other workflow, branch or repository fails here.
+      - name: Verify every signature and SBOM attestation
+        run: |
+          set -uo pipefail
+          echo '{}' > verification.json
+          for meta in images/*/metadata.json; do
+            image=$(jq -r .image "$meta"); digest=$(jq -r '.digest // empty' "$meta")
+            [ -n "$digest" ] || { echo "$(jq -r .name "$meta"): no digest"; continue; }
+            sig=false; att=false
+            cosign verify --certificate-identity "$COSIGN_IDENTITY" --certificate-oidc-issuer "$COSIGN_ISSUER" "$image@$digest" > /dev/null && sig=true
+            cosign verify-attestation --type cyclonedx --certificate-identity "$COSIGN_IDENTITY" --certificate-oidc-issuer "$COSIGN_ISSUER" "$image@$digest" > /dev/null && att=true
+            echo "$image@$digest signature=$sig attestation=$att"
+            jq --arg d "$digest" --argjson s "$sig" --argjson a "$att" '.[$d] = {signature: $s, attestation: $a}' verification.json > v.tmp && mv v.tmp verification.json
+          done
+
+      - name: Compose release-${{ env.TAG }}.json (release mode refuses any gap)
+        env:
+          SHA: ${{ steps.resolve.outputs.sha }}
+          PEER: ${{ steps.resolve.outputs.peer }}
+        run: >-
+          node scripts/release-bundle.mjs --mode release --tag "$TAG" --sha "$SHA"
+          --peer-sha "$PEER" --images images --evidence "evidence/evidence-$SHA.json"
+          --verification verification.json --run-url "$CI_RUN_URL" --out release
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: release-${{ env.TAG }}
+          path: |
+            release/
+            verification.json
+          if-no-files-found: ignore
+
+      - name: Log in to GHCR
+        if: ${{ env.DRY_RUN != 'true' }}
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # Promote, never rebuild: the version tag points at the signed digest.
+      - name: Tag the signed digests ${{ env.TAG }}
+        if: ${{ env.DRY_RUN != 'true' }}
+        run: |
+          set -euo pipefail
+          for meta in images/*/metadata.json; do
+            image=$(jq -r .image "$meta"); digest=$(jq -r .digest "$meta")
+            docker buildx imagetools create --tag "$image:$TAG" "$image@$digest"
+          done
+      - name: Publish the GitHub Release
+        if: ${{ env.DRY_RUN != 'true' }}
+        env:
+          PRERELEASE: ${{ steps.resolve.outputs.prerelease }}
+          SHA: ${{ steps.resolve.outputs.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p assets
+          cp "release/release-$TAG.json" assets/
+          for dir in images/*/; do
+            name=$(jq -r .name "$dir/metadata.json")
+            cp "$dir/sbom.cdx.json" "assets/sbom-$name.cdx.json"
+          done
+          {
+            echo "Images ghcr.io/jackson-nsanzimana/usrp-*:$TAG, each signed keylessly by ci-backend.yml on main and attested with its CycloneDX SBOM."
+            echo
+            echo "Commit: $SHA · CI: $CI_RUN_URL"
+            echo
+            echo 'Verify any image:'
+            echo '```'
+            echo "cosign verify --certificate-identity $COSIGN_IDENTITY --certificate-oidc-issuer $COSIGN_ISSUER ghcr.io/jackson-nsanzimana/usrp-edge-gateway:$TAG"
+            echo '```'
+            echo
+            echo "Evidence: release-$TAG.json (digests, SBOMs, scans, signatures, proof and test counts)."
+          } > notes.md
+          flags=(--verify-tag --title "$TAG" --notes-file notes.md)
+          if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
+          gh release create "$TAG" --repo "$REPO" "${flags[@]}" assets/*

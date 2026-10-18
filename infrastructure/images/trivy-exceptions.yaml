@@ -1,0 +1,13 @@
+# Registered Trivy exceptions for the published images (ADR-038).
+#
+# The image scan in ci-backend.yml blocks on any fixable CRITICAL or HIGH
+# finding. The ONLY way past it is an entry here, reviewed like code:
+#
+#   vulnerabilities:
+#     - id: CVE-YYYY-NNNNN
+#       paths: ["usr/local/lib/..."]          # optional: narrow it
+#       statement: why it is not exploitable here, and who accepted it
+#       expired_at: 2026-12-31                # mandatory: exceptions expire
+#
+# An entry without `expired_at` is a permanent waiver; do not add one.
+vulnerabilities: []

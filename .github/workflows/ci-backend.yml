@@ -256,3 +256,241 @@ jobs:
           name: evidence-${{ github.sha }}
           path: evidence/evidence-${{ env.EVIDENCE_HEAD_SHA }}.json
           if-no-files-found: error
+
+  # ── S03 (ADR-038): unit suites as a gate, images, release bundle ──────────
+
+  unit-tests:
+    name: Unit tests (every package)
+    # The unit suites used to run only inside the ungated evidence job, so a
+    # red unit test could not block a merge. This job makes them a signal of
+    # their own; branch protection decides whether it is required.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      # Unit suites import workspace packages from dist/.
+      - name: Build workspace
+        run: pnpm build
+      # --continue: every package's result is reported, not just the first red.
+      - name: Every package's unit suite
+        run: pnpm turbo run test --continue
+      - name: Script regression tests (evidence, release bundle, env preflight)
+        run: pnpm test:scripts
+
+  images:
+    name: Image (${{ matrix.service }})
+    # PRs build and scan without publishing; main publishes. feat/** pushes are
+    # covered by their PR run, so they do not build twelve images twice.
+    if: ${{ github.event_name != 'push' || github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    # packages/id-token are used only by the steps gated on PUBLISH (main).
+    # A pull_request token from a fork is read-only whatever this says, and a
+    # same-repo branch author can already edit this file, so the grant widens
+    # nothing; no step before PUBLISH runs repository code outside BuildKit.
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - application-service
+          - audit-service
+          - background-vetting-service
+          - biometric-service
+          - document-forensics-service
+          - edge-gateway
+          - eligibility-service
+          - field-sync-service
+          - iam-service
+          - identity-service
+          - notification-service
+          - scheduling-service
+    env:
+      SERVICE: ${{ matrix.service }}
+      IMAGE: ghcr.io/jackson-nsanzimana/usrp-${{ matrix.service }}
+      PUBLISH: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      SIZE_BUDGET_BYTES: '300000000'
+      # Same Trivy as the frontend pipeline, so the two repos cannot reach
+      # different verdicts on the same base image.
+      TRIVY_VERSION: '0.70.0'
+      COSIGN_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/ci-backend.yml@refs/heads/main
+      COSIGN_ISSUER: https://token.actions.githubusercontent.com
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v4
+      - name: Build facts
+        id: facts
+        run: |
+          echo "time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          mkdir -p out
+      # Loaded into the runner's daemon, not pushed: the bytes that are scanned
+      # below are the bytes that are pushed and signed, never a rebuild.
+      - name: Build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: services/${{ matrix.service }}/Dockerfile
+          load: true
+          push: false
+          provenance: false
+          tags: ${{ env.IMAGE }}:${{ github.sha }}
+          build-args: |
+            USRP_BUILD_SHA=${{ github.sha }}
+            USRP_BUILD_REF=${{ github.ref }}
+            USRP_BUILD_TIME=${{ steps.facts.outputs.time }}
+          cache-from: type=gha,scope=svc-${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=svc-${{ matrix.service }}
+      - name: Size budget
+        id: size
+        run: |
+          size=$(docker image inspect -f '{{.Size}}' "$IMAGE:$GITHUB_SHA")
+          echo "bytes=$size" >> "$GITHUB_OUTPUT"
+          echo "$SERVICE: $size bytes (budget $SIZE_BUDGET_BYTES)"
+          if [ "$size" -gt "$SIZE_BUDGET_BYTES" ]; then
+            echo "::error::$SERVICE is $size bytes, over its $SIZE_BUDGET_BYTES budget (ADR-038)."
+            exit 1
+          fi
+      # Blocking: any fixable CRITICAL/HIGH fails the job unless it is
+      # registered (with an expiry) in infrastructure/images/trivy-exceptions.yaml.
+      - name: Scan (Trivy, CRITICAL/HIGH blocking)
+        uses: aquasecurity/trivy-action@v0.36.0
+        env:
+          TRIVY_IGNOREFILE: infrastructure/images/trivy-exceptions.yaml
+          TRIVY_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-db,ghcr.io/aquasecurity/trivy-db
+        with:
+          version: v${{ env.TRIVY_VERSION }}
+          scan-type: image
+          image-ref: ${{ env.IMAGE }}:${{ github.sha }}
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          format: json
+          output: out/trivy.json
+          exit-code: '1'
+      - name: Show findings
+        if: ${{ failure() }}
+        run: |
+          [ -f out/trivy.json ] || { echo "no Trivy report: the scanner did not run (could not verify)"; exit 0; }
+          jq -r '.Results[]? | .Target as $t | .Vulnerabilities[]? | "\(.Severity)\t\(.VulnerabilityID)\t\(.PkgName) \(.InstalledVersion) -> \(.FixedVersion)\t\($t)"' out/trivy.json
+      - name: SBOM (CycloneDX)
+        uses: aquasecurity/trivy-action@v0.36.0
+        env:
+          TRIVY_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-db,ghcr.io/aquasecurity/trivy-db
+        with:
+          version: v${{ env.TRIVY_VERSION }}
+          skip-setup-trivy: true
+          scan-type: image
+          image-ref: ${{ env.IMAGE }}:${{ github.sha }}
+          format: cyclonedx
+          output: out/sbom.cdx.json
+          exit-code: '0'
+
+      - name: Log in to GHCR
+        if: ${{ env.PUBLISH == 'true' }}
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push the scanned image
+        id: push
+        if: ${{ env.PUBLISH == 'true' }}
+        run: |
+          docker push "$IMAGE:$GITHUB_SHA"
+          ref=$(docker image inspect -f '{{index .RepoDigests 0}}' "$IMAGE:$GITHUB_SHA")
+          echo "digest=${ref#*@}" >> "$GITHUB_OUTPUT"
+          echo "pushed $ref"
+      - uses: sigstore/cosign-installer@v4.1.2
+        if: ${{ env.PUBLISH == 'true' }}
+        with:
+          cosign-release: v3.1.3
+      # Keyless: the certificate binds the signature to THIS workflow on main
+      # (GitHub OIDC); nothing to rotate, nothing to leak. Signed by digest,
+      # so a later tag of the same digest carries the same signature.
+      - name: Sign, attest the SBOM, verify both
+        if: ${{ env.PUBLISH == 'true' }}
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          ref="$IMAGE@$DIGEST"
+          cosign sign --yes "$ref"
+          cosign attest --yes --type cyclonedx --predicate out/sbom.cdx.json "$ref"
+          cosign verify --certificate-identity "$COSIGN_IDENTITY" --certificate-oidc-issuer "$COSIGN_ISSUER" "$ref" > /dev/null
+          cosign verify-attestation --type cyclonedx --certificate-identity "$COSIGN_IDENTITY" --certificate-oidc-issuer "$COSIGN_ISSUER" "$ref" > /dev/null
+          echo "signed and verified: $ref"
+      - name: Image metadata
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+          SIZE: ${{ steps.size.outputs.bytes }}
+        run: |
+          signed=false; [ -n "$DIGEST" ] && signed=true
+          jq -n --arg name "$SERVICE" --arg image "$IMAGE" --arg digest "$DIGEST" --arg sha "$GITHUB_SHA" \
+                --argjson size "$SIZE" --argjson budget "$SIZE_BUDGET_BYTES" --argjson signed "$signed" \
+                --arg identity "$COSIGN_IDENTITY" --arg issuer "$COSIGN_ISSUER" \
+            '{name: $name, image: $image, digest: (if $digest == "" then null else $digest end), tags: [$sha],
+              sizeBytes: $size, sizeBudgetBytes: $budget, sbom: "sbom.cdx.json", scan: "trivy.json",
+              signed: $signed, attested: $signed,
+              signerIdentity: (if $signed then $identity else null end), signerIssuer: (if $signed then $issuer else null end)}' \
+            > out/metadata.json
+          cat out/metadata.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: image-${{ matrix.service }}
+          path: out/
+          if-no-files-found: error
+
+  release-bundle:
+    name: Release bundle (dry run on PRs, candidate on main)
+    # The composer the v* release workflow runs, exercised on every PR against
+    # this run's own artefacts (nothing pushed, so no digests) and on main
+    # against the published, signed images.
+    needs: [images, evidence]
+    if: ${{ !cancelled() && (github.event_name != 'push' || github.ref == 'refs/heads/main') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      EVIDENCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      MODE: ${{ github.event_name == 'push' && 'candidate' || 'dry-run' }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: image-*
+          path: images
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: evidence-${{ github.sha }}
+          path: evidence
+      - name: Compose
+        run: >-
+          node scripts/release-bundle.mjs --mode "$MODE" --tag "$MODE-$EVIDENCE_HEAD_SHA"
+          --sha "$EVIDENCE_HEAD_SHA" --images images --evidence "evidence/evidence-$EVIDENCE_HEAD_SHA.json"
+          --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --out release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ env.MODE }}-${{ github.sha }}
+          path: release/
+          if-no-files-found: error
