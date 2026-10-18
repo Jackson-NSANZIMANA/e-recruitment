@@ -512,12 +512,33 @@ export const officerAccounts = publicCore.table(
     credential: text('credential').notNull(),
     agency: agencyEnum('agency').notNull(),
     roles: text('roles').array().notNull().default([]),
-    // 'active' | 'disabled' — CHECK constraint enforced in rls/0010.
+    // 'active' | 'disabled' | 'pending' — CHECK constraint in rls/0010, widened
+    // by rls/0033 (ADR-036: 'pending' = created, activation code not redeemed).
     status: varchar('status', { length: 16 }).notNull().default('active'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    // rls/0033 (ADR-036): when the officer first held a real credential, and
+    // the most recent successful login (stamped by officer_record_login).
+    activatedAt: timestamp('activated_at', { withTimezone: true }),
+    lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
   },
   (t) => [uniqueIndex('idx_pc_officer_accounts_handle').on(t.loginHandle)],
 );
+
+// ── officer_activation_codes ──────────────────────────────────────
+// ADR-036: the one-time activation code an administrator hands a new officer.
+// Only the SHA-256 of the normalised code is stored; 24h expiry, single use.
+// No login role holds any privilege (FORCE'd RLS, no policy); only the NOLOGIN
+// usrp_officer_command_owner reaches it, through the rls/0033 functions.
+export const officerActivationCodes = publicCore.table('officer_activation_codes', {
+  officerId: uuid('officer_id')
+    .primaryKey()
+    .references(() => officerAccounts.officerId, { onDelete: 'cascade' }),
+  codeHash: varchar('code_hash', { length: 64 }).notNull(),
+  issuedAt: timestamp('issued_at', { withTimezone: true }).defaultNow().notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  issuedBy: uuid('issued_by').notNull(),
+  redeemedAt: timestamp('redeemed_at', { withTimezone: true }),
+});
 
 // ── service_accounts ──────────────────────────────────────────────
 // The MACHINE mirror of officer_accounts (ADR-016). A service client presents
