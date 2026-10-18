@@ -63,13 +63,15 @@ Work the file top to bottom. Anything with a value gets rotated; anything that t
 
 ## 3. Then close the loop
 
-- [ ] Every item in section 2 rotated, with a date and an operator name against each.
-- [ ] `node scripts/check-tracked-secrets.mjs` green on `main`.
-- [ ] `node scripts/check-tracked-secrets.mjs --selftest` green (proves the gate still fails when it should).
-- [ ] Gate wired as the **first** CI job, before `pnpm install`.
-- [ ] History rewrite planned and scheduled. Coordinate: it is a force-push and it invalidates every open branch and existing clone. The frontend repo's `tooling/repo-hygiene/PURGE-RUNBOOK.md` is a proven procedure whose approach ports directly.
-- [ ] Audit review for the 2026-08-27 → 2026-09-04 window completed and signed off.
-- [ ] DPO consulted on external notification obligations (NIDA, and any citizen-facing duty).
+Closed or re-scoped in writing on 2026-10-16 (S00); the reasoning is in §5.
+
+- [x] Every item in section 2 rotated, with a date and an operator name against each. **Re-scoped** (§5.2): no production secret has ever existed, so there is nothing in production to rotate. Production secrets are generated fresh in KMS (S07). Dev secrets are regenerated per developer (open action in §5.4).
+- [x] `node scripts/check-tracked-secrets.mjs` green on `main`. Green on 2026-10-16. From S00 it runs on every CI run, `main` included.
+- [x] `node scripts/check-tracked-secrets.mjs --selftest` green (proves the gate still fails when it should). Green on 2026-10-16, in CI from S00.
+- [x] Gate wired as the **first** CI job, before `pnpm install`. Until S00 the gate was **not wired into backend CI at all**. It now runs as the first steps of the required `Security Scan` job, which never installs dependencies.
+- [x] History rewrite planned and scheduled. **Not applicable**: the owner decided on 2026-10-16 not to rewrite (§5.3).
+- [x] Audit review for the 2026-08-27 → 2026-09-04 window completed and signed off. **Not applicable**: in that window no deployment existed and there were no real officers, so there is no officer-token activity to review. Every audit log was a developer's local container.
+- [x] DPO consulted on external notification obligations (NIDA, and any citizen-facing duty). **Not applicable** for the platform: no NIDA credential had been issued (G2G is mocks only) and no citizen record existed. This is the owner's position of 2026-10-16. When a DPO is appointed, they may review this note; nothing here forecloses that.
 
 ---
 
@@ -84,4 +86,38 @@ What changed structurally:
 3. The gate runs before dependency install, so it cannot be disabled by an unrelated build problem.
 4. The gate is proven red-then-green by `--selftest`, so it cannot quietly degrade into `exit 0`.
 
-The remaining gap is human: `main` accepted this commit **unreviewed and with no required status check**. Branch protection is tracked separately and is the reason a single unreviewed push could put a secret in a national repository.
+The remaining gap was human: `main` accepted this commit **unreviewed and with no required status check**. S00 (2026-10-16) closed it: both `main` branches now require pull requests and green, up-to-date status checks, admins included. Force-push and deletion are refused.
+
+---
+
+## 5. Closure (S00, 2026-10-16)
+
+### 5.1 The fact the closure rests on
+
+No production environment has ever existed: no hosting, no production database, no KMS, no HSM. Also:
+
+- no G2G authorisation has been issued (NIDA, NESA, HEC and RIB are mocks);
+- no SMS provider has been contracted (`LogSmsChannel` only).
+
+So whatever the August file held, it could only hold **development** values, or a credential someone pasted in by hand (see §5.4). This keeps §1's principle: the conclusion does not depend on reading the file.
+
+### 5.2 Rotation, item by item
+
+| §2 item | Resolution |
+|---|---|
+| 1. Ed25519 JWT signing keys | Dev: `bash scripts/generate-env.sh --force` mints two fresh, separate Ed25519 keypairs (JWT and QR) per developer. Production: no keypair has existed. S07 generates it in KMS, never derived from a dev value. |
+| 2. Database credentials | Dev values are the `.env.example` placeholders for local containers. The production boot guard (`shared-config` selfcheck, run in CI) refuses dev secrets, placeholders, loopback and mocks, so a dev value cannot start production. Production credentials are created in S07. |
+| 3. NIDA gateway credentials | Not applicable: no NIDA credential has been issued. Real G2G credentials (S12) are issued to production only. |
+| 4. HSM / PKI material | Not applicable: no HSM exists; custody is an S07 owner decision. |
+| 5. SMS provider credentials | Not applicable: no provider contract exists. |
+| 6. Kafka, object storage, the rest of `.env.example` | Dev-only local containers. Regenerated with the dev `.env`, and recreated by `pnpm infra:reset`. |
+
+### 5.3 Owner decisions recorded
+
+- **History rewrite: no** (owner, 2026-10-16). Rotation covers the exposure because no production secret ever existed. A rewrite is a force-push of every branch, invalidates every clone, and would undo none of the eight days of read access. The file stays retrievable from history at `47d9ad3`…`c643006`, and that is accepted.
+- **Repository visibility: stay public** (owner, 2026-10-16). See `docs/program/delivery-programme.md` §7.
+
+### 5.4 Open actions (not closed by this note)
+
+- **Each developer** regenerates their dev `.env` with `bash scripts/generate-env.sh --force` (add `pnpm infra:reset` if local DB passwords changed). This cannot be done for them: the `.env` is theirs.
+- **The owner** confirms that no personal or third-party credential was ever pasted into a local `.env` in August, for example a cloud key or an SMS sandbox key. If one was, revoke it **at its provider**. §5.1's reasoning covers platform secrets, not credentials someone brought in from elsewhere.

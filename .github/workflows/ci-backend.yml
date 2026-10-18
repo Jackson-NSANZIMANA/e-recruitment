@@ -145,7 +145,19 @@ jobs:
       - name: Run all proofs
         env:
           BOOT_TIMEOUT_S: 600
-        run: pnpm verify
+        # tee keeps the runner's own summary line for the evidence bundle.
+        # `shell: bash` is load-bearing: the default run shell is `bash -e
+        # {0}` WITHOUT pipefail, which would give the step tee's exit code and
+        # turn a red proof green. Explicit `bash` runs `bash -eo pipefail`.
+        shell: bash
+        run: pnpm verify 2>&1 | tee proofs.log
+      - name: Upload proofs log
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: proofs-log
+          path: proofs.log
+          if-no-files-found: ignore
       # Surface broker/init logs when the proofs fail — Kafka setup is the
       # most common CI-only failure (see kafka-backbone-proof.md).
       - name: Dump infra logs on failure
@@ -172,6 +184,13 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+      # The tracked-secrets gate (SECRET-ROTATION.md §4). Zero dependencies and
+      # before any install, so a registry outage or a broken lockfile cannot
+      # skip it. The selftest runs first: it proves the gate still goes red.
+      - name: Tracked-secrets gate selftest
+        run: node scripts/check-tracked-secrets.mjs --selftest
+      - name: Tracked-secrets gate
+        run: node scripts/check-tracked-secrets.mjs
       # Pinned to a release — @master is an unpinned supply-chain dependency.
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@v0.36.0
@@ -181,3 +200,59 @@ jobs:
           severity: 'CRITICAL,HIGH'
           exit-code: '1'
           ignore-unfixed: true
+
+  evidence:
+    name: Evidence bundle
+    # Runs after every gate, whatever their result, so a red run still leaves a
+    # record of what was measured. W0-04: docs cite this artefact instead of
+    # hand-written counts and SHAs.
+    needs: [typecheck, lint, verify, security-scan]
+    # !cancelled(), not always(): a cancelled run (superseded push) leaves no
+    # bundle rather than a misleading partial one.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Runs repository code after install; read-only whatever the repository
+    # default becomes. Same-run artefact download needs no token scope.
+    permissions:
+      contents: read
+    env:
+      EVIDENCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      # The operation inventory is read from the built registry, and the unit
+      # suites import workspace packages from dist/.
+      # A red build must not cost the bundle: the collector records the
+      # inventory as unavailable and exits non-zero after writing.
+      - name: Build workspace
+        id: build
+        continue-on-error: true
+        run: pnpm build
+      - name: Fetch the proofs log
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: proofs-log
+          path: proofs
+      # Runs every package's unit suite (pnpm verify does not), then writes the
+      # bundle. Exits non-zero on a failed test, after writing it.
+      - name: Write evidence bundle
+        if: ${{ !cancelled() }}
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: node scripts/evidence-bundle.mjs --out evidence --proofs-log proofs/proofs.log --run-tests --needs "$NEEDS"
+      # Named by the commit CI actually tested (the merge commit on a
+      # pull_request run), so push and PR runs of one head never share a name.
+      - name: Upload evidence bundle
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-${{ github.sha }}
+          path: evidence/evidence-${{ env.EVIDENCE_HEAD_SHA }}.json
+          if-no-files-found: error
