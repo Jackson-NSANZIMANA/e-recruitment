@@ -10,8 +10,8 @@
 //   enableOfficer / reissueOfficerActivation to recover an earlier run.
 //
 // Then it verifies from the list, not from its own bookkeeping: every
-// scenario officer exists, is active, holds EXACTLY its posts, and can sign
-// in. The dev seeder is no longer how a rehearsal gets its staff.
+// scenario officer exists, is active and holds EXACTLY its posts. The dev
+// seeder is no longer how a rehearsal gets its staff.
 // ══════════════════════════════════════════════════════════════════
 
 import type { EdgeSession } from './edge.js';
@@ -143,7 +143,9 @@ export async function provisionStaff(
       : { handle: member.handle, ok: false, applied, detail: failure });
   }
 
-  // The expectation, verified from the agency's own list: active, exactly these posts, able to sign in.
+  // The expectation, verified from the agency's own list: active, exactly these posts.
+  // (No sign-in probe per officer: activation's 204 already proved the
+  // credential, and N extra logins would exhaust the edge's shared login limit.)
   const final = listedFrom((await admin.get('/edge/v1/officers')).body) ?? [];
   const verified: StaffOutcome[] = [];
   for (const outcome of outcomes) {
@@ -155,10 +157,6 @@ export async function provisionStaff(
     const listed = final.find((o) => o.loginHandle === outcome.handle);
     if (member === undefined || listed === undefined || listed.status !== 'active' || !samePosts(listed.posts, member.posts)) {
       verified.push({ ...outcome, ok: false, detail: `listOfficers does not show ${outcome.handle} active with exactly ${member?.posts.join('+') ?? '?'}` });
-      continue;
-    }
-    if (!(await newBrowser().signIn(outcome.handle, REHEARSAL_STAFF_PASSWORD))) {
-      verified.push({ ...outcome, ok: false, detail: `${outcome.handle} cannot sign in with the rehearsal staff password` });
       continue;
     }
     verified.push(outcome);

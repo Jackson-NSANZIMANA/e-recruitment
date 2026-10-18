@@ -23,8 +23,7 @@ What `pnpm rehearse` does, in order, per agency, through the real interfaces onl
    with the dev password `RehearsalStaff#2026`, and align its posts through
    `assignOfficerPosts` (recovering an earlier run with `enableOfficer` /
    `reissueOfficerActivation`); then fail unless `listOfficers` shows each one
-   active with exactly its posts and it can sign in. The dev seeder is not used
-   for this;
+   active with exactly its posts. The dev seeder is not used for this;
 4. close earlier days' rehearsal campaigns (never delete);
 5. draft → policy version → one session per district → publish, each with a
    deterministic `Idempotency-Key`;

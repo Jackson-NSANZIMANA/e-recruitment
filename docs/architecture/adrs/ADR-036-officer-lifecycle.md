@@ -147,7 +147,7 @@ administrator it creates each scenario's station officers **through these
 operations** (create → activate with the documented dev password →
 assign posts when they differ; enable / reissue to recover an earlier run),
 then lists the agency's officers and fails unless each scenario officer
-exists, is active, holds exactly its posts and can sign in. The dev seeder
+exists, is active and holds exactly its posts. The dev seeder
 remains for bootstrap only.
 
 ## Owner decisions (asked 2026-10-18, answered)
