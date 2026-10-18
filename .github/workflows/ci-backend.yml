@@ -212,6 +212,10 @@ jobs:
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Runs repository code after install; read-only whatever the repository
+    # default becomes. Same-run artefact download needs no token scope.
+    permissions:
+      contents: read
     env:
       EVIDENCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
