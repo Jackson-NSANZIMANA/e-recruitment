@@ -60,6 +60,25 @@ test('vitest JUnit: classname is the file, a bare <skipped/> counts', () => {
   assert.deepEqual(cases.map((c) => [c.file, c.outcome]), [['src/x.test.ts', 'passed'], ['src/x.test.ts', 'skipped']]);
 });
 
+test('node:test JUnit: a raw > inside a failure message does not hide the failure', () => {
+  // node:test escapes quotes and ampersands in attributes but writes > as is.
+  const xml = '<testsuites><testcase name="compares" classname="test" file="/repo/a.test.mjs" failure="expected 2 > 1"><failure type="testCodeFailure" message="expected 2 > 1 to be false">stack with <br> text</failure></testcase><testcase name="next" classname="test" file="/repo/a.test.mjs"/></testsuites>';
+  assert.deepEqual(parseJUnit(xml, '/repo').map((c) => [c.name, c.outcome, c.reason]), [
+    ['compares', 'failed', 'expected 2 > 1 to be false'],
+    ['next', 'passed', undefined],
+  ]);
+});
+
+test('a failure without a message keeps its type, else says it had none', () => {
+  const xml = '<testsuites><testcase name="a"><failure type="testCodeFailure"/></testcase><testcase name="b"><error/></testcase></testsuites>';
+  assert.deepEqual(parseJUnit(xml, '/repo').map((c) => c.reason), ['testCodeFailure', '<error> without a message']);
+});
+
+test('CDATA and comments cannot fake a testcase', () => {
+  const xml = '<testsuites><!-- <testcase name="ghost"/> --><testcase name="real"><system-out><![CDATA[<testcase name="ghost2"/>]]></system-out></testcase></testsuites>';
+  assert.deepEqual(parseJUnit(xml, '/repo').map((c) => c.name), ['real']);
+});
+
 test('an empty report has no cases', () => {
   assert.deepEqual(parseJUnit('<testsuites></testsuites>'), []);
 });

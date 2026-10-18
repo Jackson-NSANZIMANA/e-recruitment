@@ -36,6 +36,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { stripVTControlCharacters } from 'node:util';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const REPO = 'Jackson-NSANZIMANA/e-recruitment';
@@ -43,7 +44,7 @@ const PEER = 'Jackson-NSANZIMANA/e-recruitment-ui';
 const JUNIT_DIR = 'test-results';
 const JUNIT_FILE = 'unit.junit.xml';
 
-const stripAnsi = (text) => text.replace(/\x1b\[[0-9;]*m/g, '');
+const stripAnsi = stripVTControlCharacters;
 
 const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
 const decodeXml = (text) =>
@@ -52,9 +53,14 @@ const decodeXml = (text) =>
 
 function attributes(text) {
   const out = {};
-  for (const [, key, value] of text.matchAll(/([\w:.-]+)="([^"]*)"/g)) out[key] = decodeXml(value);
+  for (const [, key, dq, sq] of text.matchAll(/([\w:.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) out[key] = decodeXml(dq ?? sq);
   return out;
 }
+
+// One element tag. Attribute values are matched as quoted strings, so a raw
+// `>` inside one (node:test writes failure messages unescaped there) does not
+// end the tag early.
+const TAG = /<(\/?)([\w:.-]+)((?:\s+[\w:.-]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*(\/?)>/g;
 
 /** Parse the selfcheck runner's output. The summary line is authoritative. */
 export function parseProofLog(raw) {
@@ -78,19 +84,30 @@ export function parseProofLog(raw) {
 /** Parse a JUnit report (node:test or vitest) into leaf test cases. */
 export function parseJUnit(xml, root = ROOT) {
   const cases = [];
-  for (const m of xml.matchAll(/<testcase\b([^>]*?)(?:\/>|>([\s\S]*?)<\/testcase>)/g)) {
-    const attrs = attributes(m[1]);
-    const body = m[2] ?? '';
-    const skipped = body.match(/<skipped\b([^>]*?)\/?>/);
-    const failure = body.match(/<(failure|error)\b([^>]*?)\/?>/);
-    const file = attrs.file ?? attrs.classname ?? '';
+  const body = xml.replace(/<!\[CDATA\[[\s\S]*?\]\]>|<!--[\s\S]*?-->/g, '');
+  let open = null;
+  const close = () => {
+    const file = open.attrs.file ?? open.attrs.classname ?? '';
     cases.push({
-      name: attrs.name ?? '',
+      name: open.attrs.name ?? '',
       file: file.startsWith('/') ? relative(root, file) : file,
-      outcome: failure ? 'failed' : skipped ? 'skipped' : 'passed',
-      ...(skipped ? { reason: attributes(skipped[1]).message ?? attributes(skipped[1]).type ?? '' } : {}),
-      ...(failure ? { reason: (attributes(failure[2]).message ?? failure[1]).slice(0, 500) } : {}),
+      outcome: open.failure ? 'failed' : open.skipped ? 'skipped' : 'passed',
+      ...(open.failure ? { reason: open.failure.slice(0, 500) } : open.skipped ? { reason: open.skipped.reason } : {}),
     });
+    open = null;
+  };
+  for (const [, slash, name, attrText, selfClosing] of body.matchAll(TAG)) {
+    if (name === 'testcase') {
+      if (slash) { if (open) close(); continue; }
+      open = { attrs: attributes(attrText), failure: null, skipped: null };
+      if (selfClosing) close();
+    } else if (open && !slash && (name === 'failure' || name === 'error')) {
+      const attrs = attributes(attrText);
+      open.failure ??= attrs.message || attrs.type || `<${name}> without a message`;
+    } else if (open && !slash && name === 'skipped') {
+      const attrs = attributes(attrText);
+      open.skipped ??= { reason: attrs.message ?? attrs.type ?? '' };
+    }
   }
   return cases;
 }
@@ -150,12 +167,15 @@ function summariseTests(packages) {
   const all = packages.flatMap((p) => (p.cases ?? []).map((c) => ({ package: p.name, ...c })));
   const sum = (key) => packages.reduce((n, p) => n + (p[key] ?? 0), 0);
   const failedPackages = packages.filter((p) => p.exitCode !== 0).map((p) => p.name);
+  // A package that exits 0 without a report ran tests nobody counted; its
+  // tests are recorded as null and the totals say so, never as zero.
+  const unreportedPackages = packages.filter((p) => p.cases === null).map((p) => p.name);
   return {
-    status: failedPackages.length > 0 ? 'failed' : 'passed',
+    status: failedPackages.length > 0 ? 'failed' : unreportedPackages.length > 0 ? 'passed-with-unreported' : 'passed',
     source: `each workspace package's \`test\` script, JUnit via node --test-reporter (${JUNIT_DIR}/${JUNIT_FILE})`,
-    totals: { packages: packages.length, tests: sum('tests'), passed: sum('passed'), failed: sum('failed'), skipped: sum('skipped') },
+    totals: { packages: packages.length, reportedPackages: packages.length - unreportedPackages.length, tests: sum('tests'), passed: sum('passed'), failed: sum('failed'), skipped: sum('skipped') },
     failedPackages,
-    unreportedPackages: packages.filter((p) => p.cases === null).map((p) => p.name),
+    unreportedPackages,
     skippedTests: all.filter((c) => c.outcome === 'skipped').map(({ outcome, ...c }) => c),
     failedTests: all.filter((c) => c.outcome === 'failed').map(({ outcome, ...c }) => c),
     packages: packages.map(({ cases, ...p }) => p),
@@ -173,6 +193,11 @@ async function operationInventory() {
       path: op.path,
       session: op.session,
       permission: op.permission ?? null,
+      csrf: op.csrf,
+      publicAllowlist: op.publicAllowlist,
+      idempotentWithoutSession: op.idempotentWithoutSession ?? false,
+      maxBodyBytes: op.maxBodyBytes,
+      retryOnG2G: op.retryOnG2G,
       composition: op.composition,
       upstream: op.upstream.map((u) => u.id),
     }))
@@ -240,7 +265,8 @@ async function main() {
   console.log(`  operations: ${operations.count ?? operations.status}`);
   console.log(`  proofs:     ${proofs.status}${proofs.passed === undefined ? '' : ` (${proofs.passed} passed, ${proofs.skipped} skipped, ${proofs.failed} failed)`}`);
   for (const label of proofs.skippedChecks ?? []) console.log(`    skipped: ${label}`);
-  console.log(`  tests:      ${tests.status}${tests.totals ? ` (${tests.totals.tests} in ${tests.totals.packages} packages: ${tests.totals.passed} passed, ${tests.totals.skipped} skipped, ${tests.totals.failed} failed)` : ''}`);
+  console.log(`  tests:      ${tests.status}${tests.totals ? ` (${tests.totals.tests} in ${tests.totals.reportedPackages} reporting packages: ${tests.totals.passed} passed, ${tests.totals.skipped} skipped, ${tests.totals.failed} failed)` : ''}`);
+  for (const name of tests.unreportedPackages ?? []) console.log(`    unreported: ${name} (exited ${tests.packages.find((p) => p.name === name)?.exitCode}, no JUnit report)`);
   for (const t of tests.skippedTests ?? []) console.log(`    skipped: ${t.package} › ${t.name}`);
 
   if (operations.status !== 'available') process.exitCode = 1;
