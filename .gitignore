@@ -90,3 +90,6 @@ packages/shared-database/.drift-check/
 
 # Dev SMS inbox written by LogSmsChannel under `pnpm dev` (holds OTP codes)
 .dev-sms/
+
+# Rehearsal stage manifest written by `pnpm rehearse` (dev/training only)
+.rehearsal/

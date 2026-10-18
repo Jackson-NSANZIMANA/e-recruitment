@@ -1,0 +1,23 @@
+{
+  "name": "@usrp/rehearsal",
+  "version": "1.0.0",
+  "private": true,
+  "description": "USRP Rehearsal: stage a complete synthetic recruitment cycle on the real control plane (dev and training only; refuses production)",
+  "type": "module",
+  "scripts": {
+    "rehearse": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint 'src/**/*.ts'",
+    "test": "tsx --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@usrp/shared-security": "workspace:*",
+    "@usrp/shared-types": "workspace:*",
+    "postgres": "^3.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.8.3"
+  }
+}

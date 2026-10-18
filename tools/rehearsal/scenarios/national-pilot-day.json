@@ -1,0 +1,69 @@
+{
+  "id": "national-pilot-day",
+  "version": 1,
+  "title": "National pilot day",
+  "purpose": "One rehearsal campaign per agency, staged for today: RDF examines today (digital lane, walk-in lane and the venue gate can all be rehearsed now); RNP and RCS are open for registration with exams in two and three weeks. Every value is synthetic.",
+  "campaigns": [
+    {
+      "agency": "RDF",
+      "categories": ["GENERAL_ENLISTMENT", "RESERVE_FORCE_UNIVERSITY"],
+      "registration": { "opensOffsetDays": -1, "closesOffsetDays": 30 },
+      "examination": { "startOffsetDays": 0, "endOffsetDays": 6 },
+      "reportingHour": 7,
+      "allowsWalkIn": true,
+      "targetIntakeCount": 200,
+      "sessions": [
+        { "district": "GASABO", "examOffsetDays": 0, "reportingHour": 7, "capacity": 300 },
+        { "district": "HUYE", "examOffsetDays": 0, "reportingHour": 7, "capacity": 300 }
+      ]
+    },
+    {
+      "agency": "RNP",
+      "categories": ["BASIC_POLICE_COURSE", "CADET_OFFICER"],
+      "registration": { "opensOffsetDays": -1, "closesOffsetDays": 30 },
+      "examination": { "startOffsetDays": 14, "endOffsetDays": 16 },
+      "reportingHour": 8,
+      "allowsWalkIn": false,
+      "targetIntakeCount": 150,
+      "sessions": [
+        { "district": "GASABO", "examOffsetDays": 14, "reportingHour": 8, "capacity": 250 },
+        { "district": "HUYE", "examOffsetDays": 15, "reportingHour": 8, "capacity": 250 }
+      ]
+    },
+    {
+      "agency": "RCS",
+      "categories": ["GENERAL_ENLISTEE", "OFFICER_ONE_YEAR"],
+      "registration": { "opensOffsetDays": -1, "closesOffsetDays": 30 },
+      "examination": { "startOffsetDays": 21, "endOffsetDays": 23 },
+      "reportingHour": 8,
+      "allowsWalkIn": false,
+      "targetIntakeCount": 100,
+      "sessions": [
+        { "district": "GASABO", "examOffsetDays": 21, "reportingHour": 8, "capacity": 200 },
+        { "district": "HUYE", "examOffsetDays": 22, "reportingHour": 8, "capacity": 200 }
+      ]
+    }
+  ],
+  "personas": [
+    {
+      "id": "A",
+      "role": "Eligible citizen, digital lane",
+      "nationalId": "1200380123456789",
+      "dateOfBirth": "2003-03-15",
+      "phone": "0788123456",
+      "homeDistrict": "GASABO",
+      "rehearses": "Apply online to RDF General Enlistment with NESA index RW2024/1001, pass the age, academic and criminal gates, receive the Exam Pass, and be admitted at Rehearsal Venue — Gasabo today.",
+      "expectedOutcome": "Scheduled at Rehearsal Venue — Gasabo today; Exam Pass READY; admitted once at the gate."
+    },
+    {
+      "id": "B",
+      "role": "Over-age citizen",
+      "nationalId": "1199980345678901",
+      "dateOfBirth": "1999-11-08",
+      "phone": "0722000021",
+      "homeDistrict": "HUYE",
+      "rehearses": "Apply to RDF General Enlistment (age band 18 to 25) at age 26: the age gate must refuse, and the citizen must see a closed application rather than an Exam Pass.",
+      "expectedOutcome": "Refused at the age gate; no slot, no Exam Pass."
+    }
+  ]
+}
