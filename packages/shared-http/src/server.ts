@@ -31,6 +31,7 @@ import { randomUUID } from 'node:crypto';
 import { HttpError } from './errors.js';
 import { parseCookieHeader, serializeSetCookie } from './cookies.js';
 import { corsPreflightHeaders, corsResponseHeaders, isAllowedOrigin } from './cors.js';
+import { versionBody } from './version.js';
 import type {
   AccessLogRecord,
   HttpResult,
@@ -62,7 +63,7 @@ const JSON_CONTENT_TYPE = 'application/json; charset=utf-8';
  * process is up and declaring itself unfit, which is exactly the state an
  * operator must see. Silencing by path alone would have hidden that too.
  */
-const SILENT_WHEN_HEALTHY: ReadonlySet<string> = new Set(['/health', '/ready']);
+const SILENT_WHEN_HEALTHY: ReadonlySet<string> = new Set(['/health', '/ready', '/version']);
 
 /** A matched route plus the byte cap that route is allowed to spend. */
 interface RouteEntry {
@@ -122,8 +123,8 @@ function mergeVary(a: string | undefined, b: string | undefined): string | undef
 
 /**
  * Start an HTTP server for a service. Resolves once the socket is listening.
- * Routes are matched exactly on method + path; `/health` and `/ready` are
- * reserved and served by the transport itself.
+ * Routes are matched exactly on method + path; `/health`, `/ready` and
+ * `/version` are reserved and served by the transport itself.
  */
 export function startHttpServer(options: HttpServerOptions): Promise<HttpServer> {
   const {
@@ -139,6 +140,8 @@ export function startHttpServer(options: HttpServerOptions): Promise<HttpServer>
   const onShutdown = options.onShutdown;
   const cors = options.cors;
   const log = options.logger ?? defaultAccessLogger;
+  // Computed once: the build facts are fixed for the life of the process.
+  const version = versionBody(serviceName, process.env, options.version);
 
   // path → (method → entry)
   const table = new Map<string, Map<string, RouteEntry>>();
@@ -296,6 +299,14 @@ export function startHttpServer(options: HttpServerOptions): Promise<HttpServer>
           status: ready ? 200 : 503,
           body: { status: ready ? 'ready' : 'not_ready', service: serviceName },
         };
+        status = result.status;
+        send(res, result, requestId, correlationId, corsHeaders);
+        return;
+      }
+
+      // Build attestation (ADR-038): which commit this process was built from.
+      if (method === 'GET' && url.pathname === '/version') {
+        const result: HttpResult = { status: 200, body: version };
         status = result.status;
         send(res, result, requestId, correlationId, corsHeaders);
         return;

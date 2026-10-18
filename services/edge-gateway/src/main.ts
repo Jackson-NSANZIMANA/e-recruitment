@@ -23,6 +23,7 @@ import { assertProductionSecrets } from '@usrp/shared-config';
 import { configureDatabase, sql } from '@usrp/shared-database';
 import { startHttpServer } from '@usrp/shared-http';
 import { createEdgeGateway } from './index.js';
+import { contractFingerprint, policyFingerprint } from './domain/version-fingerprints.js';
 import { loadEdgeGatewayConfig } from './config.js';
 
 /** How long a readiness verdict is reused. Shorter than any sane probe interval. */
@@ -123,6 +124,8 @@ async function main(): Promise<void> {
     routes: gateway.routes,
     cors: gateway.cors,
     readiness,
+    // GET /version (ADR-038): the registry and permission map this build serves.
+    version: { contract: contractFingerprint(), policy: policyFingerprint() },
     onShutdown: async (): Promise<void> => {
       console.log(JSON.stringify({ msg: 'service_stopping', service: config.runtime.serviceName }));
       clearInterval(sweeper);

@@ -139,6 +139,11 @@ export interface HttpServerOptions {
    * never called by a browser should emit no CORS headers at all.
    */
   readonly cors?: CorsPolicy;
+  /**
+   * Fingerprints this process adds to `GET /version` (ADR-038), beside the
+   * build facts every service reports. Omit when there is nothing to add.
+   */
+  readonly version?: VersionInfo;
 }
 
 /** A running server handle. */
@@ -149,4 +154,16 @@ export interface HttpServer {
   readonly port: number;
   /** Stop accepting, drain in-flight, run onShutdown. Idempotent. */
   stop(): Promise<void>;
+}
+
+/**
+ * Process-specific fingerprints for `GET /version` (ADR-038). Keys are short
+ * identifiers, values hashes / counts / version strings; malformed entries are
+ * dropped rather than echoed.
+ */
+export interface VersionInfo {
+  /** The contract this process serves (e.g. the edge operation registry). */
+  readonly contract?: Readonly<Record<string, string | number>>;
+  /** The policy this process enforces (e.g. the role → permission map). */
+  readonly policy?: Readonly<Record<string, string | number>>;
 }
