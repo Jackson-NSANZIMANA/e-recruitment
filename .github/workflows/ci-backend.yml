@@ -243,10 +243,12 @@ jobs:
         env:
           NEEDS: ${{ toJSON(needs) }}
         run: node scripts/evidence-bundle.mjs --out evidence --proofs-log proofs/proofs.log --run-tests --needs "$NEEDS"
+      # Named by the commit CI actually tested (the merge commit on a
+      # pull_request run), so push and PR runs of one head never share a name.
       - name: Upload evidence bundle
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
-          name: evidence-${{ env.EVIDENCE_HEAD_SHA }}
+          name: evidence-${{ github.sha }}
           path: evidence/evidence-${{ env.EVIDENCE_HEAD_SHA }}.json
           if-no-files-found: error
