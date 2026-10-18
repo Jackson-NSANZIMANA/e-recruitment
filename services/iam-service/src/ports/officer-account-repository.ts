@@ -2,15 +2,16 @@
 // iam-service — OfficerAccountRepository port
 //
 // The credential store, abstracted. iam-service reads an officer account by its
-// login handle to authenticate a login; it never writes through this port in
-// the login path (provisioning is a deferred follow-on). The returned record
+// login handle to authenticate a login. Its one write is the last-login stamp,
+// through the narrow rls/0033 officer_record_login function (ADR-036). The returned record
 // carries the scrypt `credential` digest — the service verifies against it and
 // NEVER returns it past the use-case boundary.
 // ══════════════════════════════════════════════════════════════════
 
 import type { Agency } from '@usrp/shared-types';
 
-export type OfficerAccountStatus = 'active' | 'disabled';
+/** 'pending' (ADR-036) = created by an administrator, activation code not yet redeemed. */
+export type OfficerAccountStatus = 'active' | 'disabled' | 'pending';
 
 export interface OfficerAccountRecord {
   /** UUID — becomes the minted token's `sub`, and the officer-stamp columns. */
@@ -26,4 +27,6 @@ export interface OfficerAccountRecord {
 export interface OfficerAccountRepository {
   /** Resolve an account by its unique login handle, or null when none exists. */
   findByHandle(loginHandle: string): Promise<OfficerAccountRecord | null>;
+  /** Stamp a successful login (ADR-036: listOfficers shows last login). */
+  recordSuccessfulLogin(officerId: string): Promise<void>;
 }

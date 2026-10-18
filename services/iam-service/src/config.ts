@@ -1,11 +1,12 @@
 // ══════════════════════════════════════════════════════════════════
 // iam-service — Configuration
 //
-// Lean by intent, like audit-service. iam-service MINTS tokens; it does not
-// verify inbound ones (its only route, login, is public), so it loads the
-// issuer PRIVATE key and nothing else auth-related — no public verifier, no
-// G2G secret, no PII encryption key. It needs exactly: runtime, the database
-// (the credential store), and the issuer signing key.
+// Lean by intent, like audit-service. iam-service MINTS tokens, so it loads
+// the issuer PRIVATE key and nothing else auth-related — no separate public
+// verifier key, no G2G secret, no PII encryption key. The officer-admin routes
+// (ADR-036) verify inbound officer tokens with the public key DERIVED from
+// that private key (index.ts), so no new key material is configured. It needs
+// exactly: runtime, the database (the credential store), and the signing key.
 // ══════════════════════════════════════════════════════════════════
 
 import {

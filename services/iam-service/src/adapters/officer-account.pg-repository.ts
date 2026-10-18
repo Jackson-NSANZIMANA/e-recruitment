@@ -47,8 +47,9 @@ export class PgOfficerAccountRepository implements OfficerAccountRepository {
         const row = rows[0];
         if (row === undefined) return null;
 
-        // Fail closed: any status that is not exactly 'active' is treated as
-        // disabled by the login use case.
+        // Fail closed: any status that is not exactly 'active' (disabled,
+        // pending activation, or anything unknown) is refused by the login use
+        // case; it is reported as disabled.
         const status: OfficerAccountStatus = row.status === 'active' ? 'active' : 'disabled';
         return {
           officerId: row.officer_id,
@@ -61,6 +62,19 @@ export class PgOfficerAccountRepository implements OfficerAccountRepository {
       });
     } catch (err) {
       throw new IamPersistenceError('Failed to read officer account', { cause: err });
+    }
+  }
+
+  async recordSuccessfulLogin(officerId: string): Promise<void> {
+    try {
+      await sql.begin(async (tx) => {
+        await tx`SET LOCAL ROLE ${sql(IAM_DB_ROLE)}`;
+        // usrp_iam_service has no UPDATE grant; this SECURITY DEFINER function
+        // stamps last_login_at for an ACTIVE account and nothing else.
+        await tx`SELECT public_core.officer_record_login(${officerId}::uuid)`;
+      });
+    } catch (err) {
+      throw new IamPersistenceError('Failed to record officer login', { cause: err });
     }
   }
 }

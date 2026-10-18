@@ -27,6 +27,7 @@ import { startHttpServer } from '@usrp/shared-http';
 import { createIamService, loadIamConfig } from './index.js';
 import { officerLoginRoutes } from './adapters/http/officer-login.controller.js';
 import { serviceTokenRoutes } from './adapters/http/service-token.controller.js';
+import { officerAdminRoutes } from './adapters/http/officer-admin.controller.js';
 
 const IAM_OUTBOX_PRODUCER = 'iam-service';
 
@@ -65,7 +66,12 @@ async function main(): Promise<void> {
   const server = await startHttpServer({
     serviceName: config.runtime.serviceName,
     port: config.runtime.port,
-    routes: [...officerLoginRoutes(service.login), ...serviceTokenRoutes(service.serviceToken)],
+    routes: [
+      ...officerLoginRoutes(service.login),
+      ...serviceTokenRoutes(service.serviceToken),
+      // ADR-036: officer lifecycle (officer bearer + permission + live DB re-check).
+      ...officerAdminRoutes(service.officerAdmin, service.verifier),
+    ],
     // Ready only when the credential store — the login path's home — is reachable.
     readiness: async (): Promise<boolean> => {
       try {

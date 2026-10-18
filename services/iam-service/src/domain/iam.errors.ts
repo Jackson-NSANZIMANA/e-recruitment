@@ -13,3 +13,16 @@ export class IamPersistenceError extends Error {
     this.name = 'IamPersistenceError';
   }
 }
+
+/**
+ * The database refused the ACTOR of an officer-admin command (ADR-036): not an
+ * active agency_admin of the requested agency, or the transaction actor did
+ * not match. Distinct from a business refusal (a return value): the HTTP
+ * layer answers 403 and names nothing.
+ */
+export class OfficerAdminForbiddenError extends Error {
+  constructor(options?: { cause?: unknown }) {
+    super('The officer-admin actor is not an active agency administrator.', options);
+    this.name = 'OfficerAdminForbiddenError';
+  }
+}
