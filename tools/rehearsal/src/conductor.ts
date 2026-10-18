@@ -16,6 +16,7 @@ import { deterministicKey } from './idempotency.js';
 import { syntheticPolicy } from './policy.js';
 import { ensureAgencyAdmin } from './provision.js';
 import { REHEARSAL_CODE_PREFIX, stageCampaigns, type Scenario, type StagedCampaign } from './scenario.js';
+import { provisionStaff } from './staff.js';
 
 export type StepOutcome = 'APPLIED' | 'REPLAYED' | 'ALREADY_DONE' | 'FAILED';
 
@@ -31,6 +32,7 @@ export interface CampaignReport {
   readonly publicCode: string;
   readonly label: string;
   readonly adminHandle: string;
+  readonly staffHandles: readonly string[];
   readonly publiclyVisible: boolean;
   readonly sessions: readonly { readonly district: string; readonly venueName: string; readonly examDate: string; readonly reportingHour: number }[];
   readonly steps: readonly StepReport[];
@@ -87,6 +89,7 @@ async function playCampaign(scenario: Scenario, staged: StagedCampaign, config: 
     publicCode: draft.publicCode,
     label: draft.campaignLabel,
     adminHandle: admin.loginHandle,
+    staffHandles: staged.staff.map((m) => m.handle),
     publiclyVisible,
     sessions: staged.sessions.map((s) => ({ district: s.district, venueName: s.venueName, examDate: s.examDate, reportingHour: s.reportingTimeHour })),
     steps,
@@ -118,6 +121,18 @@ async function playCampaign(scenario: Scenario, staged: StagedCampaign, config: 
     return report(false);
   }
   steps.push({ step: 'sign-in', outcome: 'APPLIED', httpStatus: 200, detail: admin.loginHandle });
+
+  // 2b. Staff the day through the officer-lifecycle operations (ADR-036), as
+  //     this administrator, and verify each officer from the agency's list.
+  const staffed = await provisionStaff(edge, () => new EdgeSession(config.edgeBaseUrl, config.origin), staged.staff);
+  for (const member of staffed) {
+    steps.push({
+      step: `staff ${member.handle}`,
+      outcome: member.ok ? (member.applied ? 'APPLIED' : 'ALREADY_DONE') : 'FAILED',
+      httpStatus: null,
+      detail: member.detail,
+    });
+  }
 
   // 3. Retire earlier days' rehearsal campaigns for this agency (close, never delete).
   const open = await edge.get('/edge/v1/campaigns');

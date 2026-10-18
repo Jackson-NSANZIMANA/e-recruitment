@@ -19,6 +19,7 @@ import { conduct, type AdminCredential, type RehearsalReport } from './conductor
 import { EdgeSession, EdgeUnavailable } from './edge.js';
 import { RehearsalRefused, assertRehearsalAllowed } from './fence.js';
 import { isRehearsalCode, ScenarioInvalid, validateScenario, type Scenario } from './scenario.js';
+import { REHEARSAL_STAFF_PASSWORD } from './staff.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = resolve(HERE, '..');
@@ -80,7 +81,8 @@ function printReport(report: RehearsalReport, scenario: Scenario, edgeBaseUrl: s
   out('  Officer console    http://localhost:3001');
   for (const c of report.campaigns) {
     const agency = c.agency.toLowerCase();
-    out(`    ${c.agency}: ${agency}.officer / ${DEV_OFFICER_PASSWORD} (gate, walk-in, medical)  ·  ${agency}.director / ${DEV_OFFICER_PASSWORD} (decide, accept)  ·  ${c.adminHandle} (campaigns)`);
+    out(`    ${c.agency}: ${agency}.officer / ${DEV_OFFICER_PASSWORD} (gate, walk-in, medical)  ·  ${agency}.director / ${DEV_OFFICER_PASSWORD} (decide, accept)  ·  ${c.adminHandle} (campaigns, staff)`);
+    if (c.staffHandles.length > 0) out(`      staff (password ${REHEARSAL_STAFF_PASSWORD}): ${c.staffHandles.join(', ')}`);
   }
   out();
   out('Personas');
