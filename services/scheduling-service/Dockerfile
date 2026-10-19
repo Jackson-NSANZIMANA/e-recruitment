@@ -53,9 +53,16 @@ FROM node:24-bookworm-slim@sha256:a5f4366e834695d5f363b920c104953a535d3a9864d1bd
 # A service needs node and nothing else. npm, npx, corepack and yarn (with
 # their bundled dependency trees) are most of the base image's scanner surface
 # and are never executed here, so they are removed, not merely unused.
+# Debian security fixes land between base-image refreshes (perl-base was a
+# fixable CRITICAL on the pinned digest), so the runtime takes them at build
+# time; the Trivy gate then sees what actually ships.
 RUN rm -rf /usr/local/lib/node_modules /opt/yarn-* \
       /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
-      /usr/local/bin/yarn /usr/local/bin/yarnpkg
+      /usr/local/bin/yarn /usr/local/bin/yarnpkg \
+ && apt-get update \
+ && apt-get upgrade -y --no-install-recommends \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/* /var/cache/apt/* /var/log/apt /var/log/dpkg.log
 ENV NODE_ENV=production
 # The canonical port (.env.example PORT_SCHEDULING_SERVICE); PORT_SCHEDULING_SERVICE or PORT
 # override it at runtime. Without it a bare `docker run` would listen on 3000
