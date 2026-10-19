@@ -86,7 +86,6 @@ A flat JSON object; **every key is required** (nullable ones are sent as
 |---|---|
 | `schema` | `"USRP-BIO-EVIDENCE.v1"` |
 | `recordId` | UUID, generated on the device; globally unique |
-| `agency` | `RDF` \| `RNP` \| `RCS` (must be the officer's and the device's) |
 | `applicationId` | UUID (from the exam ticket) |
 | `ticketId` | the ticket id of that application's stored exam QR |
 | `deviceId` | the enrolled `field_devices.device_id` |
@@ -119,7 +118,9 @@ with the device's enrolled key, standard base64 (88 characters).
   exist, be **of the officer's agency**, be **not revoked**, and `keyId` must
   equal the fingerprint of its stored public key (refusals: `UNKNOWN_DEVICE`,
   `DEVICE_REVOKED`, `DEVICE_WRONG_AGENCY`, `KEY_MISMATCH`, `SIGNATURE_INVALID`,
-  `AGENCY_MISMATCH`, each audited as `BIOMETRIC_EVIDENCE_REFUSED`).
+  each audited as `BIOMETRIC_EVIDENCE_REFUSED`). The record carries **no agency**:
+  the agency is the officer's, from the session (`agency` is a forbidden field at
+  the edge), and the device, the application and the ticket must all belong to it.
 - The record is **bound** to the application and its ticket: the engine
   checks that the application exists in the officer's agency schema and that
   `ticketId` is the ticket of the QR stored on it (`UNKNOWN_TICKET`).

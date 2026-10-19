@@ -30,7 +30,6 @@ function record(overrides: Partial<Record<keyof EvidenceRecord, unknown>> = {}):
   return {
     schema: 'USRP-BIO-EVIDENCE.v1',
     recordId: '0b7c3f8e-2a51-4c1d-9e2f-6a7b8c9d0e1f',
-    agency: 'RDF',
     applicationId: '9a111111-1111-4111-8111-111111111111',
     ticketId: 'Zx9_-abcDEF0123456789abcdefghijklmnopqrstuv',
     deviceId: 'TAB-RDF-0001',
@@ -169,6 +168,7 @@ test('NO IMAGE: arrays (embeddings) are refused anywhere, even short ones', () =
 
 test('NO IMAGE: unknown keys are refused even when harmless-looking', () => {
   assert.deepEqual(parseEvidenceRequest({ record: record({ note: 'ok' }), signature: SIG }), { ok: false, reason: 'SCHEMA_INVALID' });
+  assert.deepEqual(parseEvidenceRequest({ record: record({ agency: 'RDF' }), signature: SIG }), { ok: false, reason: 'SCHEMA_INVALID' }, 'the agency is the session\'s, never the body\'s');
   assert.deepEqual(parseEvidenceRequest({ record: record(), signature: SIG, note: 'ok' }), { ok: false, reason: 'SCHEMA_INVALID' });
   const missing = record();
   delete missing['modelVersion'];
@@ -185,12 +185,11 @@ test('the legitimate long values pass the image guard: signature, key id, ticket
 // ── Schema ─────────────────────────────────────────────────────────
 
 test('schema: every key is required and every value is typed and bounded', () => {
-  assert.equal(EVIDENCE_RECORD_KEYS.length, 19);
+  assert.equal(EVIDENCE_RECORD_KEYS.length, 18);
   const cases: [string, unknown][] = [
     ['schema', 'USRP-BIO-EVIDENCE.v2'],
     ['recordId', 'not-a-uuid'],
     ['recordId', '0B7C3F8E-2A51-4C1D-9E2F-6A7B8C9D0E1F'],
-    ['agency', 'XYZ'],
     ['applicationId', 7],
     ['ticketId', ''],
     ['ticketId', 'has space'],
@@ -291,7 +290,7 @@ test('signing input is canonical JSON: key order does not matter, values do', ()
   const b = parsed(reversed);
   assert.equal(evidenceSigningInput(a).toString('utf8'), evidenceSigningInput(b).toString('utf8'));
   assert.equal(evidenceDigest(a), evidenceDigest(b));
-  assert.ok(evidenceSigningInput(a).toString('utf8').startsWith('{"agency":"RDF","applicationId":'));
+  assert.ok(evidenceSigningInput(a).toString('utf8').startsWith('{"applicationId":'));
   assert.ok(evidenceSigningInput(a).toString('utf8').includes('"notAttemptedReason":null'));
   const sig = signEd25519(KEYS.privateKeyPem, evidenceSigningInput(a));
   assert.equal(verifyEd25519(KEYS.publicKeyPem, evidenceSigningInput(b), sig), true);

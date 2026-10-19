@@ -26,7 +26,6 @@
 
 import { createHash, createPublicKey } from 'node:crypto';
 import { canonicalJson, type JsonValue } from '@usrp/shared-security';
-import { AGENCIES, type Agency } from '@usrp/shared-types';
 import { RECORDING_MODES, type RecordingMode } from './biometric-mode.js';
 import {
   BASIS_POINTS_MAX,
@@ -73,7 +72,6 @@ export type BiometricLegalBasis = 'CONSENT_OR_DECLINE' | 'NECESSITY';
 export interface EvidenceRecord {
   readonly schema: typeof EVIDENCE_SCHEMA;
   readonly recordId: string;
-  readonly agency: Agency;
   readonly applicationId: string;
   readonly ticketId: string;
   readonly deviceId: string;
@@ -94,7 +92,7 @@ export interface EvidenceRecord {
 
 /** Every key of a v1 record, all required (nullable ones are sent as null). */
 export const EVIDENCE_RECORD_KEYS: readonly (keyof EvidenceRecord)[] = [
-  'schema', 'recordId', 'agency', 'applicationId', 'ticketId', 'deviceId', 'keyId',
+  'schema', 'recordId', 'applicationId', 'ticketId', 'deviceId', 'keyId',
   'referenceSource', 'method', 'consentState', 'outcome', 'notAttemptedReason',
   'livenessScoreBp', 'matchScoreBp', 'modelId', 'modelVersion',
   'thresholdPolicyVersion', 'mode', 'capturedAt',
@@ -182,7 +180,6 @@ export function parseEvidenceRecord(raw: unknown): EvidenceRecord | null {
   const r = raw;
   if (r['schema'] !== EVIDENCE_SCHEMA) return null;
   if (typeof r['recordId'] !== 'string' || !UUID_RE.test(r['recordId'])) return null;
-  if (!oneOf(AGENCIES, r['agency'])) return null;
   if (typeof r['applicationId'] !== 'string' || !UUID_RE.test(r['applicationId'])) return null;
   if (typeof r['ticketId'] !== 'string' || !OPAQUE_ID_RE.test(r['ticketId'])) return null;
   if (typeof r['deviceId'] !== 'string' || !OPAQUE_ID_RE.test(r['deviceId'])) return null;
@@ -202,7 +199,6 @@ export function parseEvidenceRecord(raw: unknown): EvidenceRecord | null {
   return {
     schema: EVIDENCE_SCHEMA,
     recordId: r['recordId'],
-    agency: r['agency'],
     applicationId: r['applicationId'],
     ticketId: r['ticketId'],
     deviceId: r['deviceId'],

@@ -5,7 +5,7 @@
 // The checks run in this order; each refusal is a return value:
 //
 //   1. image guard + exact schema           → INVALID (IMAGE_PAYLOAD_REFUSED | SCHEMA_INVALID)
-//   2. record agency == officer agency      → UNTRUSTED (AGENCY_MISMATCH), audited
+//   2. (the agency is the officer's, from the token — never in the record)
 //   3. reference source authorised          → INVALID (REFERENCE_SOURCE_NOT_AUTHORISED)
 //   4. outcome / consent consistency        → INVALID (…)
 //   5. capturedAt window                    → INVALID (CAPTURED_AT_OUT_OF_RANGE)
@@ -43,7 +43,6 @@ import type { ReferenceSourceRegistry } from '../ports/reference-source.js';
 import type { DeviceKey, EngineRefusal, EvidenceEventDispatcher, EvidenceStore } from '../ports/evidence-store.js';
 
 export type TrustRefusal =
-  | 'AGENCY_MISMATCH'
   | 'UNKNOWN_DEVICE'
   | 'DEVICE_WRONG_AGENCY'
   | 'DEVICE_REVOKED'
@@ -112,12 +111,6 @@ export class RecordEvidenceService {
     const correlationId = safeCorrelationId(command.context.correlationId);
     const context: EventContext = { ...command.context, correlationId };
 
-    if (record.agency !== command.agency) {
-      await this.#deps.store.run(command.officerId, async (uow) => {
-        await uow.stage([refusalAudit(command, record, 'AGENCY_MISMATCH', context)]);
-      });
-      return { kind: 'UNTRUSTED', reason: 'AGENCY_MISMATCH' };
-    }
     if (this.#deps.referenceSources.source(record.referenceSource).status === 'NOT_AUTHORISED') {
       return { kind: 'INVALID', reason: 'REFERENCE_SOURCE_NOT_AUTHORISED' };
     }
