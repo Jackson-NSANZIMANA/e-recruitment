@@ -313,6 +313,19 @@ check(
     'createCampaignPolicy,uploadMyDocument,syncFieldScores',
 );
 
+// ── 9. Biometric identity evidence (ADR-037) ────────────────────
+section('Biometric evidence: officer-only, never retried, no room for an image');
+check('recordBiometricEvidence caps its body at 4 KiB', edgeOperation('recordBiometricEvidence').maxBodyBytes === 4 * 1_024);
+check('recordBiometricEvidence is CSRF-protected and never retried',
+  edgeOperation('recordBiometricEvidence').csrf && !edgeOperation('recordBiometricEvidence').retryOnG2G);
+check('confirmManualIdentity is CSRF-protected and never retried',
+  edgeOperation('confirmManualIdentity').csrf && !edgeOperation('confirmManualIdentity').retryOnG2G);
+check('manual identity needs its own permission (field_supervisor)', edgeOperation('confirmManualIdentity').permission === 'identity.manual.confirm');
+check('the evidence read needs biometric.evidence.read', edgeOperation('getBiometricEvidence').permission === 'biometric.evidence.read');
+for (const id of ['getBiometricPolicy', 'recordBiometricEvidence', 'getBiometricEvidence', 'confirmManualIdentity'] as const) {
+  check(`${id}: officer session only`, edgeOperation(id).session === 'officer');
+}
+
 // ── Every officer operation declares the permission it needs ───
 const SESSION_LOCAL_OFFICER_OPS: ReadonlySet<EdgeOperationId> = new Set(['officerLogout']);
 for (const id of EDGE_OPERATION_IDS) {

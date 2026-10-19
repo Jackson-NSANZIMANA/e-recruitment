@@ -197,6 +197,17 @@ export interface BiometricVerificationCompletedEvent extends BaseEvent {
   readonly faceMatchConfidence: number;
   readonly faceMatchPass: boolean;
   // No biometric data in event — scores only. Raw frames purged.
+  /**
+   * v1.1 (ADR-037): device-attested identity evidence. Absent on v1.0 events
+   * (the legacy server-side check-in). Emitted only for ADVISORY records —
+   * a SHADOW record never reaches this event.
+   */
+  readonly schemaVersion?: '1.1';
+  /** The evidence record id (also carried as sessionId). */
+  readonly recordId?: string;
+  readonly method?: 'FACE_1_1_ON_DEVICE';
+  readonly referenceSource?: 'CARD_PORTRAIT' | 'NIDA_PORTRAIT';
+  readonly mode?: 'ADVISORY';
 }
 
 // ── Topic: slot.assigned ──────────────────────────────────────────

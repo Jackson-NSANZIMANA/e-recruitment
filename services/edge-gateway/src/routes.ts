@@ -97,6 +97,12 @@ import {
   reissueOfficerActivationHandler,
   revokeOfficerSessionsHandler,
 } from './adapters/http/officer-admin.controller.js';
+import {
+  confirmManualIdentityHandler,
+  getBiometricEvidenceHandler,
+  getBiometricPolicyHandler,
+  recordBiometricEvidenceHandler,
+} from './adapters/http/biometric-evidence.controller.js';
 
 /**
  * Every registered operation, bound to its handler.
@@ -174,6 +180,10 @@ export function edgeHandlers(deps: EdgeDeps): Record<EdgeOperationId, RouteHandl
     getVenueRoster: getVenueRosterHandler(deps),
     listErasureRequests: listErasureRequestsHandler(deps),
     decideErasureRequest: decideErasureRequestHandler(deps),
+    getBiometricPolicy: getBiometricPolicyHandler(deps),
+    recordBiometricEvidence: recordBiometricEvidenceHandler(deps),
+    getBiometricEvidence: getBiometricEvidenceHandler(deps),
+    confirmManualIdentity: confirmManualIdentityHandler(deps),
   };
 }
 
