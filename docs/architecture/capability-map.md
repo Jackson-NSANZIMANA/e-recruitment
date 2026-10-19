@@ -41,7 +41,7 @@ Legend: ✅ built and proven by a live selfcheck · 🟡 partial · ❌ missing 
 | Operation-level permissions + separation of duties | ✅ **(S)** | ADR-031; role table awaits agency ratification |
 | Application queues, detail, decision trail | ✅ reads · 🟡 UI | officer-console screens are thin |
 | Medical review / final decision / accept / adjudicate | ✅ (permissioned, four-eyes) **(S)** | `verify-officer-lifecycle-slice.ts` |
-| Officer lifecycle: create, assign posts, disable, revoke sessions | ❌ | only the first-admin provisioner script; **blocks operating ADR-031** |
+| Officer lifecycle: create, assign posts, disable, revoke sessions | ✅ backend+edge **(S01)** · ❌ UI (S06) | ADR-036, rls/0033: 8 edge operations (`listOfficers`, `createOfficer`, `reissueOfficerActivation`, `assignOfficerPosts`, `disableOfficer`, `enableOfficer`, `revokeOfficerSessions`, `activateOfficer`); one-time activation code; disable/post change ends an open browser session on the next request (`verify-officer-lifecycle.ts`); rehearsal staffs each agency through them |
 | Device revocation | ❌ API | registry honours `revoked_at`; nothing can set it |
 | Funnel metrics, exception desk, stuck applications | ❌ | BUILD-006 |
 | Audit browser | ❌ | audit-service is write-only |
@@ -85,7 +85,7 @@ Legend: ✅ built and proven by a live selfcheck · 🟡 partial · ❌ missing 
 
 ## 6. Recommended build order from here
 
-1. **Officer lifecycle** (create, assign posts, disable, revoke; audited; `agency_admin`) — without it the permission model cannot be operated.
+1. ~~**Officer lifecycle**~~ — delivered in the backend and edge (S01, ADR-036). Remaining: the staff-admin screens (S06); a token revocation list to close the one-hour residual.
 2. ~~**BUILD-003 check-in & admission**~~ — single-use QR admission delivered (ADR-034). Remaining: venue document clearing inside the gate flow, biometric evidence per attempt, offline admission queue.
 3. **Tablet PWA** on the field-sync contract.
 4. **Admin dashboard** — campaign control plane (types the 7 campaign operations), queues, exception desk.

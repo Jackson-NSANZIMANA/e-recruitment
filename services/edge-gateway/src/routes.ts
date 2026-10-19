@@ -79,6 +79,16 @@ import {
   resolveFieldSyncConflictHandler,
   syncFieldScoresHandler,
 } from './adapters/http/field-sync.controller.js';
+import {
+  activateOfficerHandler,
+  assignOfficerPostsHandler,
+  createOfficerHandler,
+  disableOfficerHandler,
+  enableOfficerHandler,
+  listOfficersHandler,
+  reissueOfficerActivationHandler,
+  revokeOfficerSessionsHandler,
+} from './adapters/http/officer-admin.controller.js';
 
 /**
  * Every registered operation, bound to its handler.
@@ -140,6 +150,15 @@ export function edgeHandlers(deps: EdgeDeps): Record<EdgeOperationId, RouteHandl
     enrollFieldDevice: enrollFieldDeviceHandler(deps),
     syncFieldScores: syncFieldScoresHandler(deps),
     resolveFieldSyncConflict: resolveFieldSyncConflictHandler(deps),
+
+    listOfficers: listOfficersHandler(deps),
+    createOfficer: createOfficerHandler(deps),
+    reissueOfficerActivation: reissueOfficerActivationHandler(deps),
+    assignOfficerPosts: assignOfficerPostsHandler(deps),
+    disableOfficer: disableOfficerHandler(deps),
+    enableOfficer: enableOfficerHandler(deps),
+    revokeOfficerSessions: revokeOfficerSessionsHandler(deps),
+    activateOfficer: activateOfficerHandler(deps),
   };
 }
 

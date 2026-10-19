@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   ALL_PERMISSIONS,
   KNOWN_ROLES,
+  OFFICER_ADMIN_PERMISSION_LIST,
   hasCampaignPermission,
   permissionsForRoles,
   principalHasPermission,
@@ -62,6 +63,11 @@ ok('the gate post cannot decide, accept or review medically (the gate is not a d
   !rolesHavePermission(['screening_officer'], 'application.accept') &&
   !rolesHavePermission(['screening_officer'], 'medical.review'));
 ok('the DPO sees no applications', !rolesHavePermission(['dpo'], 'application.read'));
+ok('only agency_admin administers officers (ADR-036)',
+  OFFICER_ADMIN_PERMISSION_LIST.every((p) => KNOWN_ROLES.filter((r) => rolesHavePermission([r], p)).join() === 'agency_admin'));
+ok('officer administration confers no decision power by itself (ADR-036)',
+  !rolesHavePermission(['agency_admin'], 'decision.final') && !rolesHavePermission(['agency_admin'], 'medical.review') &&
+  !rolesHavePermission(['agency_admin'], 'adjudication.decide') && !rolesHavePermission(['agency_admin'], 'admission.gate'));
 
 console.log('\n── Composition and compatibility ──');
 ok('roles compose (union)', rolesHavePermission(['medical_officer', 'adjudicator'], 'medical.review') && rolesHavePermission(['medical_officer', 'adjudicator'], 'adjudication.decide'));

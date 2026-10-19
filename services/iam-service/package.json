@@ -2,7 +2,7 @@
   "name": "@usrp/iam-service",
   "version": "1.0.0",
   "private": true,
-  "description": "USRP IAM Service — the token issuer: officer login that mints Ed25519 bearer tokens the officer endpoints accept. Sole holder of the issuer private key.",
+  "description": "USRP IAM Service \u2014 the token issuer: officer login that mints Ed25519 bearer tokens the officer endpoints accept. Sole holder of the issuer private key.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -23,7 +23,9 @@
     "provision:first-campaign-admin": "tsx scripts/provision-first-campaign-admin.ts",
     "selfcheck": "tsx selfcheck/verify-iam-issuer-slice.ts",
     "selfcheck:service-token": "tsx selfcheck/verify-service-token-slice.ts",
-    "selfcheck:provisioner-auth": "tsx selfcheck/verify-first-admin-provisioner-auth.ts"
+    "selfcheck:provisioner-auth": "tsx selfcheck/verify-first-admin-provisioner-auth.ts",
+    "test": "tsx --test test/*.test.ts",
+    "selfcheck:officer-lifecycle": "tsx selfcheck/verify-officer-lifecycle.ts"
   },
   "dependencies": {
     "@usrp/shared-auth": "workspace:*",

@@ -98,6 +98,7 @@ export class OfficerLoginService {
       expiresAt,
     };
     const token = signAuthToken(this.#config.privateKeyPem, claims);
+    await this.#accounts.recordSuccessfulLogin(account.officerId);
 
     // Success audit — PII-free by construction.
     const event: AuditEvent = {

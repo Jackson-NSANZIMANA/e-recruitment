@@ -286,6 +286,7 @@ async function main(): Promise<void> {
           roles: ['reviewer'],
           status: 'active' as const,
         }),
+        recordSuccessfulLogin: async () => {},
       },
       new InMemoryEventBus(),
       {

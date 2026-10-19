@@ -269,6 +269,10 @@ const APPROVED_PUBLIC: readonly EdgeOperationId[] = [
   'verifyApplicantOtp',
   'listCampaigns',
   'getCampaignDetail',
+  // ADR-036: the officer redeems a one-time activation code before they have
+  // any session. The code is the credential; CSRF + per-handle/per-client
+  // rate limits apply exactly as on officerLogin.
+  'activateOfficer',
 ];
 
 check(

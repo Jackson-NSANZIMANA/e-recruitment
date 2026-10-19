@@ -29,6 +29,17 @@ export interface ScenarioSession {
   readonly capacity: number;
 }
 
+/** A station officer the day needs, provisioned through the ADR-036 operations. */
+export interface ScenarioStaff {
+  readonly handle: string;
+  readonly posts: readonly string[];
+}
+
+/** Posts an agency administrator may assign (ADR-036: never agency_admin). */
+export const ASSIGNABLE_POSTS: readonly string[] = [
+  'reviewer', 'screening_officer', 'field_supervisor', 'medical_officer', 'adjudicator', 'decision_authority', 'dpo',
+];
+
 export interface ScenarioCampaign {
   readonly agency: string;
   readonly categories: readonly string[];
@@ -38,6 +49,8 @@ export interface ScenarioCampaign {
   readonly allowsWalkIn: boolean;
   readonly targetIntakeCount: number;
   readonly sessions: readonly ScenarioSession[];
+  /** Optional: the station officers the `staff` step provisions (ADR-036). */
+  readonly staff?: readonly ScenarioStaff[];
 }
 
 export interface ScenarioPersona {
@@ -107,6 +120,18 @@ export function validateScenario(scenario: Scenario): void {
       check(Number.isInteger(session.capacity) && session.capacity >= 1, `${campaign.agency}/${session.district}: capacity must be a positive integer.`);
     }
   }
+  const staffHandles = new Set<string>();
+  for (const campaign of scenario.campaigns) {
+    for (const member of campaign.staff ?? []) {
+      check(/^reh\.[a-z0-9][a-z0-9._-]{2,59}$/.test(member.handle), `${campaign.agency}: staff handle "${member.handle}" must start with "reh." (rehearsal-marked).`);
+      check(!staffHandles.has(member.handle), `Staff handle ${member.handle} appears twice.`);
+      staffHandles.add(member.handle);
+      check(member.posts.length > 0 && new Set(member.posts).size === member.posts.length, `${member.handle}: at least one post, no duplicates.`);
+      for (const post of member.posts) {
+        check(ASSIGNABLE_POSTS.includes(post), `${member.handle}: "${post}" is not an assignable post (agency_admin never is).`);
+      }
+    }
+  }
   const personaIds = new Set<string>();
   for (const persona of scenario.personas) {
     check(!personaIds.has(persona.id), `Persona ${persona.id} appears twice.`);
@@ -147,6 +172,7 @@ export interface StagedCampaign {
   readonly agency: Agency;
   readonly draft: CampaignDraftCommand;
   readonly sessions: readonly SessionCommand[];
+  readonly staff: readonly ScenarioStaff[];
 }
 
 /** PURE. The public code of an agency's rehearsal campaign for the Kigali day of `now`. */
@@ -200,6 +226,7 @@ export function stageCampaigns(scenario: Scenario, now: Date): readonly StagedCa
         contactPhoneNumbers: [],
       },
       sessions,
+      staff: campaign.staff ?? [],
     };
   });
 }

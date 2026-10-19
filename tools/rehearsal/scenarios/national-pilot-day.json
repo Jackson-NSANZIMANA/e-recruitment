@@ -15,6 +15,11 @@
       "sessions": [
         { "district": "GASABO", "examOffsetDays": 0, "reportingHour": 7, "capacity": 300 },
         { "district": "HUYE", "examOffsetDays": 0, "reportingHour": 7, "capacity": 300 }
+      ],
+      "staff": [
+        { "handle": "reh.rdf.gate.gasabo", "posts": ["screening_officer"] },
+        { "handle": "reh.rdf.gate.huye", "posts": ["screening_officer"] },
+        { "handle": "reh.rdf.supervisor", "posts": ["field_supervisor", "reviewer"] }
       ]
     },
     {
@@ -28,6 +33,10 @@
       "sessions": [
         { "district": "GASABO", "examOffsetDays": 14, "reportingHour": 8, "capacity": 250 },
         { "district": "HUYE", "examOffsetDays": 15, "reportingHour": 8, "capacity": 250 }
+      ],
+      "staff": [
+        { "handle": "reh.rnp.gate.gasabo", "posts": ["screening_officer"] },
+        { "handle": "reh.rnp.medical", "posts": ["medical_officer"] }
       ]
     },
     {
@@ -41,6 +50,10 @@
       "sessions": [
         { "district": "GASABO", "examOffsetDays": 21, "reportingHour": 8, "capacity": 200 },
         { "district": "HUYE", "examOffsetDays": 22, "reportingHour": 8, "capacity": 200 }
+      ],
+      "staff": [
+        { "handle": "reh.rcs.gate.gasabo", "posts": ["screening_officer"] },
+        { "handle": "reh.rcs.medical", "posts": ["medical_officer"] }
       ]
     }
   ],

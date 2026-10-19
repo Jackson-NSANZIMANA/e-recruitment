@@ -18,10 +18,16 @@ What `pnpm rehearse` does, in order, per agency, through the real interfaces onl
    administrator is never given a second one (set `REHEARSAL_<AGENCY>_ADMIN_HANDLE`
    and `REHEARSAL_<AGENCY>_ADMIN_PASSWORD` instead);
 2. sign in at the edge as that administrator;
-3. close earlier days' rehearsal campaigns (never delete);
-4. draft → policy version → one session per district → publish, each with a
+3. **staff** the day (ADR-036): create each scenario officer (`reh.<agency>.…`)
+   through `createOfficer`, redeem its one-time code through `activateOfficer`
+   with the dev password `RehearsalStaff#2026`, and align its posts through
+   `assignOfficerPosts` (recovering an earlier run with `enableOfficer` /
+   `reissueOfficerActivation`); then fail unless `listOfficers` shows each one
+   active with exactly its posts. The dev seeder is not used for this;
+4. close earlier days' rehearsal campaigns (never delete);
+5. draft → policy version → one session per district → publish, each with a
    deterministic `Idempotency-Key`;
-5. confirm the public detail serves the campaign.
+6. confirm the public detail serves the campaign.
 
 Everything it creates is marked as a rehearsal: `REH-<AGENCY>-<YYYYMMDD>` codes,
 `[REHEARSAL]` labels, "Rehearsal Venue — …" venues, legal basis

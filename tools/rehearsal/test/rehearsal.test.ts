@@ -8,6 +8,7 @@ import { assertRehearsalAllowed, RehearsalRefused } from '../src/fence.js';
 import { deterministicKey } from '../src/idempotency.js';
 import { MEDICAL_MODE_BY_AGENCY, syntheticPolicy, SYNTHETIC_LEGAL_BASIS_CODE } from '../src/policy.js';
 import { isRehearsalCode, rehearsalCode, ScenarioInvalid, stageCampaigns, validateScenario, type Scenario } from '../src/scenario.js';
+import { nextStaffAction, samePosts } from '../src/staff.js';
 
 const scenario = JSON.parse(readFileSync(new URL('../scenarios/national-pilot-day.json', import.meta.url), 'utf8')) as Scenario;
 // 23:30 UTC on 15 Oct is already 16 Oct in Kigali (UTC+2).
@@ -115,4 +116,30 @@ test('conductor: a step is FAILED unless the edge said 2xx, and a replay is name
   const conflict = classify('publish', 409, false, { error: 'COVERAGE_INCOMPLETE' });
   assert.equal(conflict.outcome, 'FAILED');
   assert.equal(conflict.detail, 'COVERAGE_INCOMPLETE');
+});
+
+test('staff: the plan converges create → (enable | reissue) → assign → none', () => {
+  const member = { handle: 'reh.rdf.gate.gasabo', posts: ['screening_officer'] };
+  const row = (status: 'active' | 'disabled' | 'pending', posts: string[]) => [{ officerId: 'o-1', loginHandle: member.handle, posts, status }];
+  assert.deepEqual(nextStaffAction(member, []), { kind: 'CREATE' });
+  assert.deepEqual(nextStaffAction(member, row('disabled', ['screening_officer'])), { kind: 'ENABLE', officerId: 'o-1' });
+  assert.deepEqual(nextStaffAction(member, row('pending', ['screening_officer'])), { kind: 'REISSUE', officerId: 'o-1' });
+  assert.deepEqual(nextStaffAction(member, row('active', ['reviewer'])), { kind: 'ASSIGN', officerId: 'o-1' });
+  assert.deepEqual(nextStaffAction(member, row('active', ['screening_officer'])), { kind: 'NONE', officerId: 'o-1' });
+  assert.ok(samePosts(['b', 'a'], ['a', 'b']));
+  assert.ok(!samePosts(['a'], ['a', 'b']));
+});
+
+test('staff: the shipped scenario staffs every agency with rehearsal-marked handles and assignable posts only', () => {
+  const staged = stageCampaigns(scenario, NOW);
+  for (const s of staged) {
+    assert.ok(s.staff.length > 0, `${s.agency} has staff`);
+    for (const m of s.staff) assert.ok(m.handle.startsWith(`reh.${s.agency.toLowerCase()}.`));
+  }
+  const withAdmin = structuredClone(scenario) as unknown as { campaigns: { staff?: { handle: string; posts: string[] }[] }[] };
+  withAdmin.campaigns[0]!.staff = [{ handle: 'reh.rdf.boss', posts: ['agency_admin'] }];
+  assert.throws(() => validateScenario(withAdmin as unknown as Scenario), ScenarioInvalid, 'agency_admin is never assignable');
+  const unmarked = structuredClone(scenario) as unknown as { campaigns: { staff?: { handle: string; posts: string[] }[] }[] };
+  unmarked.campaigns[0]!.staff = [{ handle: 'rdf.gate', posts: ['screening_officer'] }];
+  assert.throws(() => validateScenario(unmarked as unknown as Scenario), ScenarioInvalid, 'staff handles are rehearsal-marked');
 });

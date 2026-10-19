@@ -77,7 +77,7 @@ Parallel sessions must not pick "the next number". These are reserved; use only 
 | Session | State | PR(s) | Notes |
 |---|---|---|---|
 | S00 Programme integrity | done | BE [#34](https://github.com/Jackson-NSANZIMANA/e-recruitment/pull/34) [#35](https://github.com/Jackson-NSANZIMANA/e-recruitment/pull/35) [#36](https://github.com/Jackson-NSANZIMANA/e-recruitment/pull/36) · FE [#27](https://github.com/Jackson-NSANZIMANA/e-recruitment-ui/pull/27) [#28](https://github.com/Jackson-NSANZIMANA/e-recruitment-ui/pull/28) [#29](https://github.com/Jackson-NSANZIMANA/e-recruitment-ui/pull/29) | mains protected (required checks, strict, admins included); evidence bundle on every run; SECRET-ROTATION closed (§5) |
-| S01 Officer lifecycle | ready | | |
+| S01 Officer lifecycle | in review | BE (this PR) | ADR-036, rls/0033; 8 edge operations; unblocks S06 and B1 once merged |
 | S02 Frontend foundations | ready | | also: stale applicant `home.tsx` header comment (W0-03 leftover) |
 | S03 Release engineering | ready | | also: make the backend unit suites a required check (run today only by the evidence job) |
 | B1 Biometric evidence | waiting on S01 | | |

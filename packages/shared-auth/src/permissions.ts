@@ -78,13 +78,34 @@ export const OPERATION_PERMISSION_LIST = [
   'erasure.decide',
 ] as const;
 
+/**
+ * Officer-lifecycle permissions (ADR-036). Account administration in the
+ * caller's OWN agency; granted to agency_admin only. They confer no campaign
+ * or decision power, and the rls/0033 command functions re-check the actor's
+ * live database row on every call.
+ */
+export const OFFICER_ADMIN_PERMISSION_LIST = [
+  /** List the agency's officers: handle, posts, status, created, last login. */
+  'officer.read',
+  /** Create an officer (one-time activation code) or re-issue an unredeemed code. */
+  'officer.create',
+  /** Replace an officer's posts (never agency_admin). */
+  'officer.posts.assign',
+  /** Disable or re-enable an officer account. */
+  'officer.disable',
+  /** End every browser session of an officer now. */
+  'officer.sessions.revoke',
+] as const;
+
 export const ALL_PERMISSIONS = [
   ...CAMPAIGN_PERMISSION_LIST,
   ...OPERATION_PERMISSION_LIST,
+  ...OFFICER_ADMIN_PERMISSION_LIST,
 ] as const;
 
 export type Permission = (typeof ALL_PERMISSIONS)[number];
 export type OperationPermission = (typeof OPERATION_PERMISSION_LIST)[number];
+export type OfficerAdminPermission = (typeof OFFICER_ADMIN_PERMISSION_LIST)[number];
 
 /**
  * The role vocabulary. `agency_admin` and `reviewer` pre-date this module
@@ -122,6 +143,7 @@ const ROLE_PERMISSIONS: Readonly<Record<KnownRole, ReadonlySet<Permission>>> = {
     'campaign.cancel',
     'campaign.read.admin',
     ...READ,
+    ...OFFICER_ADMIN_PERMISSION_LIST,
   ]),
   reviewer: new Set<Permission>(['campaign.read.admin', ...READ]),
   screening_officer: new Set<Permission>([
