@@ -50,7 +50,11 @@ export type TrustRefusal =
   | 'KEY_MISMATCH'
   | 'SIGNATURE_INVALID';
 
-export type InvalidReason = EvidenceRejection | 'REFERENCE_SOURCE_NOT_AUTHORISED' | 'UNKNOWN_TICKET';
+export type InvalidReason =
+  | EvidenceRejection
+  | 'REFERENCE_SOURCE_NOT_AUTHORISED'
+  | 'THRESHOLD_POLICY_NOT_IN_FORCE'
+  | 'UNKNOWN_TICKET';
 
 export type RecordEvidenceOutcome =
   | {
@@ -81,6 +85,8 @@ export interface RecordEvidenceDeps {
   readonly referenceSources: ReferenceSourceRegistry;
   readonly modeFor: (agency: Agency) => BiometricMode;
   readonly legalBasis: BiometricLegalBasis;
+  /** The one threshold policy devices must use in this deployment. */
+  readonly thresholdPolicyVersion: string;
   readonly now?: () => Date;
 }
 
@@ -117,6 +123,9 @@ export class RecordEvidenceService {
     }
     const inconsistency = checkEvidenceConsistency(record, this.#deps.legalBasis);
     if (inconsistency !== null) return { kind: 'INVALID', reason: inconsistency };
+    if (record.thresholdPolicyVersion !== this.#deps.thresholdPolicyVersion) {
+      return { kind: 'INVALID', reason: 'THRESHOLD_POLICY_NOT_IN_FORCE' };
+    }
     if (!isCapturedAtAcceptable(record.capturedAt, now)) return { kind: 'INVALID', reason: 'CAPTURED_AT_OUT_OF_RANGE' };
 
     const gate = modeGate(this.#deps.modeFor(command.agency), record.mode);

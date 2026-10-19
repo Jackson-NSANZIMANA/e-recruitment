@@ -126,11 +126,13 @@ class PgUnitOfWork implements EvidenceUnitOfWork {
 export class PgEvidenceStore implements EvidenceStore {
   async run<T>(officerId: string, work: (uow: EvidenceUnitOfWork) => Promise<T>): Promise<T> {
     try {
-      return await sql.begin(async (tx): Promise<T> => {
+      // Boxed so postgres.js does not try to unwrap a generic result.
+      const boxed = await sql.begin(async (tx): Promise<{ readonly value: T }> => {
         await tx`SET LOCAL ROLE ${sql(DB_ROLE)}`;
         await tx`SELECT set_config('usrp.biometric_actor_id', ${officerId}, true)`;
-        return work(new PgUnitOfWork(tx));
+        return { value: await work(new PgUnitOfWork(tx)) };
       });
+      return boxed.value;
     } catch (err) {
       if (isForbidden(err)) throw new EvidenceForbiddenError({ cause: err });
       if (err instanceof EvidencePersistenceError) throw err;

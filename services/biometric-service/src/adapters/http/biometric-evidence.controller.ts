@@ -80,7 +80,7 @@ export function biometricEvidenceRoutes(
       handler: withAuth(verify, { kind: 'officer' }, async (ctx, principal): Promise<HttpResult> => {
         requireOfficerPermission(principal, 'biometric.verify');
         if (principal.kind !== 'officer') throw new HttpError(403, 'FORBIDDEN', 'Officer principal required.');
-        const body = await ctx.json<unknown>();
+        const body: unknown = await ctx.json();
         let outcome: RecordEvidenceOutcome;
         try {
           outcome = await service.record({
@@ -102,12 +102,12 @@ export function biometricEvidenceRoutes(
     {
       method: 'GET',
       path: BIOMETRIC_POLICY_PATH,
-      handler: withAuth(verify, { kind: 'officer' }, async (_ctx, principal): Promise<HttpResult> => {
+      handler: withAuth(verify, { kind: 'officer' }, (_ctx, principal): Promise<HttpResult> => {
         requireOfficerPermission(principal, 'biometric.verify');
         if (principal.kind !== 'officer') throw new HttpError(403, 'FORBIDDEN', 'Officer principal required.');
         const thresholds = thresholdPolicy(policy.thresholdPolicyVersion);
         if (thresholds === null) throw new HttpError(500, 'INTERNAL_ERROR');
-        return {
+        return Promise.resolve({
           status: 200,
           body: {
             agency: principal.agency,
@@ -123,7 +123,7 @@ export function biometricEvidenceRoutes(
             },
             referenceSources: policy.referenceSources.all().map((s) => ({ id: s.id, status: s.status })),
           },
-        };
+        });
       }),
     },
   ];

@@ -12,7 +12,7 @@
 import { HttpError, type HttpResult, type Route } from '@usrp/shared-http';
 import { requireOfficerPermission, withAuth, type AuthVerifier } from '@usrp/shared-auth';
 import type { VerifyBiometricOutcome, VerifyBiometricService } from '../../application/verify-biometric.service.js';
-import { BiometricMatchError } from '../../domain/biometric.errors.js';
+import { BiometricMatchError, ReferenceSourceNotAuthorisedError } from '../../domain/biometric.errors.js';
 
 export const VERIFY_BIOMETRIC_PATH = '/v1/biometric/verify';
 
@@ -82,6 +82,10 @@ function mapOutcome(outcome: VerifyBiometricOutcome): HttpResult {
 }
 
 function mapError(err: unknown): HttpError {
+  // ADR-037 §2: the server-side reference (NIDA_PORTRAIT) is not authorised.
+  if (err instanceof ReferenceSourceNotAuthorisedError) {
+    return new HttpError(503, 'REFERENCE_SOURCE_NOT_AUTHORISED', 'Server-side biometric matching is not authorised.', { cause: err });
+  }
   if (err instanceof BiometricMatchError) {
     return new HttpError(503, 'BIOMETRIC_MATCH_UNAVAILABLE', 'The biometric matcher is unavailable.', { cause: err });
   }

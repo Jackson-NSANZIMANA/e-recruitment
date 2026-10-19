@@ -63,8 +63,12 @@ export const NOT_ATTEMPTED_REASONS = [
 ] as const;
 export type NotAttemptedReason = (typeof NOT_ATTEMPTED_REASONS)[number];
 
-/** The legal bases engineering can enforce. Owner decision: consent-or-decline. */
-export type BiometricLegalBasis = 'CONSENT_OR_DECLINE';
+/**
+ * The legal bases engineering can enforce. Owner decision (ADR-037 §12):
+ * CONSENT_OR_DECLINE. NECESSITY exists only so a future DPO decision is a
+ * one-line composition change; nothing wires it today.
+ */
+export type BiometricLegalBasis = 'CONSENT_OR_DECLINE' | 'NECESSITY';
 
 export interface EvidenceRecord {
   readonly schema: typeof EVIDENCE_SCHEMA;
