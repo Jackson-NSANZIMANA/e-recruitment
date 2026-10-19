@@ -19,6 +19,10 @@
 //   6. NOT_ADMISSIBLE     withdrawn, rejected, on hold, or past the stage
 //   7. WRONG_VENUE        this gate is not the venue on the ticket
 //   8. TOO_EARLY/EXPIRED  today (Africa/Kigali) is not the exam day
+//  10. MANUAL_IDENTITY_REQUIRED  (ADR-037) visible NO_MATCH / INCONCLUSIVE
+//                         biometric evidence has not been confirmed by a
+//                         field supervisor — asked only after the card matched.
+//                         Biometric evidence never refuses on its own.
 //   9. IDENTITY_MISMATCH  the card's national ID is not this applicant's —
 //                         asked LAST, so the match function is only ever
 //                         consulted for a genuine, unspent, on-site ticket
@@ -48,6 +52,7 @@ export const GATE_OUTCOMES = [
   'TOO_EARLY',
   'EXPIRED',
   'IDENTITY_MISMATCH',
+  'MANUAL_IDENTITY_REQUIRED',
 ] as const;
 export type GateOutcome = (typeof GATE_OUTCOMES)[number];
 
@@ -159,7 +164,7 @@ export interface GateRowFacts {
 }
 
 export type PreIdentityDecision =
-  | { readonly kind: 'REFUSE'; readonly outcome: Exclude<GateOutcome, 'ADMITTED' | 'IDENTITY_MISMATCH'> }
+  | { readonly kind: 'REFUSE'; readonly outcome: Exclude<GateOutcome, 'ADMITTED' | 'IDENTITY_MISMATCH' | 'MANUAL_IDENTITY_REQUIRED'> }
   | { readonly kind: 'CHECK_IDENTITY' };
 
 /**

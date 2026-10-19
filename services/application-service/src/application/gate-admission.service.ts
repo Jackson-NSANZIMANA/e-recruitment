@@ -41,7 +41,7 @@ export interface GateAdmissionDeps {
   readonly now?: () => Date;
 }
 
-const AUDITED_REFUSALS = new Set(['ALREADY_ADMITTED', 'IDENTITY_MISMATCH', 'TICKET_NOT_ISSUED']);
+const AUDITED_REFUSALS = new Set(['ALREADY_ADMITTED', 'IDENTITY_MISMATCH', 'TICKET_NOT_ISSUED', 'MANUAL_IDENTITY_REQUIRED']);
 
 export class GateAdmissionService {
   readonly #deps: GateAdmissionDeps;
@@ -84,7 +84,9 @@ export class GateAdmissionService {
             ticketId: outcome.ticketId,
             venueName: outcome.venueName,
             examDate: outcome.examDate,
-            identityMethod: 'NATIONAL_ID_CARD',
+            identityMethod: outcome.identityMethod,
+            biometricEvidenceIds: [...outcome.evidenceIds],
+            manualIdentityConfirmationIds: [...outcome.confirmationIds],
           },
         }];
         if (outcome.advancedTo !== null) {

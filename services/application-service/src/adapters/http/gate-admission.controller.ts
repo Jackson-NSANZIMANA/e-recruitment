@@ -12,7 +12,9 @@
 //   200  { outcome: ADMITTED, candidate, venueName, examDate, reportingTimeHour,
 //          admittedAt, statusAdvanced }
 //   409  { error: ALREADY_ADMITTED | NOT_ADMISSIBLE | IDENTITY_MISMATCH |
-//          WRONG_VENUE | TOO_EARLY | EXPIRED, … }   a real ticket, refused here/now
+//          WRONG_VENUE | TOO_EARLY | EXPIRED | MANUAL_IDENTITY_REQUIRED, … }
+//          a real ticket, refused here/now (MANUAL_IDENTITY_REQUIRED, ADR-037:
+//          a field supervisor must confirm identity first — not a refusal)
 //   422  { error: INVALID_TICKET, reason }           not a ticket of this agency
 // ══════════════════════════════════════════════════════════════════
 
@@ -90,6 +92,7 @@ export function gateAdmissionRoutes(service: GateAdmissionService, verify: AuthV
                 reportingTimeHour: result.reportingTimeHour,
                 admittedAt: result.admittedAt,
                 statusAdvanced: result.advancedTo !== null,
+                identityMethod: result.identityMethod,
               },
             };
           case 'ALREADY_ADMITTED':
@@ -110,6 +113,8 @@ export function gateAdmissionRoutes(service: GateAdmissionService, verify: AuthV
             };
           case 'IDENTITY_MISMATCH':
             return { status: 409, body: { error: 'IDENTITY_MISMATCH', candidate: candidateBody(result.candidate) } };
+          case 'MANUAL_IDENTITY_REQUIRED':
+            return { status: 409, body: { error: 'MANUAL_IDENTITY_REQUIRED', candidate: candidateBody(result.candidate) } };
           case 'WRONG_VENUE':
             return { status: 409, body: { error: 'WRONG_VENUE', ticketVenueName: result.ticketVenueName } };
           case 'TOO_EARLY':

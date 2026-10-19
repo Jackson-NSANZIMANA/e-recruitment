@@ -28,6 +28,7 @@ import type { ApplicationCategory, ApplicationStatus } from '@usrp/shared-types'
 import { ApplicationPersistenceError } from '../domain/application.errors.js';
 import { schemaForAgency } from '../domain/agency-schema.js';
 import { decideBeforeIdentity, type GateOutcome } from '../domain/gate-admission.js';
+import { EVIDENCE_OUTCOMES, resolveGateIdentity, type EvidenceOutcome, type VisibleEvidence } from '../domain/gate-identity.js';
 import type {
   GateAdmissionInput,
   GateAdmissionOutcome,
@@ -149,13 +150,32 @@ export class PgGateAdmissionRepository implements GateAdmissionRepository {
         return finish({ outcome: 'IDENTITY_MISMATCH', candidate }, claims.applicationId);
       }
 
+      // Check 10 (ADR-037): biometric evidence for THIS ticket, as the officer's
+      // own agency role — rls/0034 hides SHADOW rows from it, so they cannot
+      // influence the admission. Evidence never refuses: an unconfirmed
+      // negative only asks for supervised manual identity.
+      const evidenceRows = await tx<{ id: string; outcome: string; confirmation_id: string | null; confirmed_by_id: string | null }[]>`
+        SELECT e.id, e.outcome, c.id AS confirmation_id, c.confirmed_by_id
+        FROM ${schema}.biometric_evidence AS e
+        LEFT JOIN ${schema}.gate_manual_identity_confirmations AS c ON c.evidence_id = e.id
+        WHERE e.application_id = ${claims.applicationId} AND e.ticket_id = ${claims.ticketId}
+        ORDER BY e.received_at, e.id
+      `;
+      const identity = resolveGateIdentity(evidenceRows.map(toVisibleEvidence), actor.officerId);
+      if (identity.kind === 'MANUAL_IDENTITY_REQUIRED') {
+        return finish(
+          { outcome: 'MANUAL_IDENTITY_REQUIRED', candidate, evidenceIds: identity.evidenceIds },
+          claims.applicationId,
+        );
+      }
+
       const inserted = await tx<{ admitted_at: Date }[]>`
         INSERT INTO ${schema}.gate_admissions
           (application_id, ticket_id, campaign_id, venue_name, exam_date,
            identity_method, admitted_by_id, correlation_id)
         VALUES (
           ${claims.applicationId}, ${claims.ticketId}, ${app.campaign_id}, ${claims.venueName},
-          ${claims.examDate}::date, 'NATIONAL_ID_CARD', ${actor.officerId}, ${actor.correlationId}
+          ${claims.examDate}::date, ${identity.identityMethod}, ${actor.officerId}, ${actor.correlationId}
         )
         RETURNING admitted_at
       `;
@@ -197,6 +217,9 @@ export class PgGateAdmissionRepository implements GateAdmissionRepository {
           admittedAt: admittedAt.toISOString(),
           fromStatus: app.status,
           advancedTo,
+          identityMethod: identity.identityMethod,
+          evidenceIds: identity.evidenceIds,
+          confirmationIds: identity.confirmationIds,
         },
         claims.applicationId,
       );
@@ -205,7 +228,7 @@ export class PgGateAdmissionRepository implements GateAdmissionRepository {
 }
 
 function refusal(
-  outcome: Exclude<GateOutcome, 'ADMITTED' | 'IDENTITY_MISMATCH'>,
+  outcome: Exclude<GateOutcome, 'ADMITTED' | 'IDENTITY_MISMATCH' | 'MANUAL_IDENTITY_REQUIRED'>,
   candidate: GateCandidate,
   app: ApplicationRow,
   claims: { readonly venueName: string; readonly examDate: string },
@@ -235,6 +258,24 @@ function refusal(
     case 'TICKET_NOT_ISSUED':
       return { outcome };
   }
+}
+
+function toVisibleEvidence(row: {
+  readonly id: string;
+  readonly outcome: string;
+  readonly confirmation_id: string | null;
+  readonly confirmed_by_id: string | null;
+}): VisibleEvidence {
+  if (!(EVIDENCE_OUTCOMES as readonly string[]).includes(row.outcome)) {
+    throw new ApplicationPersistenceError('Biometric evidence carries an unknown outcome');
+  }
+  return {
+    evidenceId: row.id,
+    outcome: row.outcome as EvidenceOutcome,
+    confirmation: row.confirmation_id !== null && row.confirmed_by_id !== null
+      ? { confirmationId: row.confirmation_id, confirmedById: row.confirmed_by_id }
+      : null,
+  };
 }
 
 async function recordAttempt(

@@ -226,9 +226,9 @@ export type ApplyPhysicalTestOutcome =
    */
   | { readonly kind: 'CONFLICT_HELD' }
   /**
-   * Biometric check-in precondition unmet (applicant_identities.biometric_verified_at
-   * is null) — no physical-test completion for a check-in that failed biometrics.
-   * A deliberate HOLD, not an error.
+   * Identity precondition unmet (ADR-037 §9): neither a gate admission nor a
+   * legacy verified check-in exists. A deliberate HOLD, not an error. (Name kept
+   * for wire stability: a failed or missing biometric alone no longer holds.)
    */
   | { readonly kind: 'BIOMETRIC_NOT_VERIFIED' }
   /** No stored score row matches the event's payload hash in this schema. */

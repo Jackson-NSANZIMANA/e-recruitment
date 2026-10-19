@@ -97,9 +97,9 @@ test('an expiresAt earlier than the end of the Kigali day still expires the tick
   );
 });
 
-test('the outcome vocabulary mirrors the rls/0032 CHECK constraint exactly', () => {
+test('the outcome vocabulary mirrors the rls/0032 + rls/0034 CHECK constraint exactly', () => {
   assert.deepEqual([...GATE_OUTCOMES].sort(), [
-    'ADMITTED', 'ALREADY_ADMITTED', 'EXPIRED', 'IDENTITY_MISMATCH', 'MALFORMED_TICKET', 'NOT_ADMISSIBLE',
+    'ADMITTED', 'ALREADY_ADMITTED', 'EXPIRED', 'IDENTITY_MISMATCH', 'MALFORMED_TICKET', 'MANUAL_IDENTITY_REQUIRED', 'NOT_ADMISSIBLE',
     'TICKET_NOT_ISSUED', 'TOO_EARLY', 'UNKNOWN_TICKET', 'WRONG_AGENCY', 'WRONG_VENUE',
   ]);
 });
