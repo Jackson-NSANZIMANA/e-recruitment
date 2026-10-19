@@ -120,6 +120,9 @@ services:
     image: ${USRP_IMAGE_PREFIX:-usrp-s03/}identity-service:${USRP_IMAGE_TAG:-dev}
     environment: *env
     volumes: ["${USRP_SMS_DIR:?set USRP_SMS_DIR}:/sms"]
+    # The dev SMS inbox is read by host tooling (pnpm dev:sms, the live
+    # spec), so the two processes that write it run as the host user.
+    user: "${USRP_HOST_UID:-1000}:${USRP_HOST_GID:-1000}"
   eligibility-service:
     <<: *service
     image: ${USRP_IMAGE_PREFIX:-usrp-s03/}eligibility-service:${USRP_IMAGE_TAG:-dev}
@@ -149,6 +152,9 @@ services:
     image: ${USRP_IMAGE_PREFIX:-usrp-s03/}notification-service:${USRP_IMAGE_TAG:-dev}
     environment: *env
     volumes: ["${USRP_SMS_DIR:?set USRP_SMS_DIR}:/sms"]
+    # The dev SMS inbox is read by host tooling (pnpm dev:sms, the live
+    # spec), so the two processes that write it run as the host user.
+    user: "${USRP_HOST_UID:-1000}:${USRP_HOST_GID:-1000}"
   field-sync-service:
     <<: *service
     image: ${USRP_IMAGE_PREFIX:-usrp-s03/}field-sync-service:${USRP_IMAGE_TAG:-dev}

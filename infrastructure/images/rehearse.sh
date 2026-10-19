@@ -30,6 +30,7 @@ export USRP_REHEARSAL_DB="$DB"
 export USRP_APPLICANT_PORT="${USRP_APPLICANT_PORT:-3510}"
 export USRP_OFFICER_PORT="${USRP_OFFICER_PORT:-3511}"
 export USRP_SMS_DIR="${USRP_SMS_DIR:-$REPO_ROOT/.dev-sms-images}"
+export USRP_HOST_UID="${USRP_HOST_UID:-$(id -u)}" USRP_HOST_GID="${USRP_HOST_GID:-$(id -g)}"
 PG_CONTAINER="${PG_CONTAINER:-usrp-postgres}"
 OFFICER="http://localhost:$USRP_OFFICER_PORT"
 
@@ -57,7 +58,7 @@ up() {
 }
 
 status() {
-  compose ps --format 'table {{.Service}}\t{{.State}}\t{{.Health}}'
+  compose ps --format 'table {{.Service}}\t{{.Status}}'
   echo
   for svc in identity-service eligibility-service biometric-service document-forensics-service background-vetting-service \
              application-service scheduling-service notification-service field-sync-service audit-service iam-service edge-gateway; do
