@@ -146,6 +146,7 @@ async function main(): Promise<void> {
       applicationBaseUrl: 'http://127.0.0.1:1',
       schedulingBaseUrl: 'http://127.0.0.1:1',
       fieldSyncBaseUrl: 'http://127.0.0.1:1',
+      biometricBaseUrl: 'http://127.0.0.1:1',
       timeoutMs: 8_000,
       maxResponseBytes: 1_048_576,
     },
