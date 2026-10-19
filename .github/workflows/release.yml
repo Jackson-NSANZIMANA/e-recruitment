@@ -125,8 +125,13 @@ jobs:
         run: |
           set -uo pipefail
           echo '{}' > verification.json
+          # (an image reference outside ghcr.io/jackson-nsanzimana/usrp-* stops the release here)
           for meta in images/*/metadata.json; do
             image=$(jq -r .image "$meta"); digest=$(jq -r '.digest // empty' "$meta")
+            # Defence in depth: only our own GHCR namespace is ever verified or promoted.
+            if ! printf '%s' "$image" | grep -Eq '^ghcr\.io/jackson-nsanzimana/usrp-[a-z0-9-]+$'; then
+              echo "::error::refusing image reference '$image'"; exit 1
+            fi
             [ -n "$digest" ] || { echo "$(jq -r .name "$meta"): no digest"; continue; }
             sig=false; att=false
             cosign verify --certificate-identity "$COSIGN_IDENTITY" --certificate-oidc-issuer "$COSIGN_ISSUER" "$image@$digest" > /dev/null && sig=true
