@@ -2,7 +2,7 @@
   "name": "@usrp/biometric-service",
   "version": "1.0.0",
   "private": true,
-  "description": "USRP Biometric Service — exam-day check-in gate: verifies the applicant's signed QR offline, runs a 1:1 face-match + liveness check, emits biometric.result (scores only, no raw frames)",
+  "description": "USRP Biometric Service \u2014 exam-day check-in gate: verifies the applicant's signed QR offline, runs a 1:1 face-match + liveness check, emits biometric.result (scores only, no raw frames)",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -19,7 +19,9 @@
     "dev": "tsx watch src/main.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint 'src/**/*.ts'",
-    "selfcheck": "tsx selfcheck/verify-biometric-slice.ts"
+    "selfcheck": "tsx selfcheck/verify-biometric-slice.ts",
+    "test": "tsx --test test/*.test.ts",
+    "selfcheck:evidence": "tsx selfcheck/verify-biometric-evidence.ts"
   },
   "dependencies": {
     "@usrp/shared-auth": "workspace:*",
