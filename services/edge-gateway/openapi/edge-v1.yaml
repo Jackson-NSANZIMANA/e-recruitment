@@ -1244,7 +1244,7 @@ paths:
       tags: [officer-admin]
       responses:
         '200':
-          description: "{ officers: [ { officerId, loginHandle, posts[], status: active|disabled|pending, createdAt, activatedAt|null, lastLoginAt|null, activationExpiresAt|null } ] }"
+          description: "{ officers: [ { officerId, loginHandle, posts[], status: active|disabled|pending, createdAt, activatedAt|null, lastLoginAt|null, activationExpiresAt|null, activationState: PENDING_RELEASE|RELEASED|null, releasableByYou: boolean } ] }"
         '401':
           description: Session ended ({ reason })
         '403':
@@ -1260,10 +1260,12 @@ paths:
       x-usrp-retry-on-g2g: false
       summary: |
         Create an officer in the session's own agency with initial posts
-        (officer.create). The account is `pending` until the officer redeems
-        the ONE-TIME activation code returned here exactly once (stored only
-        as a hash; 24 h; single use). agency_admin is not an assignable post.
-        Never retried: a lost answer is recovered with reissueOfficerActivation.
+        (officer.create). The account is `pending`. FOUR-EYES (ADR-036
+        addendum): this answer NEVER carries an activation code; a DIFFERENT
+        administrator of the same agency releases it once with
+        releaseOfficerActivation (stored only as a hash; 24 h; single use).
+        agency_admin is not an assignable post. Never retried: a lost answer
+        is recovered with reissueOfficerActivation.
       tags: [officer-admin]
       requestBody:
         required: true
@@ -1283,7 +1285,7 @@ paths:
                   items: { type: string, enum: [reviewer, screening_officer, field_supervisor, medical_officer, adjudicator, decision_authority, dpo] }
       responses:
         '201':
-          description: "{ outcome: CREATED, officer { …as listOfficers }, activation { code: XXXXX-XXXXX-XXXXX-XXXXX, expiresAt } } — show the code once"
+          description: "{ outcome: CREATED, officer { …as listOfficers, activationState: PENDING_RELEASE } } — never a code"
         '400':
           description: INVALID_REQUEST — shape only
         '403':
@@ -1302,8 +1304,10 @@ paths:
       x-usrp-csrf: true
       x-usrp-retry-on-g2g: false
       summary: |
-        Replace the activation code of an officer who has never activated
-        (lost or expired code). Never a password reset (officer.create).
+        Reopen the pending activation of an officer who has never activated
+        (lost or expired code; also invalidates a released, unredeemed code).
+        Never carries a code: a different administrator releases a new one.
+        Never a password reset (officer.create).
       tags: [officer-admin]
       requestBody:
         required: true
@@ -1317,13 +1321,51 @@ paths:
                 targetOfficerId: { type: string, format: uuid }
       responses:
         '200':
-          description: "{ outcome: REISSUED, officer, activation { code, expiresAt } }"
+          description: "{ outcome: REISSUED, officer } — never a code"
         '403':
           description: PERMISSION_DENIED | SELF_MODIFICATION
         '404':
           description: NOT_FOUND — absent or in another agency (one answer)
         '409':
           description: NOT_PENDING_ACTIVATION
+
+  /edge/v1/officers/activation/release:
+    post:
+      operationId: releaseOfficerActivation
+      x-usrp-session: officer
+      x-usrp-permission: officer.create
+      x-usrp-outcomes: { 409: [NOT_PENDING_ACTIVATION, ALREADY_RELEASED, ACTIVATION_EXPIRED] }
+      x-usrp-csrf: true
+      x-usrp-retry-on-g2g: false
+      summary: |
+        FOUR-EYES one-time release (ADR-036 addendum). A DIFFERENT active
+        agency_admin of the same agency receives the pending officer's one-time
+        activation code, exactly once (generated at release, stored only as a
+        hash, 24 h from release, single use). Refused for the administrator who
+        created or last reissued the activation (403 SAME_ADMIN), for another
+        agency's administrator (404 NOT_FOUND, one answer) and for a code
+        already released (409 ALREADY_RELEASED: reissue instead). Audited.
+        Never retried.
+      tags: [officer-admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [targetOfficerId]
+              properties:
+                targetOfficerId: { type: string, format: uuid }
+      responses:
+        '200':
+          description: "{ outcome: RELEASED, officer, activation { code: XXXXX-XXXXX-XXXXX-XXXXX, expiresAt } } — show the code once"
+        '403':
+          description: PERMISSION_DENIED | SAME_ADMIN
+        '404':
+          description: NOT_FOUND — absent or in another agency (one answer)
+        '409':
+          description: NOT_PENDING_ACTIVATION | ALREADY_RELEASED | ACTIVATION_EXPIRED
 
   /edge/v1/officers/posts:
     post:

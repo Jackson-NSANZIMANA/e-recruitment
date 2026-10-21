@@ -149,6 +149,7 @@ export const UPSTREAM = Object.freeze({
   officerList: op('officerList', 'iam', 'GET', '/v1/officers', 'officer-jwt'),
   officerCreate: op('officerCreate', 'iam', 'POST', '/v1/officers', 'officer-jwt'),
   officerReissueActivation: op('officerReissueActivation', 'iam', 'POST', '/v1/officers/activation/reissue', 'officer-jwt'),
+  officerReleaseActivation: op('officerReleaseActivation', 'iam', 'POST', '/v1/officers/activation/release', 'officer-jwt'),
   officerAssignPosts: op('officerAssignPosts', 'iam', 'POST', '/v1/officers/posts', 'officer-jwt'),
   officerDisable: op('officerDisable', 'iam', 'POST', '/v1/officers/disable', 'officer-jwt'),
   officerEnable: op('officerEnable', 'iam', 'POST', '/v1/officers/enable', 'officer-jwt'),
