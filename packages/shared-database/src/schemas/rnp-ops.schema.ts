@@ -10,6 +10,7 @@
 // 4. No specialist field age exception for Basic Police Course
 // ══════════════════════════════════════════════════════════════════
 
+import { sql } from 'drizzle-orm';
 import {
   pgSchema,
   uuid,
@@ -187,6 +188,11 @@ export const rnpApplications = rnpOps.table(
     index('idx_rnp_applicant_id').on(t.applicantId),
     index('idx_rnp_campaign_id').on(t.campaignId),
     index('idx_rnp_status').on(t.status),
+    // rls/0035 (ADR-039): keyset order of the officer application search, and the venue roster.
+    index('idx_rnp_applications_read_keyset').on(sql`(COALESCE(submitted_at, created_at)) DESC`, t.id.desc()),
+    index('idx_rnp_applications_roster')
+      .on(t.campaignId, t.assignedDistrict)
+      .where(sql`assigned_district IS NOT NULL`),
     index('idx_rnp_document_lane').on(t.documentLane),
     index('idx_rnp_academic_status').on(t.academicStatus),
     index('idx_rnp_age_status').on(t.ageEligibilityStatus),

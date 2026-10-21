@@ -10,7 +10,7 @@
 --
 --   <agency>_ops.applications   keyset  (COALESCE(submitted_at, created_at) DESC, id DESC)
 --                               roster  (campaign_id, assigned_district)
---                               filter  (status)
+--                               (the status filter reuses idx_<agency>_status from the baseline)
 --   public_core.recruitment_campaigns  keyset (agency, created_at DESC, id DESC)
 --
 -- Run as usrp_admin AFTER 0033. Fully re-runnable (IF NOT EXISTS).
@@ -29,9 +29,6 @@ BEGIN
       a, s);
     EXECUTE format(
       'CREATE INDEX IF NOT EXISTS idx_%s_applications_roster ON %I.applications (campaign_id, assigned_district) WHERE assigned_district IS NOT NULL',
-      a, s);
-    EXECUTE format(
-      'CREATE INDEX IF NOT EXISTS idx_%s_applications_read_status ON %I.applications (status)',
       a, s);
   END LOOP;
 END$$;

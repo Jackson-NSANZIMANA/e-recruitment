@@ -47,7 +47,8 @@ Legend: ✅ built and proven by a live selfcheck · 🟡 partial · ❌ missing 
 | Audit browser | ❌ | audit-service is write-only |
 | Emergency campaign suspension | ❌ | BUILD-006 |
 | Notification monitoring / reconciliation | ❌ | BUILD-005 |
-| Erasure (DPO) queue and decision | ✅ backend (`dpo` role) · ❌ UI | |
+| Erasure (DPO) queue and decision | ✅ backend + edge **(S04)** · ❌ UI | ADR-039: `listErasureRequests`, `decideErasureRequest` (decline needs grounds; execute composed at the edge) |
+| Agency-scoped admin campaign list/detail (occupancy), application search with cursor + total, venue roster | ✅ backend + edge **(S04)** · ❌ UI | ADR-039, rls/0035 (indexes only): `listAgencyCampaigns`, `getCampaignAdminDetail`, `searchApplications`, `getVenueRoster` (no names, no NIDs); `x-usrp-permission` / `x-usrp-outcomes` on every officer operation, enforced by the edge-contract selfcheck; `pnpm rehearse --roster` |
 
 ## 3. On-site officer tablet (installable PWA — decided)
 

@@ -3,6 +3,7 @@
 // ISOLATED: Only accessible to usrp_rdf_officer and usrp_system_service
 // ══════════════════════════════════════════════════════════════════
 
+import { sql } from 'drizzle-orm';
 import {
   pgSchema,
   uuid,
@@ -200,6 +201,11 @@ export const rdfApplications = rdfOps.table(
     index('idx_rdf_applicant_id').on(t.applicantId),
     index('idx_rdf_campaign_id').on(t.campaignId),
     index('idx_rdf_status').on(t.status),
+    // rls/0035 (ADR-039): keyset order of the officer application search, and the venue roster.
+    index('idx_rdf_applications_read_keyset').on(sql`(COALESCE(submitted_at, created_at)) DESC`, t.id.desc()),
+    index('idx_rdf_applications_roster')
+      .on(t.campaignId, t.assignedDistrict)
+      .where(sql`assigned_district IS NOT NULL`),
     index('idx_rdf_document_lane').on(t.documentLane),
     index('idx_rdf_academic_status').on(t.academicStatus),
     index('idx_rdf_age_status').on(t.ageEligibilityStatus),
