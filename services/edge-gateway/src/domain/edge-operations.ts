@@ -75,6 +75,8 @@ const CAMPAIGN_POLICY_BODY = 32 * KIB;
 const FIELD_SYNC_BATCH_BODY = 512 * KIB;
 /** FORENSICS_MAX_FILE_SIZE_MB (10) + multipart framing headroom. */
 const DOCUMENT_UPLOAD_BODY = 10 * 1_024 * KIB + 8 * KIB;
+/** ADR-037: a flat signed evidence record. Small on purpose — no image fits. */
+const BIOMETRIC_EVIDENCE_BODY = 4 * KIB;
 
 export const EDGE_OPERATIONS = Object.freeze({
   readSession: { operationId: 'readSession', method: 'GET', path: '/edge/v1/session', session: 'anonymous', csrf: false, maxBodyBytes: SMALL_BODY, retryOnG2G: false, publicAllowlist: true, upstream: [], composition: 'local' },
@@ -151,6 +153,11 @@ export const EDGE_OPERATIONS = Object.freeze({
   // The officer redeems the one-time code and sets their password. Anonymous
   // (no session yet), CSRF double-submit, rate-limited like login.
   activateOfficer: { operationId: 'activateOfficer', method: 'POST', path: '/edge/v1/auth/officer/activate', session: 'anonymous', csrf: true, maxBodyBytes: SMALL_BODY, retryOnG2G: false, publicAllowlist: true, upstream: [UPSTREAM.officerActivate], composition: 'single' },
+  // ADR-037: biometric identity evidence — evidence, never a verdict.
+  getBiometricPolicy: { operationId: 'getBiometricPolicy', method: 'GET', path: '/edge/v1/gate/biometric-policy', session: 'officer', permission: 'biometric.verify', csrf: false, maxBodyBytes: SMALL_BODY, retryOnG2G: true, publicAllowlist: false, upstream: [UPSTREAM.biometricPolicy], composition: 'single' },
+  recordBiometricEvidence: { operationId: 'recordBiometricEvidence', method: 'POST', path: '/edge/v1/gate/biometric-evidence', session: 'officer', permission: 'biometric.verify', csrf: true, maxBodyBytes: BIOMETRIC_EVIDENCE_BODY, retryOnG2G: false, publicAllowlist: false, upstream: [UPSTREAM.biometricEvidenceRecord], composition: 'single' },
+  getBiometricEvidence: { operationId: 'getBiometricEvidence', method: 'GET', path: '/edge/v1/applications/biometric-evidence', session: 'officer', permission: 'biometric.evidence.read', csrf: false, maxBodyBytes: SMALL_BODY, retryOnG2G: true, publicAllowlist: false, upstream: [UPSTREAM.biometricEvidenceRead], composition: 'single' },
+  confirmManualIdentity: { operationId: 'confirmManualIdentity', method: 'POST', path: '/edge/v1/gate/manual-identity', session: 'officer', permission: 'identity.manual.confirm', csrf: true, maxBodyBytes: SMALL_BODY, retryOnG2G: false, publicAllowlist: false, upstream: [UPSTREAM.manualIdentityConfirm], composition: 'single' },
 } as const satisfies Record<string, EdgeOperation>);
 
 export type EdgeOperationId = keyof typeof EDGE_OPERATIONS;

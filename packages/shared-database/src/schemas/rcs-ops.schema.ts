@@ -16,6 +16,7 @@ import {
   pgSchema,
   uuid,
   varchar,
+  char,
   timestamp,
   text,
   date,
@@ -358,5 +359,65 @@ export const rcsGateAdmissionAttempts = rcsOps.table(
   },
   (t) => [
     index('idx_rcs_gate_attempts_application').on(t.applicationId),
+  ],
+);
+
+// ── Biometric identity evidence (rls/0034, ADR-037) ──────────────
+// Append-only by trigger; the CHECK constraints (closed vocabularies,
+// score ranges, hex digests) live in the SQL, which is the system of record.
+export const rcsBiometricEvidence = rcsOps.table(
+  'biometric_evidence',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    recordId: uuid('record_id').notNull(),
+    applicationId: uuid('application_id')
+      .references(() => rcsApplications.id)
+      .notNull(),
+    ticketId: varchar('ticket_id', { length: 64 }).notNull(),
+    referenceSource: varchar('reference_source', { length: 16 }).notNull(),
+    method: varchar('method', { length: 24 }).notNull(),
+    consentState: varchar('consent_state', { length: 24 }).notNull(),
+    outcome: varchar('outcome', { length: 16 }).notNull(),
+    notAttemptedReason: varchar('not_attempted_reason', { length: 32 }),
+    livenessScoreBp: integer('liveness_score_bp'),
+    matchScoreBp: integer('match_score_bp'),
+    modelId: varchar('model_id', { length: 64 }),
+    modelVersion: varchar('model_version', { length: 32 }),
+    thresholdPolicyVersion: varchar('threshold_policy_version', { length: 32 }).notNull(),
+    mode: varchar('mode', { length: 16 }).notNull(),
+    deviceId: varchar('device_id', { length: 64 }).notNull(),
+    keyId: char('key_id', { length: 64 }).notNull(),
+    recordDigest: char('record_digest', { length: 64 }).notNull(),
+    signature: varchar('signature', { length: 88 }).notNull(),
+    officerId: uuid('officer_id').notNull(),
+    capturedAt: timestamp('captured_at', { withTimezone: true }).notNull(),
+    receivedAt: timestamp('received_at', { withTimezone: true }).defaultNow().notNull(),
+    correlationId: varchar('correlation_id', { length: 128 }),
+  },
+  (t) => [
+    uniqueIndex('idx_rcs_biometric_evidence_record').on(t.recordId),
+    index('idx_rcs_biometric_evidence_application').on(t.applicationId, t.receivedAt),
+  ],
+);
+
+export const rcsGateManualIdentityConfirmations = rcsOps.table(
+  'gate_manual_identity_confirmations',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    evidenceId: uuid('evidence_id')
+      .references(() => rcsBiometricEvidence.id)
+      .notNull(),
+    applicationId: uuid('application_id')
+      .references(() => rcsApplications.id)
+      .notNull(),
+    ticketId: varchar('ticket_id', { length: 64 }).notNull(),
+    reasonCode: varchar('reason_code', { length: 48 }).notNull(),
+    confirmedById: uuid('confirmed_by_id').notNull(),
+    confirmedAt: timestamp('confirmed_at', { withTimezone: true }).defaultNow().notNull(),
+    correlationId: varchar('correlation_id', { length: 128 }),
+  },
+  (t) => [
+    uniqueIndex('idx_rcs_gate_manual_identity_evidence').on(t.evidenceId),
+    index('idx_rcs_gate_manual_identity_application').on(t.applicationId),
   ],
 );

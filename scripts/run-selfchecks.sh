@@ -340,6 +340,9 @@ run_ts "notification-service: invitation delivery + lifecycle advance" services/
 run_ts "notification-service: contact capture → real delivery" services/notification-service/selfcheck/verify-contact-delivery-slice.ts
 run_ts "notification-service: withdrawal notice (acceptance → sweep → citizen SMS, ADR-022)" services/notification-service/selfcheck/verify-notices-slice.ts
 run_ts "biometric-service: check-in gate + persistence" services/biometric-service/selfcheck/verify-biometric-slice.ts
+# ADR-037: device-signed identity evidence — signature/device/replay/image refusals,
+# modes (SHADOW never shown), supervised manual identity, append-only, PII-free.
+run_ts "biometric-service: identity evidence LIVE (no image ever accepted; evidence never a verdict)" services/biometric-service/selfcheck/verify-biometric-evidence.ts
 run_ts "field-sync-service: offline capture + CRDT merge + adjudication" services/field-sync-service/selfcheck/verify-field-sync-slice.ts
 run_ts "audit-service: immutable trail"           services/audit-service/selfcheck/verify-audit-slice.ts
 run_ts "document-forensics: bounded-real analyzer (MinIO+ClamAV)" services/document-forensics-service/selfcheck/verify-forensics-slice.ts

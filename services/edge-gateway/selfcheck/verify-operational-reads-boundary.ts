@@ -74,7 +74,7 @@ async function main(): Promise<void> {
     database: { url: 'postgres://selfcheck.invalid/usrp', maxConnections: 1 },
     session: { handleHmacKey: HMAC_KEY, idleTtlSeconds: 1_800, absoluteTtlSeconds: 43_200, secureCookies: false },
     cors: { origins: [ORIGIN] },
-    upstream: { iamBaseUrl: 'http://127.0.0.1:1', identityBaseUrl: 'http://127.0.0.1:1', applicationBaseUrl: 'http://127.0.0.1:1', schedulingBaseUrl: 'http://127.0.0.1:1', fieldSyncBaseUrl: 'http://127.0.0.1:1', timeoutMs: 8_000, maxResponseBytes: 1_048_576 },
+    upstream: { iamBaseUrl: 'http://127.0.0.1:1', identityBaseUrl: 'http://127.0.0.1:1', applicationBaseUrl: 'http://127.0.0.1:1', schedulingBaseUrl: 'http://127.0.0.1:1', fieldSyncBaseUrl: 'http://127.0.0.1:1', biometricBaseUrl: 'http://127.0.0.1:1', timeoutMs: 8_000, maxResponseBytes: 1_048_576 },
     rateLimits: { loginPerMinute: 20, otpPerMinute: 20, verifyIdentityPerMinute: 20, applicantSubmitPerMinute: 20, trustedProxyHops: 0 },
     auth: { authPublicKeyPem: 'unused-by-the-stub-upstream', jwtIssuer: 'usrp', jwtAudience: 'usrp-services' },
   };

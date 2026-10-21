@@ -239,9 +239,17 @@ apply_sql "${RLS_DIR}/0032_gate_admissions.sql" "rls/0032 (gate admissions)"
 apply_sql "${RLS_DIR}/0033_officer_lifecycle.sql" "rls/0033 (officer lifecycle)"
 apply_sql "${RLS_DIR}/0035_operational_reads.sql" "rls/0035 (operational read indexes)"
 
+# 23m. Biometric identity evidence (ADR-037): device-signed, PII-free evidence
+#     records (append-only, FORCE RLS, SHADOW rows invisible to officers),
+#     written only through a SECURITY DEFINER function owned by the NOLOGIN
+#     usrp_biometric_evidence_owner (EXECUTE: usrp_biometric_service); the
+#     supervised manual-identity confirmations; and the gate admission's new
+#     identity methods and MANUAL_IDENTITY_REQUIRED outcome.
+apply_sql "${RLS_DIR}/0034_biometric_evidence.sql" "rls/0034 (biometric identity evidence)"
+
 printf '\n'
 
-ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts + applicant auth + erasure requests + stored contact + edge sessions + event outbox + slot reservations + submission integrity + walk-in outbox grant + shared rate-limit buckets + required extensions + campaign control plane + functions-only command boundary + onboarding lockout + application policy binding + document venue verification + exam invitation + gate admissions + officer lifecycle in place"
+ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts + applicant auth + erasure requests + stored contact + edge sessions + event outbox + slot reservations + submission integrity + walk-in outbox grant + shared rate-limit buckets + required extensions + campaign control plane + functions-only command boundary + onboarding lockout + application policy binding + document venue verification + exam invitation + gate admissions + officer lifecycle + biometric identity evidence in place"
 
 # 24. Dev officer accounts (one per agency). A CONVENIENCE seed so the officer
 #     console / manual login smoke tests have real credentials to drive —

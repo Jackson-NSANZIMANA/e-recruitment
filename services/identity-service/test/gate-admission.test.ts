@@ -62,6 +62,7 @@ const VALID = { qrToken: 'USRP-SLOT.v1.abc.def', nationalId: NID, gateVenueName:
 const ADMITTED = {
   outcome: 'ADMITTED', candidate: CANDIDATE, venueName: 'ULK Stadium', examDate: '2026-12-01',
   reportingTimeHour: 8, admittedAt: '2026-12-01T06:01:00.000Z', statusAdvanced: true,
+  identityMethod: 'NATIONAL_ID_CARD+CARD_PORTRAIT',
 };
 
 test('hashes the card number, forwards the HASH under the officer\'s own token, never the number', async () => {
@@ -124,6 +125,9 @@ test('projection: every documented conflict shape passes, nothing else does', ()
   assert.equal(projectGateAdmission(409, { error: 'TOO_EARLY', examDate: '2026-12-01' })?.status, 409);
   assert.equal(projectGateAdmission(409, { error: 'EXPIRED', examDate: '2026-12-01' })?.status, 409);
   assert.equal(projectGateAdmission(409, { error: 'IDENTITY_MISMATCH', candidate: CANDIDATE })?.status, 409);
+  assert.deepEqual(projectGateAdmission(409, { error: 'MANUAL_IDENTITY_REQUIRED', candidate: CANDIDATE, evidenceIds: ['x'] })?.body,
+    { error: 'MANUAL_IDENTITY_REQUIRED', candidate: CANDIDATE }, 'ADR-037: relayed with the candidate only');
+  assert.equal(projectGateAdmission(200, { ...ADMITTED, identityMethod: 'FACE_ONLY' }), null, 'ADR-037: unknown identity method');
   assert.equal(projectGateAdmission(409, { error: 'NOT_ADMISSIBLE', candidate: CANDIDATE, currentStatus: 'WITHDRAWN' })?.status, 409);
   assert.equal(projectGateAdmission(409, { error: 'IDENTITY_MISMATCH' }), null, 'missing candidate');
   assert.equal(projectGateAdmission(422, { error: 'INVALID_TICKET', reason: 'ANYTHING' }), null);

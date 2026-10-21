@@ -49,7 +49,7 @@ ok('the campaign admin cannot decide a candidate',
   !rolesHavePermission(['agency_admin'], 'application.accept'));
 ok('a reviewer can read but not mutate', 
   rolesHavePermission(['reviewer'], 'application.read') &&
-  permissionsForRoles(['reviewer']).every((p) => p === 'application.read' || p === 'adjudication.read' || p === 'campaign.read.admin'));
+  permissionsForRoles(['reviewer']).every((p) => p === 'application.read' || p === 'adjudication.read' || p === 'campaign.read.admin' || p === 'biometric.evidence.read'));
 ok('only decision_authority finalises and accepts',
   KNOWN_ROLES.filter((r) => rolesHavePermission([r], 'decision.final')).join() === 'decision_authority' &&
   KNOWN_ROLES.filter((r) => rolesHavePermission([r], 'application.accept')).join() === 'decision_authority');
@@ -68,6 +68,16 @@ ok('only agency_admin administers officers (ADR-036)',
 ok('officer administration confers no decision power by itself (ADR-036)',
   !rolesHavePermission(['agency_admin'], 'decision.final') && !rolesHavePermission(['agency_admin'], 'medical.review') &&
   !rolesHavePermission(['agency_admin'], 'adjudication.decide') && !rolesHavePermission(['agency_admin'], 'admission.gate'));
+
+ok('only field_supervisor confirms manual identity after negative biometric evidence (ADR-037)',
+  KNOWN_ROLES.filter((r) => rolesHavePermission([r], 'identity.manual.confirm')).join() === 'field_supervisor');
+ok('the gate post records evidence but cannot confirm identity or read evidence (ADR-037)',
+  rolesHavePermission(['screening_officer'], 'biometric.verify') &&
+  !rolesHavePermission(['screening_officer'], 'identity.manual.confirm') &&
+  !rolesHavePermission(['screening_officer'], 'biometric.evidence.read'));
+ok('advisory evidence is read by reviewers, supervisors, adjudicators and decision authorities (ADR-037)',
+  KNOWN_ROLES.filter((r) => rolesHavePermission([r], 'biometric.evidence.read')).sort().join() ===
+    'adjudicator,decision_authority,field_supervisor,reviewer');
 
 console.log('\n── Composition and compatibility ──');
 ok('roles compose (union)', rolesHavePermission(['medical_officer', 'adjudicator'], 'medical.review') && rolesHavePermission(['medical_officer', 'adjudicator'], 'adjudication.decide'));

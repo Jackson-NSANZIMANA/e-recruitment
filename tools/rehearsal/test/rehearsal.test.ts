@@ -154,3 +154,34 @@ test('roster: minimal rows pass, identifying fields and missing codes fail', () 
   assert.throws(() => assertGasaboRoster({ candidates: [{ ...row, processingCode: '1200380123456789' }] }, null), RosterAssertion);
   assert.throws(() => assertGasaboRoster({ nothing: true }, null), RosterAssertion);
 });
+
+// ── ADR-037: the dev-only synthetic evidence signer ─────────────────
+import { generateDeviceKeyPair as genKeys, verifyEd25519, canonicalJson as canon } from '@usrp/shared-security';
+import { keyIdOf, signEvidenceRecord, syntheticEvidenceRecord, ticketIdOf } from '../src/biometric.js';
+
+test('synthetic evidence: a flat SHADOW record signed over canonicalJson, no biometric data', () => {
+  const keys = genKeys();
+  const record = syntheticEvidenceRecord({
+    recordId: '0b7c3f8e-2a51-4c1d-9e2f-6a7b8c9d0e1f', applicationId: '9a111111-1111-4111-8111-111111111111',
+    ticketId: 'T1', deviceId: 'reh-rdf-bio-1', publicKeyPem: keys.publicKeyPem, mode: 'SHADOW', capturedAt: '2026-10-21T07:00:00.000Z',
+  });
+  assert.equal(Object.keys(record).length, 18);
+  assert.ok(Object.values(record).every((v) => v === null || typeof v !== 'object'), 'flat scalars only');
+  assert.equal(record['keyId'], keyIdOf(keys.publicKeyPem));
+  const sig = signEvidenceRecord(record, keys.privateKeyPem);
+  assert.match(sig, /^[A-Za-z0-9+/]{86}==$/);
+  assert.equal(verifyEd25519(keys.publicKeyPem, Buffer.from(canon(record), 'utf8'), sig), true);
+});
+
+test('ticketIdOf reads the ticket from a USRP-SLOT.v1 token and refuses anything else', () => {
+  const payload = Buffer.from(JSON.stringify({ ticketId: 'abc_-123' })).toString('base64url');
+  assert.equal(ticketIdOf(`USRP-SLOT.v1.${payload}.sig`), 'abc_-123');
+  assert.equal(ticketIdOf('nope'), null);
+  assert.equal(ticketIdOf(`OTHER.v1.${payload}.sig`), null);
+});
+
+test('scenario: national-pilot-day declares SHADOW for RDF only', async () => {
+  const { readFileSync } = await import('node:fs');
+  const scenario = JSON.parse(readFileSync(new URL('../scenarios/national-pilot-day.json', import.meta.url), 'utf8')) as { campaigns: { agency: string; biometricMode?: string }[] };
+  assert.deepEqual(scenario.campaigns.filter((c) => c.biometricMode !== undefined).map((c) => [c.agency, c.biometricMode]), [['RDF', 'SHADOW']]);
+});

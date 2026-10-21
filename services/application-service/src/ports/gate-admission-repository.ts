@@ -10,6 +10,7 @@
 
 import type { ApplicationCategory, ApplicationStatus } from '@usrp/shared-types';
 import type { GateTicketClaims } from '../domain/gate-admission.js';
+import type { IdentityMethod } from '../domain/gate-identity.js';
 import type { StageEvents } from './event-outbox.js';
 import type { OfficerActor } from './officer-transition-repository.js';
 
@@ -45,7 +46,12 @@ export type GateAdmissionOutcome =
       readonly fromStatus: ApplicationStatus;
       /** PHYSICAL_TEST_SCHEDULED when this admission advanced the row; null if it already was. */
       readonly advancedTo: 'PHYSICAL_TEST_SCHEDULED' | null;
+      /** ADR-037: the identity method recorded, and the evidence it relied on. */
+      readonly identityMethod: IdentityMethod;
+      readonly evidenceIds: readonly string[];
+      readonly confirmationIds: readonly string[];
     }
+  | { readonly outcome: 'MANUAL_IDENTITY_REQUIRED'; readonly candidate: GateCandidate; readonly evidenceIds: readonly string[] }
   | {
       readonly outcome: 'ALREADY_ADMITTED';
       readonly candidate: GateCandidate;

@@ -2,8 +2,9 @@
 // biometric-service — Runtime entrypoint (composition + bootstrap)
 //
 // An officer-facing HTTP gate that emits over the backbone. It exposes
-// POST /v1/biometric/verify (officer-authenticated) and publishes
-// biometric.result. DB-free — identity-service records the outcome. Transport
+// POST /v1/biometric/evidence + GET /v1/biometric/policy (ADR-037: device-
+// attested identity evidence, stored through rls/0034 and announced through
+// the transactional outbox) and the legacy POST /v1/biometric/verify. Transport
 // is resolved by @usrp/shared-config: Kafka when KAFKA_BROKERS is set, else an
 // in-memory bus in DEVELOPMENT only (the emitted result then reaches no
 // consumer, so a venue check-in is accepted and never recorded — logged loudly).
@@ -25,15 +26,19 @@ import {
   type EventBus,
 } from '@usrp/shared-events';
 import {
-  assertDevAdapterAllowed,
   assertProductionSecrets,
+  isProduction,
   loadKafkaConfig,
   resolveEventTransport,
   type EventTransport,
 } from '@usrp/shared-config';
 import { makeAuthVerifier } from '@usrp/shared-auth';
 import { startHttpServer } from '@usrp/shared-http';
-import { createBiometricService } from './index.js';
+import { PgOutboxRelay, sql } from '@usrp/shared-database';
+import { hasValidEnvelope } from '@usrp/shared-events';
+import type { USRPEvent } from '@usrp/shared-types';
+import { BIOMETRIC_OUTBOX_PRODUCER, createBiometricService } from './index.js';
+import { biometricEvidenceRoutes } from './adapters/http/biometric-evidence.controller.js';
 import { loadBiometricConfig } from './config.js';
 import { verifyBiometricRoute } from './adapters/http/verify-biometric.controller.js';
 
@@ -61,15 +66,14 @@ async function main(): Promise<void> {
   logStartupPhase(SERVICE_NAME, 'asserting_production_secrets');
   assertProductionSecrets();
 
-  // FAIL CLOSED: createBiometricService wires MockBiometricMatcher, which
-  // returns FIXED PASSING scores (liveness 0.95, match 96.0) for ANY capture.
-  // In production every venue check-in would clear biometrics. Refuse to boot
-  // until a real liveness + 1:1 match adapter replaces it behind the port.
-  logStartupPhase(SERVICE_NAME, 'asserting_biometric_matcher');
-  assertDevAdapterAllowed(
-    'MockBiometricMatcher',
-    'every capture would receive fixed passing liveness and face-match scores, so every check-in would clear biometrics',
-  );
+  // ADR-037 §2: outside production the legacy server-side check-in uses the
+  // dev MockBiometricMatcher (fixed passing scores). In production it is wired
+  // to the NIDA_PORTRAIT matcher, which FAILS CLOSED (not authorised), so the
+  // service boots and every server-side match is refused. The evidence path
+  // needs no matcher: matching happens on the device.
+  logStartupPhase(SERVICE_NAME, 'selecting_server_matcher', {
+    matcher: isProduction() ? 'NidaPortraitMatcher (fails closed)' : 'MockBiometricMatcher (dev only)',
+  });
 
   // Not merely reading env: this decodes QR_INVITATION_PUBLIC_KEY_B64 and
   // runs createPublicKey() on it, so a malformed or truncated key fails HERE.
@@ -89,6 +93,12 @@ async function main(): Promise<void> {
   logStartupPhase(SERVICE_NAME, 'event_bus_connected', { transport: transport.kind });
 
   const service = createBiometricService(config, bus);
+  const outboxRelay = new PgOutboxRelay<USRPEvent>(bus, {
+    producer: BIOMETRIC_OUTBOX_PRODUCER,
+    isValid: (payload: unknown): boolean => hasValidEnvelope(payload),
+  });
+  outboxRelay.start();
+  logStartupPhase(SERVICE_NAME, 'outbox_relay_started', { producer: BIOMETRIC_OUTBOX_PRODUCER });
   const verify = makeAuthVerifier({
     publicKeyPem: config.auth.authPublicKeyPem,
     issuer: config.auth.jwtIssuer,
@@ -102,9 +112,22 @@ async function main(): Promise<void> {
   const server = await startHttpServer({
     serviceName: config.runtime.serviceName,
     port: config.runtime.port,
-    routes: [verifyBiometricRoute(service.verifyBiometric, verify)],
+    routes: [
+      verifyBiometricRoute(service.verifyBiometric, verify),
+      ...biometricEvidenceRoutes(service.recordEvidence, service.policy, verify),
+    ],
+    // Ready only when the evidence store is reachable.
+    readiness: async (): Promise<boolean> => {
+      try {
+        await sql`SELECT 1`;
+        return true;
+      } catch {
+        return false;
+      }
+    },
     onShutdown: async (): Promise<void> => {
       console.log(JSON.stringify({ msg: 'service_stopping', service: config.runtime.serviceName }));
+      await outboxRelay.stop();
       await bus.disconnect();
       console.log(JSON.stringify({ msg: 'service_stopped', service: config.runtime.serviceName }));
     },
@@ -117,6 +140,7 @@ async function main(): Promise<void> {
       url: server.url,
       env: config.runtime.nodeEnv,
       emitting: transport.kind === 'kafka' ? 'biometric.result' : 'none (in-memory bus)',
+      evidenceModes: config.modes,
     }),
   );
 }

@@ -11,6 +11,9 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { createPublicKey } from 'node:crypto';
+import type { Agency } from '@usrp/shared-types';
+import { isBiometricMode, type BiometricMode } from './domain/biometric-mode.js';
+import { DEFAULT_THRESHOLD_POLICY_VERSION, thresholdPolicy } from './domain/threshold-policy.js';
 import {
   EnvValidationError,
   loadAuthVerifyConfig,
@@ -34,6 +37,10 @@ export interface BiometricServiceConfig {
   /** Scheduling issuer public key (SPKI PEM) used to verify the slot-invitation QR. */
   readonly qrInvitationPublicKeyPem: string;
   readonly thresholds: BiometricThresholdsConfig;
+  /** ADR-037 §7: per-agency evidence mode; default OFF (fail closed). */
+  readonly modes: Readonly<Record<Agency, BiometricMode>>;
+  /** The registered threshold policy devices must use (ADR-037 §6). */
+  readonly thresholdPolicyVersion: string;
 }
 
 export function loadBiometricConfig(source: EnvSource = process.env): BiometricServiceConfig {
@@ -42,6 +49,10 @@ export function loadBiometricConfig(source: EnvSource = process.env): BiometricS
       QR_INVITATION_PUBLIC_KEY_B64: string({ minLength: 40 }), // base64 SPKI PEM (public)
       BIOMETRIC_LIVENESS_THRESHOLD: withDefault(string(), '0.85'),
       BIOMETRIC_FACE_MATCH_THRESHOLD: withDefault(string(), '85.0'),
+      BIOMETRIC_MODE_RDF: withDefault(string(), 'OFF'),
+      BIOMETRIC_MODE_RNP: withDefault(string(), 'OFF'),
+      BIOMETRIC_MODE_RCS: withDefault(string(), 'OFF'),
+      BIOMETRIC_THRESHOLD_POLICY: withDefault(string(), DEFAULT_THRESHOLD_POLICY_VERSION),
     },
     source,
   );
@@ -59,6 +70,13 @@ export function loadBiometricConfig(source: EnvSource = process.env): BiometricS
   if (Number.isNaN(faceMatchThreshold) || faceMatchThreshold < 0 || faceMatchThreshold > 100) {
     issues.push('BIOMETRIC_FACE_MATCH_THRESHOLD must be a number between 0.0 and 100.0');
   }
+  const modes = { RDF: env.BIOMETRIC_MODE_RDF, RNP: env.BIOMETRIC_MODE_RNP, RCS: env.BIOMETRIC_MODE_RCS };
+  for (const [agency, mode] of Object.entries(modes)) {
+    if (!isBiometricMode(mode)) issues.push(`BIOMETRIC_MODE_${agency} must be OFF, SHADOW or ADVISORY (there is no automatic mode)`);
+  }
+  if (thresholdPolicy(env.BIOMETRIC_THRESHOLD_POLICY) === null) {
+    issues.push('BIOMETRIC_THRESHOLD_POLICY must name a registered threshold policy');
+  }
   if (issues.length > 0) {
     throw new EnvValidationError(issues);
   }
@@ -71,5 +89,7 @@ export function loadBiometricConfig(source: EnvSource = process.env): BiometricS
       livenessThreshold,
       faceMatchThreshold,
     },
+    modes: modes as Record<Agency, BiometricMode>,
+    thresholdPolicyVersion: env.BIOMETRIC_THRESHOLD_POLICY,
   };
 }

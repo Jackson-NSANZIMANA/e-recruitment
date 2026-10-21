@@ -534,14 +534,21 @@ export class PgApplicationRepository implements ApplicationRepository {
         `;
         if (conflict[0]) return { kind: 'CONFLICT_HELD' };
 
-        // Biometric-pass precondition (ADR-010 §4): the applicant must have
-        // cleared the exam-day check-in. No verified biometric ⇒ hold.
-        const bio = await tx<{ biometric_verified_at: Date | null }[]>`
-          SELECT biometric_verified_at
-          FROM public_core.applicant_identities
-          WHERE id = ${current.applicant_id}
+        // Identity precondition. ADR-010 §4 required a biometric PASS here,
+        // which made a missing or failed face match an automatic hold. ADR-037
+        // §9 supersedes it: biometrics are evidence, never a verdict, so what
+        // is required is that identity was ESTABLISHED — a gate admission
+        // (card number, plus supervised manual identity after any negative
+        // advisory evidence), or the legacy verified check-in. Neither ⇒ hold.
+        const identity = await tx<{ admitted: boolean; biometric_verified: boolean }[]>`
+          SELECT
+            EXISTS (SELECT 1 FROM ${schema}.gate_admissions WHERE application_id = ${result.applicationId}) AS admitted,
+            EXISTS (
+              SELECT 1 FROM public_core.applicant_identities
+              WHERE id = ${current.applicant_id} AND biometric_verified_at IS NOT NULL
+            ) AS biometric_verified
         `;
-        if (!bio[0] || bio[0].biometric_verified_at === null) {
+        if (identity[0]?.admitted !== true && identity[0]?.biometric_verified !== true) {
           return { kind: 'BIOMETRIC_NOT_VERIFIED' };
         }
 

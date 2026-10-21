@@ -197,11 +197,20 @@ async function main(): Promise<void> {
     APPLICATION_SERVICE_BASE_URL: 'http://127.0.0.1:9',
     SCHEDULING_SERVICE_BASE_URL: 'http://127.0.0.1:9',
     FIELD_SYNC_SERVICE_BASE_URL: 'http://127.0.0.1:9',
+    BIOMETRIC_SERVICE_BASE_URL: 'http://127.0.0.1:9',
     EDGE_SESSION_HMAC_KEY: 'prod_proof_only_key_not_a_published_dev_value_min_32_chars!!',
     EDGE_COOKIE_SECURE: 'true',
     CORS_ORIGINS: 'https://proof.example',
     AUTH_JWT_PUBLIC_KEY_B64: process.env['AUTH_JWT_PUBLIC_KEY_B64'] ?? '',
   };
+  let biometricRefused = false;
+  try {
+    const { BIOMETRIC_SERVICE_BASE_URL: _omitted, ...withoutBiometric } = prodEnv;
+    loadEdgeGatewayConfig(withoutBiometric);
+  } catch (err) {
+    biometricRefused = err instanceof Error && err.message.includes('BIOMETRIC_SERVICE_BASE_URL');
+  }
+  check('production without BIOMETRIC_SERVICE_BASE_URL is refused (ADR-037)', biometricRefused);
   const prodConfig = loadEdgeGatewayConfig(prodEnv);
   check('the proof really built a production config', prodConfig.runtime.isProduction === true);
   let bootRefused = false;

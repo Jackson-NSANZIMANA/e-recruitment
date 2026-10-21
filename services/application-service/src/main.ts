@@ -60,6 +60,7 @@ import { documentChecklistRoutes } from './adapters/http/document-checklist.cont
 import { examInvitationRoute } from './adapters/http/exam-invitation.controller.js';
 import { walkInRoutes } from './adapters/http/walk-in.controller.js';
 import { gateAdmissionRoutes } from './adapters/http/gate-admission.controller.js';
+import { biometricEvidenceRoutes } from './adapters/http/biometric-evidence.controller.js';
 import { startVettingResultConsumer } from './adapters/events/vetting-result.consumer.js';
 import { startSlotAssignedConsumer } from './adapters/events/slot-assigned.consumer.js';
 import { startNotificationDeliveredConsumer } from './adapters/events/notification-delivered.consumer.js';
@@ -170,6 +171,7 @@ async function main(): Promise<void> {
       ...documentChecklistRoutes(service.documentChecklist, verify), // ADR-032 advisory checklist + venue verification
       examInvitationRoute(service.examInvitation, verify), // ADR-033 system-token: the citizen's downloadable exam QR
       ...gateAdmissionRoutes(service.gateAdmission, verify), // BUILD-003 officer-token: single-use QR admission at the gate
+      ...biometricEvidenceRoutes(service.biometricEvidence, verify), // ADR-037 advisory evidence read + supervised manual identity
       // officer-token writes: medical-review / final-decision / accept / adjudicate
       ...officerTransitionRoutes(service.officerTransitions, verify),
       // officer-token writes: exam-day walk-in register + on-site vet (RDF, ADR-012)

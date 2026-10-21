@@ -97,15 +97,31 @@ export const OFFICER_ADMIN_PERMISSION_LIST = [
   'officer.sessions.revoke',
 ] as const;
 
+/**
+ * Biometric identity evidence permissions (ADR-037). Recording evidence
+ * reuses `biometric.verify` (screening_officer). Reading ADVISORY evidence is
+ * for reviewers; confirming identity after a NO_MATCH / INCONCLUSIVE result
+ * is the field supervisor's alone (owner decision 2026-10-19), and the gate
+ * refuses to count a confirmation by the admitting officer.
+ */
+export const BIOMETRIC_EVIDENCE_PERMISSION_LIST = [
+  /** Read ADVISORY biometric evidence on the officer application detail. */
+  'biometric.evidence.read',
+  /** Confirm a candidate's identity after negative biometric evidence. */
+  'identity.manual.confirm',
+] as const;
+
 export const ALL_PERMISSIONS = [
   ...CAMPAIGN_PERMISSION_LIST,
   ...OPERATION_PERMISSION_LIST,
   ...OFFICER_ADMIN_PERMISSION_LIST,
+  ...BIOMETRIC_EVIDENCE_PERMISSION_LIST,
 ] as const;
 
 export type Permission = (typeof ALL_PERMISSIONS)[number];
 export type OperationPermission = (typeof OPERATION_PERMISSION_LIST)[number];
 export type OfficerAdminPermission = (typeof OFFICER_ADMIN_PERMISSION_LIST)[number];
+export type BiometricEvidencePermission = (typeof BIOMETRIC_EVIDENCE_PERMISSION_LIST)[number];
 
 /**
  * The role vocabulary. `agency_admin` and `reviewer` pre-date this module
@@ -145,7 +161,7 @@ const ROLE_PERMISSIONS: Readonly<Record<KnownRole, ReadonlySet<Permission>>> = {
     ...READ,
     ...OFFICER_ADMIN_PERMISSION_LIST,
   ]),
-  reviewer: new Set<Permission>(['campaign.read.admin', ...READ]),
+  reviewer: new Set<Permission>(['campaign.read.admin', 'biometric.evidence.read', ...READ]),
   screening_officer: new Set<Permission>([
     'walkin.register',
     'walkin.vet',
@@ -161,11 +177,13 @@ const ROLE_PERMISSIONS: Readonly<Record<KnownRole, ReadonlySet<Permission>>> = {
     'field.device.enroll',
     'field.score.sync',
     'field.conflict.resolve',
+    'biometric.evidence.read',
+    'identity.manual.confirm',
     ...READ,
   ]),
   medical_officer: new Set<Permission>(['medical.review', ...READ]),
-  adjudicator: new Set<Permission>(['adjudication.decide', ...READ]),
-  decision_authority: new Set<Permission>(['decision.final', 'application.accept', ...READ]),
+  adjudicator: new Set<Permission>(['adjudication.decide', 'biometric.evidence.read', ...READ]),
+  decision_authority: new Set<Permission>(['decision.final', 'application.accept', 'biometric.evidence.read', ...READ]),
   dpo: new Set<Permission>(['erasure.queue.read', 'erasure.decide']),
 };
 

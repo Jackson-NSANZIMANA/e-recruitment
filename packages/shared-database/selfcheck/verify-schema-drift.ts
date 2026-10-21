@@ -174,6 +174,7 @@ function normaliseType(type: string): string {
   const t = type.replace(/"/g, '');
   if (t === 'varchar') return 'character varying';
   if (t.startsWith('varchar(')) return t.replace('varchar', 'character varying');
+  if (t.startsWith('char(')) return t.replace('char', 'character');
   if (t === 'serial') return 'integer';
   if (t === 'bigserial') return 'bigint';
   return t;

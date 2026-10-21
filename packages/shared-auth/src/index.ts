@@ -20,6 +20,7 @@ export {
 
 export {
   ALL_PERMISSIONS,
+  BIOMETRIC_EVIDENCE_PERMISSION_LIST,
   KNOWN_ROLES,
   OFFICER_ADMIN_PERMISSION_LIST,
   OPERATION_PERMISSION_LIST,
@@ -28,6 +29,7 @@ export {
   rolesHavePermission,
   type KnownRole,
   type OfficerAdminPermission,
+  type BiometricEvidencePermission,
   type OperationPermission,
   type Permission,
 } from './permissions.js';

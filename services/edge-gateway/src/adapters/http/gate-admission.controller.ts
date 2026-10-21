@@ -21,7 +21,9 @@ const MAX_TICKET_LENGTH = 4096;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const CODE_RE = /^[A-Z][A-Z0-9_]{0,63}$/;
-const CONFLICTS = new Set(['ALREADY_ADMITTED', 'NOT_ADMISSIBLE', 'IDENTITY_MISMATCH', 'WRONG_VENUE', 'TOO_EARLY', 'EXPIRED']);
+const CONFLICTS = new Set(['ALREADY_ADMITTED', 'NOT_ADMISSIBLE', 'IDENTITY_MISMATCH', 'MANUAL_IDENTITY_REQUIRED', 'WRONG_VENUE', 'TOO_EARLY', 'EXPIRED']);
+/** ADR-037: the identity method an admission recorded. */
+const IDENTITY_METHODS = new Set(['NATIONAL_ID_CARD', 'NATIONAL_ID_CARD+CARD_PORTRAIT', 'NATIONAL_ID_CARD+SUPERVISOR']);
 const INVALID_REASONS = new Set(['MALFORMED_TICKET', 'WRONG_AGENCY', 'UNKNOWN_TICKET', 'TICKET_NOT_ISSUED']);
 const MISMATCH: HttpResult = { status: 502, body: { error: 'UPSTREAM_CONTRACT_MISMATCH' } };
 
@@ -51,7 +53,8 @@ export function projectGateAdmission(status: number, raw: unknown): HttpResult |
       b['outcome'] !== 'ADMITTED' || cand === null || !text(b['venueName']) ||
       typeof b['examDate'] !== 'string' || !DATE_RE.test(b['examDate']) ||
       typeof b['reportingTimeHour'] !== 'number' || !instant(b['admittedAt']) ||
-      typeof b['statusAdvanced'] !== 'boolean'
+      typeof b['statusAdvanced'] !== 'boolean' ||
+      typeof b['identityMethod'] !== 'string' || !IDENTITY_METHODS.has(b['identityMethod'])
     ) {
       return null;
     }
@@ -65,6 +68,7 @@ export function projectGateAdmission(status: number, raw: unknown): HttpResult |
         reportingTimeHour: b['reportingTimeHour'],
         admittedAt: b['admittedAt'],
         statusAdvanced: b['statusAdvanced'],
+        identityMethod: b['identityMethod'],
       },
     };
   }
@@ -81,7 +85,7 @@ export function projectGateAdmission(status: number, raw: unknown): HttpResult |
       if (cand === null || typeof b['currentStatus'] !== 'string' || !CODE_RE.test(b['currentStatus'])) return null;
       return { status: 409, body: { error, candidate: cand, currentStatus: b['currentStatus'] } };
     }
-    if (error === 'IDENTITY_MISMATCH') {
+    if (error === 'IDENTITY_MISMATCH' || error === 'MANUAL_IDENTITY_REQUIRED') {
       const cand = candidate(b['candidate']);
       return cand === null ? null : { status: 409, body: { error, candidate: cand } };
     }

@@ -21,7 +21,9 @@ import { EdgeSession, EdgeUnavailable } from './edge.js';
 import { RehearsalRefused, assertRehearsalAllowed } from './fence.js';
 import { isRehearsalCode, ScenarioInvalid, validateScenario, type Scenario } from './scenario.js';
 import { assertGasaboRoster, RosterAssertion } from './roster.js';
-import { REHEARSAL_STAFF_PASSWORD } from './staff.js';
+import { REHEARSAL_STAFF_PASSWORD, provisionStaff } from './staff.js';
+import { recordShadowEvidence } from './biometric.js';
+import { ensureAgencyAdmin } from './provision.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = resolve(HERE, '..');
@@ -125,6 +127,51 @@ async function roster(edgeBaseUrl: string, origin: string, expectCode: string | 
   return 0;
 }
 
+/**
+ * ADR-037, dev-only: record one signed SYNTHETIC SHADOW evidence record for a
+ * persona of the scenario's SHADOW agency, then prove it invisible to
+ * officers and stored. Staffs the agency first (idempotent), like `rehearse`.
+ */
+async function biometricShadow(
+  argv: readonly string[],
+  where: { readonly edgeBaseUrl: string; readonly origin: string; readonly databaseUrl: string },
+): Promise<number> {
+  const scenario = loadScenario('national-pilot-day');
+  const personaId = argv[argv.indexOf('--biometric-shadow') + 1] ?? 'A';
+  const persona = scenario.personas.find((p) => p.id === personaId) ?? scenario.personas.find((p) => p.id === 'A');
+  const campaign = scenario.campaigns.find((c) => c.biometricMode === 'SHADOW');
+  if (persona === undefined || campaign === undefined) throw new ScenarioInvalid('No SHADOW agency or persona in the scenario.');
+  const agency = campaign.agency as Agency;
+  const admin = adminFor(agency);
+  const provisioned = await ensureAgencyAdmin(where.databaseUrl, {
+    agency, loginHandle: admin.loginHandle, password: admin.password,
+    operatorReference: 'REHEARSAL-BIOMETRIC-SHADOW', correlationId: `REH-BIO-${agency}-ADMIN`,
+  });
+  if (provisioned.kind === 'OTHER_ADMIN') throw new RehearsalRefused(`${agency} already has another administrator.`);
+  const edge = new EdgeSession(where.edgeBaseUrl, where.origin);
+  if (!(await edge.signIn(admin.loginHandle, admin.password))) throw new RehearsalRefused(`edge refused ${admin.loginHandle}`);
+  const staff = campaign.staff ?? [];
+  const staffed = await provisionStaff(edge, () => new EdgeSession(where.edgeBaseUrl, where.origin), staff);
+  const gate = staff.find((m) => m.posts.includes('screening_officer'));
+  const reader = staff.find((m) => m.posts.includes('field_supervisor') || m.posts.includes('reviewer'));
+  if (staffed.some((m) => !m.ok) || gate === undefined || reader === undefined) {
+    out('biometric shadow: staffing failed or the scenario lacks a gate officer and a reader');
+    return 1;
+  }
+  const steps = await recordShadowEvidence({
+    edgeBaseUrl: where.edgeBaseUrl, origin: where.origin, databaseUrl: where.databaseUrl, agency,
+    nationalId: persona.nationalId,
+    gateOfficer: { loginHandle: gate.handle, password: REHEARSAL_STAFF_PASSWORD },
+    reader: { loginHandle: reader.handle, password: REHEARSAL_STAFF_PASSWORD },
+    now: new Date(),
+  });
+  out(`USRP REHEARSAL · biometric SHADOW evidence · ${agency} · persona ${persona.id} (synthetic record; no face is captured)`);
+  for (const s of steps) out(`  ${s.ok ? '✓' : '✗'} ${s.step}: ${s.detail}`);
+  const ok = steps.length > 0 && steps.every((s) => s.ok);
+  out(ok ? 'SHADOW EVIDENCE RECORDED AND INVISIBLE TO OFFICERS.' : 'BIOMETRIC SHADOW REHEARSAL INCOMPLETE — see ✗ above.');
+  return ok ? 0 : 1;
+}
+
 async function main(argv: readonly string[]): Promise<number> {
   const edgeBaseUrl = env('REHEARSAL_EDGE_URL') ?? `http://localhost:${env('PORT_EDGE_GATEWAY') ?? '4021'}`;
   const origin = env('REHEARSAL_ORIGIN') ?? 'http://localhost:3001';
@@ -135,6 +182,9 @@ async function main(argv: readonly string[]): Promise<number> {
   if (argv.includes('--roster')) {
     const at = argv.indexOf('--expect-code');
     return roster(edgeBaseUrl, origin, at >= 0 ? (argv[at + 1] ?? null) : null);
+  }
+  if (argv.includes('--biometric-shadow')) {
+    return biometricShadow(argv, { edgeBaseUrl, origin, databaseUrl });
   }
   const scenarioId = argv.find((arg) => !arg.startsWith('--')) ?? 'national-pilot-day';
   const scenario = loadScenario(scenarioId);

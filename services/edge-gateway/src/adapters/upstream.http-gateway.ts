@@ -112,6 +112,8 @@ export class UpstreamClient implements UpstreamGateway {
         return this.#config.schedulingBaseUrl;
       case 'field-sync':
         return this.#config.fieldSyncBaseUrl;
+      case 'biometric':
+        return this.#config.biometricBaseUrl;
       default: {
         const exhaustive: never = service;
         throw new Error(`Unknown upstream service: ${String(exhaustive)}`);

@@ -27,6 +27,8 @@ import { PgOfficerTransitionRepository } from './adapters/officer-transition.pg-
 import { PgWalkInRepository } from './adapters/walk-in.pg-repository.js';
 import { PgGateAdmissionRepository } from './adapters/gate-admission.pg-repository.js';
 import { GateAdmissionService } from './application/gate-admission.service.js';
+import { BiometricEvidenceService } from './application/biometric-evidence.service.js';
+import { PgBiometricEvidenceRepository } from './adapters/biometric-evidence.pg-repository.js';
 import { PgSubmissionLedger } from './adapters/submission-ledger.pg-repository.js';
 import { PgOutboxDispatcher } from './adapters/outbox/pg-event-outbox.js';
 import { SubmitApplicationService } from './application/submit-application.service.js';
@@ -86,6 +88,8 @@ export interface ApplicationService {
   readonly examInvitation: ExamInvitationService;
   /** HTTP officer write — spend the exam QR at the venue gate (BUILD-003, ADR-034). */
   readonly gateAdmission: GateAdmissionService;
+  /** ADR-037: officer read of ADVISORY evidence + supervised manual identity. */
+  readonly biometricEvidence: BiometricEvidenceService;
   /** Re-offers clearances scheduling deferred (no venue / no capacity) to scheduling. */
   readonly slotRetry: ReannounceStalledClearancesService;
   /** Officer-authorized BUILD-001 campaign aggregate writes. */
@@ -149,6 +153,7 @@ export function createApplicationService(
     }),
     examInvitation: new ExamInvitationService({ reader: new PgExamInvitationReader() }),
     gateAdmission: new GateAdmissionService({ repository: new PgGateAdmissionRepository(), events }),
+    biometricEvidence: new BiometricEvidenceService({ repository: new PgBiometricEvidenceRepository(), events }),
     slotRetry: new ReannounceStalledClearancesService({
       repository: new PgStalledClearanceRepository(),
       events,
@@ -471,6 +476,26 @@ export {
   type GateTicketClaims,
 } from './domain/gate-admission.js';
 export type { GateAdmissionOutcome, GateCandidate } from './ports/gate-admission-repository.js';
+
+// ── Biometric identity evidence (ADR-037) ──
+export { BiometricEvidenceService } from './application/biometric-evidence.service.js';
+export { PgBiometricEvidenceRepository } from './adapters/biometric-evidence.pg-repository.js';
+export {
+  biometricEvidenceRoutes,
+  BIOMETRIC_EVIDENCE_READ_PATH,
+  MANUAL_IDENTITY_PATH,
+} from './adapters/http/biometric-evidence.controller.js';
+export {
+  resolveGateIdentity,
+  requiresManualIdentity,
+  IDENTITY_METHODS,
+  MANUAL_IDENTITY_REASONS,
+  type IdentityMethod,
+  type ManualIdentityReason,
+  type VisibleEvidence,
+  type GateIdentityDecision,
+} from './domain/gate-identity.js';
+export type { EvidenceView, ConfirmManualIdentityOutcome, EvidenceListOutcome } from './ports/biometric-evidence-repository.js';
 
 // ── Exam invitation (ADR-033) ──
 export { ExamInvitationService } from './application/exam-invitation.service.js';

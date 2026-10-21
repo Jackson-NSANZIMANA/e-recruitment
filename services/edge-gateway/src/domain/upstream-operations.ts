@@ -16,7 +16,7 @@
 // ══════════════════════════════════════════════════════════════════
 
 /** Explicitly allowlisted upstream services; no request-derived target is possible. */
-export type UpstreamService = 'iam' | 'identity' | 'application' | 'field-sync' | 'scheduling';
+export type UpstreamService = 'iam' | 'identity' | 'application' | 'field-sync' | 'scheduling' | 'biometric';
 
 export interface UpstreamOperation {
   readonly id: string;
@@ -149,6 +149,14 @@ export const UPSTREAM = Object.freeze({
   officerEnable: op('officerEnable', 'iam', 'POST', '/v1/officers/enable', 'officer-jwt'),
   officerRevokeSessions: op('officerRevokeSessions', 'iam', 'POST', '/v1/officers/sessions/revoke', 'officer-jwt'),
   officerActivate: op('officerActivate', 'iam', 'POST', '/v1/auth/officer/activate', 'none'),
+
+  // ADR-037 — biometric identity evidence.
+  // biometric-service — biometric-evidence.controller.ts
+  biometricPolicy: op('biometricPolicy', 'biometric', 'GET', '/v1/biometric/policy', 'officer-jwt'),
+  biometricEvidenceRecord: op('biometricEvidenceRecord', 'biometric', 'POST', '/v1/biometric/evidence', 'officer-jwt'),
+  // application-service — biometric-evidence.controller.ts
+  biometricEvidenceRead: op('biometricEvidenceRead', 'application', 'GET', '/v1/applications/biometric-evidence', 'officer-jwt'),
+  manualIdentityConfirm: op('manualIdentityConfirm', 'application', 'POST', '/v1/applications/biometric-evidence/manual-identity', 'officer-jwt'),
 } as const);
 
 export type UpstreamOperationId = keyof typeof UPSTREAM;

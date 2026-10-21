@@ -11,6 +11,7 @@
       "examination": { "startOffsetDays": 0, "endOffsetDays": 6 },
       "reportingHour": 7,
       "allowsWalkIn": true,
+      "biometricMode": "SHADOW",
       "targetIntakeCount": 200,
       "sessions": [
         { "district": "GASABO", "examOffsetDays": 0, "reportingHour": 7, "capacity": 300 },

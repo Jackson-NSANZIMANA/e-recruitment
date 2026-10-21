@@ -292,6 +292,9 @@ importers:
       '@usrp/shared-config':
         specifier: workspace:*
         version: link:../../packages/shared-config
+      '@usrp/shared-database':
+        specifier: workspace:*
+        version: link:../../packages/shared-database
       '@usrp/shared-events':
         specifier: workspace:*
         version: link:../../packages/shared-events
@@ -308,12 +311,12 @@ importers:
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.2
+      '@usrp/application-service':
+        specifier: workspace:*
+        version: link:../application-service
       '@usrp/identity-service':
         specifier: workspace:*
         version: link:../identity-service
-      '@usrp/shared-database':
-        specifier: workspace:*
-        version: link:../../packages/shared-database
       postgres:
         specifier: ^3.4.5
         version: 3.4.9

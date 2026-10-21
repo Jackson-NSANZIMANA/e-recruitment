@@ -16,7 +16,8 @@
 //   • tamper (bad signature), unenrolled device, revoked device, cross-agency
 //     device, wrong-agency application, and a FORGED EXAM TICKET all
 //     REJECTED / guarded;
-//   • biometric-precondition enforced (no completion without a check-in pass);
+//   • identity precondition (ADR-037 §9): admitted without a biometric pass
+//     completes; never admitted and never checked in holds;
 //   • auth: unauthenticated → 401, system token → 403 (officer-only routes).
 //
 //   DATABASE_URL='postgresql://usrp_app:app_pw@localhost:5432/usrp_db' \
@@ -184,7 +185,7 @@ async function seed(): Promise<void> {
       (${APPLICANT_BIO_3}, ${'a4'.repeat(32)}, 'x','x','x','x','MALE','WEB',
        'VERIFIED'::public_core.identity_verification_status, now()),
       (${APPLICANT_UNADMITTED}, ${'a5'.repeat(32)}, 'x','x','x','x','MALE','WEB',
-       'VERIFIED'::public_core.identity_verification_status, now())`;
+       'VERIFIED'::public_core.identity_verification_status, NULL)`;
 
   await admin.begin(async (tx) => {
     await tx`SET LOCAL session_replication_role = replica`;
@@ -426,17 +427,24 @@ async function main(): Promise<void> {
     check('unadmitted record never stored', (await admin`SELECT count(*)::int AS n FROM rdf_ops.physical_test_scores WHERE application_id=${APP_UNADMITTED}`)[0]?.['n'] === 0);
     check('NOT_ADMITTED audited as FIELD_SCORE_REJECTED', busMain.published.some((e) => e.eventType === 'AUDIT_ENTRY' && asRecord(e)['action'] === 'FIELD_SCORE_REJECTED' && asRecord(asRecord(e)['metadata'])['reason'] === 'NOT_ADMITTED'));
 
-    // ── 7. Biometric precondition ──────────────────────────────────
-    console.log('\n── 7. Biometric-pass precondition enforced ──');
+    // ── 7. Identity precondition (ADR-037 §9 supersedes ADR-010 §4) ─
+    // Biometrics are evidence, never a verdict: an admitted candidate with NO
+    // biometric pass completes; only "identity never established" holds.
+    console.log('\n── 7. Identity-established precondition (no biometric hold) ──');
     const recNoBio = makeRecord(APP_NOBIO, keysA.privateKeyPem, DEV_A, { [DEV_A]: 1 });
     const sNoBio = await syncOne(recNoBio);
     check('score accepted + stored (field-sync owns the score)', sNoBio.result['status'] === 'ACCEPTED', JSON.stringify(sNoBio.result));
-    check('but application HELD at PHYSICAL_TEST_SCHEDULED (no biometric pass)', (await appStatus(APP_NOBIO)) === 'PHYSICAL_TEST_SCHEDULED');
     const bioOut = await appService.physicalTestProjector.project({
       result: { applicationId: APP_NOBIO, agency: 'RDF', signedPayloadHash: recNoBio.signedPayloadHash, correlationId: 'c7' },
       agency: 'RDF', context: { correlationId: 'c7', causationId: 'c7' },
     });
-    check('projector → BIOMETRIC_NOT_VERIFIED (fail-closed hold)', bioOut.kind === 'BIOMETRIC_NOT_VERIFIED', bioOut.kind);
+    check('admitted on the card, no biometric pass → completes (not held)', bioOut.kind === 'APPLIED' || bioOut.kind === 'NO_CHANGE', bioOut.kind);
+    check('application at PHYSICAL_TEST_COMPLETE', (await appStatus(APP_NOBIO)) === 'PHYSICAL_TEST_COMPLETE');
+    const noIdentity = await appService.physicalTestProjector.project({
+      result: { applicationId: APP_UNADMITTED, agency: 'RDF', signedPayloadHash: recNoBio.signedPayloadHash, correlationId: 'c7b' },
+      agency: 'RDF', context: { correlationId: 'c7b', causationId: 'c7b' },
+    });
+    check('never admitted and no verified check-in → HOLD (identity not established)', noIdentity.kind === 'BIOMETRIC_NOT_VERIFIED', noIdentity.kind);
 
     // ── 8. No raw PII / frames leak into events ────────────────────
     console.log('\n── 8. Events carry scores/ids only — no PII ──');

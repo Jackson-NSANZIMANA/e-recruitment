@@ -668,7 +668,7 @@ paths:
       tags: [gate]
       x-usrp-session: officer
       x-usrp-permission: admission.gate
-      x-usrp-outcomes: { 409: [ALREADY_ADMITTED, NOT_ADMISSIBLE, IDENTITY_MISMATCH, WRONG_VENUE, TOO_EARLY, EXPIRED], 422: [INVALID_TICKET] }
+      x-usrp-outcomes: { 409: [ALREADY_ADMITTED, NOT_ADMISSIBLE, IDENTITY_MISMATCH, WRONG_VENUE, TOO_EARLY, EXPIRED, MANUAL_IDENTITY_REQUIRED], 422: [INVALID_TICKET] }
       x-usrp-csrf: true
       x-usrp-retry-on-g2g: false
       requestBody:
@@ -685,19 +685,184 @@ paths:
                 gateVenueName: { type: string, minLength: 1, maxLength: 200, description: The venue this gate is at }
       responses:
         '200':
-          description: "{ outcome: ADMITTED, candidate { applicationId, processingCode, category }, venueName, examDate, reportingTimeHour, admittedAt, statusAdvanced }"
+          description: "{ outcome: ADMITTED, candidate { applicationId, processingCode, category }, venueName, examDate, reportingTimeHour, admittedAt, statusAdvanced, identityMethod: NATIONAL_ID_CARD | NATIONAL_ID_CARD+CARD_PORTRAIT | NATIONAL_ID_CARD+SUPERVISOR } (identityMethod: ADR-037)"
         '400':
           description: INVALID_REQUEST — shape only (incl. a national ID that is not 16 digits)
         '403':
           description: PERMISSION_DENIED — only the screening post (admission.gate) admits
         '409':
-          description: "ALREADY_ADMITTED (candidate, admittedAt, venueName, admittedBySelf) | NOT_ADMISSIBLE (candidate, currentStatus) | IDENTITY_MISMATCH (candidate) | WRONG_VENUE (ticketVenueName) | TOO_EARLY | EXPIRED (examDate)"
+          description: "ALREADY_ADMITTED (candidate, admittedAt, venueName, admittedBySelf) | NOT_ADMISSIBLE (candidate, currentStatus) | IDENTITY_MISMATCH (candidate) | MANUAL_IDENTITY_REQUIRED (candidate) — ADR-037 check 10, after the card matched; a field supervisor must confirm via confirmManualIdentity; never a refusal | WRONG_VENUE (ticketVenueName) | TOO_EARLY | EXPIRED (examDate)"
         '422':
           description: "INVALID_TICKET { reason: MALFORMED_TICKET | WRONG_AGENCY | UNKNOWN_TICKET | TICKET_NOT_ISSUED }"
         '502':
           description: UPSTREAM_CONTRACT_MISMATCH — an off-contract answer is never relayed
         '503':
           description: UPSTREAM_UNAVAILABLE
+
+  /edge/v1/gate/biometric-policy:
+    get:
+      operationId: getBiometricPolicy
+      summary: |
+        The biometric evidence policy in force for the officer's agency
+        (ADR-037): mode (OFF | SHADOW | ADVISORY; there is no automatic mode),
+        legal basis, threshold policy, reference-source status. The device reads
+        it before capturing; in OFF it captures nothing, in SHADOW it must never
+        display a result.
+      tags: [gate]
+      x-usrp-session: officer
+      x-usrp-permission: biometric.verify
+      x-usrp-outcomes: {}
+      x-usrp-csrf: false
+      x-usrp-retry-on-g2g: true
+      responses:
+        '200':
+          description: "{ agency, mode, legalBasis, evidenceSchema: USRP-BIO-EVIDENCE.v1, maxBodyBytes, thresholdPolicy { version, livenessPassBp, matchBp, noMatchBelowBp }, referenceSources [{ id: CARD_PORTRAIT | NIDA_PORTRAIT | NONE, status: DEVICE_ATTESTED | SERVER_MATCH | NOT_AUTHORISED | MANUAL_ONLY }] }"
+        '403':
+          description: PERMISSION_DENIED (biometric.verify, screening_officer)
+        '502':
+          description: UPSTREAM_CONTRACT_MISMATCH
+
+  /edge/v1/gate/biometric-evidence:
+    post:
+      operationId: recordBiometricEvidence
+      summary: |
+        Record device-signed biometric identity EVIDENCE (ADR-037). The tablet
+        matched the live face against the card portrait ON THE DEVICE; this
+        carries only the signed outcome, integer scores, model and policy. No
+        image, frame, template or embedding is accepted: the body is capped at
+        4 KiB, must be exactly { record, signature }, and the record must be a
+        flat object of scalars (arrays, nested objects, data: values and long
+        strings are refused as IMAGE_PAYLOAD_REFUSED). The signature is Ed25519
+        over canonicalJson(record), verified against the enrolled device of the
+        officer's agency. A record id is stored once; the same record and
+        signature again answers ALREADY_RECORDED. Never retried by the edge.
+        Evidence never admits or refuses anyone by itself.
+      tags: [gate]
+      x-usrp-session: officer
+      x-usrp-permission: biometric.verify
+      x-usrp-outcomes: { 409: [REPLAY_CONFLICT, BIOMETRIC_OFF, MODE_MISMATCH], 422: [INVALID_EVIDENCE] }
+      x-usrp-csrf: true
+      x-usrp-retry-on-g2g: false
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [record, signature]
+              properties:
+                record:
+                  type: object
+                  additionalProperties: false
+                  description: USRP-BIO-EVIDENCE.v1; every key required (nullable ones as null); see ADR-037 §4
+                  required: [schema, recordId, applicationId, ticketId, deviceId, keyId, referenceSource, method, consentState, outcome, notAttemptedReason, livenessScoreBp, matchScoreBp, modelId, modelVersion, thresholdPolicyVersion, mode, capturedAt]
+                  properties:
+                    schema: { type: string, enum: [USRP-BIO-EVIDENCE.v1] }
+                    recordId: { type: string, format: uuid, description: Lowercase, generated on the device }
+                    applicationId: { type: string, format: uuid }
+                    ticketId: { type: string, pattern: '^[A-Za-z0-9._:-]{1,64}$' }
+                    deviceId: { type: string, pattern: '^[A-Za-z0-9._:-]{1,64}$' }
+                    keyId: { type: string, pattern: '^[0-9a-f]{64}$', description: SHA-256 of the device public key SPKI DER }
+                    referenceSource: { type: string, enum: [CARD_PORTRAIT, NIDA_PORTRAIT, NONE], description: NIDA_PORTRAIT is refused (not authorised) }
+                    method: { type: string, enum: [FACE_1_1_ON_DEVICE, NONE] }
+                    consentState: { type: string, enum: [GIVEN, DECLINED, NOT_REQUIRED_BY_POLICY] }
+                    outcome: { type: string, enum: [MATCH, NO_MATCH, INCONCLUSIVE, NOT_ATTEMPTED] }
+                    notAttemptedReason: { type: [string, 'null'], enum: [CANDIDATE_DECLINED, CAPTURE_FAILED, CARD_PORTRAIT_UNREADABLE, DEVICE_UNAVAILABLE, NO_REFERENCE_SOURCE, null] }
+                    livenessScoreBp: { type: [integer, 'null'], minimum: 0, maximum: 10000 }
+                    matchScoreBp: { type: [integer, 'null'], minimum: 0, maximum: 10000 }
+                    modelId: { type: [string, 'null'], maxLength: 64 }
+                    modelVersion: { type: [string, 'null'], maxLength: 32 }
+                    thresholdPolicyVersion: { type: string, maxLength: 32 }
+                    mode: { type: string, enum: [SHADOW, ADVISORY] }
+                    capturedAt: { type: string, format: date-time }
+                signature: { type: string, pattern: '^[A-Za-z0-9+/]{86}==$', description: Ed25519 over the UTF-8 bytes of canonicalJson(record), standard base64 }
+      responses:
+        '201':
+          description: "{ status: RECORDED, recordId, mode, receivedAt, outcome (ADVISORY only; a SHADOW outcome is never shown) }"
+        '200':
+          description: "{ status: ALREADY_RECORDED, recordId, mode } (the same record and signature again)"
+        '400':
+          description: INVALID_REQUEST | FORBIDDEN_FIELD (e.g. agency, which comes from the session)
+        '403':
+          description: "UNTRUSTED_EVIDENCE { reason: UNKNOWN_DEVICE | DEVICE_WRONG_AGENCY | DEVICE_REVOKED | KEY_MISMATCH | SIGNATURE_INVALID } | PERMISSION_DENIED"
+        '409':
+          description: "REPLAY_CONFLICT | BIOMETRIC_OFF | MODE_MISMATCH { configuredMode }"
+        '413':
+          description: Body over 4 KiB
+        '422':
+          description: "INVALID_EVIDENCE { reason: IMAGE_PAYLOAD_REFUSED | SCHEMA_INVALID | THRESHOLD_POLICY_UNKNOWN | THRESHOLD_POLICY_NOT_IN_FORCE | OUTCOME_INCONSISTENT | CONSENT_STATE_NOT_PERMITTED | CAPTURED_AT_OUT_OF_RANGE | REFERENCE_SOURCE_NOT_AUTHORISED | UNKNOWN_TICKET }"
+        '502':
+          description: UPSTREAM_CONTRACT_MISMATCH
+        '503':
+          description: UPSTREAM_UNAVAILABLE
+
+  /edge/v1/gate/manual-identity:
+    post:
+      operationId: confirmManualIdentity
+      summary: |
+        Supervised manual identity after NO_MATCH or INCONCLUSIVE advisory
+        evidence (ADR-037). A field supervisor (not the capturing officer, and
+        not the officer who will admit) confirms with a closed reason code
+        through their own session. The gate admission then records
+        NATIONAL_ID_CARD+SUPERVISOR. Never retried by the edge.
+      tags: [gate]
+      x-usrp-session: officer
+      x-usrp-permission: identity.manual.confirm
+      x-usrp-outcomes: { 409: [NOT_REQUIRED, ALREADY_CONFIRMED, SAME_OFFICER] }
+      x-usrp-csrf: true
+      x-usrp-retry-on-g2g: false
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [recordId, reasonCode]
+              properties:
+                recordId: { type: string, format: uuid }
+                reasonCode: { type: string, enum: [CARD_PHOTO_OUTDATED, APPEARANCE_CHANGED, POOR_CAPTURE_CONDITIONS, CARD_PORTRAIT_DAMAGED, SECONDARY_DOCUMENT_CHECKED, SUPERVISOR_INTERVIEW] }
+      responses:
+        '201':
+          description: "{ status: CONFIRMED, confirmationId, recordId, confirmedAt }"
+        '400':
+          description: INVALID_REQUEST
+        '403':
+          description: PERMISSION_DENIED (identity.manual.confirm, field_supervisor)
+        '404':
+          description: NOT_FOUND (unknown, SHADOW or another agency's record; one answer)
+        '409':
+          description: "NOT_REQUIRED (MATCH / NOT_ATTEMPTED) | ALREADY_CONFIRMED | SAME_OFFICER"
+        '502':
+          description: UPSTREAM_CONTRACT_MISMATCH
+
+  /edge/v1/applications/biometric-evidence:
+    get:
+      operationId: getBiometricEvidence
+      summary: |
+        ADVISORY biometric evidence for one application in the officer's agency
+        (ADR-037), for the officer application detail. SHADOW evidence is
+        invisible to every officer (engine RLS). Scores, outcome, method, model,
+        policy and the supervisor's reason only; never a device id, key id,
+        signature or officer id. `?applicationId=` is a query parameter.
+      tags: [applications]
+      x-usrp-session: officer
+      x-usrp-permission: biometric.evidence.read
+      x-usrp-outcomes: {}
+      x-usrp-csrf: false
+      x-usrp-retry-on-g2g: true
+      parameters:
+        - { name: applicationId, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: "{ applicationId, evidence: [{ recordId, ticketId, referenceSource, method, consentState, outcome, notAttemptedReason, livenessScoreBp, matchScoreBp, modelId, modelVersion, thresholdPolicyVersion, mode: ADVISORY, capturedAt, receivedAt, manualIdentity { reasonCode, confirmedAt } | null }] }"
+        '403':
+          description: PERMISSION_DENIED (biometric.evidence.read)
+        '404':
+          description: NOT_FOUND (nonexistent and another agency's are one answer)
+        '502':
+          description: UPSTREAM_CONTRACT_MISMATCH
 
   /edge/v1/me/applications:
     get:

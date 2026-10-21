@@ -32,6 +32,8 @@ recruitment campaigns in Rwanda.
 | National ID (raw) | **never stored, never logged, never in events or responses** — platform invariant, proven by selfchecks | HMAC hash only (`national_id_hash`), key separate from NIDA lookup hash (two-hash contract) |
 | Phone number | `phone_number_hash` (lookup digest) + `encrypted_phone_number` (deliverable value, ADR-021 — captured at OTP verification from the live NIDA lookup) | HMAC + pgcrypto as above; ciphertext NULLed on erasure; decrypted only by notification-service per delivery, transaction-locally. **Legal basis: necessity** — statutory notification duty in the recruitment process the citizen initiated (owner D13b, 2026-07-27); no separate consent step **[LEGAL: confirm basis]** |
 | Biometric linkage | `biometric_session_id` + result flags — no biometric templates stored | session pointer only |
+| Biometric identity evidence (ADR-037) | `<agency>_ops.biometric_evidence`: device-signed outcome (`MATCH`/`NO_MATCH`/`INCONCLUSIVE`/`NOT_ATTEMPTED`), integer liveness and match scores, model id/version, threshold-policy version, mode, consent state, device and key id, officer id, timestamps. **No image, frame, template or embedding is ever received or stored** (refused at the edge, the service and the column types). Pseudonymous: linked to a person only through the application → identity row. **Legal basis: consent-or-decline (owner decision 2026-10-19); a decline routes to the card check without prejudice. [DPO: confirm basis and article]** | append-only, FORCE RLS; SHADOW rows invisible to every officer; retention = application record class; identity tombstone on erasure leaves the row pseudonymous **[DPO: decide whether scores must also be destroyed on erasure]** |
+| Supervised manual identity (ADR-037) | `<agency>_ops.gate_manual_identity_confirmations`: evidence id, confirming supervisor id, closed reason code, time | append-only, FORCE RLS; no free text |
 
 **Personal data adjacent:** `applicant_sessions` (session token, IP,
 user-agent — deleted on erasure); officer identity in `iam` (employment
@@ -51,6 +53,9 @@ and `audit_log` (opaque UUIDs, statuses, scores only).
 | 6b | Irreversible destruction triggered by a hijacked citizen session | Owner D10: self-service erasure is REQUEST-intake, not execution — the OTP-strength session can demand, only an accountable officer can destroy | Officer judgment; DPO role not yet distinct from officer (ADR-020 follow-on) |
 | 7 | Tampering with processing history | REVOKE + unconditional RAISE triggers on audit/history tables (rls/0002/0007) | Superuser bypass |
 | 8 | G2G credential misuse | **Mocks only today. Real G2G BLOCKED on government authorization** — see prerequisites doc | n/a until authorized |
+| 8b | Biometric data leaving the device or being retained | On-device matching only (B2); the server accepts a ≤4 KiB flat, closed-schema record and refuses any image-shaped value (`IMAGE_PAYLOAD_REFUSED`), proven by `verify-biometric-evidence.ts`; scores-only events | A compromised tablet app could capture locally (device management, B2/S09) |
+| 8c | A face-match error excluding a candidate | Evidence never refuses (ADR-037 §1): `NO_MATCH`/`INCONCLUSIVE` → supervised manual identity by a different officer, who must be an active field supervisor of the agency (checked in the engine, rls/0034 `confirm_manual_identity`); device evidence never sets the identity's biometric verdict; decline → card check without prejudice; no automatic mode exists; SHADOW for the pilot | Supervisor judgement; thresholds are placeholders until B3 |
+| 8d | Forged or replayed evidence | Ed25519 device signature verified against `field_devices` (agency, revocation, key fingerprint), ticket binding, unique record id, server-recomputed outcome | A stolen device key signs until revoked; shared `usrp_app` login (rls/0001); negative evidence arriving after admission is recorded and flagged (`afterAdmission`) but does not undo the admission |
 | 9 | Officer over-collection | Officers see only their agency's rows (RLS EXISTS predicates); no PII decrypt grant to officer roles | — |
 
 ## 4. Necessity & proportionality
@@ -72,5 +77,15 @@ and `audit_log` (opaque UUIDs, statuses, scores only).
 3. Retention periods (see `retention-schedule.md` — all TBD).
 4. Whether this DPIA must be filed with the supervisory authority before
    production processing, and by whom.
-5. DPO appointment. (The citizen-facing erasure request channel is now
+5. DPO appointment.
+6. **Biometric identity evidence (ADR-037, engineering draft 2026-10-19 — DPO sign-off PENDING):**
+   (a) legal basis and article for consent-or-decline biometric processing at
+   the gate; (b) the notice/consent text shown on the tablet (B2; the current
+   frontend copy wrongly mentions fingerprints); (c) whether erasure must also
+   destroy evidence scores (today: identity tombstone, row stays pseudonymous,
+   retention = application record); (d) confirmation that SHADOW-mode
+   collection for accuracy measurement (B3) is within the stated purpose
+   (SHADOW outcomes are kept out of the audit stream; they exist only in the
+   evidence table); (e) the follow-up duty for negative evidence that arrives
+   after an admission (`afterAdmission` in the audit). (The citizen-facing erasure request channel is now
    BUILT — ADR-020 intake queue; the open question is who staffs it.)
