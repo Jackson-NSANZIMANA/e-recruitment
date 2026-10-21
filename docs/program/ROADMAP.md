@@ -1,10 +1,10 @@
 # USRP Engineering and Architecture Roadmap
 
 **Status:** Adopted · 2026-10-21 · **Owner:** platform owner
-**Verified against:** backend `main` ded7a6f (S04 merged, `v0.1.0-rc1` tagged at 4546cee), frontend `main` (S02 and S03 merged)
+**Verified against:** backend `main` 17306af (B1 merged; `v0.1.0-rc1` tagged at 4546cee), frontend `main` (S02 and S03 merged) · **Ledger updated:** 2026-10-21
 **Supersedes for sequencing:** `delivery-programme.md` §5 (phases), national baseline §13 (waves 0–6), frontend revamp plan "Waves 3–6". Those documents keep their detail (session cards, feature catalogue, gate definitions); **this file decides order and priority**.
 
-This is the single roadmap for USRP. Every session, ADR and PR is placed against it. It is meant to be **stable**: milestones, principles and gates change only by the amendment rule in §9. Progress is not written here. It lives on the [status board](README.md#status-board) and in the CI evidence bundle.
+This is the single roadmap for USRP. Every session, ADR and PR is placed against it. It is meant to be **stable**: milestones, principles and gates change only by the amendment rule in §9. Day-to-day progress is not written here: it lives on the [status board](README.md#status-board) and in the CI evidence bundle. The only progress recorded here is the **milestone ledger** (§3.1), an append-only record of proofs that have passed.
 
 ---
 
@@ -41,6 +41,23 @@ North star: one authoritative application lifecycle; one versioned policy per fi
 | **M5 National scale** | Expand only from measured pilot data | S15 durable offline / native client, B2 + B3 biometrics to `ADVISORY`, full S13 (dashboards, audit explorer), governed national aggregates, USSD, applicant-requested rescheduling, read-only AI assistance | Each expansion stage has rollback and stop authority; offline sync flips only with its proof (G7) | G7 (offline) |
 
 Milestones overlap in time: a later milestone's packages may start once their dependencies merge. But **a milestone is not reported as reached until all of its proofs pass**, and M4 cannot open while M2 or M3 proofs are missing.
+
+### 3.1 Milestone ledger (append-only)
+
+A row is added when a proof passes in CI on `main`, citing the PRs. Rows are never edited or removed; a regression adds a new row.
+
+| Date | Milestone | Proven | Evidence |
+|---|---|---|---|
+| 2026-10-18 | M0 | Both mains protected (required checks, strict, admins included); CI evidence bundle on every run; secret rotation closed | BE #34 #35 #36 · FE #27 #28 #29 |
+| 2026-10-18 | M0 | Rehearsal: a synthetic cycle staged through the real control plane; persona A admitted at the gate, persona B refused on age | BE #35 (ADR-035) · FE live journey |
+| 2026-10-19 | M0 | Officer lifecycle: create/activate, posts, disable/enable, session revocation (rls/0033) | BE #39 (ADR-036) |
+| 2026-10-21 | M0 | Release engineering: digest-pinned signed images, `GET /version`, unit-test gate required, release bundle; SPA serving images | BE #38 · FE #32 #34 · tag `v0.1.0-rc1` |
+| 2026-10-21 | M0 | Frontend foundations: three apps (field-station added), readiness ladder enforced, contract drift v2 | FE #33 (ADR-FE-007…013) |
+| 2026-10-21 | M0 | Read models: agency campaign list/detail with occupancy, paginated application search with totals, minimal venue roster, DPO queue and decision on the edge; permission and outcome metadata on every officer operation, enforced | BE #41 (ADR-039, rls/0035) |
+| 2026-10-21 | **M0 closed** | All M0 packages merged with CI green on `main` | — |
+| 2026-10-21 | M1 (part) | Biometric identity evidence in `SHADOW`: device-signed, PII-free, append-only; never a verdict; supervised manual identity after `NO_MATCH`; no image accepted | BE #40 (ADR-037, rls/0034) |
+
+**Where M1 stands:** B1 is done. S06 and the minimal S05 remain, and so does the closing proof: the rehearsal driven entirely through the UI.
 
 ## 4. Changes from the earlier plans, and why
 
@@ -94,20 +111,51 @@ Ordered by lead time. Engineering cannot shorten these.
 | Trilingual incident and outage messages | M4 | S18 |
 | Rehearsal scenario per drill, growing with each milestone | M1–M4 | each session adds its scenario |
 
-## 8. Lanes and next steps
+## 8. How the work ahead is run
 
-At most **two concurrent agent sessions** (usage limits), plus an infra-only lane when one is free. Two backend sessions do not run against the shared append-only files at once without staggered merges (README §Shared files).
+### 8.1 Lanes
 
-Immediate order after B1 merges:
+- **Two concurrent agent sessions at most** (usage limits), plus an infra-only lane when one is free.
+- Two backend sessions do not run against the shared append-only files at once without staggered merges (README §Shared files). The later one rebases onto main and re-proves itself before merging (§8.4).
+- **Models:** Opus for the biometric track (B1–B3) and security-heavy work (S16). Sonnet for the other sessions.
 
-1. **S06** (frontend) ‖ **S09** (backend; after B1, because both touch the device registry).
-2. **S08** ‖ **S14**, once the pilot agency and device are decided (§6 #2–3).
-3. **S05** minimal Studio and **S11a** in whichever lane frees first.
-4. Then the M3 packages: S07 → S11b; S12 when the contracts arrive; S10a → S10b; minimal S13.
+### 8.2 Session plan per milestone
+
+| Milestone | Session | Kit | Lane | Needs from the owner first |
+|---|---|---|---|---|
+| M1 | **S06** officer workspace + staff admin (two PRs; carries the four-eyes activation-code fix) | ready | FE | — |
+| M1 | **S05** minimal Campaign Studio (draft → policy → sessions → publish; policy-hash parity with the rehearsal) | ready | FE | — |
+| M2 | **S09** venue roster + device fleet (rls/0036) | ready | BE | who may enrol and revoke devices |
+| M2 | **S08** Field Station, online capture | ready | FE | pilot agency, district, tablet model |
+| M2 | **S14** operator relocation and superseding invitations | **to write** | BE+FE | relocation authority and fairness rules |
+| M2 | **P1 pilot continuity kit** (new package): printed roster and run sheet from `getVenueRoster`, paper score sheets with two-person re-entry and reconciliation, assisted desk with pass printing | **to write** | FE + procedure | paper procedure; assisted-desk operation |
+| M3 | **S11a** observability (any free lane, from now) | ready | infra | — |
+| M3 | **S07** provider-neutral staging → **S11b** backup + restore | ready | infra | production hosting only |
+| M3 | **S12** SMS + G2G production adapters | **to write** | BE | provider contract; G2G authorisation |
+| M3 | **S10a → S10b** citizen timeline and screens | ready | BE → FE | — |
+| M3 | **S13 (minimal)** control room: exam-day live and field-health panels | **to write** | BE+FE | — |
+| M4 | **S16** security assurance · **S17** load + failure drills · **S18** pilot pack | **to write** | mixed | SLOs, RPO/RTO; DPO sign-off; role ratification |
+| M5 | **S15** durable offline · **B2 → B3** biometrics · full S13 | S15 to write; B2–B3 ready | mixed | model licence; evaluation dataset |
+
+A kit marked **to write** is written, and its ADR and migration numbers are reserved in README.md, before the session starts. Kits are written one milestone ahead, never further.
+
+### 8.3 Immediate order
+
+1. **S06 ‖ S09** — start now.
+2. **S08 ‖ S14**, once the pilot agency, district and tablet are decided (§6 #2–3). The S14 and P1 kits are written while S06 and S09 run.
+3. **S05** and **S11a** in whichever lane frees first.
+4. M3 packages: S07 → S11b; S12 when the contracts arrive; S10a → S10b; minimal S13.
+
+### 8.4 Session practice (learned in M0)
+
+- **Commit and push early.** A session can stop at any moment (usage limits, restarts). Work that is committed but not pushed is easy to lose, and so is a rebase that was never pushed.
+- **Re-prove after every rebase.** B1 and S04 each passed CI alone. Combined, they conflicted in ways git didn't flag: missing contract metadata, and a newly required config field. The later session reruns the contract, schema-drift and its own proofs on the rebased head.
+- **Proofs on throwaway databases set both connections.** Set both `DATABASE_URL` and `ADMIN_DATABASE_URL`; otherwise the admin connection defaults to the shared `usrp_db`.
+- **A resumed session starts from the pushed branch,** never from a memory of it. It reads `git log origin/main..HEAD` against the kit's Done list.
 
 ## 9. Amending this roadmap
 
 - A change to a milestone's meaning, closing proof, gates or the principles needs a PR that edits this file and states why, approved by the platform owner.
 - Moving a work package between milestones is allowed in the same way, with the reason in §4.
-- Session progress, PR links and dates are **not** recorded here: they belong on the status board and in the CI evidence bundle, so this file does not go stale.
+- Session progress belongs on the status board and in the CI evidence bundle, so this file does not go stale. The exceptions are the §3.1 ledger, which is append-only, and the kit column of §8.2, which is updated when a kit is written.
 - If another document disagrees with this file on order or priority, this file wins; fix the other document in the same PR that notices it.
