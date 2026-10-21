@@ -247,6 +247,12 @@ apply_sql "${RLS_DIR}/0035_operational_reads.sql" "rls/0035 (operational read in
 #     identity methods and MANUAL_IDENTITY_REQUIRED outcome.
 apply_sql "${RLS_DIR}/0034_biometric_evidence.sql" "rls/0034 (biometric identity evidence)"
 
+# 23n. Device fleet and venue operations (S09): last-seen stamp (touch_field_device),
+#     final revocation + immutable key, device -> venue-day assignments, and the
+#     per-venue/day live-count projection maintained in the same transaction as
+#     each admission, score, conflict and roster change.
+apply_sql "${RLS_DIR}/0036_device_fleet.sql" "rls/0036 (device fleet and venue live counts)"
+
 printf '\n'
 
 ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts + applicant auth + erasure requests + stored contact + edge sessions + event outbox + slot reservations + submission integrity + walk-in outbox grant + shared rate-limit buckets + required extensions + campaign control plane + functions-only command boundary + onboarding lockout + application policy binding + document venue verification + exam invitation + gate admissions + officer lifecycle + biometric identity evidence in place"
