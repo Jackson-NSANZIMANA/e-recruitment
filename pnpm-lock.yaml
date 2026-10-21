@@ -311,6 +311,9 @@ importers:
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.2
+      '@usrp/application-service':
+        specifier: workspace:*
+        version: link:../application-service
       '@usrp/identity-service':
         specifier: workspace:*
         version: link:../identity-service

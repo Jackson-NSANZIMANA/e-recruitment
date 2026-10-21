@@ -34,6 +34,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@usrp/application-service": "workspace:*",
     "@usrp/identity-service": "workspace:*",
     "postgres": "^3.4.5",
     "tsx": "^4.21.0",
