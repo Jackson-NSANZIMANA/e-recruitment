@@ -38,6 +38,7 @@ import type {
   OfficerChangeResult,
   Refused,
   ReissueActivationResult,
+  ReleaseActivationResult,
 } from '../ports/officer-admin-repository.js';
 
 /** The verified caller, as the HTTP layer hands it over. */
@@ -84,6 +85,16 @@ export class OfficerAdminService {
     if (!isUuid(officerId)) return invalidTarget;
     if (isSelfModification(principal.subjectId, officerId)) return refused('SELF_MODIFICATION');
     return this.#repository.reissueActivation(this.#actor(principal), officerId);
+  }
+
+  /**
+   * Four-eyes: the code is returned to a DIFFERENT administrator only. The
+   * database refuses the creating/reissuing administrator (SAME_ADMIN) and is
+   * authoritative; there is nothing to pre-check here beyond the id shape.
+   */
+  async releaseActivation(principal: AdminPrincipal, officerId: unknown): Promise<ReleaseActivationResult | InvalidRequest> {
+    if (!isUuid(officerId)) return invalidTarget;
+    return this.#repository.releaseActivation(this.#actor(principal), officerId);
   }
 
   async assignPosts(

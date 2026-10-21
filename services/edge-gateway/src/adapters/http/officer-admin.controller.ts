@@ -4,6 +4,7 @@
 //   GET  /edge/v1/officers                        officer.read            listOfficers
 //   POST /edge/v1/officers                        officer.create          createOfficer
 //   POST /edge/v1/officers/activation/reissue     officer.create          reissueOfficerActivation
+//   POST /edge/v1/officers/activation/release     officer.create          releaseOfficerActivation
 //   POST /edge/v1/officers/posts                  officer.posts.assign    assignOfficerPosts
 //   POST /edge/v1/officers/disable                officer.disable         disableOfficer
 //   POST /edge/v1/officers/enable                 officer.disable         enableOfficer
@@ -16,9 +17,13 @@
 // actor). Bodies are exact-key; no write is retried by the edge.
 //
 // EVERY ANSWER IS REBUILT FROM AN ALLOWLIST. An officer row crosses with its
-// id, handle, posts, status and timestamps only — never a credential, a code
-// hash, or anything an upstream bug might add. The one-time activation code
-// crosses exactly once, on create/reissue, and is never logged here.
+// id, handle, posts, status, activation state and timestamps only — never a
+// credential, a code hash, or anything an upstream bug might add.
+//
+// FOUR-EYES (ADR-036 addendum): create and reissue NEVER carry an activation
+// code, and their projection drops one even if an upstream bug sent it. The
+// one-time code crosses exactly once, on releaseOfficerActivation, to a
+// DIFFERENT administrator of the same agency, and is never logged here.
 // ══════════════════════════════════════════════════════════════════
 
 import { HttpError, type HttpResult, type RouteHandler } from '@usrp/shared-http';
@@ -33,6 +38,7 @@ const CODE_RE = /^[A-HJ-NP-Z2-9]{5}(?:-[A-HJ-NP-Z2-9]{5}){3}$/;
 const TOKEN_RE = /^[A-Z][A-Z_]{1,63}$/;
 const POST_RE = /^[a-z][a-z_]{1,63}$/;
 const STATUSES = new Set(['active', 'disabled', 'pending']);
+const ACTIVATION_STATES = new Set(['PENDING_RELEASE', 'RELEASED']);
 const CHANGE_OUTCOMES = new Set(['ASSIGNED', 'DISABLED', 'ENABLED', 'REVOKED', 'UNCHANGED']);
 /** The upstream refusals that may cross, each with its own HTTP status. */
 const REFUSALS: Readonly<Record<string, number>> = {
@@ -46,6 +52,9 @@ const REFUSALS: Readonly<Record<string, number>> = {
   HANDLE_TAKEN: 409,
   LAST_ACTIVE_ADMIN: 409,
   NOT_PENDING_ACTIVATION: 409,
+  SAME_ADMIN: 403,
+  ALREADY_RELEASED: 409,
+  ACTIVATION_EXPIRED: 409,
 };
 const MISMATCH: HttpResult = { status: 502, body: { error: 'UPSTREAM_CONTRACT_MISMATCH' } };
 const MAX_PASSWORD = 256;
@@ -69,7 +78,9 @@ export function projectOfficer(raw: unknown): Record<string, unknown> | null {
     typeof raw['status'] !== 'string' || !STATUSES.has(raw['status']) ||
     typeof raw['createdAt'] !== 'string' || Number.isNaN(Date.parse(raw['createdAt'])) ||
     !instantOrNull(raw['activatedAt']) || !instantOrNull(raw['lastLoginAt']) ||
-    !instantOrNull(raw['activationExpiresAt'])
+    !instantOrNull(raw['activationExpiresAt']) ||
+    !(raw['activationState'] === null || (typeof raw['activationState'] === 'string' && ACTIVATION_STATES.has(raw['activationState']))) ||
+    typeof raw['releasableByYou'] !== 'boolean'
   ) {
     return null;
   }
@@ -82,6 +93,8 @@ export function projectOfficer(raw: unknown): Record<string, unknown> | null {
     activatedAt: raw['activatedAt'],
     lastLoginAt: raw['lastLoginAt'],
     activationExpiresAt: raw['activationExpiresAt'],
+    activationState: raw['activationState'],
+    releasableByYou: raw['releasableByYou'],
   };
 }
 
@@ -103,19 +116,34 @@ function refusal(status: number, raw: unknown): HttpResult | null {
   return expected === status ? { status, body: { error: raw['error'] } } : null;
 }
 
-/** create (201) / reissue (200): the officer plus the one-time code, nothing else. */
+/**
+ * create (201) / reissue (200): the officer and the outcome, NOTHING ELSE. An
+ * `activation` object from upstream is dropped, never relayed: the creating or
+ * reissuing administrator must never hold the code (four-eyes).
+ */
 export function projectCredentialIssue(status: number, raw: unknown, successStatus: 200 | 201): HttpResult | null {
   if (status === successStatus) {
+    if (!isRecord(raw)) return null;
+    const officer = projectOfficer(raw['officer']);
+    const outcome = successStatus === 201 ? 'CREATED' : 'REISSUED';
+    if (officer === null || raw['outcome'] !== outcome) return null;
+    return { status: successStatus, body: { outcome, officer } };
+  }
+  return refusal(status, raw);
+}
+
+/** release (200): the officer plus the one-time code, to a different administrator, once. */
+export function projectActivationRelease(status: number, raw: unknown): HttpResult | null {
+  if (status === 200) {
     if (!isRecord(raw) || !isRecord(raw['activation'])) return null;
     const officer = projectOfficer(raw['officer']);
     const code = raw['activation']['code'];
     const expiresAt = raw['activation']['expiresAt'];
-    const outcome = successStatus === 201 ? 'CREATED' : 'REISSUED';
-    if (officer === null || raw['outcome'] !== outcome || typeof code !== 'string' || !CODE_RE.test(code) ||
+    if (officer === null || raw['outcome'] !== 'RELEASED' || typeof code !== 'string' || !CODE_RE.test(code) ||
         typeof expiresAt !== 'string' || Number.isNaN(Date.parse(expiresAt))) {
       return null;
     }
-    return { status: successStatus, body: { outcome, officer, activation: { code, expiresAt } } };
+    return { status: 200, body: { outcome: 'RELEASED', officer, activation: { code, expiresAt } } };
   }
   return refusal(status, raw);
 }
@@ -244,6 +272,24 @@ export function reissueOfficerActivationHandler(deps: EdgeDeps): RouteHandler {
     });
     return common(upstream.status) ??
       projectCredentialIssue(upstream.status, upstream.body, 200) ??
+      (upstream.status === 403 ? permissionDenied(upstream.body) : null) ??
+      MISMATCH;
+  });
+}
+
+export function releaseOfficerActivationHandler(deps: EdgeDeps): RouteHandler {
+  return withOfficerSession(deps, 'releaseOfficerActivation', async (ctx, session) => {
+    const body = await readJsonBody(ctx);
+    exactKeys(body, ['targetOfficerId']);
+    const targetOfficerId = requireUuid(body['targetOfficerId'], 'targetOfficerId');
+    const upstream = await deps.upstream.call({
+      operation: UPSTREAM.officerReleaseActivation,
+      correlationId: ctx.correlationId,
+      credential: session.upstreamCredential,
+      body: { targetOfficerId },
+    });
+    return common(upstream.status) ??
+      projectActivationRelease(upstream.status, upstream.body) ??
       (upstream.status === 403 ? permissionDenied(upstream.body) : null) ??
       MISMATCH;
   });

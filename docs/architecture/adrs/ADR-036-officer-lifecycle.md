@@ -155,7 +155,7 @@ remains for bootstrap only.
 |---|---|
 | May an `agency_admin` grant `agency_admin`? | **No.** Only the first-admin provisioner path creates an administrator. |
 | May an `agency_admin` grant `decision_authority`? | **Yes, audited** (the role table stays provisional until ratified). |
-| Initial credential delivery | **One-time activation code**, shown once, stored hashed, 24 h expiry; the officer sets the password through `activateOfficer`. No server-generated plaintext password anywhere. |
+| Initial credential delivery | **One-time activation code**, shown once, stored hashed, 24 h expiry; the officer sets the password through `activateOfficer`. No server-generated plaintext password anywhere. **Amended by Addendum A:** the code is released once to a *different* administrator, never to the creator. |
 
 ## Consequences
 - ADR-031 can be operated; S06 builds the staff screens on these operations.
@@ -220,3 +220,74 @@ own agency's rows through FORCE'd RLS and cannot write the table. Medical
 recorded counts candidates with a score row carrying a fitness status; an
 application's own medical review is not counted. A venue with no event yet
 answers zeros with `asOf: null`.
+
+## Addendum A (2026-10-21, S06) — four-eyes release of the activation code
+**Status: accepted (owner decision, settled). Takes no new ADR number.**
+
+### Problem
+As first shipped, `createOfficer` and `reissueOfficerActivation` returned the one-time
+activation code to the creating `agency_admin`. One administrator could therefore create
+a `decision_authority` officer, redeem the code themselves and act as the second person
+in a four-eyes decision (ADR-031). The S01 hand-off flagged this as a design residual.
+
+### Decision
+1. **Create and reissue never carry a code**, or anything it can be derived from. They open
+   a *pending activation* and answer `{ outcome, officer }`; the officer row gains
+   `activationState` (`PENDING_RELEASE | RELEASED | null`) and `releasableByYou`.
+   The same holds at the iam-service route and at the edge projection (an upstream
+   `activation` object is dropped, never relayed; allowlist test).
+2. **The code does not exist until release.** A new operation `releaseOfficerActivation`
+   (`POST /edge/v1/officers/activation/release`, `{ targetOfficerId }`, permission
+   `officer.create`, CSRF, never retried) lets a **different** active `agency_admin` of the
+   **same agency** perform a one-time release. The code is generated inside the
+   database function at that moment, returned once, and stored only as SHA-256. The 24 h
+   expiry runs from release; before release, the 24 h is the release window.
+3. **Refusals** (ADR-039 style: a typed `error` code per HTTP status, no body detail):
+
+   | Status | `error` | When |
+   |---|---|---|
+   | 403 | `SAME_ADMIN` | the actor created the account **or** last created/reissued this activation |
+   | 404 | `NOT_FOUND` | absent, or in another agency (one answer, no cross-agency oracle) |
+   | 409 | `ALREADY_RELEASED` | the code was already released: reissue instead |
+   | 409 | `ACTIVATION_EXPIRED` | the release window passed: reissue instead |
+   | 409 | `NOT_PENDING_ACTIVATION` | already activated, disabled, or no open activation |
+   | 403 | `PERMISSION_DENIED` | not an active agency administrator |
+
+   `SAME_ADMIN` is checked before `ALREADY_RELEASED`, so the creator never learns more than
+   "not you". Both the creator and the latest reissuer are barred: the releaser must differ
+   from every administrator who touched that activation, so one person cannot
+   complete both halves.
+4. **Reissue** invalidates any released but unredeemed code (the hash is cleared) and
+   reopens the release window. `activate` additionally requires `released_at IS NOT NULL`.
+5. **Audit**: `OFFICER_ACTIVATION_RELEASED` (actor = the releasing administrator; metadata:
+   the issuing administrator's id, `grantsDecisionAuthority`). Create and reissue audits no
+   longer claim a delivered code. PII-free as before.
+6. **Schema** (rls/0033 edited in place, replay-safe; no new file or Drizzle migration;
+   .ts mirror and 0004 snapshot updated): `officer_activation_codes` gains `created_by`,
+   `released_at`, `released_by`; `code_hash` becomes nullable; a CHECK ties
+   `code_hash IS NULL` to `released_at IS NULL` until redemption. Codes issued under the
+   first S01 contract are voided on replay (hash cleared): they were visible to their
+   creator and need a release by a second administrator. The private function
+   `officer_private_issue_code` is dropped.
+7. **UI contract (S06 frontend)**: the creating administrator sees "pending release by a
+   second administrator"; a second administrator gets a release screen with copy and print;
+   the creator never sees the code.
+8. **Rehearsal**: seeds `<agency>.admin2` (dev-only local insert; the first-admin function
+   provisions only the first administrator). The journey is: `rdf.admin` creates,
+   `rdf.admin2` releases, the officer activates, `rdf.admin` assigns posts.
+
+### Proof
+`services/iam-service/selfcheck/verify-officer-lifecycle.ts` (live Postgres, iam-service,
+edge): create answers carry no code at the edge **and** at iam-service; the creator is
+refused (`SAME_ADMIN`); an administrator of another agency is refused (404, byte-identical
+to a nonexistent officer); a reviewer is refused; a second administrator releases once;
+a replay is refused (`ALREADY_RELEASED`); an unreleased account cannot be activated; the
+released code activates and is single-use; a reissue voids a released code; after
+creator-then-reissuer neither may release; the code appears in exactly one response and
+nowhere in the database or outbox in plaintext.
+`services/edge-gateway/test/officer-admin-projection.test.ts`: the allowlist.
+
+### Residual
+Two administrators can still collude (that is the point of four-eyes, not a defect). A
+single agency with one active administrator cannot onboard anyone until a second is
+provisioned through the operator path; the pilot runbook must say so.

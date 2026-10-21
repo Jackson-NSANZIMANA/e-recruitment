@@ -44,10 +44,17 @@ export const OFFICER_REFUSALS = [
   'SELF_MODIFICATION',
   'LAST_ACTIVE_ADMIN',
   'NOT_PENDING_ACTIVATION',
+  // Four-eyes release (ADR-036 addendum).
+  'SAME_ADMIN',
+  'ALREADY_RELEASED',
+  'ACTIVATION_EXPIRED',
 ] as const;
 export type OfficerRefusal = (typeof OFFICER_REFUSALS)[number];
 
 export type OfficerStatus = 'active' | 'disabled' | 'pending';
+
+/** A pending activation waits for a second administrator, then for the officer. */
+export type ActivationState = 'PENDING_RELEASE' | 'RELEASED';
 
 /** The listing row. Never a credential, a code or a code hash. */
 export interface OfficerView {
@@ -59,9 +66,12 @@ export interface OfficerView {
   readonly activatedAt: string | null;
   readonly lastLoginAt: string | null;
   readonly activationExpiresAt: string | null;
+  readonly activationState: ActivationState | null;
+  /** True only in the list: the viewing administrator may release this officer's code. */
+  readonly releasableByYou: boolean;
 }
 
-/** Shown to the administrator exactly once. */
+/** Shown exactly once, to the RELEASING (second) administrator; never at create or reissue. */
 export interface ActivationCode {
   readonly code: string;
   readonly expiresAt: string;

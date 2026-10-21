@@ -17,9 +17,15 @@ What `pnpm rehearse` does, in order, per agency, through the real interfaces onl
    through the first-admin function; an agency that already has a different
    administrator is never given a second one (set `REHEARSAL_<AGENCY>_ADMIN_HANDLE`
    and `REHEARSAL_<AGENCY>_ADMIN_PASSWORD` instead);
-2. sign in at the edge as that administrator;
+2. seed and sign in a **second** administrator (`<agency>.admin2`, same dev
+   password; `REHEARSAL_<AGENCY>_ADMIN2_HANDLE` / `_PASSWORD` to override): the
+   four-eyes release (ADR-036 addendum) needs a different administrator from the
+   one who creates officers. Dev-only direct insert, local database only;
+   then sign in at the edge as both;
 3. **staff** the day (ADR-036): create each scenario officer (`reh.<agency>.…`)
-   through `createOfficer`, redeem its one-time code through `activateOfficer`
+   through `createOfficer` (no code is returned), have the **second**
+   administrator release the one-time code through `releaseOfficerActivation`,
+   redeem it through `activateOfficer`
    with the dev password `RehearsalStaff#2026`, and align its posts through
    `assignOfficerPosts` (recovering an earlier run with `enableOfficer` /
    `reissueOfficerActivation`); then fail unless `listOfficers` shows each one

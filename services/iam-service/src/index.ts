@@ -94,6 +94,7 @@ export {
   OFFICER_ENABLE_PATH,
   OFFICER_POSTS_PATH,
   OFFICER_REISSUE_ACTIVATION_PATH,
+  OFFICER_RELEASE_ACTIVATION_PATH,
   OFFICER_REVOKE_SESSIONS_PATH,
 } from './adapters/http/officer-admin.controller.js';
 export { OfficerAdminService, type AdminPrincipal } from './application/officer-admin.service.js';

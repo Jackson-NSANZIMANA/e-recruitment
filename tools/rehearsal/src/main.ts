@@ -24,7 +24,7 @@ import { assertGasaboRoster, RosterAssertion } from './roster.js';
 import { REHEARSAL_STAFF_PASSWORD, provisionStaff } from './staff.js';
 import { recordShadowEvidence } from './biometric.js';
 import { FleetAssertion, rehearseFleet } from './fleet.js';
-import { ensureAgencyAdmin } from './provision.js';
+import { ensureAgencyAdmin, ensureSecondAgencyAdmin } from './provision.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = resolve(HERE, '..');
@@ -49,6 +49,13 @@ function adminFor(agency: Agency): AdminCredential {
   return {
     loginHandle: env(`REHEARSAL_${agency}_ADMIN_HANDLE`) ?? `${agency.toLowerCase()}.admin`,
     password: env(`REHEARSAL_${agency}_ADMIN_PASSWORD`) ?? DEFAULT_ADMIN_PASSWORD,
+  };
+}
+
+function secondAdminFor(agency: Agency): AdminCredential {
+  return {
+    loginHandle: env(`REHEARSAL_${agency}_ADMIN2_HANDLE`) ?? `${agency.toLowerCase()}.admin2`,
+    password: env(`REHEARSAL_${agency}_ADMIN2_PASSWORD`) ?? DEFAULT_ADMIN_PASSWORD,
   };
 }
 
@@ -152,7 +159,11 @@ async function biometricShadow(
   const edge = new EdgeSession(where.edgeBaseUrl, where.origin);
   if (!(await edge.signIn(admin.loginHandle, admin.password))) throw new RehearsalRefused(`edge refused ${admin.loginHandle}`);
   const staff = campaign.staff ?? [];
-  const staffed = await provisionStaff(edge, () => new EdgeSession(where.edgeBaseUrl, where.origin), staff);
+  const second = secondAdminFor(agency);
+  await ensureSecondAgencyAdmin(where.databaseUrl, { agency, loginHandle: second.loginHandle, password: second.password });
+  const releaser = new EdgeSession(where.edgeBaseUrl, where.origin);
+  if (!(await releaser.signIn(second.loginHandle, second.password))) throw new RehearsalRefused(`edge refused ${second.loginHandle}`);
+  const staffed = await provisionStaff(edge, releaser, () => new EdgeSession(where.edgeBaseUrl, where.origin), staff);
   const gate = staff.find((m) => m.posts.includes('screening_officer'));
   const reader = staff.find((m) => m.posts.includes('field_supervisor') || m.posts.includes('reviewer'));
   if (staffed.some((m) => !m.ok) || gate === undefined || reader === undefined) {
@@ -212,7 +223,7 @@ async function main(argv: readonly string[]): Promise<number> {
   const scenarioId = argv.find((arg) => !arg.startsWith('--')) ?? 'national-pilot-day';
   const scenario = loadScenario(scenarioId);
 
-  const report = await conduct(scenario, { edgeBaseUrl, origin, databaseUrl, now: new Date(), adminFor });
+  const report = await conduct(scenario, { edgeBaseUrl, origin, databaseUrl, now: new Date(), adminFor, secondAdminFor });
   const manifestDir = join(REPO_ROOT, '.rehearsal');
   mkdirSync(manifestDir, { recursive: true });
   writeFileSync(join(manifestDir, 'last-run.json'), `${JSON.stringify({ ...report, personas: scenario.personas }, null, 2)}\n`);
