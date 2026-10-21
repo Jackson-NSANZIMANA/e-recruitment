@@ -125,6 +125,10 @@ class PgUnitOfWork implements EvidenceUnitOfWork {
     return toResult(rows[0]?.result);
   }
 
+  async touchDevice(deviceId: string): Promise<void> {
+    await this.tx`SELECT public_core.touch_field_device(${deviceId}, 'BIOMETRIC')`;
+  }
+
   async stage(events: readonly USRPEvent[]): Promise<void> {
     await stageOutboxEvents(this.tx, events, BIOMETRIC_OUTBOX_PRODUCER);
   }

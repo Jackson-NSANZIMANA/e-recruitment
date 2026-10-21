@@ -10,10 +10,13 @@
 // ══════════════════════════════════════════════════════════════════
 
 import type { EventBus } from '@usrp/shared-events';
-import { PgDeviceRegistry } from './adapters/device-registry.pg.js';
+import { PgOutboxDispatcher } from '@usrp/shared-database';
+import type { USRPEvent } from '@usrp/shared-types';
+import { FIELD_SYNC_OUTBOX_PRODUCER, PgDeviceRegistry } from './adapters/device-registry.pg.js';
 import { PgFieldScoreStore } from './adapters/field-score-store.pg.js';
 import { EnrollDeviceService } from './application/enroll-device.service.js';
 import { SyncFieldScoresService } from './application/sync-field-scores.service.js';
+import { ManageFleetService } from './application/manage-fleet.service.js';
 import { ResolveConflictService } from './application/resolve-conflict.service.js';
 import type { FieldSyncServiceConfig } from './config.js';
 
@@ -21,6 +24,8 @@ export interface FieldSyncService {
   readonly enrollDevice: EnrollDeviceService;
   readonly syncFieldScores: SyncFieldScoresService;
   readonly resolveConflict: ResolveConflictService;
+  /** S09: list, assign and revoke field devices. */
+  readonly manageFleet: ManageFleetService;
 }
 
 export function createFieldSyncService(
@@ -33,6 +38,10 @@ export function createFieldSyncService(
     enrollDevice: new EnrollDeviceService({ registry, eventBus }),
     syncFieldScores: new SyncFieldScoresService({ registry, store, eventBus }),
     resolveConflict: new ResolveConflictService({ store, eventBus }),
+    manageFleet: new ManageFleetService({
+      registry,
+      dispatcher: new PgOutboxDispatcher<USRPEvent>(eventBus, FIELD_SYNC_OUTBOX_PRODUCER),
+    }),
   };
 }
 
@@ -64,7 +73,14 @@ export {
   resolveConflictRoute,
 } from './adapters/http/resolve-conflict.controller.js';
 
-export { PgDeviceRegistry } from './adapters/device-registry.pg.js';
+export { ManageFleetService } from './application/manage-fleet.service.js';
+export {
+  ASSIGN_DEVICE_PATH,
+  LIST_FLEET_PATH,
+  REVOKE_DEVICE_PATH,
+  manageFleetRoutes,
+} from './adapters/http/manage-fleet.controller.js';
+export { FIELD_SYNC_OUTBOX_PRODUCER, PgDeviceRegistry } from './adapters/device-registry.pg.js';
 export { PgFieldScoreStore } from './adapters/field-score-store.pg.js';
 
 export { compareClocks, mergeVectorClock } from './domain/vector-clock.js';

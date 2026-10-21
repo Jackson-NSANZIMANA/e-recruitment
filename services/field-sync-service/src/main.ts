@@ -11,7 +11,9 @@
 // load config → bus → assemble → serve → shut down cleanly.
 // ══════════════════════════════════════════════════════════════════
 
-import { sql } from '@usrp/shared-database';
+import { PgOutboxRelay, sql } from '@usrp/shared-database';
+import { hasValidEnvelope } from '@usrp/shared-events';
+import type { USRPEvent } from '@usrp/shared-types';
 import { InMemoryEventBus, KafkaEventBus, type EventBus } from '@usrp/shared-events';
 import {
   assertProductionSecrets,
@@ -21,7 +23,8 @@ import {
 } from '@usrp/shared-config';
 import { makeAuthVerifier } from '@usrp/shared-auth';
 import { startHttpServer } from '@usrp/shared-http';
-import { createFieldSyncService } from './index.js';
+import { FIELD_SYNC_OUTBOX_PRODUCER, createFieldSyncService } from './index.js';
+import { manageFleetRoutes } from './adapters/http/manage-fleet.controller.js';
 import { loadFieldSyncConfig } from './config.js';
 import { enrollDeviceRoute } from './adapters/http/enroll-device.controller.js';
 import { syncScoresRoute } from './adapters/http/sync-scores.controller.js';
@@ -70,6 +73,13 @@ async function main(): Promise<void> {
   await bus.connect();
 
   const service = createFieldSyncService(config, bus);
+  // Fleet audits (revoke/assign) are staged in the same transaction as the state
+  // change; this relay is their delivery guarantee.
+  const outboxRelay = new PgOutboxRelay<USRPEvent>(bus, {
+    producer: FIELD_SYNC_OUTBOX_PRODUCER,
+    isValid: (payload: unknown): boolean => hasValidEnvelope(payload),
+  });
+  outboxRelay.start();
   const verify = makeAuthVerifier({
     publicKeyPem: config.auth.authPublicKeyPem,
     issuer: config.auth.jwtIssuer,
@@ -83,11 +93,13 @@ async function main(): Promise<void> {
       enrollDeviceRoute(service.enrollDevice, verify),
       syncScoresRoute(service.syncFieldScores, verify),
       resolveConflictRoute(service.resolveConflict, verify),
+      ...manageFleetRoutes(service.manageFleet, verify),
     ],
     // Ready only when the database — the system-of-record — is reachable.
     readiness: checkDatabaseReadiness,
     onShutdown: async (): Promise<void> => {
       console.log(JSON.stringify({ msg: 'service_stopping', service: config.runtime.serviceName }));
+      await outboxRelay.stop();
       await bus.disconnect();
       await sql.end({ timeout: 5 });
       console.log(JSON.stringify({ msg: 'service_stopped', service: config.runtime.serviceName }));

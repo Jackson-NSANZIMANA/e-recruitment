@@ -20,6 +20,7 @@ import type {
   CampaignAdminDetail,
   CampaignAdminSummary,
   OperationalReadRepository,
+  VenueLiveCounts,
   VenueRoster,
 } from '../ports/operational-read-repository.js';
 
@@ -101,6 +102,13 @@ export class OperationalReadService {
     const scope = scopeOf(actor);
     if (scope === null) return { kind: 'FORBIDDEN' };
     const value = await this.#reader.venueRoster(scope, query);
+    return value === null ? { kind: 'NOT_FOUND' } : { kind: 'OK', agency: scope.agency, value };
+  }
+
+  async venueLiveCounts(actor: Principal, query: RosterQuery): Promise<DetailOutcome<VenueLiveCounts>> {
+    const scope = scopeOf(actor);
+    if (scope === null) return { kind: 'FORBIDDEN' };
+    const value = await this.#reader.venueLiveCounts(scope, query);
     return value === null ? { kind: 'NOT_FOUND' } : { kind: 'OK', agency: scope.agency, value };
   }
 }

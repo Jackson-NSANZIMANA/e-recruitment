@@ -49,6 +49,8 @@ export interface EvidenceUnitOfWork {
   device(deviceId: string): Promise<DeviceKey | null>;
   record(input: RecordEvidenceInput): Promise<RecordEvidenceResult>;
   stage(events: readonly USRPEvent[]): Promise<void>;
+  /** Stamp the device's last-seen (monotonic), after a SIGNED contact only (S09, rls/0036). */
+  touchDevice(deviceId: string): Promise<void>;
 }
 
 export interface EvidenceStore {

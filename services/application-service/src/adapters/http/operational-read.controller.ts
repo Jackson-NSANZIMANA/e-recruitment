@@ -5,6 +5,7 @@
 //   GET /v1/campaigns/admin/detail     campaign.read.admin  sessions, occupancy, policy hash
 //   GET /v1/applications/search        application.read     filters, cursor, total (list v2)
 //   GET /v1/venue-roster               admission.gate | field.score.sync   no names, no NIDs
+//   GET /v1/venue-live-counts          field.score.sync | field.device.manage   S09: counts + asOf, no names
 //
 // The agency is the verified principal's. There is no agency parameter.
 // A missing campaign and a sibling agency's campaign are the same bare 404.
@@ -26,6 +27,7 @@ export const ADMIN_CAMPAIGN_LIST_PATH = '/v1/campaigns/admin';
 export const ADMIN_CAMPAIGN_DETAIL_PATH = '/v1/campaigns/admin/detail';
 export const SEARCH_APPLICATIONS_PATH = '/v1/applications/search';
 export const VENUE_ROSTER_PATH = '/v1/venue-roster';
+export const VENUE_LIVE_COUNTS_PATH = '/v1/venue-live-counts';
 
 const NOT_FOUND: HttpResult = { status: 404, body: { error: 'NOT_FOUND' } };
 const FORBIDDEN: HttpResult = { status: 403, body: { error: 'FORBIDDEN' } };
@@ -122,6 +124,37 @@ export function operationalReadRoutes(service: OperationalReadService, verify: A
                 requiredPaperItems: e.requiredPaperItems,
               })),
               truncated: v.truncated,
+            },
+          };
+        });
+      }),
+    },
+    {
+      method: 'GET',
+      path: VENUE_LIVE_COUNTS_PATH,
+      handler: withAuth(verify, { kind: 'officer' }, (ctx, principal): Promise<HttpResult> => {
+        if (!principalHasPermission(principal, 'field.score.sync') && !principalHasPermission(principal, 'field.device.manage')) {
+          throw new HttpError(403, 'PERMISSION_DENIED', 'Your role does not permit this operation.');
+        }
+        return guarded(async () => {
+          const outcome = await service.venueLiveCounts(principal, parseRosterQuery(ctx.query));
+          if (outcome.kind === 'FORBIDDEN') return FORBIDDEN;
+          if (outcome.kind === 'NOT_FOUND') return NOT_FOUND;
+          const v = outcome.value;
+          // Allowlisted field by field. Counts only: no candidate row can reach this wire.
+          return {
+            status: 200,
+            body: {
+              agency: outcome.agency,
+              venue: { venueName: v.venueName, district: v.district, examDate: v.examDate },
+              counts: {
+                expected: v.expected,
+                admitted: v.admitted,
+                physicalCaptured: v.physicalCaptured,
+                medicalRecorded: v.medicalRecorded,
+                openConflicts: v.openConflicts,
+              },
+              asOf: v.asOf,
             },
           };
         });

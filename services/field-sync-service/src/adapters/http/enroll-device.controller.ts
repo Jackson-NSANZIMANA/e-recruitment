@@ -50,6 +50,11 @@ export function enrollDeviceRoute(service: EnrollDeviceService, verify: AuthVeri
         context: { correlationId: ctx.correlationId, causationId: ctx.correlationId },
       });
 
+      // A revoked device id is final (S09): enrol a NEW device id instead.
+      if (outcome.kind === 'REVOKED') {
+        throw new HttpError(409, 'DEVICE_REVOKED', 'This device id was revoked and cannot be enrolled again.');
+      }
+
       return outcome.kind === 'ENROLLED'
         ? { status: 201, body: { status: 'ENROLLED', deviceId, agency: principal.agency } }
         : { status: 200, body: { status: 'ALREADY_ENROLLED', deviceId, agency: outcome.agency } };
