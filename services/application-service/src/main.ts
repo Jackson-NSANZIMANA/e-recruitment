@@ -68,6 +68,7 @@ import { startForensicsResultConsumer } from './adapters/events/forensics-result
 import { startApplicationAcceptedConsumer } from './adapters/events/application-accepted.consumer.js';
 import { campaignControlRoutes } from './adapters/http/campaign-control.controller.js';
 import { campaignPublicReadRoutes } from './adapters/http/campaign-public-read.controller.js';
+import { operationalReadRoutes } from './adapters/http/operational-read.controller.js';
 
 function createEventBus(serviceName: string, transport: EventTransport): EventBus {
   if (transport.kind === 'kafka') {
@@ -155,6 +156,7 @@ async function main(): Promise<void> {
     routes: [
       ...campaignPublicReadRoutes(service.campaignPublicRead), // safe published-only anonymous projection
       ...campaignControlRoutes(service.campaignControl, verify), // agency-admin BUILD-001 commands
+      ...operationalReadRoutes(service.operationalReads, verify), // ADR-039 agency-scoped admin/ops reads
       submitApplicationRoute(service.submit, verify), // system-token required
       listApplicationsRoute(service.list, verify), // officer-token required
       amberQueueRoute(service.list, verify), // officer review queue (ADR-011)
