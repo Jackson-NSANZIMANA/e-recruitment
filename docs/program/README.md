@@ -1,8 +1,10 @@
 # USRP sessions — how to run the programme
 
-The plan is in [`delivery-programme.md`](delivery-programme.md). The rules for every session are in [`quality-workflow.md`](quality-workflow.md). Each session has a self-contained kit in [`sessions/`](sessions/) that ends with a **Session starter**: paste it into a new Claude Code session opened at `~/Documents/projects/e-recruitment-software`.
+**Order and priority are set by [`ROADMAP.md`](ROADMAP.md)** (milestones M0–M5); it wins over any other document on sequencing. Session cards are in [`delivery-programme.md`](delivery-programme.md). The rules for every session are in [`quality-workflow.md`](quality-workflow.md). Each session has a self-contained kit in [`sessions/`](sessions/) that ends with a **Session starter**: paste it into a new Claude Code session opened at `~/Documents/projects/e-recruitment-software`.
 
 ## Order
+
+> The phase diagram below is the original session dependency graph. For what runs next and why, follow [`ROADMAP.md`](ROADMAP.md) §3 and §8 (notably: S14 relocation and the paper/assisted-desk kit are pilot work in M2; S15 offline and B2/B3 are M5).
 
 ```
 Phase 0  S00 Programme integrity                                     (alone)
@@ -77,19 +79,19 @@ Parallel sessions must not pick "the next number". These are reserved; use only 
 | Session | State | PR(s) | Notes |
 |---|---|---|---|
 | S00 Programme integrity | done | BE [#34](https://github.com/Jackson-NSANZIMANA/e-recruitment/pull/34) [#35](https://github.com/Jackson-NSANZIMANA/e-recruitment/pull/35) [#36](https://github.com/Jackson-NSANZIMANA/e-recruitment/pull/36) · FE [#27](https://github.com/Jackson-NSANZIMANA/e-recruitment-ui/pull/27) [#28](https://github.com/Jackson-NSANZIMANA/e-recruitment-ui/pull/28) [#29](https://github.com/Jackson-NSANZIMANA/e-recruitment-ui/pull/29) | mains protected (required checks, strict, admins included); evidence bundle on every run; SECRET-ROTATION closed (§5) |
-| S01 Officer lifecycle | in review | BE (this PR) | ADR-036, rls/0033; 8 edge operations; unblocks S06 and B1 once merged |
-| S02 Frontend foundations | ready | | also: stale applicant `home.tsx` header comment (W0-03 leftover) |
-| S03 Release engineering | in review | BE [#38](https://github.com/Jackson-NSANZIMANA/e-recruitment/pull/38) · FE [#32](https://github.com/Jackson-NSANZIMANA/e-recruitment-ui/pull/32) | ADR-038 / ADR-FE-014; owner: add `Unit tests (every package)` as a required check, then tag `v0.1.0-rc1` (commands in the PR hand-off) |
-| B1 Biometric evidence | in review | BE (#40) | ADR-037, rls/0034; 4 edge operations; DPO sign-off on the DPIA rows pending; B2 unblocked once S08 lands |
-| S04 Read models | done | BE (#41) | ADR-039, rls/0035; 6 new edge operations + permission metadata; unblocks S05 list, S06 DPO queue, S08 roster, S09 |
-| S05 Campaign Studio | waiting on S02 (+S04 list) | | |
-| S06 Officer workspace + staff admin | waiting on S01, S02 | | |
-| S07 Deployment + staging | waiting on S03 merge | | owner: hosting decision; set the SPA public origins (ADR-FE-014) |
-| S08 Field Station | waiting on S02 | | owner: pilot agency, device model |
-| S09 Fleet + venue ops | waiting on S04 | | |
-| S10a Citizen timeline | waiting on S04 | | |
-| S10b Citizen screens | waiting on S10a, S02 | | |
-| S11a Observability | waiting on S03 merge | | `/version` on every service and SPA (ADR-038) |
-| S11b Backup + restore | waiting on S07 | | |
-| B2 Biometric capture | waiting on S08, B1 | | owner: model licence |
-| B3 Biometric evaluation | waiting on B2 | | owner: evaluation dataset |
+| S01 Officer lifecycle | done | BE [#39](https://github.com/Jackson-NSANZIMANA/e-recruitment/pull/39) | ADR-036, rls/0033; 8 edge operations |
+| S02 Frontend foundations | done | FE [#33](https://github.com/Jackson-NSANZIMANA/e-recruitment-ui/pull/33) | ADR-FE-007…013; field-station app, readiness ladder, contract drift v2. Leftover: stale applicant `home.tsx` header comment |
+| S03 Release engineering | done | BE [#38](https://github.com/Jackson-NSANZIMANA/e-recruitment/pull/38) · FE [#32](https://github.com/Jackson-NSANZIMANA/e-recruitment-ui/pull/32) [#34](https://github.com/Jackson-NSANZIMANA/e-recruitment-ui/pull/34) | ADR-038 / ADR-FE-014; `Unit tests (every package)` required; `v0.1.0-rc1` tagged |
+| B1 Biometric evidence | done | BE [#40](https://github.com/Jackson-NSANZIMANA/e-recruitment/pull/40) | ADR-037, rls/0034; 4 edge operations; SHADOW for the pilot; **DPO sign-off on the DPIA rows pending** |
+| S04 Read models | done | BE [#41](https://github.com/Jackson-NSANZIMANA/e-recruitment/pull/41) | ADR-039, rls/0035; 6 edge operations + permission metadata |
+| S05 Campaign Studio | ready (M1) | | |
+| S06 Officer workspace + staff admin | ready (M1) — next | | carries the four-eyes activation-code fix |
+| S07 Deployment + staging | ready (M3) | | provider-neutral staging first; production hosting decision gates production only (ROADMAP §4) |
+| S08 Field Station | ready (M2) | | owner: pilot agency, district, device model |
+| S09 Fleet + venue ops | ready (M2) — next | | owner: who may enrol/revoke devices |
+| S10a Citizen timeline | ready (M3) | | |
+| S10b Citizen screens | waiting on S10a (M3) | | |
+| S11a Observability | ready (M3; any free lane) | | `/version` on every service and SPA (ADR-038) |
+| S11b Backup + restore | waiting on S07 (M3) | | |
+| B2 Biometric capture | waiting on S08 (M5) | | owner: model licence |
+| B3 Biometric evaluation | waiting on B2 (M5) | | owner: evaluation dataset |
