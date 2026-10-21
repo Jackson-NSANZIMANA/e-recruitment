@@ -29,6 +29,19 @@ What `pnpm rehearse` does, in order, per agency, through the real interfaces onl
    deterministic `Idempotency-Key`;
 6. confirm the public detail serves the campaign.
 
+7. **biometric mode** (ADR-037): sign in as the day's gate officer and fail
+   unless `getBiometricPolicy` reports the mode the scenario declares
+   (`national-pilot-day`: RDF `SHADOW`; set `BIOMETRIC_MODE_RDF=SHADOW`).
+
+`pnpm rehearse --biometric-shadow [persona]` (default `A`, after the persona
+holds an Exam Pass) is the dev-only stand-in for the Field Station tablet until
+B2: it enrols a rehearsal device through `enrollFieldDevice`, signs a
+**synthetic** `USRP-BIO-EVIDENCE.v1` record (no face is captured; fixed
+synthetic scores), records it through `recordBiometricEvidence` as the gate
+officer, then fails unless the supervisor's `getBiometricEvidence` does not
+list it and the row is stored with mode `SHADOW`. The live spec can call the
+same helpers (`src/biometric.ts`).
+
 Everything it creates is marked as a rehearsal: `REH-<AGENCY>-<YYYYMMDD>` codes,
 `[REHEARSAL]` labels, "Rehearsal Venue — …" venues, legal basis
 `SYNTHETIC-REHEARSAL`. It refuses `NODE_ENV=production` and any non-local

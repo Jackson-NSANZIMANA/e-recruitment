@@ -51,6 +51,12 @@ export interface ScenarioCampaign {
   readonly sessions: readonly ScenarioSession[];
   /** Optional: the station officers the `staff` step provisions (ADR-036). */
   readonly staff?: readonly ScenarioStaff[];
+  /**
+   * Optional (ADR-037): the biometric evidence mode the platform must be
+   * running for this agency. The rehearsal checks it through
+   * getBiometricPolicy; it never sets it (that is BIOMETRIC_MODE_<AGENCY>).
+   */
+  readonly biometricMode?: 'OFF' | 'SHADOW' | 'ADVISORY';
 }
 
 export interface ScenarioPersona {
@@ -132,6 +138,11 @@ export function validateScenario(scenario: Scenario): void {
       }
     }
   }
+  for (const campaign of scenario.campaigns) {
+    if (campaign.biometricMode !== undefined) {
+      check(['OFF', 'SHADOW', 'ADVISORY'].includes(campaign.biometricMode), `${campaign.agency}: biometricMode must be OFF, SHADOW or ADVISORY (there is no automatic mode).`);
+    }
+  }
   const personaIds = new Set<string>();
   for (const persona of scenario.personas) {
     check(!personaIds.has(persona.id), `Persona ${persona.id} appears twice.`);
@@ -173,6 +184,7 @@ export interface StagedCampaign {
   readonly draft: CampaignDraftCommand;
   readonly sessions: readonly SessionCommand[];
   readonly staff: readonly ScenarioStaff[];
+  readonly biometricMode: 'OFF' | 'SHADOW' | 'ADVISORY' | null;
 }
 
 /** PURE. The public code of an agency's rehearsal campaign for the Kigali day of `now`. */
@@ -227,6 +239,7 @@ export function stageCampaigns(scenario: Scenario, now: Date): readonly StagedCa
       },
       sessions,
       staff: campaign.staff ?? [],
+      biometricMode: campaign.biometricMode ?? null,
     };
   });
 }

@@ -16,7 +16,7 @@ import { deterministicKey } from './idempotency.js';
 import { syntheticPolicy } from './policy.js';
 import { ensureAgencyAdmin } from './provision.js';
 import { REHEARSAL_CODE_PREFIX, stageCampaigns, type Scenario, type StagedCampaign } from './scenario.js';
-import { provisionStaff } from './staff.js';
+import { REHEARSAL_STAFF_PASSWORD, provisionStaff } from './staff.js';
 
 export type StepOutcome = 'APPLIED' | 'REPLAYED' | 'ALREADY_DONE' | 'FAILED';
 
@@ -132,6 +132,26 @@ async function playCampaign(scenario: Scenario, staged: StagedCampaign, config: 
       httpStatus: null,
       detail: member.detail,
     });
+  }
+
+  // 2c. ADR-037: the platform must be running the biometric evidence mode the
+  //     scenario declares. Read as the day's gate officer, never set here.
+  if (staged.biometricMode !== null) {
+    const gateOfficer = staged.staff.find((m) => m.posts.includes('screening_officer'));
+    const gate = new EdgeSession(config.edgeBaseUrl, config.origin);
+    if (gateOfficer === undefined || !(await gate.signIn(gateOfficer.handle, REHEARSAL_STAFF_PASSWORD))) {
+      steps.push({ step: 'biometric mode', outcome: 'FAILED', httpStatus: null, detail: 'no signed-in screening officer to read the policy' });
+    } else {
+      const policy = await gate.get('/edge/v1/gate/biometric-policy');
+      const mode = (policy.body as { mode?: unknown } | null)?.mode;
+      const ok = policy.status === 200 && mode === staged.biometricMode;
+      steps.push({
+        step: 'biometric mode',
+        outcome: ok ? 'ALREADY_DONE' : 'FAILED',
+        httpStatus: policy.status,
+        detail: ok ? String(mode) : `platform runs ${String(mode)}; set BIOMETRIC_MODE_${agency}=${staged.biometricMode}`,
+      });
+    }
   }
 
   // 3. Retire earlier days' rehearsal campaigns for this agency (close, never delete).
