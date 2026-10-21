@@ -82,7 +82,11 @@ const statusList = (raw: string): string | null => {
   const parts = raw.split(',').map((p) => p.trim().toUpperCase()).filter((p) => p !== '');
   return parts.every((p) => TOKEN_RE.test(p)) ? parts.join(',') : null;
 };
-const text = (raw: string): string | null => (raw.length <= 64 && !/[\u0000-\u001f]/.test(raw) ? raw : null);
+const hasControlChar = (raw: string): boolean => {
+  for (let i = 0; i < raw.length; i += 1) if (raw.charCodeAt(i) < 0x20) return true;
+  return false;
+};
+const text = (raw: string): string | null => (raw.length <= 64 && !hasControlChar(raw) ? raw : null);
 const limit = (raw: string): string | null => (LIMIT_RE.test(raw) ? raw : null);
 
 export function listAgencyCampaignsHandler(deps: EdgeDeps): RouteHandler {

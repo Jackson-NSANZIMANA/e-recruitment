@@ -120,7 +120,7 @@ function toSummary(row: CampaignRow): CampaignAdminSummary {
 }
 
 /** The columns every campaign read selects, plus the session occupancy roll-up. */
-function campaignSelect(tx: SqlTransaction) {
+function campaignSelect(tx: SqlTransaction): ReturnType<SqlTransaction> {
   return tx`
     c.id, c.public_code, c.campaign_label, c.status::text AS status,
     c.target_categories, c.target_districts,
@@ -133,7 +133,7 @@ function campaignSelect(tx: SqlTransaction) {
     COALESCE(v.registered_total, 0) AS registered_total`;
 }
 
-function campaignFrom(tx: SqlTransaction) {
+function campaignFrom(tx: SqlTransaction): ReturnType<SqlTransaction> {
   return tx`
     public_core.recruitment_campaigns c
     LEFT JOIN LATERAL (
