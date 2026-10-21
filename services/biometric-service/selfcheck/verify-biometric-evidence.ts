@@ -86,11 +86,11 @@ const OTHER = generateDeviceKeyPair();
 const QR = generateDeviceKeyPair();
 const AUTH = generateDeviceKeyPair();
 const VENUE = `B1 Selfcheck Venue ${RUN}`;
-const NID = '1200380123456789';
 
-interface Candidate { readonly app: string; readonly applicant: string; readonly ticket: string; readonly code: string }
+interface Candidate { readonly app: string; readonly applicant: string; readonly ticket: string; readonly code: string; readonly nid: string }
 const candidate = (n: number): Candidate => ({
   app: randomUUID(), applicant: randomUUID(), ticket: `B1${RUN}${String(n)}TICKET`, code: `RDF-B1${String(n)}${RUN.slice(0, 4)}`,
+  nid: `1${String(Math.floor(Math.random() * 1e14)).padStart(14, '0')}${String(n)}`,
 });
 const A = candidate(1); // SHADOW evidence; then SHADOW NO_MATCH must not influence admission
 const B = candidate(2); // ADVISORY NO_MATCH → manual identity → admission
@@ -156,14 +156,14 @@ async function seed(): Promise<void> {
       await tx`INSERT INTO public_core.applicant_identities
         (id, national_id_hash, encrypted_full_name, encrypted_date_of_birth, encrypted_home_district,
          encrypted_home_province, gender, registration_channel, identity_status)
-        VALUES (${c.applicant}, ${hashNationalId(NID, HMAC_KEY)}, 'x','x','x','x','MALE','WEB',
+        VALUES (${c.applicant}, ${hashNationalId(c.nid, HMAC_KEY)}, 'x','x','x','x','MALE','WEB',
                 'VERIFIED'::public_core.identity_verification_status)`;
     }
     await tx`SET LOCAL session_replication_role = replica`;
     await tx`INSERT INTO public_core.recruitment_campaigns
       (id, public_code, campaign_label, agency, status, target_categories, registration_opens_at,
        registration_closes_at, examination_start_date, examination_end_date, examination_reporting_hour)
-      VALUES (${CAMPAIGN}, ${`RDF-B1-${RUN}`}, 'B1 selfcheck', 'RDF', 'REGISTRATION_CLOSED', '["GENERAL_ENLISTMENT"]',
+      VALUES (${CAMPAIGN}, ${`RDF-B1-SELFCHECK-${RUN.toUpperCase()}`}, 'B1 selfcheck', 'RDF', 'REGISTRATION_CLOSED', '["GENERAL_ENLISTMENT"]',
               now() - interval '30 days', now() - interval '1 day', ${kigaliToday()}, ${kigaliToday()}, 7)`;
     for (const c of ALL) {
       await tx`INSERT INTO rdf_ops.applications
@@ -245,7 +245,7 @@ async function main(): Promise<void> {
   const post = (srv: { url: string }, body: unknown, token = gate, raw?: string): Promise<Reply> =>
     call(srv.url, 'POST', '/v1/biometric/evidence', token, body, raw);
   const admit = (c: Candidate, token = gate): Promise<Reply> => call(app.url, 'POST', '/v1/applications/admissions/gate', token, {
-    qrToken: TOKENS.get(c.app), gateVenueName: VENUE, nationalIdHash: hashNationalId(NID, HMAC_KEY),
+    qrToken: TOKENS.get(c.app), gateVenueName: VENUE, nationalIdHash: hashNationalId(c.nid, HMAC_KEY),
   });
   const officerRead = (c: Candidate, token = reviewer): Promise<Reply> =>
     call(app.url, 'GET', `/v1/applications/biometric-evidence?applicationId=${c.app}`, token);
@@ -423,17 +423,20 @@ async function main(): Promise<void> {
     for (const [label, stmt] of [
       ['UPDATE evidence', admin`UPDATE rdf_ops.biometric_evidence SET outcome = 'MATCH' WHERE application_id = ${B.app}`],
       ['DELETE evidence', admin`DELETE FROM rdf_ops.biometric_evidence WHERE application_id = ${B.app}`],
-      ['TRUNCATE evidence', admin`TRUNCATE rdf_ops.biometric_evidence`],
+      ['TRUNCATE confirmations', admin`TRUNCATE rdf_ops.gate_manual_identity_confirmations`],
       ['UPDATE confirmation', admin`UPDATE rdf_ops.gate_manual_identity_confirmations SET reason_code = 'APPEARANCE_CHANGED' WHERE application_id = ${B.app}`],
       ['DELETE confirmation', admin`DELETE FROM rdf_ops.gate_manual_identity_confirmations WHERE application_id = ${B.app}`],
     ] as const) {
       check(`append-only as the table owner/superuser: ${label} raises`, await sqlState(() => stmt) === '42501');
     }
 
+    check('TRUNCATE evidence is refused (FK + statement trigger)', await sqlState(() => admin`TRUNCATE rdf_ops.biometric_evidence`) !== 'ok');
+    check('evidence rows survived every mutation attempt', (await evidenceRows(B)).length === 2);
+
     console.log('\n── 11. Events are PII-free ──');
     const payloads = JSON.stringify(await admin`SELECT payload FROM public_core.event_outbox WHERE producer = 'biometric-service' AND (payload->>'entityId' IN ${admin(ALL.map((c) => c.app))} OR payload->>'applicantId' IN ${admin(ALL.map((c) => c.applicant))})`)
       + JSON.stringify(bus.published);
-    check('no national id or its hash', !payloads.includes(NID) && !payloads.includes(hashNationalId(NID, HMAC_KEY)));
+    check('no national id or its hash', ALL.every((c) => !payloads.includes(c.nid) && !payloads.includes(hashNationalId(c.nid, HMAC_KEY))));
     check('no signature, key or image material', !payloads.includes(s1) && !payloads.includes('BEGIN PUBLIC KEY') && !payloads.includes('data:'));
   } finally {
     await Promise.all([shadow.stop(), advisory.stop(), off.stop(), app.stop()]);
