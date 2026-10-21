@@ -4,6 +4,8 @@
 **Verified against:** backend `main` 446f90b (+ `feat/rehearsal` 8943aec), frontend `main` e053479 (+ PR #27, `feat/rehearsal`)
 **Companions:** [`000.md`](../../000.md) (handbook) · [`capability-map.md`](../architecture/capability-map.md) (what exists) · frontend `docs/architecture/frontend-revamp-plan-2026-10-15.md` (UI plan) · frontend `docs/product/usrp-national-baseline-v1.md` (national baseline, go-live gates G1–G9)
 
+> **Sequencing is now set by [`ROADMAP.md`](ROADMAP.md)** (adopted 2026-10-21). §5 below is kept as the dependency graph; where it disagrees on order or priority, the roadmap wins. The session cards in §6 remain the scope reference.
+>
 > **Running a session?** Start at [`README.md`](README.md) (order, reserved numbers, status board) and [`quality-workflow.md`](quality-workflow.md). Phases 0–3 and the biometric track (B1–B3) have ready-to-run kits with session starters in [`sessions/`](sessions/).
 
 This document divides the remaining work into **sessions**: bounded work packages that one engineer or agent can complete, prove and hand over. It also defines the protocol that lets several sessions run in parallel without breaking each other.
@@ -129,6 +131,8 @@ The rehearsal library grows into the pilot's training and drill pack (S18).
 Merged to `main` with green CI, capability map updated, rehearsal step passing, and no new `test.fixme` without a `BLOCKED:` reason.
 
 ## 5. Sequencing
+
+> Superseded for order by [`ROADMAP.md`](ROADMAP.md) §3; kept as the dependency graph.
 
 ```
 Phase 0  S00 Programme integrity ─────────────────────────────── (serial, first)

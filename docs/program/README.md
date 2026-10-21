@@ -1,8 +1,10 @@
 # USRP sessions — how to run the programme
 
-The plan is in [`delivery-programme.md`](delivery-programme.md). The rules for every session are in [`quality-workflow.md`](quality-workflow.md). Each session has a self-contained kit in [`sessions/`](sessions/) that ends with a **Session starter**: paste it into a new Claude Code session opened at `~/Documents/projects/e-recruitment-software`.
+**Order and priority are set by [`ROADMAP.md`](ROADMAP.md)** (milestones M0–M5); it wins over any other document on sequencing. Session cards are in [`delivery-programme.md`](delivery-programme.md). The rules for every session are in [`quality-workflow.md`](quality-workflow.md). Each session has a self-contained kit in [`sessions/`](sessions/) that ends with a **Session starter**: paste it into a new Claude Code session opened at `~/Documents/projects/e-recruitment-software`.
 
 ## Order
+
+> The phase diagram below is the original session dependency graph. For what runs next and why, follow [`ROADMAP.md`](ROADMAP.md) §3 and §8 (notably: S14 relocation and the paper/assisted-desk kit are pilot work in M2; S15 offline and B2/B3 are M5).
 
 ```
 Phase 0  S00 Programme integrity                                     (alone)
