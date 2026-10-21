@@ -234,3 +234,62 @@ export function projectErasureQueue(body: unknown): { requests: Rec[] } | null {
     }, 1_000),
   }));
 }
+
+// ── S09: device fleet and venue live counts ────────────────────────
+const SEEN_SOURCES: ReadonlySet<string> = new Set(['FIELD_SYNC', 'BIOMETRIC']);
+const REVOKE_REASON_CODES: ReadonlySet<string> = new Set(['LOST', 'STOLEN', 'COMPROMISED', 'RETIRED', 'OTHER']);
+
+/**
+ * The fleet list. A device is its id, who enrolled it, when it was last heard
+ * from and whether it is revoked. The public key never has a field here; the
+ * agency is the session's, so none is echoed.
+ */
+export function projectFleetDevices(body: unknown): { devices: Rec[] } | null {
+  return guard(() => ({
+    devices: list(rec(body)['devices'], (raw) => {
+      const d = rec(raw);
+      const seenSource = d['lastSeenSource'] === null ? null : token(d['lastSeenSource']);
+      if (seenSource !== null && !SEEN_SOURCES.has(seenSource)) throw new Mismatch();
+      const reason = d['revokeReason'] === null ? null : token(d['revokeReason']);
+      if (reason !== null && !REVOKE_REASON_CODES.has(reason)) throw new Mismatch();
+      const revokedAt = instantOrNull(d['revokedAt']);
+      const a = d['assignment'] === null ? null : rec(d['assignment']);
+      return {
+        deviceId: str(d['deviceId'], 64),
+        enrolledBy: str(d['enrolledBy'], 128),
+        enrolledAt: instant(d['enrolledAt']),
+        lastSeenAt: instantOrNull(d['lastSeenAt']),
+        lastSeenSource: seenSource,
+        lastSyncAt: instantOrNull(d['lastSyncAt']),
+        revoked: revokedAt !== null,
+        revokedAt,
+        revokeReason: reason,
+        assignment:
+          a === null
+            ? null
+            : { campaign: str(a['campaignPublicCode'], 64), district: token(a['district']), examDate: day(a['examDate']) },
+      };
+    }, 500),
+  }));
+}
+
+/** Counts and the instant they were last recomputed. No candidate row exists in this shape. */
+export function projectVenueLiveCounts(body: unknown): Rec | null {
+  return guard(() => {
+    const b = rec(body);
+    const v = rec(b['venue']);
+    const c = rec(b['counts']);
+    return {
+      agency: agency(b['agency']),
+      venue: { venueName: str(v['venueName'], 200), district: token(v['district']), examDate: day(v['examDate']) },
+      counts: {
+        expected: int(c['expected']),
+        admitted: int(c['admitted']),
+        physicalCaptured: int(c['physicalCaptured']),
+        medicalRecorded: int(c['medicalRecorded']),
+        openConflicts: int(c['openConflicts']),
+      },
+      asOf: instantOrNull(b['asOf']),
+    };
+  });
+}

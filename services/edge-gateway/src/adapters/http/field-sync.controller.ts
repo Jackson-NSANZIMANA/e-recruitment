@@ -147,6 +147,8 @@ export function enrollFieldDeviceHandler(deps: EdgeDeps): RouteHandler {
         },
       };
     }
+    // A revoked device id is final (S09): the tablet must be enrolled under a NEW id.
+    if (upstream.status === 409) return { status: 409, body: { error: 'DEVICE_REVOKED' } };
     if (upstream.status === 403) return FORBIDDEN;
     if (upstream.status === 400) return { status: 400, body: { error: 'INVALID_REQUEST' } };
     return { status: 502, body: { error: 'UPSTREAM_CONTRACT_MISMATCH' } };
