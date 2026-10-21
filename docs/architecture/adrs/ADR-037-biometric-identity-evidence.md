@@ -213,6 +213,24 @@ this ticket**:
 - otherwise the admission records the identity method of §1 and names the
   evidence and confirmation ids in its `APPLICANT_ADMITTED_AT_GATE` audit.
 
+**Confirmations are an engine boundary.** The officer role has no INSERT on
+`gate_manual_identity_confirmations`. A confirmation is written only through
+`<agency>_ops.confirm_manual_identity(officer, recordId, reason, correlation)`,
+SECURITY DEFINER (owner `usrp_biometric_evidence_owner`), EXECUTE for the
+agency's officer role. It re-checks in the engine that the caller is
+`usrp_app` as that role, that `usrp.manual_identity_actor_id` equals the
+confirming officer, and that the officer is an **active `field_supervisor` of
+this agency** (a stale token claiming the post gets `403`). SHADOW evidence
+answers `NOT_FOUND`, exactly like a nonexistent record.
+
+**Late evidence.** Check 10, `record_biometric_evidence` and
+`confirm_manual_identity` take one transaction-level advisory lock per
+application (`usrp.gate-identity:<applicationId>`). Evidence is therefore
+either visible to the admission or known to have arrived after it. Evidence
+that arrives after admission is still recorded (B3 needs it), never undoes the
+admission (evidence is never a verdict), and its audit carries
+`afterAdmission: true`, so a negative can be followed up by a supervisor.
+
 **Physical-test completion** no longer requires
 `applicant_identities.biometric_verified_at` (ADR-010 §4). It requires that
 identity was established: a gate admission for the application, or (legacy
@@ -225,10 +243,14 @@ must never influence an outcome, would hold every candidate at
   with `method`, `referenceSource`, `mode` and `recordId` (envelope
   `eventVersion` stays `1.0`; new fields are optional for consumers). It is
   emitted only for an **ADVISORY, attempted** record; SHADOW never reaches the
-  identity projection.
+  identity projection. identity-service's projector **ignores v1.1**: device
+  evidence must never set or clear `applicant_identities.biometric_verified_at`,
+  which the legacy physical-test path reads as a verdict. Only the legacy v1.0
+  server-side check-in result is projected.
 - Every stored record stages one `AUDIT_ENTRY` `BIOMETRIC_EVIDENCE_RECORDED`
-  (record id, mode, outcome, reference source, method, consent state; no
-  scores, no device key). Trust refusals stage `BIOMETRIC_EVIDENCE_REFUSED`.
+  (record id, mode, `afterAdmission`, reference source, method, consent state,
+  and the outcome **only in ADVISORY**: a SHADOW outcome stays in the evidence
+  table and never travels in the audit stream; no scores, no device key). Trust refusals stage `BIOMETRIC_EVIDENCE_REFUSED`.
   A confirmation stages `MANUAL_IDENTITY_CONFIRMED`. All through the
   transactional outbox in the same transaction (producers `biometric-service`
   and `application-service`).

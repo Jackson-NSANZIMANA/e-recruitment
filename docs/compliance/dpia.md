@@ -54,8 +54,8 @@ and `audit_log` (opaque UUIDs, statuses, scores only).
 | 7 | Tampering with processing history | REVOKE + unconditional RAISE triggers on audit/history tables (rls/0002/0007) | Superuser bypass |
 | 8 | G2G credential misuse | **Mocks only today. Real G2G BLOCKED on government authorization** — see prerequisites doc | n/a until authorized |
 | 8b | Biometric data leaving the device or being retained | On-device matching only (B2); the server accepts a ≤4 KiB flat, closed-schema record and refuses any image-shaped value (`IMAGE_PAYLOAD_REFUSED`), proven by `verify-biometric-evidence.ts`; scores-only events | A compromised tablet app could capture locally (device management, B2/S09) |
-| 8c | A face-match error excluding a candidate | Evidence never refuses (ADR-037 §1): `NO_MATCH`/`INCONCLUSIVE` → supervised manual identity by a different officer; decline → card check without prejudice; no automatic mode exists; SHADOW for the pilot | Supervisor judgement; thresholds are placeholders until B3 |
-| 8d | Forged or replayed evidence | Ed25519 device signature verified against `field_devices` (agency, revocation, key fingerprint), ticket binding, unique record id, server-recomputed outcome | A stolen device key signs until revoked; shared `usrp_app` login (rls/0001) |
+| 8c | A face-match error excluding a candidate | Evidence never refuses (ADR-037 §1): `NO_MATCH`/`INCONCLUSIVE` → supervised manual identity by a different officer, who must be an active field supervisor of the agency (checked in the engine, rls/0034 `confirm_manual_identity`); device evidence never sets the identity's biometric verdict; decline → card check without prejudice; no automatic mode exists; SHADOW for the pilot | Supervisor judgement; thresholds are placeholders until B3 |
+| 8d | Forged or replayed evidence | Ed25519 device signature verified against `field_devices` (agency, revocation, key fingerprint), ticket binding, unique record id, server-recomputed outcome | A stolen device key signs until revoked; shared `usrp_app` login (rls/0001); negative evidence arriving after admission is recorded and flagged (`afterAdmission`) but does not undo the admission |
 | 9 | Officer over-collection | Officers see only their agency's rows (RLS EXISTS predicates); no PII decrypt grant to officer roles | — |
 
 ## 4. Necessity & proportionality
@@ -84,5 +84,8 @@ and `audit_log` (opaque UUIDs, statuses, scores only).
    frontend copy wrongly mentions fingerprints); (c) whether erasure must also
    destroy evidence scores (today: identity tombstone, row stays pseudonymous,
    retention = application record); (d) confirmation that SHADOW-mode
-   collection for accuracy measurement (B3) is within the stated purpose. (The citizen-facing erasure request channel is now
+   collection for accuracy measurement (B3) is within the stated purpose
+   (SHADOW outcomes are kept out of the audit stream; they exist only in the
+   evidence table); (e) the follow-up duty for negative evidence that arrives
+   after an admission (`afterAdmission` in the audit). (The citizen-facing erasure request channel is now
    BUILT — ADR-020 intake queue; the open question is who staffs it.)
