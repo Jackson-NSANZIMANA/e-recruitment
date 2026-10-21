@@ -35,10 +35,20 @@
 --
 -- 2. <agency>_ops.gate_manual_identity_confirmations — a field supervisor's
 --    confirmation after NO_MATCH / INCONCLUSIVE evidence. Append-only, FORCE
---    RLS, one per evidence row, closed reason codes only. INSERT by the
---    agency's officer role, guarded by a trigger: the evidence must be
---    ADVISORY (visible), NO_MATCH or INCONCLUSIVE, of the same application and
---    ticket, and the supervisor must not be the officer who captured it.
+--    RLS, one per evidence row, closed reason codes only. Written ONLY through
+--    <agency>_ops.confirm_manual_identity(…), SECURITY DEFINER (same owner),
+--    EXECUTE for the agency's officer role, which re-checks in the engine that
+--    the caller is usrp_app as that role, that usrp.manual_identity_actor_id
+--    equals the confirming officer, and that this officer is an ACTIVE
+--    field_supervisor of THIS agency. A trigger then guards the row: the
+--    evidence must be ADVISORY, NO_MATCH or INCONCLUSIVE, of the same
+--    application and ticket, and the supervisor must not be the officer who
+--    captured it. The officer role has no INSERT grant or policy.
+--
+--    Both functions and the gate admission take one transaction-level
+--    advisory lock per application ('usrp.gate-identity:<id>'), so evidence
+--    is either seen by the gate or recorded as arriving after admission
+--    (afterAdmission in the answer and the audit).
 --
 -- 3. gate_admissions.identity_method gains NATIONAL_ID_CARD+CARD_PORTRAIT and
 --    NATIONAL_ID_CARD+SUPERVISOR; gate_admission_attempts.outcome gains
@@ -154,20 +164,7 @@ BEGIN
         CONSTRAINT biometric_evidence_ticket_check CHECK (ticket_id ~ '^[A-Za-z0-9._:-]{1,64}$'),
         CONSTRAINT biometric_evidence_source_check CHECK (reference_source IN ('CARD_PORTRAIT', 'NONE')),
         CONSTRAINT biometric_evidence_method_check CHECK (method IN ('FACE_1_1_ON_DEVICE', 'NONE')),
-        CONSTRAINT biometric_evidence_consent_check CHECK (consent_state IN ('GIVEN', 'DECLINED')),
         CONSTRAINT biometric_evidence_outcome_check CHECK (outcome IN ('MATCH', 'NO_MATCH', 'INCONCLUSIVE', 'NOT_ATTEMPTED')),
-        CONSTRAINT biometric_evidence_reason_check CHECK (
-          (outcome = 'NOT_ATTEMPTED' AND not_attempted_reason IN (
-             'CANDIDATE_DECLINED', 'CAPTURE_FAILED', 'CARD_PORTRAIT_UNREADABLE',
-             'DEVICE_UNAVAILABLE', 'NO_REFERENCE_SOURCE'))
-          OR (outcome <> 'NOT_ATTEMPTED' AND not_attempted_reason IS NULL)),
-        CONSTRAINT biometric_evidence_scores_check CHECK (
-          (outcome = 'NOT_ATTEMPTED' AND liveness_score_bp IS NULL AND match_score_bp IS NULL
-             AND model_id IS NULL AND model_version IS NULL)
-          OR (outcome <> 'NOT_ATTEMPTED'
-             AND liveness_score_bp BETWEEN 0 AND 10000 AND match_score_bp BETWEEN 0 AND 10000
-             AND model_id ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$'
-             AND model_version ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,31}$')),
         CONSTRAINT biometric_evidence_policy_check CHECK (threshold_policy_version ~ '^[A-Z][A-Za-z0-9._-]{0,31}$'),
         CONSTRAINT biometric_evidence_mode_check CHECK (mode IN ('SHADOW', 'ADVISORY')),
         CONSTRAINT biometric_evidence_device_check CHECK (device_id ~ '^[A-Za-z0-9._:-]{1,64}$'),
@@ -178,6 +175,28 @@ BEGIN
           correlation_id IS NULL OR correlation_id ~ '^[A-Za-z0-9._:-]{1,128}$')
       )
     $t$, s);
+    -- NULL-safe by construction: a CHECK that evaluates to NULL passes, so
+    -- every nullable term is COALESCEd to false. Dropped and re-added so a
+    -- database that applied an earlier draft converges.
+    EXECUTE format('ALTER TABLE %I.biometric_evidence DROP CONSTRAINT IF EXISTS biometric_evidence_consent_check', s);
+    EXECUTE format($c$ALTER TABLE %I.biometric_evidence ADD CONSTRAINT biometric_evidence_consent_check
+      CHECK (consent_state IN ('GIVEN', 'DECLINED', 'NOT_REQUIRED_BY_POLICY'))$c$, s);
+    EXECUTE format('ALTER TABLE %I.biometric_evidence DROP CONSTRAINT IF EXISTS biometric_evidence_reason_check', s);
+    EXECUTE format($c$ALTER TABLE %I.biometric_evidence ADD CONSTRAINT biometric_evidence_reason_check CHECK (
+      CASE WHEN outcome = 'NOT_ATTEMPTED'
+        THEN COALESCE(not_attempted_reason IN (
+               'CANDIDATE_DECLINED', 'CAPTURE_FAILED', 'CARD_PORTRAIT_UNREADABLE',
+               'DEVICE_UNAVAILABLE', 'NO_REFERENCE_SOURCE'), false)
+        ELSE not_attempted_reason IS NULL
+      END)$c$, s);
+    EXECUTE format('ALTER TABLE %I.biometric_evidence DROP CONSTRAINT IF EXISTS biometric_evidence_scores_check', s);
+    EXECUTE format($c$ALTER TABLE %I.biometric_evidence ADD CONSTRAINT biometric_evidence_scores_check CHECK (
+      CASE WHEN outcome = 'NOT_ATTEMPTED'
+        THEN liveness_score_bp IS NULL AND match_score_bp IS NULL AND model_id IS NULL AND model_version IS NULL
+        ELSE COALESCE(liveness_score_bp BETWEEN 0 AND 10000 AND match_score_bp BETWEEN 0 AND 10000
+               AND model_id ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$'
+               AND model_version ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,31}$', false)
+      END)$c$, s);
     EXECUTE format('CREATE UNIQUE INDEX IF NOT EXISTS idx_%s_biometric_evidence_record ON %I.biometric_evidence (record_id)', a, s);
     EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%s_biometric_evidence_application ON %I.biometric_evidence (application_id, received_at)', a, s);
 
@@ -206,7 +225,9 @@ BEGIN
     EXECUTE format('REVOKE ALL ON %I.biometric_evidence FROM PUBLIC, %I, usrp_system_service, usrp_biometric_service', s, officer);
     EXECUTE format('GRANT SELECT ON %I.biometric_evidence TO %I', s, officer);
     EXECUTE format('REVOKE ALL ON %I.gate_manual_identity_confirmations FROM PUBLIC, %I, usrp_system_service, usrp_biometric_service', s, officer);
-    EXECUTE format('GRANT SELECT, INSERT ON %I.gate_manual_identity_confirmations TO %I', s, officer);
+    EXECUTE format('GRANT SELECT ON %I.gate_manual_identity_confirmations TO %I', s, officer);
+    EXECUTE format('GRANT SELECT, INSERT ON %I.gate_manual_identity_confirmations TO usrp_biometric_evidence_owner', s);
+    EXECUTE format('GRANT SELECT (application_id) ON %I.gate_admissions TO usrp_biometric_evidence_owner', s);
 
     EXECUTE format('GRANT USAGE ON SCHEMA %I TO usrp_biometric_evidence_owner', s);
     EXECUTE format('GRANT CREATE ON SCHEMA %I TO usrp_biometric_evidence_owner', s);
@@ -226,7 +247,8 @@ BEGIN
     EXECUTE format('DROP POLICY IF EXISTS %s_manual_identity_officer_read ON %I.gate_manual_identity_confirmations', a, s);
     EXECUTE format('CREATE POLICY %s_manual_identity_officer_read ON %I.gate_manual_identity_confirmations FOR SELECT TO %I USING (true)', a, s, officer);
     EXECUTE format('DROP POLICY IF EXISTS %s_manual_identity_officer_insert ON %I.gate_manual_identity_confirmations', a, s);
-    EXECUTE format('CREATE POLICY %s_manual_identity_officer_insert ON %I.gate_manual_identity_confirmations FOR INSERT TO %I WITH CHECK (true)', a, s, officer);
+    -- No INSERT policy for the officer role: confirmations are written only
+    -- through confirm_manual_identity(…) below (owner BYPASSRLS).
 
     -- ── append-only (both tables, every role incl. the owner) ───
     EXECUTE format($f$
@@ -329,6 +351,7 @@ BEGIN
         v_token text; v_payload text; v_claims jsonb; v_applicant uuid;
         v_id uuid; v_received timestamptz;
         v_prior record;
+        v_admitted boolean;
       BEGIN
         -- caller: the shared backend login, as the biometric service role
         IF session_user <> 'usrp_app' OR current_setting('role', true) IS DISTINCT FROM 'usrp_biometric_service' THEN
@@ -388,6 +411,12 @@ BEGIN
           RETURN jsonb_build_object('outcome', 'REFUSED', 'reason', 'UNKNOWN_TICKET');
         END IF;
 
+        -- Serialise against the gate admission of this application (the gate
+        -- takes the same transaction lock before it reads evidence), so the
+        -- evidence is either visible to the gate or known to be late.
+        PERFORM pg_advisory_xact_lock(hashtextextended('usrp.gate-identity:' || p_application_id::text, 0));
+        v_admitted := EXISTS (SELECT 1 FROM %1$I.gate_admissions AS ga WHERE ga.application_id = p_application_id);
+
         -- write once; a replayed record id is never a second row
         INSERT INTO %1$I.biometric_evidence (
           record_id, application_id, ticket_id, reference_source, method, consent_state,
@@ -413,13 +442,82 @@ BEGIN
         END IF;
 
         RETURN jsonb_build_object('outcome', 'RECORDED', 'evidenceId', v_id,
-          'applicantId', v_applicant, 'receivedAt', v_received);
+          'applicantId', v_applicant, 'receivedAt', v_received, 'afterAdmission', v_admitted);
       END
       $body$;
     $f$, s, upper(a));
     EXECUTE format('ALTER FUNCTION %I.record_biometric_evidence(uuid, uuid, uuid, text, text, text, text, text, text, integer, integer, text, text, text, text, text, text, text, text, timestamptz, text) OWNER TO usrp_biometric_evidence_owner', s);
     EXECUTE format('REVOKE ALL ON FUNCTION %I.record_biometric_evidence(uuid, uuid, uuid, text, text, text, text, text, text, integer, integer, text, text, text, text, text, text, text, text, timestamptz, text) FROM PUBLIC', s);
     EXECUTE format('GRANT EXECUTE ON FUNCTION %I.record_biometric_evidence(uuid, uuid, uuid, text, text, text, text, text, text, integer, integer, text, text, text, text, text, text, text, text, timestamptz, text) TO usrp_biometric_service', s);
+
+    -- ── 2b. the confirmation write boundary (four eyes, in the engine) ──
+    EXECUTE format($f$
+      CREATE OR REPLACE FUNCTION %1$I.confirm_manual_identity(
+        p_officer_id uuid,
+        p_record_id uuid,
+        p_reason_code text,
+        p_correlation_id text
+      )
+      RETURNS jsonb
+      LANGUAGE plpgsql
+      SECURITY DEFINER
+      SET search_path = pg_catalog, pg_temp
+      AS $body$
+      DECLARE
+        v_agency constant text := %2$L;
+        v_officer_role constant text := %3$L;
+        v_status text; v_roles text[]; v_officer_agency text;
+        v_ev record;
+        v_id uuid; v_confirmed_at timestamptz;
+      BEGIN
+        -- caller: the shared backend login, as this agency's officer role
+        IF session_user <> 'usrp_app' OR current_setting('role', true) IS DISTINCT FROM v_officer_role THEN
+          RAISE EXCEPTION 'manual identity requires the agency officer database role' USING ERRCODE = '42501';
+        END IF;
+        IF p_officer_id IS NULL
+           OR current_setting('usrp.manual_identity_actor_id', true) IS DISTINCT FROM p_officer_id::text THEN
+          RAISE EXCEPTION 'manual identity actor does not match transaction actor context' USING ERRCODE = '42501';
+        END IF;
+        SELECT oa.status, oa.roles, oa.agency::text INTO v_status, v_roles, v_officer_agency
+        FROM public_core.officer_accounts AS oa WHERE oa.officer_id = p_officer_id;
+        IF NOT FOUND OR v_status <> 'active' OR v_officer_agency IS DISTINCT FROM v_agency
+           OR NOT ('field_supervisor' = ANY(COALESCE(v_roles, ARRAY[]::text[]))) THEN
+          RAISE EXCEPTION 'manual identity requires an active field supervisor of this agency' USING ERRCODE = '42501';
+        END IF;
+
+        -- The owner bypasses RLS: SHADOW evidence is filtered here explicitly,
+        -- and answers exactly like a nonexistent record.
+        SELECT e.id, e.application_id, e.ticket_id, e.outcome, e.officer_id INTO v_ev
+        FROM %1$I.biometric_evidence AS e
+        WHERE e.record_id = p_record_id AND e.mode = 'ADVISORY';
+        IF NOT FOUND THEN
+          RETURN jsonb_build_object('outcome', 'NOT_FOUND');
+        END IF;
+        PERFORM pg_advisory_xact_lock(hashtextextended('usrp.gate-identity:' || v_ev.application_id::text, 0));
+        IF v_ev.outcome NOT IN ('NO_MATCH', 'INCONCLUSIVE') THEN
+          RETURN jsonb_build_object('outcome', 'NOT_REQUIRED');
+        END IF;
+        IF v_ev.officer_id = p_officer_id THEN
+          RETURN jsonb_build_object('outcome', 'SAME_OFFICER');
+        END IF;
+
+        INSERT INTO %1$I.gate_manual_identity_confirmations
+          (evidence_id, application_id, ticket_id, reason_code, confirmed_by_id, correlation_id)
+        VALUES (v_ev.id, v_ev.application_id, v_ev.ticket_id, p_reason_code, p_officer_id,
+                CASE WHEN p_correlation_id ~ '^[A-Za-z0-9._:-]{1,128}$' THEN p_correlation_id END)
+        ON CONFLICT (evidence_id) DO NOTHING
+        RETURNING id, confirmed_at INTO v_id, v_confirmed_at;
+        IF v_id IS NULL THEN
+          RETURN jsonb_build_object('outcome', 'ALREADY_CONFIRMED');
+        END IF;
+        RETURN jsonb_build_object('outcome', 'CONFIRMED', 'confirmationId', v_id,
+          'applicationId', v_ev.application_id, 'confirmedAt', v_confirmed_at);
+      END
+      $body$;
+    $f$, s, upper(a), officer);
+    EXECUTE format('ALTER FUNCTION %I.confirm_manual_identity(uuid, uuid, text, text) OWNER TO usrp_biometric_evidence_owner', s);
+    EXECUTE format('REVOKE ALL ON FUNCTION %I.confirm_manual_identity(uuid, uuid, text, text) FROM PUBLIC', s);
+    EXECUTE format('GRANT EXECUTE ON FUNCTION %I.confirm_manual_identity(uuid, uuid, text, text) TO %I', s, officer);
   END LOOP;
 END $$;
 

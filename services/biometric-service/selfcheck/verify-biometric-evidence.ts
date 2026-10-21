@@ -139,7 +139,8 @@ function sign(record: Record<string, unknown>, privateKeyPem = KEYS.privateKeyPe
 async function seed(): Promise<void> {
   await admin.begin(async (tx) => {
     for (const [id, roles, status] of [
-      [GATE, ['screening_officer'], 'active'], [GATE_2, ['screening_officer'], 'active'],
+      // GATE also holds field_supervisor, so the engine reaches the SAME_OFFICER rule.
+      [GATE, ['screening_officer', 'field_supervisor'], 'active'], [GATE_2, ['screening_officer'], 'active'],
       [SUPERVISOR, ['field_supervisor'], 'active'], [DISABLED, ['screening_officer'], 'disabled'],
       [REVIEWER, ['reviewer'], 'active'],
     ] as const) {
@@ -370,6 +371,8 @@ async function main(): Promise<void> {
     check('the gate officer cannot confirm (identity.manual.confirm) → 403', (await confirm(gate)).status === 403);
     const selfConfirm = await confirm(officerToken(GATE, ['field_supervisor']));
     check('the capturing officer cannot confirm their own evidence → 409 SAME_OFFICER', selfConfirm.status === 409 && selfConfirm.json['error'] === 'SAME_OFFICER', selfConfirm.text);
+    const notSupervisor = await confirm(officerToken(GATE_2, ['field_supervisor']));
+    check('a token claiming field_supervisor for an officer who is not one → 403 (engine)', notSupervisor.status === 403, notSupervisor.text);
     check('a SHADOW record cannot be confirmed (404)', (await confirm(supervisor, String(shadowNoMatch['recordId']))).status === 404);
     const confirmed = await confirm(supervisor);
     check('field supervisor confirms → 201 CONFIRMED', confirmed.status === 201 && confirmed.json['status'] === 'CONFIRMED', confirmed.text);
@@ -388,6 +391,14 @@ async function main(): Promise<void> {
     check('MATCH recorded', (await post(advisory, { record: match, signature: sign(match) })).status === 201);
     const admittedC = await admit(C, officerToken(GATE_2, ['screening_officer']));
     check('admission → NATIONAL_ID_CARD+CARD_PORTRAIT', admittedC.status === 200 && admittedC.json['identityMethod'] === 'NATIONAL_ID_CARD+CARD_PORTRAIT', admittedC.text);
+    const lateNoMatch = baseRecord(C, { mode: 'ADVISORY', outcome: 'NO_MATCH', matchScoreBp: 3_500 });
+    check('negative evidence after admission is still recorded', (await post(advisory, { record: lateNoMatch, signature: sign(lateNoMatch) })).status === 201);
+    const lateAudit = await admin<{ m: Record<string, unknown> }[]>`SELECT payload->'metadata' AS m FROM public_core.event_outbox
+      WHERE producer = 'biometric-service' AND payload->>'action' = 'BIOMETRIC_EVIDENCE_RECORDED' AND payload->'metadata'->>'recordId' = ${String(lateNoMatch['recordId'])}`;
+    check('…and its audit says afterAdmission: true (supervisor follow-up)', lateAudit[0]?.m['afterAdmission'] === true, JSON.stringify(lateAudit));
+    const matchAudit = await admin<{ m: Record<string, unknown> }[]>`SELECT payload->'metadata' AS m FROM public_core.event_outbox
+      WHERE producer = 'biometric-service' AND payload->>'action' = 'BIOMETRIC_EVIDENCE_RECORDED' AND payload->'metadata'->>'recordId' = ${String(match['recordId'])}`;
+    check('evidence before admission: afterAdmission: false', matchAudit[0]?.m['afterAdmission'] === false, JSON.stringify(matchAudit));
 
     console.log('\n── 10. Engine boundaries ──');
     const fnArgs = (tx: postgres.TransactionSql, actor: string) => tx`SELECT rdf_ops.record_biometric_evidence(
@@ -432,6 +443,33 @@ async function main(): Promise<void> {
 
     check('TRUNCATE evidence is refused (FK + statement trigger)', await sqlState(() => admin`TRUNCATE rdf_ops.biometric_evidence`) !== 'ok');
     check('evidence rows survived every mutation attempt', (await evidenceRows(B)).length === 2);
+
+    check('the officer role cannot insert a confirmation directly', await sqlState(() => sql.begin(async (tx) => {
+      await tx`SET LOCAL ROLE usrp_rdf_officer`;
+      await tx`INSERT INTO rdf_ops.gate_manual_identity_confirmations (evidence_id, application_id, ticket_id, reason_code, confirmed_by_id)
+        SELECT id, application_id, ticket_id, 'SUPERVISOR_INTERVIEW', ${SUPERVISOR}::uuid FROM rdf_ops.biometric_evidence WHERE application_id = ${C.app} LIMIT 1`;
+    })) !== 'ok');
+    check('confirm_manual_identity refuses a substituted actor (42501)', await sqlState(() => sql.begin(async (tx) => {
+      await tx`SET LOCAL ROLE usrp_rdf_officer`;
+      await tx`SELECT set_config('usrp.manual_identity_actor_id', ${GATE_2}, true)`;
+      await tx`SELECT rdf_ops.confirm_manual_identity(${SUPERVISOR}::uuid, ${String(lateNoMatch['recordId'])}::uuid, 'SUPERVISOR_INTERVIEW', 'b1-selfcheck')`;
+    })) === '42501');
+    check('confirm_manual_identity refuses a caller without the officer role (42501)', await sqlState(() => sql.begin(async (tx) => {
+      await tx`SET LOCAL ROLE usrp_biometric_service`;
+      await tx`SELECT set_config('usrp.manual_identity_actor_id', ${SUPERVISOR}, true)`;
+      await tx`SELECT rdf_ops.confirm_manual_identity(${SUPERVISOR}::uuid, ${String(lateNoMatch['recordId'])}::uuid, 'SUPERVISOR_INTERVIEW', 'b1-selfcheck')`;
+    })) === '42501');
+    check('the engine refuses an attempted outcome with NULL scores (NULL-safe CHECK)', await sqlState(() => admin`INSERT INTO rdf_ops.biometric_evidence (record_id, application_id, ticket_id, reference_source, method, consent_state, outcome,
+        threshold_policy_version, mode, device_id, key_id, record_digest, signature, officer_id, captured_at)
+        VALUES (${randomUUID()}, ${A.app}, ${A.ticket}, 'CARD_PORTRAIT', 'FACE_1_1_ON_DEVICE', 'GIVEN', 'MATCH', 'BIO-THRESHOLDS.v1', 'ADVISORY',
+        ${DEV}, ${'a'.repeat(64)}, ${'a'.repeat(64)}, ${`${'A'.repeat(86)}==`}, ${GATE}, now())`) === '23514');
+    check('the engine refuses NOT_ATTEMPTED without a reason (NULL-safe CHECK)', await sqlState(() => admin`INSERT INTO rdf_ops.biometric_evidence (record_id, application_id, ticket_id, reference_source, method, consent_state, outcome,
+        threshold_policy_version, mode, device_id, key_id, record_digest, signature, officer_id, captured_at)
+        VALUES (${randomUUID()}, ${A.app}, ${A.ticket}, 'NONE', 'NONE', 'DECLINED', 'NOT_ATTEMPTED', 'BIO-THRESHOLDS.v1', 'ADVISORY',
+        ${DEV}, ${'a'.repeat(64)}, ${'a'.repeat(64)}, ${`${'A'.repeat(86)}==`}, ${GATE}, now())`) === '23514');
+    const shadowAudit = await admin<{ m: Record<string, unknown> }[]>`SELECT payload->'metadata' AS m FROM public_core.event_outbox
+      WHERE producer = 'biometric-service' AND payload->>'action' = 'BIOMETRIC_EVIDENCE_RECORDED' AND payload->'metadata'->>'recordId' = ${String(shadowNoMatch['recordId'])}`;
+    check('a SHADOW audit carries no outcome', shadowAudit.length === 1 && !('outcome' in (shadowAudit[0]?.m ?? {})), JSON.stringify(shadowAudit));
 
     console.log('\n── 11. Events are PII-free ──');
     const payloads = JSON.stringify(await admin`SELECT payload FROM public_core.event_outbox WHERE producer = 'biometric-service' AND (payload->>'entityId' IN ${admin(ALL.map((c) => c.app))} OR payload->>'applicantId' IN ${admin(ALL.map((c) => c.applicant))})`)

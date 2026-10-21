@@ -159,7 +159,7 @@ export class RecordEvidenceService {
         case 'ALREADY_RECORDED':
           return { kind: 'ALREADY_RECORDED', recordId: record.recordId, mode: result.mode };
         case 'RECORDED': {
-          const events = recordedEvents(command, record, mode, result.applicantId, context);
+          const events = recordedEvents(command, record, mode, result.applicantId, result.afterAdmission, context);
           await uow.stage(events);
           durable = events;
           return {
@@ -215,6 +215,7 @@ function recordedEvents(
   record: EvidenceRecord,
   mode: RecordingMode,
   applicantId: string,
+  afterAdmission: boolean,
   context: EventContext,
 ): readonly USRPEvent[] {
   const audit: AuditEvent = {
@@ -225,10 +226,15 @@ function recordedEvents(
     action: 'BIOMETRIC_EVIDENCE_RECORDED',
     performedBy: command.officerId,
     agency: command.agency,
+    // SHADOW is stored, never shown: its outcome stays in the evidence table
+    // (B3 reads it there) and never travels in the audit stream.
     metadata: {
       recordId: record.recordId,
       mode,
-      outcome: record.outcome,
+      ...(mode === 'ADVISORY' ? { outcome: record.outcome } : {}),
+      // Arrived after the gate admitted the application: evidence never undoes
+      // an admission, so a negative here is for supervisor follow-up.
+      afterAdmission,
       referenceSource: record.referenceSource,
       method: record.method,
       consentState: record.consentState,

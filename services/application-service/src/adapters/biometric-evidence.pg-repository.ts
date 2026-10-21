@@ -15,7 +15,6 @@ import { schemaForAgency } from '../domain/agency-schema.js';
 import {
   EVIDENCE_OUTCOMES,
   isManualIdentityReason,
-  requiresManualIdentity,
   type EvidenceOutcome,
   type ManualIdentityReason,
 } from '../domain/gate-identity.js';
@@ -82,8 +81,18 @@ function toView(row: EvidenceRow): EvidenceView {
   };
 }
 
-function isUniqueViolation(err: unknown): boolean {
-  return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === '23505';
+function isInsufficientPrivilege(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === '42501';
+}
+
+type ConfirmRefusal = 'NOT_FOUND' | 'NOT_REQUIRED' | 'ALREADY_CONFIRMED' | 'SAME_OFFICER';
+const CONFIRM_REFUSALS: ReadonlySet<string> = new Set<ConfirmRefusal>(['NOT_FOUND', 'NOT_REQUIRED', 'ALREADY_CONFIRMED', 'SAME_OFFICER']);
+
+interface ConfirmFunctionAnswer {
+  readonly outcome: string;
+  readonly confirmationId?: unknown;
+  readonly applicationId?: unknown;
+  readonly confirmedAt?: unknown;
 }
 
 export class PgBiometricEvidenceRepository implements BiometricEvidenceRepository {
@@ -123,39 +132,40 @@ export class PgBiometricEvidenceRepository implements BiometricEvidenceRepositor
     try {
       return await sql.begin(async (tx): Promise<ConfirmManualIdentityOutcome> => {
         await tx`SET LOCAL ROLE ${sql(actor.dbRole)}`;
-        const rows = await tx<{ id: string; application_id: string; ticket_id: string; outcome: string; officer_id: string; confirmed: boolean }[]>`
-          SELECT e.id, e.application_id, e.ticket_id, e.outcome, e.officer_id,
-                 EXISTS (SELECT 1 FROM ${schema}.gate_manual_identity_confirmations c WHERE c.evidence_id = e.id) AS confirmed
-          FROM ${schema}.biometric_evidence AS e
-          WHERE e.record_id = ${recordId}
+        await tx`SELECT set_config('usrp.manual_identity_actor_id', ${actor.officerId}, true)`;
+        // rls/0034 confirm_manual_identity: the engine re-checks the role, the
+        // bound actor, that they are an active field_supervisor of this agency,
+        // the evidence (ADVISORY, negative, not their own capture) and writes once.
+        const answer = await tx<{ result: ConfirmFunctionAnswer }[]>`
+          SELECT ${schema}.confirm_manual_identity(
+            ${actor.officerId}::uuid, ${recordId}::uuid, ${reasonCode}, ${actor.correlationId}
+          ) AS result
         `;
-        const ev = rows[0];
-        if (!ev) return { kind: 'NOT_FOUND' };
-        if (!requiresManualIdentity(outcomeOf(ev.outcome))) return { kind: 'NOT_REQUIRED' };
-        if (ev.confirmed) return { kind: 'ALREADY_CONFIRMED' };
-        if (ev.officer_id === actor.officerId) return { kind: 'SAME_OFFICER' };
-        const inserted = await tx<{ id: string; confirmed_at: Date }[]>`
-          INSERT INTO ${schema}.gate_manual_identity_confirmations
-            (evidence_id, application_id, ticket_id, reason_code, confirmed_by_id, correlation_id)
-          VALUES (${ev.id}, ${ev.application_id}, ${ev.ticket_id}, ${reasonCode}, ${actor.officerId},
-                  ${/^[A-Za-z0-9._:-]{1,128}$/.test(actor.correlationId) ? actor.correlationId : null})
-          RETURNING id, confirmed_at
-        `;
-        const row = inserted[0];
-        if (!row) throw new ApplicationPersistenceError('Confirmation insert returned no row');
+        const result = answer[0]?.result;
+        if (result === undefined) throw new ApplicationPersistenceError('confirm_manual_identity returned no row');
+        if (result.outcome !== 'CONFIRMED') {
+          if (!CONFIRM_REFUSALS.has(result.outcome)) {
+            throw new ApplicationPersistenceError('confirm_manual_identity returned an unknown outcome');
+          }
+          return { kind: result.outcome as ConfirmRefusal };
+        }
+        if (typeof result.confirmationId !== 'string' || typeof result.applicationId !== 'string'
+            || typeof result.confirmedAt !== 'string') {
+          throw new ApplicationPersistenceError('confirm_manual_identity returned a malformed answer');
+        }
         const outcome: ConfirmManualIdentityOutcome = {
           kind: 'CONFIRMED',
-          confirmationId: row.id,
+          confirmationId: result.confirmationId,
           recordId,
-          applicationId: ev.application_id,
-          confirmedAt: row.confirmed_at.toISOString(),
+          applicationId: result.applicationId,
+          confirmedAt: new Date(result.confirmedAt).toISOString(),
         };
         await stageEvents(tx, stage(outcome));
         return outcome;
       });
     } catch (err) {
-      // Two supervisors in the same instant: the UNIQUE index decides.
-      if (isUniqueViolation(err)) return { kind: 'ALREADY_CONFIRMED' };
+      // Not an active field supervisor of this agency (engine, 42501).
+      if (isInsufficientPrivilege(err)) return { kind: 'FORBIDDEN' };
       if (err instanceof ApplicationPersistenceError) throw err;
       throw new ApplicationPersistenceError('Recording the manual identity confirmation failed', { cause: err });
     }

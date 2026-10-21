@@ -33,7 +33,14 @@ export interface RecordEvidenceInput {
 export type EngineRefusal = 'UNKNOWN_DEVICE' | 'DEVICE_WRONG_AGENCY' | 'DEVICE_REVOKED' | 'KEY_MISMATCH' | 'UNKNOWN_TICKET';
 
 export type RecordEvidenceResult =
-  | { readonly outcome: 'RECORDED'; readonly evidenceId: string; readonly applicantId: string; readonly receivedAt: string }
+  | {
+      readonly outcome: 'RECORDED';
+      readonly evidenceId: string;
+      readonly applicantId: string;
+      readonly receivedAt: string;
+      /** The application was already admitted at the gate when this arrived. */
+      readonly afterAdmission: boolean;
+    }
   | { readonly outcome: 'ALREADY_RECORDED'; readonly evidenceId: string; readonly mode: RecordingMode; readonly receivedAt: string }
   | { readonly outcome: 'REPLAY_CONFLICT' }
   | { readonly outcome: 'REFUSED'; readonly reason: EngineRefusal };

@@ -12,6 +12,7 @@
 //   POST /v1/applications/biometric-evidence/manual-identity      officer  identity.manual.confirm
 //     { recordId, reasonCode }
 //     201 { status: CONFIRMED, confirmationId, recordId, confirmedAt }
+//     403 FORBIDDEN (engine: not an active field supervisor of the agency)
 //     404 NOT_FOUND | 409 NOT_REQUIRED | ALREADY_CONFIRMED | SAME_OFFICER
 // ══════════════════════════════════════════════════════════════════
 
@@ -109,6 +110,8 @@ export function biometricEvidenceRoutes(service: BiometricEvidenceService, verif
             case 'ALREADY_CONFIRMED':
             case 'SAME_OFFICER':
               return { status: 409, body: { error: outcome.kind } };
+            case 'FORBIDDEN':
+              return { status: 403, body: { error: 'FORBIDDEN' } };
           }
         } catch (err) {
           throw mapError(err);

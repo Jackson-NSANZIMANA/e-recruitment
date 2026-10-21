@@ -66,8 +66,15 @@ function toResult(raw: unknown): RecordEvidenceResult {
   const r = raw as Record<string, unknown>;
   switch (r['outcome']) {
     case 'RECORDED':
-      if (typeof r['evidenceId'] !== 'string' || typeof r['applicantId'] !== 'string') break;
-      return { outcome: 'RECORDED', evidenceId: r['evidenceId'], applicantId: r['applicantId'], receivedAt: instant(r['receivedAt']) };
+      if (typeof r['evidenceId'] !== 'string' || typeof r['applicantId'] !== 'string'
+          || typeof r['afterAdmission'] !== 'boolean') break;
+      return {
+        outcome: 'RECORDED',
+        evidenceId: r['evidenceId'],
+        applicantId: r['applicantId'],
+        receivedAt: instant(r['receivedAt']),
+        afterAdmission: r['afterAdmission'],
+      };
     case 'ALREADY_RECORDED':
       if (typeof r['evidenceId'] !== 'string' || (r['mode'] !== 'SHADOW' && r['mode'] !== 'ADVISORY')) break;
       return { outcome: 'ALREADY_RECORDED', evidenceId: r['evidenceId'], mode: r['mode'], receivedAt: instant(r['receivedAt']) };

@@ -121,6 +121,17 @@ const MODEL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
 const MODEL_VERSION_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,31}$/;
 const POLICY_VERSION_RE = /^[A-Z][A-Za-z0-9._-]{0,31}$/;
 const ISO_INSTANT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z$/;
+
+/**
+ * Date.parse rolls impossible calendar values over (2026-02-30 → March 2),
+ * which PostgreSQL then refuses. Accept only an instant whose calendar and
+ * clock fields survive a round trip. PURE.
+ */
+function isRealInstant(value: string): boolean {
+  const ms = Date.parse(value);
+  if (Number.isNaN(ms)) return false;
+  return new Date(ms).toISOString().slice(0, 19) === value.slice(0, 19);
+}
 /** Ed25519 signatures are 64 bytes: exactly 86 base64 symbols and "==". */
 const SIGNATURE_RE = /^[A-Za-z0-9+/]{86}==$/;
 const BASE64ISH_RE = /^[A-Za-z0-9+/_-]+={0,2}$/;
@@ -194,7 +205,7 @@ export function parseEvidenceRecord(raw: unknown): EvidenceRecord | null {
   if (typeof r['thresholdPolicyVersion'] !== 'string' || !POLICY_VERSION_RE.test(r['thresholdPolicyVersion'])) return null;
   if (!oneOf(RECORDING_MODES, r['mode'])) return null;
   if (typeof r['capturedAt'] !== 'string' || !ISO_INSTANT_RE.test(r['capturedAt'])
-      || Number.isNaN(Date.parse(r['capturedAt']))) return null;
+      || !isRealInstant(r['capturedAt'])) return null;
 
   return {
     schema: EVIDENCE_SCHEMA,

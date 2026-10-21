@@ -43,7 +43,9 @@ export type ConfirmManualIdentityOutcome =
   | { readonly kind: 'NOT_REQUIRED' }
   | { readonly kind: 'ALREADY_CONFIRMED' }
   /** The supervisor captured this evidence themselves. */
-  | { readonly kind: 'SAME_OFFICER' };
+  | { readonly kind: 'SAME_OFFICER' }
+  /** The engine (rls/0034) refused: not an active field supervisor of this agency. */
+  | { readonly kind: 'FORBIDDEN' };
 
 export interface BiometricEvidenceRepository {
   list(actor: OfficerActor, applicationId: string): Promise<EvidenceListOutcome>;

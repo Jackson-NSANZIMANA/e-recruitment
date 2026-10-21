@@ -154,6 +154,10 @@ export class PgGateAdmissionRepository implements GateAdmissionRepository {
       // own agency role — rls/0034 hides SHADOW rows from it, so they cannot
       // influence the admission. Evidence never refuses: an unconfirmed
       // negative only asks for supervised manual identity.
+      // Serialised with rls/0034's evidence and confirmation functions on one
+      // per-application lock: evidence is either seen here or recorded as
+      // arriving after this admission (afterAdmission), never lost in a race.
+      await tx`SELECT pg_advisory_xact_lock(hashtextextended(${'usrp.gate-identity:' + claims.applicationId}, 0))`;
       const evidenceRows = await tx<{ id: string; outcome: string; confirmation_id: string | null; confirmed_by_id: string | null }[]>`
         SELECT e.id, e.outcome, c.id AS confirmation_id, c.confirmed_by_id
         FROM ${schema}.biometric_evidence AS e

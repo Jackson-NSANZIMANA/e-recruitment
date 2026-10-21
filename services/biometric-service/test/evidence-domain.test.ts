@@ -211,6 +211,8 @@ test('schema: every key is required and every value is typed and bounded', () =>
     ['mode', 'AUTOMATIC'],
     ['capturedAt', '2026-10-19 07:15:00'],
     ['capturedAt', '2026-13-45T99:99:99Z'],
+    ['capturedAt', '2026-02-30T08:00:00Z'],
+    ['capturedAt', '2026-10-19T23:59:60Z'],
   ];
   for (const [key, value] of cases) {
     assert.equal(parseEvidenceRecord(record({ [key]: value })), null, `${key}=${JSON.stringify(value)}`);
