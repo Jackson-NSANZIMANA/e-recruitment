@@ -53,6 +53,7 @@ x-env: &env
   SCHEDULING_SERVICE_BASE_URL: http://scheduling-service:4007
   IDENTITY_SERVICE_BASE_URL: http://identity-service:4001
   FIELD_SYNC_SERVICE_BASE_URL: http://field-sync-service:4009
+  BIOMETRIC_SERVICE_BASE_URL: http://biometric-service:4003
   DOCUMENT_FORENSICS_BASE_URL: http://document-forensics-service:4004
   NIDA_BASE_URL: http://usrp-nida-mock:3100
   NESA_BASE_URL: http://usrp-nesa-mock:3101

@@ -67,7 +67,10 @@ export interface EdgeUpstreamConfig {
   readonly applicationBaseUrl: string;
   readonly schedulingBaseUrl: string;
   readonly fieldSyncBaseUrl: string;
-  /** ADR-037. Defaulted so an existing local .env keeps booting. */
+  /**
+   * ADR-037. Defaulted OUTSIDE production only, so an existing local .env
+   * keeps booting; a production edge refuses to boot without it.
+   */
   readonly biometricBaseUrl: string;
   /** Per-call upstream deadline. A browser request cannot outlive this. */
   readonly timeoutMs: number;
@@ -92,6 +95,12 @@ export function loadEdgeUpstreamConfig(source: EnvSource = process.env): EdgeUps
     },
     source,
   );
+  const rawBiometric = source['BIOMETRIC_SERVICE_BASE_URL'];
+  if (source['NODE_ENV'] === 'production' && (rawBiometric === undefined || rawBiometric.trim() === '')) {
+    throw new Error(
+      'BIOMETRIC_SERVICE_BASE_URL is required in production: the localhost default would point the edge at itself.',
+    );
+  }
   return deepFreeze({
     iamBaseUrl: env.IAM_BASE_URL,
     identityBaseUrl: env.IDENTITY_SERVICE_BASE_URL,
