@@ -123,6 +123,19 @@ export const UPSTREAM = Object.freeze({
   syncScores: op('syncScores', 'field-sync', 'POST', '/v1/field-sync/scores', 'officer-jwt'),
   resolveConflict: op('resolveConflict', 'field-sync', 'POST', '/v1/field-sync/conflicts/resolve', 'officer-jwt'),
 
+  // application-service — operational-read.controller.ts (ADR-039). Agency-scoped
+  // officer reads; read-only, run under the officer's own agency DB role.
+  adminCampaignList: op('adminCampaignList', 'application', 'GET', '/v1/campaigns/admin', 'officer-jwt'),
+  adminCampaignDetail: op('adminCampaignDetail', 'application', 'GET', '/v1/campaigns/admin/detail', 'officer-jwt'),
+  searchApplications: op('searchApplications', 'application', 'GET', '/v1/applications/search', 'officer-jwt'),
+  venueRoster: op('venueRoster', 'application', 'GET', '/v1/venue-roster', 'officer-jwt'),
+
+  // identity-service — erasure-request.controller.ts / erasure.controller.ts (ADR-020,
+  // ADR-015). The DPO queue, the accountable decline, and the gated execution road.
+  erasureQueue: op('erasureQueue', 'identity', 'GET', '/v1/identities/erasure-requests', 'officer-jwt'),
+  erasureDecline: op('erasureDecline', 'identity', 'POST', '/v1/identities/erasure-requests/decline', 'officer-jwt'),
+  erasureExecute: op('erasureExecute', 'identity', 'POST', '/v1/identities/erasure', 'officer-jwt'),
+
   // iam-service — officer-admin.controller.ts (ADR-036). The agency
   // administrator's officer lifecycle, under the administrator's own officer
   // credential; iam-service re-checks the permission and the rls/0033

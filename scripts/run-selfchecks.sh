@@ -192,6 +192,7 @@ run_ts "deployment hygiene (EXPOSE ↔ .env.example port map, non-root, exec-for
 # existed being read as fact for a month.
 run_ts "edge-gateway: contract drift (registry ↔ OpenAPI ↔ upstream catalogue)" services/edge-gateway/selfcheck/verify-edge-contract.ts
 run_ts "edge-gateway: BUILD-001 live campaign HTTP/session/CSRF/idempotency boundary" services/edge-gateway/selfcheck/verify-campaign-http-boundary.ts
+run_ts "edge-gateway: operational reads + DPO queue/decision boundary (ADR-039)" services/edge-gateway/selfcheck/verify-operational-reads-boundary.ts
 # This second HTTP proof does not stub either side: a real IAM-issued officer
 # token traverses the Edge persistent session and the application controller,
 # and the result/actor/audit/outbox are read back from PostgreSQL. It creates an
@@ -294,6 +295,7 @@ run_ts "application-service: officer auth + RLS"  services/application-service/s
 # not have, and every RNP officer's detail read answered 500. An unregistered
 # proof is not a proof — it is a file. Registered so that cannot recur.
 run_ts "application-service: officer single-record reads (by-id + status-history)" services/application-service/selfcheck/verify-application-detail-reads.ts
+run_ts "application-service: operational read models (admin campaigns, application search + cursor, venue roster; ADR-039)" services/application-service/selfcheck/verify-operational-reads.ts
 run_ts "application-service: officer lifecycle (medical→final→accept)" services/application-service/selfcheck/verify-officer-lifecycle-slice.ts
 run_ts "application-service: auto-withdrawal on accept (ADR-017)" services/application-service/selfcheck/verify-auto-withdrawal-slice.ts
 run_ts "iam-service: token issuer (mint → officer endpoint accepts)" services/iam-service/selfcheck/verify-iam-issuer-slice.ts
