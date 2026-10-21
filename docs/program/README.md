@@ -79,17 +79,17 @@ Parallel sessions must not pick "the next number". These are reserved; use only 
 | S00 Programme integrity | done | BE [#34](https://github.com/Jackson-NSANZIMANA/e-recruitment/pull/34) [#35](https://github.com/Jackson-NSANZIMANA/e-recruitment/pull/35) [#36](https://github.com/Jackson-NSANZIMANA/e-recruitment/pull/36) · FE [#27](https://github.com/Jackson-NSANZIMANA/e-recruitment-ui/pull/27) [#28](https://github.com/Jackson-NSANZIMANA/e-recruitment-ui/pull/28) [#29](https://github.com/Jackson-NSANZIMANA/e-recruitment-ui/pull/29) | mains protected (required checks, strict, admins included); evidence bundle on every run; SECRET-ROTATION closed (§5) |
 | S01 Officer lifecycle | in review | BE (this PR) | ADR-036, rls/0033; 8 edge operations; unblocks S06 and B1 once merged |
 | S02 Frontend foundations | ready | | also: stale applicant `home.tsx` header comment (W0-03 leftover) |
-| S03 Release engineering | ready | | also: make the backend unit suites a required check (run today only by the evidence job) |
+| S03 Release engineering | in review | BE [#38](https://github.com/Jackson-NSANZIMANA/e-recruitment/pull/38) · FE [#32](https://github.com/Jackson-NSANZIMANA/e-recruitment-ui/pull/32) | ADR-038 / ADR-FE-014; owner: add `Unit tests (every package)` as a required check, then tag `v0.1.0-rc1` (commands in the PR hand-off) |
 | B1 Biometric evidence | waiting on S01 | | |
 | S04 Read models | waiting on S01 | | |
 | S05 Campaign Studio | waiting on S02 (+S04 list) | | |
 | S06 Officer workspace + staff admin | waiting on S01, S02 | | |
-| S07 Deployment + staging | waiting on S03 | | owner: hosting decision |
+| S07 Deployment + staging | waiting on S03 merge | | owner: hosting decision; set the SPA public origins (ADR-FE-014) |
 | S08 Field Station | waiting on S02 | | owner: pilot agency, device model |
 | S09 Fleet + venue ops | waiting on S04 | | |
 | S10a Citizen timeline | waiting on S04 | | |
 | S10b Citizen screens | waiting on S10a, S02 | | |
-| S11a Observability | waiting on S03 | | |
+| S11a Observability | waiting on S03 merge | | `/version` on every service and SPA (ADR-038) |
 | S11b Backup + restore | waiting on S07 | | |
 | B2 Biometric capture | waiting on S08, B1 | | owner: model licence |
 | B3 Biometric evaluation | waiting on B2 | | owner: evaluation dataset |

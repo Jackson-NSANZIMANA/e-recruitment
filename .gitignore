@@ -93,3 +93,6 @@ packages/shared-database/.drift-check/
 
 # Rehearsal stage manifest written by `pnpm rehearse` (dev/training only)
 .rehearsal/
+
+# rehearse.sh (images stack) dev SMS inbox
+.dev-sms-images/

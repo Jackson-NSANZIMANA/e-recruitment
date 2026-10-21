@@ -44,4 +44,6 @@ export type {
   RequestContext,
   Route,
   RouteHandler,
+  VersionInfo,
 } from './types.js';
+export { versionBody, type VersionBody } from './version.js';

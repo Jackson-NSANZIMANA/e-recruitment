@@ -185,6 +185,14 @@ function summariseTests(packages) {
 async function operationInventory() {
   const registry = join(ROOT, 'services/edge-gateway/dist/domain/edge-operations.js');
   if (!existsSync(registry)) return { status: 'not-available', reason: 'edge-gateway is not built (run pnpm build first)' };
+  // The edge's own projection (ADR-038): GET /version reports the same hash,
+  // so a running edge and this bundle compare by one value. The inline
+  // projection below is the fallback for a build that predates it.
+  const fingerprints = join(ROOT, 'services/edge-gateway/dist/domain/version-fingerprints.js');
+  if (existsSync(fingerprints)) {
+    const items = (await import(pathToFileURL(fingerprints).href)).operationInventory();
+    return { status: 'available', source: 'services/edge-gateway/src/domain/version-fingerprints.ts (built)', count: items.length, sha256: sha256(JSON.stringify(items)), items };
+  }
   const { EDGE_OPERATIONS } = await import(pathToFileURL(registry).href);
   const items = Object.values(EDGE_OPERATIONS)
     .map((op) => ({

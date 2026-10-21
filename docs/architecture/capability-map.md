@@ -73,6 +73,7 @@ Legend: ✅ built and proven by a live selfcheck · 🟡 partial · ❌ missing 
 | Real G2G (NIDA/NESA/HEC/RIB) authorization | ❌ mocks only |
 | Real biometric matcher or ratified manual-admission policy | ❌ |
 | Backups/PITR, KMS keys, load and failure testing | ❌ |
+| G1 supply chain: signed, scanned images with SBOMs | ✅ (S03, ADR-038 / ADR-FE-014) once the PRs merge and the first `v0.1.0-rc1` release is cut |
 
 ## 5. Rehearsal and evidence
 
@@ -80,8 +81,12 @@ Legend: ✅ built and proven by a live selfcheck · 🟡 partial · ❌ missing 
 |---|---|---|
 | Synthetic rehearsal: `pnpm rehearse` | ✅ **(S00)** | ADR-035, `tools/rehearsal`: stages REH-RDF/RNP/RCS campaigns through the real control plane only (first-admin provisioner, then `/edge/v1/**` with CSRF and Idempotency-Key); same-day re-runs idempotent; refuses production and non-local targets. Frontend pair: rehearsal markers on campaigns and the Exam Pass, and the opt-in live journey `apps/applicant-portal/e2e/live-rehearsal.spec.ts` (`USRP_LIVE=1`) |
 | CI evidence bundle | ✅ **(S00)** | `scripts/evidence-bundle.mjs`, *Evidence bundle* job; parser tests in `scripts/test/evidence-bundle.test.mjs` |
-| Unit suites in CI | 🟡 **(S00)** | The `test` scripts of 7 packages (edge projection tests included) were not run by any CI job; `pnpm verify` runs selfchecks only. The evidence job now runs them and goes red on a failure, but it is not a required check (S03) |
+| Unit suites in CI | ✅ **(S03)** | Job `Unit tests (every package)` runs every package's `test` script and `pnpm test:scripts`; making it a required check is the owner's branch-protection step |
 | Tracked-secrets gate in CI | ✅ **(S00)** | `scripts/check-tracked-secrets.mjs` selftest + check, first steps of `Security Scan` (no install) |
+| Deployable images (12 services) | ✅ **(S03)** | ADR-038: digest-pinned, read-only/cap-drop-ALL capable, `HEALTHCHECK`, 232–243 MB (budget 300). CI `images` job: Trivy (CRITICAL/HIGH blocking, expiring exceptions), CycloneDX SBOM; on main pushed, cosign-signed (keyless) and SBOM-attested to GHCR |
+| `GET /version` on every service | ✅ **(S03)** | shared-http; edge adds contract + policy hashes; deployment-hygiene proof checks it live |
+| Release evidence bundle | ✅ **(S03)** · first tag pending | `scripts/release-bundle.mjs`, `release.yml` on `v*` (promotes signed digests, verifies, publishes `release-<tag>.json`); dry run on every PR |
+| Platform from its images | ✅ **(S03)** | `infrastructure/images/rehearse.sh`: 12 service + 2 SPA images, `pnpm rehearse` and the live journey green (2026-10-19) |
 
 ## 6. Recommended build order from here
 
