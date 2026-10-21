@@ -668,7 +668,7 @@ paths:
       tags: [gate]
       x-usrp-session: officer
       x-usrp-permission: admission.gate
-      x-usrp-outcomes: { 409: [ALREADY_ADMITTED, NOT_ADMISSIBLE, IDENTITY_MISMATCH, WRONG_VENUE, TOO_EARLY, EXPIRED], 422: [INVALID_TICKET] }
+      x-usrp-outcomes: { 409: [ALREADY_ADMITTED, NOT_ADMISSIBLE, IDENTITY_MISMATCH, WRONG_VENUE, TOO_EARLY, EXPIRED, MANUAL_IDENTITY_REQUIRED], 422: [INVALID_TICKET] }
       x-usrp-csrf: true
       x-usrp-retry-on-g2g: false
       requestBody:
