@@ -228,7 +228,11 @@ export function withOfficerSession(
       }
       // WHAT, after WHO and WHICH AGENCY (BUILD-004 §D). Refused before any
       // upstream spend; the owning service enforces the same rule again.
-      if (operation.permission !== undefined && !rolesHavePermission(session.roles, operation.permission)) {
+      if (
+        operation.permission !== undefined &&
+        !rolesHavePermission(session.roles, operation.permission) &&
+        !(operation.alsoPermission ?? []).some((p) => rolesHavePermission(session.roles, p))
+      ) {
         deps.audit.log({
           action: 'EDGE_PERMISSION_DENIED',
           operationId,

@@ -185,11 +185,11 @@ async function seed(): Promise<void> {
     await seedApplicant(applicantId(s.n), s.n);
   }
   // n=2 and n=3 share one exact instant (microseconds included).
-  const [{ tie, tie_day }] = await admin<{ tie: string; tie_day: string }[]>`
+  const [tieRow] = await admin<{ tie: string; tie_day: string }[]>`
     SELECT (date_trunc('second', now()) - interval '6 days' + interval '123456 microseconds')::text AS tie,
            ((date_trunc('second', now()) - interval '6 days') AT TIME ZONE 'Africa/Kigali')::date::text AS tie_day`;
-  tieInstant = tie;
-  tieDay = tie_day;
+  tieInstant = tieRow?.tie ?? '';
+  tieDay = tieRow?.tie_day ?? '';
   for (const s of SEEDS) {
     const submittedAt = s.n === 2 || s.n === 3 ? tieInstant : null;
     await admin.begin(async (tx) => {
@@ -410,9 +410,9 @@ async function main(): Promise<void> {
     check('bad district → 400', (await get(`/v1/venue-roster?campaign=${CODE_OPEN}&district=ATLANTIS&examDate=${EXAM_DATE}`, SCREENING)).status === 400);
 
     console.log('\n── 8. The reads write nothing ──');
-    const [{ writes }] = await admin<{ writes: string }[]>`
+    const [writesRow] = await admin<{ writes: string }[]>`
       SELECT (SELECT count(*) FROM public_core.campaign_lifecycle_history WHERE campaign_id = ${C_OPEN})::text AS writes`;
-    check('lifecycle history unchanged by reads', writes === '2', String(writes));
+    check('lifecycle history unchanged by reads', writesRow?.writes === '2', String(writesRow?.writes));
   } finally {
     await cleanup();
     await server.stop();
