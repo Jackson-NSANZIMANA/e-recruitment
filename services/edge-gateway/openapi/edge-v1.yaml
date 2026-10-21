@@ -710,6 +710,8 @@ paths:
         display a result.
       tags: [gate]
       x-usrp-session: officer
+      x-usrp-permission: biometric.verify
+      x-usrp-outcomes: {}
       x-usrp-csrf: false
       x-usrp-retry-on-g2g: true
       responses:
@@ -737,6 +739,8 @@ paths:
         Evidence never admits or refuses anyone by itself.
       tags: [gate]
       x-usrp-session: officer
+      x-usrp-permission: biometric.verify
+      x-usrp-outcomes: { 409: [REPLAY_CONFLICT, BIOMETRIC_OFF, MODE_MISMATCH], 422: [INVALID_EVIDENCE] }
       x-usrp-csrf: true
       x-usrp-retry-on-g2g: false
       requestBody:
@@ -804,6 +808,8 @@ paths:
         NATIONAL_ID_CARD+SUPERVISOR. Never retried by the edge.
       tags: [gate]
       x-usrp-session: officer
+      x-usrp-permission: identity.manual.confirm
+      x-usrp-outcomes: { 409: [NOT_REQUIRED, ALREADY_CONFIRMED, SAME_OFFICER] }
       x-usrp-csrf: true
       x-usrp-retry-on-g2g: false
       requestBody:
@@ -842,6 +848,8 @@ paths:
         signature or officer id. `?applicationId=` is a query parameter.
       tags: [applications]
       x-usrp-session: officer
+      x-usrp-permission: biometric.evidence.read
+      x-usrp-outcomes: {}
       x-usrp-csrf: false
       x-usrp-retry-on-g2g: true
       parameters:
