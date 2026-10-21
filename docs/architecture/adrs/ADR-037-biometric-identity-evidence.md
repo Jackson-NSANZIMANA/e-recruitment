@@ -269,7 +269,16 @@ must never influence an outcome, would hold every candidate at
 corrected in B2), the erasure treatment of scores, and the DPIA rows.
 
 ## Consequences
-- Proven live by `services/biometric-service/selfcheck/verify-biometric-evidence.ts`.
+- Proven live by `services/biometric-service/selfcheck/verify-biometric-evidence.ts`
+  (67 checks), with the gate, field-sync and permission proofs updated.
+- Rehearsal: `national-pilot-day` declares `biometricMode: SHADOW` for RDF;
+  `pnpm rehearse` checks it through `getBiometricPolicy`, and
+  `pnpm rehearse --biometric-shadow A` records a synthetic signed SHADOW
+  record for persona A through the real edge and proves it invisible to the
+  officer read (dev-only helper in `tools/rehearsal/src/biometric.ts`, until B2).
+- Operators: set `BIOMETRIC_MODE_<AGENCY>` (default `OFF`); the edge reaches
+  biometric-service at `BIOMETRIC_SERVICE_BASE_URL` (default
+  `http://localhost:4003`). biometric-service now needs `DATABASE_URL`.
 - B2 builds the on-device pipeline against §4 and `getBiometricPolicy`; B3
   evaluates SHADOW rows and replaces the placeholder thresholds.
 - The supervisor confirmation needs the supervisor's own session (their

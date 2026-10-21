@@ -57,7 +57,7 @@ Legend: ✅ built and proven by a live selfcheck · 🟡 partial · ❌ missing 
 | The tablet app itself | ❌ | no app in `e-recruitment-ui/apps`; `OFFLINE_CAPTURE_CAN_SYNC=false` |
 | Officer login, device enrolment | ✅ backend+edge | |
 | QR scan → single-use admission record | ✅ backend+edge **(S)** · ✅ console screen | BUILD-003, ADR-034: one admission per QR (DB-unique), national ID card bound, every scan logged; advances to PHYSICAL_TEST_SCHEDULED; field scores require it. Online only. |
-| Biometric check-in | 🟡 | service exists; matcher is a **mock that always passes** |
+| Biometric check-in | 🟡 evidence model live, on-device capture B2 **(B1)** | ADR-037, rls/0034: device-signed `USRP-BIO-EVIDENCE.v1` records (Ed25519, verified against `field_devices`), modes OFF/SHADOW/ADVISORY (pilot SHADOW), evidence never a verdict: `NO_MATCH`/`INCONCLUSIVE` → supervised manual identity (`confirmManualIdentity`, field supervisor), gate records `NATIONAL_ID_CARD+CARD_PORTRAIT` / `+SUPERVISOR`; `NIDA_PORTRAIT` fails closed; no image, frame or embedding accepted (`verify-biometric-evidence.ts`); edge `getBiometricPolicy`, `recordBiometricEvidence`, `getBiometricEvidence`, `confirmManualIdentity`; rehearsal records a SHADOW row for persona A. The server-side mock matcher is dev-only |
 | Venue document clearing by the check-in post | ✅ backend+edge **(S)** · ❌ screen | ADR-032 `document.verify.venue` |
 | Walk-in register / vet (RDF) | ✅ (permissioned) | |
 | Physical test capture, signed, offline CRDT sync | ✅ service · ❌ client | field-sync-service; fixed metric schema for all agencies. `enrollFieldDevice`, `syncFieldScores` and `resolveFieldSyncConflict` are frontend registry IDs only (untyped) |
@@ -72,7 +72,7 @@ Legend: ✅ built and proven by a live selfcheck · 🟡 partial · ❌ missing 
 | Security sign-off of the anonymous surface (4 → 7) | ❌ `docs/security/anonymous-surface-review.md` |
 | CAPTCHA/WAF in front of onboarding; SMS cost cap | ❌ |
 | Real G2G (NIDA/NESA/HEC/RIB) authorization | ❌ mocks only |
-| Real biometric matcher or ratified manual-admission policy | ❌ |
+| Real biometric matcher or ratified manual-admission policy | 🟡 manual-identity policy built (ADR-037, owner decisions; DPO sign-off pending); on-device matcher B2, thresholds B3 |
 | Backups/PITR, KMS keys, load and failure testing | ❌ |
 | G1 supply chain: signed, scanned images with SBOMs | ✅ (S03, ADR-038 / ADR-FE-014) once the PRs merge and the first `v0.1.0-rc1` release is cut |
 
@@ -92,7 +92,7 @@ Legend: ✅ built and proven by a live selfcheck · 🟡 partial · ❌ missing 
 ## 6. Recommended build order from here
 
 1. ~~**Officer lifecycle**~~ — delivered in the backend and edge (S01, ADR-036). Remaining: the staff-admin screens (S06); a token revocation list to close the one-hour residual.
-2. ~~**BUILD-003 check-in & admission**~~ — single-use QR admission delivered (ADR-034). Remaining: venue document clearing inside the gate flow, biometric evidence per attempt, offline admission queue.
+2. ~~**BUILD-003 check-in & admission**~~ — single-use QR admission delivered (ADR-034). Biometric evidence and supervised manual identity delivered (B1, ADR-037). Remaining: venue document clearing inside the gate flow, on-device capture (B2), offline admission queue.
 3. **Tablet PWA** on the field-sync contract.
 4. **Admin dashboard** — campaign control plane (types the 7 campaign operations), queues, exception desk.
 5. **BUILD-005** notification intents + citizen timeline; **BUILD-006** operations.

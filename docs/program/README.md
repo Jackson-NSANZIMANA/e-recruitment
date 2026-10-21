@@ -80,8 +80,8 @@ Parallel sessions must not pick "the next number". These are reserved; use only 
 | S01 Officer lifecycle | in review | BE (this PR) | ADR-036, rls/0033; 8 edge operations; unblocks S06 and B1 once merged |
 | S02 Frontend foundations | ready | | also: stale applicant `home.tsx` header comment (W0-03 leftover) |
 | S03 Release engineering | in review | BE [#38](https://github.com/Jackson-NSANZIMANA/e-recruitment/pull/38) · FE [#32](https://github.com/Jackson-NSANZIMANA/e-recruitment-ui/pull/32) | ADR-038 / ADR-FE-014; owner: add `Unit tests (every package)` as a required check, then tag `v0.1.0-rc1` (commands in the PR hand-off) |
-| B1 Biometric evidence | waiting on S01 | | |
-| S04 Read models | in review | BE (this PR) | ADR-039, rls/0035; 6 new edge operations + permission metadata; unblocks S05 list, S06 DPO queue, S08 roster, S09 |
+| B1 Biometric evidence | in review | BE (#40) | ADR-037, rls/0034; 4 edge operations; DPO sign-off on the DPIA rows pending; B2 unblocked once S08 lands |
+| S04 Read models | done | BE (#41) | ADR-039, rls/0035; 6 new edge operations + permission metadata; unblocks S05 list, S06 DPO queue, S08 roster, S09 |
 | S05 Campaign Studio | waiting on S02 (+S04 list) | | |
 | S06 Officer workspace + staff admin | waiting on S01, S02 | | |
 | S07 Deployment + staging | waiting on S03 merge | | owner: hosting decision; set the SPA public origins (ADR-FE-014) |
