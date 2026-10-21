@@ -329,6 +329,90 @@ check(
   EDGE_OPERATION_IDS.every((id) => edgeOperation(id).session === 'officer' || edgeOperation(id).permission === undefined),
 );
 
+// ── Permission + outcome metadata on every officer operation (ADR-039) ───
+// `x-usrp-permission` must equal the registry's permission (`none` only for the
+// session-local logout), `x-usrp-permission-also` its any-of set, and
+// `x-usrp-outcomes` must exist (`{}` is a legitimate answer) with every listed
+// status backed by a documented response. The frontend's drift gate reads these
+// to check permission parity, so a missing one is a failing build, not a gap.
+interface OperationMetadata {
+  readonly permission: string | undefined;
+  readonly also: readonly string[] | undefined;
+  readonly outcomes: Readonly<Record<string, readonly string[]>> | undefined;
+  readonly documentedStatuses: ReadonlySet<string>;
+}
+
+function metadataFor(lines: readonly string[], id: string): OperationMetadata {
+  const start = lines.findIndex((line) => line.trim() === `operationId: ${id}`);
+  let permission: string | undefined;
+  let also: string[] | undefined;
+  let outcomes: Record<string, string[]> | undefined;
+  const documentedStatuses = new Set<string>();
+  if (start === -1) return { permission, also, outcomes, documentedStatuses };
+  // An operation block ends at the next operationId or the next path key.
+  let end = start + 1;
+  while (end < lines.length && !/^\s+operationId:/.test(lines[end] ?? '') && !/^  \/edge\/|^  \/(livez|readyz)|^components:/.test(lines[end] ?? '')) end += 1;
+  for (let i = start; i < end; i += 1) {
+    const line = lines[i] ?? '';
+    const p = /^\s+x-usrp-permission:\s*(\S+)\s*$/.exec(line);
+    if (p?.[1] !== undefined) permission = p[1];
+    const a = /^\s+x-usrp-permission-also:\s*\[([^\]]*)\]\s*$/.exec(line);
+    if (a?.[1] !== undefined) also = a[1].split(',').map((v) => v.trim()).filter((v) => v !== '');
+    const o = /^\s+x-usrp-outcomes:\s*\{(.*)\}\s*$/.exec(line);
+    if (o?.[1] !== undefined) {
+      outcomes = {};
+      for (const entry of o[1].matchAll(/(\d{3}):\s*\[([^\]]*)\]/g)) {
+        outcomes[entry[1] as string] = (entry[2] ?? '').split(',').map((v) => v.trim()).filter((v) => v !== '');
+      }
+    }
+    const r = /^\s+'(\d{3})':/.exec(line);
+    if (r?.[1] !== undefined) documentedStatuses.add(r[1]);
+  }
+  return { permission, also, outcomes, documentedStatuses };
+}
+
+/** PURE. Why this operation's metadata is unacceptable, or [] when it is fine. */
+function metadataProblems(id: EdgeOperationId, meta: OperationMetadata): string[] {
+  const operation = edgeOperation(id);
+  const problems: string[] = [];
+  const expected = operation.permission ?? 'none';
+  if (meta.permission !== expected) problems.push(`x-usrp-permission is ${String(meta.permission)}, registry says ${expected}`);
+  const expectedAlso = [...(operation.alsoPermission ?? [])].sort().join(',');
+  if ((meta.also ?? []).slice().sort().join(',') !== expectedAlso) problems.push('x-usrp-permission-also differs from the registry');
+  if (meta.outcomes === undefined) problems.push('x-usrp-outcomes is missing');
+  else {
+    for (const [status, codes] of Object.entries(meta.outcomes)) {
+      if (status !== '409' && status !== '422') problems.push(`x-usrp-outcomes lists ${status}; only 409 and 422 unions belong here`);
+      if (codes.length === 0) problems.push(`x-usrp-outcomes ${status} is empty`);
+      if (!meta.documentedStatuses.has(status)) problems.push(`x-usrp-outcomes lists ${status} but the operation documents no ${status} response`);
+      if (codes.some((code) => !/^[A-Z][A-Z0-9_]+$/.test(code))) problems.push(`x-usrp-outcomes ${status} holds a non-token code`);
+    }
+  }
+  return problems;
+}
+
+section('Every officer operation declares x-usrp-permission and x-usrp-outcomes');
+for (const id of EDGE_OPERATION_IDS) {
+  const operation = edgeOperation(id);
+  if (operation.session !== 'officer') continue;
+  const problems = metadataProblems(id, metadataFor(specLines, id));
+  check(`${id}: permission + outcomes metadata`, problems.length === 0, problems.join('; '));
+}
+check(
+  'no non-officer operation declares x-usrp-permission',
+  EDGE_OPERATION_IDS.every((id) => edgeOperation(id).session === 'officer' || metadataFor(specLines, id).permission === undefined),
+);
+// The enforcement itself must bite: strip each marker from a real operation and
+// the checker has to object, or this section proves nothing.
+{
+  const victim: EdgeOperationId = 'admitAtGate';
+  const stripped = (prefix: string): string[] => specLines.filter((line) => !line.trim().startsWith(prefix));
+  check('self-test: a missing x-usrp-permission is detected', metadataProblems(victim, metadataFor(stripped('x-usrp-permission:'), victim)).length > 0);
+  check('self-test: a missing x-usrp-outcomes is detected', metadataProblems(victim, metadataFor(stripped('x-usrp-outcomes:'), victim)).length > 0);
+  check('self-test: a wrong x-usrp-permission is detected', metadataProblems(victim, metadataFor(specLines.map((l) => l.replace('x-usrp-permission: admission.gate', 'x-usrp-permission: application.read')), victim)).length > 0);
+  check('self-test: an outcome status with no documented response is detected', metadataProblems(victim, metadataFor(specLines.map((l) => (l.trim().startsWith("'422':") ? l.replace("'422'", "'418'") : l)), victim)).length > 0);
+}
+
 // ── Summary ──────────────────────────────────────────────────
 console.log(`\n\u001b[1m────────────────────────────────────────\u001b[0m`);
 if (fail === 0) {

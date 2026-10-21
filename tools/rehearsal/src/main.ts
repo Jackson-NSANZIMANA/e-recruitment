@@ -4,6 +4,7 @@
 //   pnpm rehearse                      stage national-pilot-day for today
 //   pnpm rehearse <scenario-id>        stage another scenario
 //   pnpm rehearse --status             list today's open rehearsal campaigns
+//   pnpm rehearse --roster [--expect-code CODE]   assert the Gasabo venue roster is minimal (ADR-039)
 //
 // Requires the platform running (`pnpm dev`). Dev and training only: refuses
 // NODE_ENV=production and any non-local database or edge (see fence.ts).
@@ -19,6 +20,7 @@ import { conduct, type AdminCredential, type RehearsalReport } from './conductor
 import { EdgeSession, EdgeUnavailable } from './edge.js';
 import { RehearsalRefused, assertRehearsalAllowed } from './fence.js';
 import { isRehearsalCode, ScenarioInvalid, validateScenario, type Scenario } from './scenario.js';
+import { assertGasaboRoster, RosterAssertion } from './roster.js';
 import { REHEARSAL_STAFF_PASSWORD } from './staff.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -106,6 +108,23 @@ async function status(edgeBaseUrl: string, origin: string): Promise<number> {
   return 0;
 }
 
+/** ADR-039: the Gasabo gate officer reads today's roster and it must be minimal. */
+async function roster(edgeBaseUrl: string, origin: string, expectCode: string | null): Promise<number> {
+  const manifest = JSON.parse(readFileSync(join(REPO_ROOT, '.rehearsal', 'last-run.json'), 'utf8')) as RehearsalReport;
+  const rdf = manifest.campaigns.find((c) => c.agency === 'RDF');
+  const session = rdf?.sessions.find((s) => s.district === 'GASABO');
+  const handle = rdf?.staffHandles.find((h) => h.endsWith('.gate.gasabo'));
+  if (rdf === undefined || session === undefined || handle === undefined) throw new ScenarioInvalid('The last run has no RDF Gasabo session or gate officer; run `pnpm rehearse` first.');
+  const edge = new EdgeSession(edgeBaseUrl, origin);
+  if (!(await edge.signIn(handle, REHEARSAL_STAFF_PASSWORD))) throw new ScenarioInvalid(`The edge refused ${handle}.`);
+  const query = new URLSearchParams({ campaign: rdf.publicCode, district: session.district, examDate: session.examDate });
+  const response = await edge.get(`/edge/v1/gate/roster?${query.toString()}`);
+  if (response.status !== 200) throw new RosterAssertion(`roster read answered HTTP ${String(response.status)}`);
+  const count = assertGasaboRoster(response.body, expectCode);
+  out(`ROSTER OK · ${session.venueName} ${session.examDate} · ${String(count)} candidate(s), no names or National IDs${expectCode === null ? '' : `, contains ${expectCode}`}.`);
+  return 0;
+}
+
 async function main(argv: readonly string[]): Promise<number> {
   const edgeBaseUrl = env('REHEARSAL_EDGE_URL') ?? `http://localhost:${env('PORT_EDGE_GATEWAY') ?? '4021'}`;
   const origin = env('REHEARSAL_ORIGIN') ?? 'http://localhost:3001';
@@ -113,6 +132,10 @@ async function main(argv: readonly string[]): Promise<number> {
   assertRehearsalAllowed({ nodeEnv: process.env['NODE_ENV'], databaseUrl, edgeBaseUrl });
 
   if (argv.includes('--status')) return status(edgeBaseUrl, origin);
+  if (argv.includes('--roster')) {
+    const at = argv.indexOf('--expect-code');
+    return roster(edgeBaseUrl, origin, at >= 0 ? (argv[at + 1] ?? null) : null);
+  }
   const scenarioId = argv.find((arg) => !arg.startsWith('--')) ?? 'national-pilot-day';
   const scenario = loadScenario(scenarioId);
 
@@ -129,7 +152,7 @@ main(process.argv.slice(2))
     process.exitCode = code;
   })
   .catch((error: unknown) => {
-    const known = error instanceof RehearsalRefused || error instanceof ScenarioInvalid || error instanceof EdgeUnavailable;
+    const known = error instanceof RehearsalRefused || error instanceof ScenarioInvalid || error instanceof EdgeUnavailable || error instanceof RosterAssertion;
     process.stderr.write(`rehearsal: ${known ? (error as Error).message : `unexpected failure: ${error instanceof Error ? error.message : String(error)}`}\n`);
     process.exitCode = known ? 2 : 1;
   });

@@ -11,6 +11,7 @@
 // 6. OFFICER_FOUR_YEAR_UR: age max 21, science grade >= 70%, UR program required
 // ══════════════════════════════════════════════════════════════════
 
+import { sql } from 'drizzle-orm';
 import {
   pgSchema,
   uuid,
@@ -213,6 +214,11 @@ export const rcsApplications = rcsOps.table(
     index('idx_rcs_applicant_id').on(t.applicantId),
     index('idx_rcs_campaign_id').on(t.campaignId),
     index('idx_rcs_status').on(t.status),
+    // rls/0035 (ADR-039): keyset order of the officer application search, and the venue roster.
+    index('idx_rcs_applications_read_keyset').on(sql`(COALESCE(submitted_at, created_at)) DESC`, t.id.desc()),
+    index('idx_rcs_applications_roster')
+      .on(t.campaignId, t.assignedDistrict)
+      .where(sql`assigned_district IS NOT NULL`),
     index('idx_rcs_document_lane').on(t.documentLane),
     index('idx_rcs_academic_status').on(t.academicStatus),
     index('idx_rcs_age_status').on(t.ageEligibilityStatus),

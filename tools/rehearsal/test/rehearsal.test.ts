@@ -8,6 +8,7 @@ import { assertRehearsalAllowed, RehearsalRefused } from '../src/fence.js';
 import { deterministicKey } from '../src/idempotency.js';
 import { MEDICAL_MODE_BY_AGENCY, syntheticPolicy, SYNTHETIC_LEGAL_BASIS_CODE } from '../src/policy.js';
 import { isRehearsalCode, rehearsalCode, ScenarioInvalid, stageCampaigns, validateScenario, type Scenario } from '../src/scenario.js';
+import { assertGasaboRoster, RosterAssertion } from '../src/roster.js';
 import { nextStaffAction, samePosts } from '../src/staff.js';
 
 const scenario = JSON.parse(readFileSync(new URL('../scenarios/national-pilot-day.json', import.meta.url), 'utf8')) as Scenario;
@@ -142,4 +143,14 @@ test('staff: the shipped scenario staffs every agency with rehearsal-marked hand
   const unmarked = structuredClone(scenario) as unknown as { campaigns: { staff?: { handle: string; posts: string[] }[] }[] };
   unmarked.campaigns[0]!.staff = [{ handle: 'rdf.gate', posts: ['screening_officer'] }];
   assert.throws(() => validateScenario(unmarked as unknown as Scenario), ScenarioInvalid, 'staff handles are rehearsal-marked');
+});
+
+test('roster: minimal rows pass, identifying fields and missing codes fail', () => {
+  const row = { processingCode: 'PC-0001', category: 'GENERAL_ENLISTMENT', status: 'SCHEDULED', admission: 'NOT_ADMITTED', requiredPaperItems: [] };
+  assert.equal(assertGasaboRoster({ candidates: [row] }, 'PC-0001'), 1);
+  assert.equal(assertGasaboRoster({ candidates: [] }, null), 0);
+  assert.throws(() => assertGasaboRoster({ candidates: [row] }, 'PC-9999'), RosterAssertion);
+  assert.throws(() => assertGasaboRoster({ candidates: [{ ...row, fullName: 'X' }] }, null), RosterAssertion);
+  assert.throws(() => assertGasaboRoster({ candidates: [{ ...row, processingCode: '1200380123456789' }] }, null), RosterAssertion);
+  assert.throws(() => assertGasaboRoster({ nothing: true }, null), RosterAssertion);
 });

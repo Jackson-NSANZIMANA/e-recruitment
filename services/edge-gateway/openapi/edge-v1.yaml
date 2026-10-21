@@ -4,7 +4,7 @@ info:
   description: |
     The EDGE RUNTIME CONTRACT — the single trusted browser boundary.
     
-    All 36 operations mount under `/edge/v1/**`. The browser never calls service
+    All 57 operations mount under `/edge/v1/**`. The browser never calls service
     ports directly, never holds upstream credentials, and never declares agency:
     the edge serves opaque session cookies and derives agency from the verified
     officer session.
@@ -71,6 +71,8 @@ paths:
       summary: Officer logout
       tags: [officer-auth]
       x-usrp-session: officer
+      x-usrp-permission: none
+      x-usrp-outcomes: {}
       x-usrp-csrf: true
       x-usrp-idempotent-without-session: true
       responses:
@@ -143,6 +145,8 @@ paths:
       summary: Create a campaign draft
       tags: [campaign-control]
       x-usrp-session: officer
+      x-usrp-permission: campaign.create
+      x-usrp-outcomes: { 409: [PUBLIC_CODE_ALREADY_EXISTS, CAMPAIGN_LABEL_ALREADY_EXISTS, CAMPAIGN_WRITE_CONFLICT, IDEMPOTENCY_KEY_REUSED], 422: [CATEGORY_AGENCY_MISMATCH, INVALID_REGISTRATION_WINDOW, INVALID_EXAMINATION_WINDOW] }
       x-usrp-csrf: true
       x-usrp-retry-on-g2g: false
       parameters:
@@ -193,6 +197,8 @@ paths:
       summary: Create an immutable policy version
       tags: [campaign-control]
       x-usrp-session: officer
+      x-usrp-permission: campaign.policy.create
+      x-usrp-outcomes: { 409: [INVALID_STATE, POLICY_VERSION_CONFLICT, POLICY_HASH_MISMATCH, IDEMPOTENCY_KEY_REUSED], 422: [INVALID_POLICY, POLICY_CATEGORY_COVERAGE_MISMATCH] }
       x-usrp-csrf: true
       x-usrp-retry-on-g2g: false
       parameters:
@@ -257,6 +263,8 @@ paths:
       summary: Configure one scheduling-owned district session
       tags: [campaign-control]
       x-usrp-session: officer
+      x-usrp-permission: campaign.session.configure
+      x-usrp-outcomes: { 409: [INVALID_STATE, SESSION_ALREADY_RESERVED, STALE_COVERAGE, INCOMPLETE_COVERAGE, CAPACITY_DECISION_REQUIRED, IDEMPOTENCY_KEY_REUSED], 422: [INVALID_SESSION_CONFIGURATION, INVALID_SESSION_DATE, INVALID_REPORTING_HOUR, DISTRICT_PROVINCE_MISMATCH] }
       x-usrp-csrf: true
       x-usrp-retry-on-g2g: false
       parameters:
@@ -294,6 +302,8 @@ paths:
       summary: Publish a validated draft and open registration
       tags: [campaign-control]
       x-usrp-session: officer
+      x-usrp-permission: campaign.publish
+      x-usrp-outcomes: { 409: [INVALID_STATE, POLICY_NOT_SET, INCOMPLETE_COVERAGE, STALE_COVERAGE, POLICY_HASH_MISMATCH, INVALID_CAPACITY, CAPACITY_DECISION_REQUIRED, IDEMPOTENCY_KEY_REUSED] }
       x-usrp-csrf: true
       x-usrp-retry-on-g2g: false
       parameters:
@@ -322,6 +332,8 @@ paths:
       summary: Close campaign registration
       tags: [campaign-control]
       x-usrp-session: officer
+      x-usrp-permission: campaign.registration.close
+      x-usrp-outcomes: { 409: [INVALID_STATE, IDEMPOTENCY_KEY_REUSED] }
       x-usrp-csrf: true
       x-usrp-retry-on-g2g: false
       parameters:
@@ -349,6 +361,8 @@ paths:
       summary: Complete a campaign after registration closes
       tags: [campaign-control]
       x-usrp-session: officer
+      x-usrp-permission: campaign.complete
+      x-usrp-outcomes: { 409: [INVALID_STATE, IDEMPOTENCY_KEY_REUSED] }
       x-usrp-csrf: true
       x-usrp-retry-on-g2g: false
       parameters:
@@ -376,6 +390,8 @@ paths:
       summary: Cancel a permitted campaign
       tags: [campaign-control]
       x-usrp-session: officer
+      x-usrp-permission: campaign.cancel
+      x-usrp-outcomes: { 409: [INVALID_STATE, CANCELLATION_HAS_APPLICATIONS, IDEMPOTENCY_KEY_REUSED] }
       x-usrp-csrf: true
       x-usrp-retry-on-g2g: false
       parameters:
@@ -422,6 +438,8 @@ paths:
       summary: List applications
       tags: [officer-reads]
       x-usrp-session: officer
+      x-usrp-permission: application.read
+      x-usrp-outcomes: {}
       x-usrp-csrf: false
       x-usrp-retry-on-g2g: true
       responses:
@@ -436,6 +454,8 @@ paths:
       summary: List amber queue
       tags: [officer-reads]
       x-usrp-session: officer
+      x-usrp-permission: adjudication.read
+      x-usrp-outcomes: {}
       x-usrp-csrf: false
       x-usrp-retry-on-g2g: true
       responses:
@@ -450,6 +470,8 @@ paths:
       summary: Find application by ID
       tags: [officer-reads]
       x-usrp-session: officer
+      x-usrp-permission: application.read
+      x-usrp-outcomes: {}
       x-usrp-csrf: false
       x-usrp-retry-on-g2g: true
       parameters:
@@ -470,6 +492,8 @@ paths:
       summary: Get application with history
       tags: [officer-reads]
       x-usrp-session: officer
+      x-usrp-permission: application.read
+      x-usrp-outcomes: {}
       x-usrp-csrf: false
       x-usrp-retry-on-g2g: true
       x-usrp-composition: composed
@@ -491,6 +515,8 @@ paths:
       summary: Get status history
       tags: [officer-reads]
       x-usrp-session: officer
+      x-usrp-permission: application.read
+      x-usrp-outcomes: {}
       x-usrp-csrf: false
       x-usrp-retry-on-g2g: true
       parameters:
@@ -511,8 +537,12 @@ paths:
       summary: Record medical review
       tags: [officer-transitions]
       x-usrp-session: officer
+      x-usrp-permission: medical.review
+      x-usrp-outcomes: { 409: [ILLEGAL_TRANSITION], 422: [INVALID_MEDICAL_INPUT] }
       x-usrp-csrf: true
       responses:
+        '422':
+          description: "INVALID_MEDICAL_INPUT (detail = the agency medical mode; never render)"
         '200':
           description: Recorded
         '409':
@@ -524,6 +554,8 @@ paths:
       summary: Record final decision
       tags: [officer-transitions]
       x-usrp-session: officer
+      x-usrp-permission: decision.final
+      x-usrp-outcomes: { 409: [ILLEGAL_TRANSITION] }
       x-usrp-csrf: true
       responses:
         '200':
@@ -537,6 +569,8 @@ paths:
       summary: Accept application
       tags: [officer-transitions]
       x-usrp-session: officer
+      x-usrp-permission: application.accept
+      x-usrp-outcomes: { 409: [ILLEGAL_TRANSITION, CROSS_AGENCY_ACCEPT_LOCK] }
       x-usrp-csrf: true
       responses:
         '200':
@@ -550,6 +584,8 @@ paths:
       summary: Adjudicate application
       tags: [officer-transitions]
       x-usrp-session: officer
+      x-usrp-permission: adjudication.decide
+      x-usrp-outcomes: { 409: [ILLEGAL_TRANSITION] }
       x-usrp-csrf: true
       responses:
         '200':
@@ -563,8 +599,12 @@ paths:
       summary: Register walk-in
       tags: [walk-in]
       x-usrp-session: officer
+      x-usrp-permission: walkin.register
+      x-usrp-outcomes: { 409: [IDENTITY_NOT_VERIFIED, NO_WALK_IN_CAMPAIGN, ALREADY_APPLIED], 422: [INVALID_ACADEMIC_INPUT, VALIDATION_FAILED] }
       x-usrp-csrf: true
       responses:
+        '422':
+          description: "INVALID_ACADEMIC_INPUT | VALIDATION_FAILED"
         '201':
           description: Registered
         '403':
@@ -582,8 +622,14 @@ paths:
       summary: Vet walk-in
       tags: [walk-in]
       x-usrp-session: officer
+      x-usrp-permission: walkin.vet
+      x-usrp-outcomes: { 409: [AGE_PENDING, ILLEGAL_TRANSITION], 422: [VALIDATION_FAILED] }
       x-usrp-csrf: true
       responses:
+        '409':
+          description: "AGE_PENDING (retry shortly) | ILLEGAL_TRANSITION"
+        '422':
+          description: "VALIDATION_FAILED"
         '200':
           description: Vetted
         '404':
@@ -595,9 +641,13 @@ paths:
       summary: Verify identity
       tags: [identity]
       x-usrp-session: officer
+      x-usrp-permission: identity.verify
+      x-usrp-outcomes: { 422: [NOT_A_CITIZEN] }
       x-usrp-csrf: true
       x-usrp-retry-on-g2g: false
       responses:
+        '422':
+          description: "NOT_A_CITIZEN"
         '200':
           description: Verified
         '404':
@@ -617,6 +667,8 @@ paths:
         retried by the edge.
       tags: [gate]
       x-usrp-session: officer
+      x-usrp-permission: admission.gate
+      x-usrp-outcomes: { 409: [ALREADY_ADMITTED, NOT_ADMISSIBLE, IDENTITY_MISMATCH, WRONG_VENUE, TOO_EARLY, EXPIRED], 422: [INVALID_TICKET] }
       x-usrp-csrf: true
       x-usrp-retry-on-g2g: false
       requestBody:
@@ -791,6 +843,8 @@ paths:
       summary: Advisory document checklist for an application of the officer's agency (ADR-032)
       tags: [officer]
       x-usrp-session: officer
+      x-usrp-permission: application.read
+      x-usrp-outcomes: {}
       x-usrp-csrf: false
       x-usrp-retry-on-g2g: true
       parameters:
@@ -808,6 +862,8 @@ paths:
       summary: The check-in officer records seeing a required document's paper at the venue (ADR-032)
       tags: [officer]
       x-usrp-session: officer
+      x-usrp-permission: document.verify.venue
+      x-usrp-outcomes: { 409: [NOT_APPLICABLE], 422: [UNSUPPORTED_DOCUMENT_TYPE, NOT_REQUIRED] }
       x-usrp-csrf: true
       responses:
         '200':
@@ -893,6 +949,8 @@ paths:
       summary: Enroll device
       tags: [field-sync]
       x-usrp-session: officer
+      x-usrp-permission: field.device.enroll
+      x-usrp-outcomes: {}
       x-usrp-csrf: true
       responses:
         '201':
@@ -906,6 +964,8 @@ paths:
       summary: Sync scores
       tags: [field-sync]
       x-usrp-session: officer
+      x-usrp-permission: field.score.sync
+      x-usrp-outcomes: {}
       x-usrp-csrf: true
       responses:
         '200':
@@ -919,8 +979,12 @@ paths:
       summary: Resolve conflict
       tags: [field-sync]
       x-usrp-session: officer
+      x-usrp-permission: field.conflict.resolve
+      x-usrp-outcomes: { 409: [NO_CONFLICT] }
       x-usrp-csrf: true
       responses:
+        '409':
+          description: "NO_CONFLICT (nothing to adjudicate)"
         '200':
           description: Resolved
         '404':
@@ -930,6 +994,8 @@ paths:
     get:
       operationId: listOfficers
       x-usrp-session: officer
+      x-usrp-permission: officer.read
+      x-usrp-outcomes: {}
       x-usrp-csrf: false
       x-usrp-retry-on-g2g: true
       summary: |
@@ -948,6 +1014,8 @@ paths:
     post:
       operationId: createOfficer
       x-usrp-session: officer
+      x-usrp-permission: officer.create
+      x-usrp-outcomes: { 409: [HANDLE_TAKEN], 422: [INVALID_HANDLE, INVALID_POSTS, UNKNOWN_POST] }
       x-usrp-csrf: true
       x-usrp-retry-on-g2g: false
       summary: |
@@ -989,6 +1057,8 @@ paths:
     post:
       operationId: reissueOfficerActivation
       x-usrp-session: officer
+      x-usrp-permission: officer.create
+      x-usrp-outcomes: { 409: [NOT_PENDING_ACTIVATION] }
       x-usrp-csrf: true
       x-usrp-retry-on-g2g: false
       summary: |
@@ -1019,6 +1089,8 @@ paths:
     post:
       operationId: assignOfficerPosts
       x-usrp-session: officer
+      x-usrp-permission: officer.posts.assign
+      x-usrp-outcomes: { 422: [INVALID_POSTS, UNKNOWN_POST, INVALID_REASON] }
       x-usrp-csrf: true
       x-usrp-retry-on-g2g: false
       summary: |
@@ -1058,6 +1130,8 @@ paths:
     post:
       operationId: disableOfficer
       x-usrp-session: officer
+      x-usrp-permission: officer.disable
+      x-usrp-outcomes: { 409: [LAST_ACTIVE_ADMIN], 422: [INVALID_REASON] }
       x-usrp-csrf: true
       x-usrp-retry-on-g2g: false
       summary: |
@@ -1093,6 +1167,8 @@ paths:
     post:
       operationId: enableOfficer
       x-usrp-session: officer
+      x-usrp-permission: officer.disable
+      x-usrp-outcomes: { 422: [INVALID_REASON] }
       x-usrp-csrf: true
       x-usrp-retry-on-g2g: false
       summary: Re-enable a disabled officer (officer.disable). A never-activated account returns to pending.
@@ -1122,6 +1198,8 @@ paths:
     post:
       operationId: revokeOfficerSessions
       x-usrp-session: officer
+      x-usrp-permission: officer.sessions.revoke
+      x-usrp-outcomes: { 422: [INVALID_REASON] }
       x-usrp-csrf: true
       x-usrp-retry-on-g2g: false
       summary: End every browser session of an officer now (officer.sessions.revoke; SESSIONS_REVOKED). The account stays active.
@@ -1204,6 +1282,205 @@ paths:
         '503':
           description: Not ready
 
+  # ── ADR-039 operational read models ────────────────────────────
+  /edge/v1/campaigns/admin:
+    get:
+      operationId: listAgencyCampaigns
+      x-usrp-session: officer
+      x-usrp-permission: campaign.read.admin
+      x-usrp-outcomes: {}
+      x-usrp-csrf: false
+      x-usrp-retry-on-g2g: true
+      summary: |
+        The session agency's campaigns in EVERY state (the public list shows only
+        open ones), newest first, with a keyset cursor and a total. Each row
+        carries a session occupancy roll-up (ADR-026 registered_count against
+        capacity_limit). No internal id; the agency is the session's.
+      tags: [campaign-admin]
+      parameters:
+        - { name: q, in: query, required: false, schema: { type: string, maxLength: 64 }, description: "Case-insensitive substring of the label or public code." }
+        - { name: status, in: query, required: false, schema: { type: array, items: { type: string, enum: [DRAFT, REGISTRATION_OPEN, REGISTRATION_CLOSED, EXAMINATION_ACTIVE, COMPLETED, CANCELLED] } }, style: form, explode: true, description: "Repeatable, or comma-separated." }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - { name: cursor, in: query, required: false, schema: { type: string, maxLength: 256 }, description: "The previous page's nextCursor. Opaque." }
+      responses:
+        '200':
+          description: "{ agency, campaigns: [ { publicCode, campaignLabel, status, targetCategories[], targetDistricts[], registrationOpensAt, registrationClosesAt, examinationStartDate, examinationEndDate, allowsWalkIn, targetIntakeCount|null, publishedAt|null, createdAt, occupancy: { sessionCount, capacityTotal|null, hasUnboundedSession, registeredTotal } } ], total, nextCursor|null }"
+        '400':
+          description: INVALID_REQUEST (unknown query key, bad status, bad cursor)
+        '401':
+          description: Session ended ({ reason })
+        '403':
+          description: PERMISSION_DENIED
+        '502':
+          description: UPSTREAM_CONTRACT_MISMATCH
+
+  /edge/v1/campaigns/admin/detail:
+    get:
+      operationId: getCampaignAdminDetail
+      x-usrp-session: officer
+      x-usrp-permission: campaign.read.admin
+      x-usrp-outcomes: {}
+      x-usrp-csrf: false
+      x-usrp-retry-on-g2g: true
+      summary: |
+        One of the session agency's campaigns with its sessions and occupancy
+        (capacityLimit, registeredCount, remaining; an unbounded session says so
+        with its decision code), the current policy version and hash, the
+        coverage version and hash, and the lifecycle history. A sibling agency's
+        campaign and a nonexistent one are the same bare 404.
+      tags: [campaign-admin]
+      parameters:
+        - { name: publicCode, in: query, required: true, schema: { type: string, pattern: '^[A-Z0-9][A-Z0-9-]{2,63}$' } }
+      responses:
+        '200':
+          description: "{ agency, campaign: { ...the list row, contactPhoneNumbers|null, contactWebsite|null, announcementReference|null, registrationClosedAt|null, cancelledAt|null, policy: { versionNumber, policyHash, hashVersion, legalBasisCode, createdAt }|null, coverage: { version, hash }|null, sessions: [ { district, province, venueName, examDate, reportingTimeHour, capacityLimit|null, capacityDecisionCode|null, registeredCount, remaining|null, isActive } ], history: [ { fromStatus|null, toStatus, reasonCode|null, occurredAt } ] } }"
+        '400':
+          description: INVALID_PUBLIC_CODE
+        '401':
+          description: Session ended ({ reason })
+        '403':
+          description: PERMISSION_DENIED
+        '404':
+          description: NOT_FOUND (also for a sibling agency's campaign)
+        '502':
+          description: UPSTREAM_CONTRACT_MISMATCH
+
+  /edge/v1/applications/search:
+    get:
+      operationId: searchApplications
+      x-usrp-session: officer
+      x-usrp-permission: application.read
+      x-usrp-outcomes: {}
+      x-usrp-csrf: false
+      x-usrp-retry-on-g2g: true
+      summary: |
+        The paginated, filterable officer application list (v2 of listApplications,
+        which keeps its capped v1 shape). Newest first, keyset cursor over
+        (submitted_at, id), `total` for the filters ignoring the cursor. A filter
+        that matches nothing is 200 with total 0. Non-PII rows only.
+      tags: [applications]
+      parameters:
+        - { name: status, in: query, required: false, schema: { type: array, items: { type: string } }, style: form, explode: true, description: "Application statuses; repeatable, or comma-separated." }
+        - { name: category, in: query, required: false, schema: { type: string } }
+        - { name: campaign, in: query, required: false, schema: { type: string }, description: "Campaign public code (the session agency's own)." }
+        - { name: district, in: query, required: false, schema: { type: string }, description: "Assigned exam district." }
+        - { name: submittedFrom, in: query, required: false, schema: { type: string, format: date }, description: "Inclusive Kigali calendar day." }
+        - { name: submittedTo, in: query, required: false, schema: { type: string, format: date }, description: "Inclusive Kigali calendar day." }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - { name: cursor, in: query, required: false, schema: { type: string, maxLength: 256 } }
+      responses:
+        '200':
+          description: "{ agency, applications: [ { applicationId, processingCode, category, status, submittedAt|null } ], total, nextCursor|null }"
+        '400':
+          description: INVALID_REQUEST
+        '401':
+          description: Session ended ({ reason })
+        '403':
+          description: PERMISSION_DENIED
+        '502':
+          description: UPSTREAM_CONTRACT_MISMATCH
+
+  /edge/v1/gate/roster:
+    get:
+      operationId: getVenueRoster
+      x-usrp-session: officer
+      x-usrp-permission: admission.gate
+      x-usrp-permission-also: [field.score.sync]
+      x-usrp-outcomes: {}
+      x-usrp-csrf: false
+      x-usrp-retry-on-g2g: true
+      summary: |
+        The minimum candidate set for one venue day (ADR-039): processing code,
+        category, status, admission state (ADMITTED | NOT_ADMITTED) and the paper
+        items the candidate is asked to present. NO name, NO National ID, no
+        applicant id, no QR token, no phone. The same shape feeds the field
+        ledger's pre-download manifest. Any one of the two permissions admits.
+      tags: [gate]
+      parameters:
+        - { name: campaign, in: query, required: true, schema: { type: string }, description: "Campaign public code." }
+        - { name: district, in: query, required: true, schema: { type: string } }
+        - { name: examDate, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: "{ agency, venue: { venueName, district, examDate, reportingTimeHour, capacityLimit|null, registeredCount }, candidates: [ { processingCode, category, status, admission, requiredPaperItems[] } ], truncated }"
+        '400':
+          description: INVALID_REQUEST
+        '401':
+          description: Session ended ({ reason })
+        '403':
+          description: PERMISSION_DENIED
+        '404':
+          description: NOT_FOUND (no such venue day in this agency; identical for a sibling agency's campaign)
+        '502':
+          description: UPSTREAM_CONTRACT_MISMATCH
+
+  /edge/v1/erasure-requests:
+    get:
+      operationId: listErasureRequests
+      x-usrp-session: officer
+      x-usrp-permission: erasure.queue.read
+      x-usrp-outcomes: {}
+      x-usrp-csrf: false
+      x-usrp-retry-on-g2g: true
+      summary: |
+        The data-protection office's queue of PENDING erasure requests (ADR-020).
+        A request is identified by its id and age only; the applicant id never
+        crosses the edge.
+      tags: [compliance]
+      responses:
+        '200':
+          description: "{ requests: [ { requestId, requestedAt } ] }"
+        '401':
+          description: Session ended ({ reason })
+        '403':
+          description: PERMISSION_DENIED
+        '502':
+          description: UPSTREAM_CONTRACT_MISMATCH
+
+  /edge/v1/erasure-requests/decision:
+    post:
+      operationId: decideErasureRequest
+      x-usrp-session: officer
+      x-usrp-permission: erasure.decide
+      x-usrp-outcomes: { 409: [NOT_PENDING, REFUSED_ACTIVE_APPLICATION, REFUSED_ACCEPT_LOCKED] }
+      x-usrp-csrf: true
+      x-usrp-retry-on-g2g: false
+      x-usrp-composition: composed
+      summary: |
+        The DPO's decision on one pending request. DECLINE needs written grounds
+        (the citizen is shown them). EXECUTE runs the existing gated erasure road
+        (ADR-015) for that request's applicant, resolved server-side; it is
+        irreversible and refused while the applicant holds an active application.
+        Never retried by the edge.
+      tags: [compliance]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [requestId, decision]
+              properties:
+                requestId: { type: string, format: uuid }
+                decision: { type: string, enum: [DECLINE, EXECUTE] }
+                grounds: { type: string, minLength: 1, maxLength: 200, description: "Required for DECLINE; refused for EXECUTE." }
+      responses:
+        '200':
+          description: "{ requestId, decision: DECLINED | EXECUTED }"
+        '400':
+          description: INVALID_REQUEST | GROUNDS_REQUIRED
+        '401':
+          description: Session ended ({ reason })
+        '403':
+          description: PERMISSION_DENIED
+        '404':
+          description: NOT_FOUND (unknown, or no longer pending, for EXECUTE)
+        '409':
+          description: NOT_PENDING | REFUSED_ACTIVE_APPLICATION | REFUSED_ACCEPT_LOCKED
+        '502':
+          description: UPSTREAM_CONTRACT_MISMATCH
+
 components:
   parameters:
     IdempotencyKey:
@@ -1240,5 +1517,9 @@ tags:
     description: Field sync
   - name: probes
     description: Health probes
+  - name: campaign-admin
+    description: Agency-scoped campaign administration reads (ADR-039)
+  - name: compliance
+    description: Data-protection office queue and decisions (ADR-039)
   - name: officer-admin
     description: Officer lifecycle — agency administrators over their own agency's officers (ADR-036)

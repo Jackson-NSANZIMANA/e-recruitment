@@ -80,6 +80,14 @@ import {
   syncFieldScoresHandler,
 } from './adapters/http/field-sync.controller.js';
 import {
+  decideErasureRequestHandler,
+  getCampaignAdminDetailHandler,
+  getVenueRosterHandler,
+  listAgencyCampaignsHandler,
+  listErasureRequestsHandler,
+  searchApplicationsHandler,
+} from './adapters/http/operational-reads.controller.js';
+import {
   activateOfficerHandler,
   assignOfficerPostsHandler,
   createOfficerHandler,
@@ -159,6 +167,13 @@ export function edgeHandlers(deps: EdgeDeps): Record<EdgeOperationId, RouteHandl
     enableOfficer: enableOfficerHandler(deps),
     revokeOfficerSessions: revokeOfficerSessionsHandler(deps),
     activateOfficer: activateOfficerHandler(deps),
+
+    listAgencyCampaigns: listAgencyCampaignsHandler(deps),
+    getCampaignAdminDetail: getCampaignAdminDetailHandler(deps),
+    searchApplications: searchApplicationsHandler(deps),
+    getVenueRoster: getVenueRosterHandler(deps),
+    listErasureRequests: listErasureRequestsHandler(deps),
+    decideErasureRequest: decideErasureRequestHandler(deps),
   };
 }
 

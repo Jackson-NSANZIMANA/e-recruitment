@@ -237,6 +237,7 @@ apply_sql "${RLS_DIR}/0032_gate_admissions.sql" "rls/0032 (gate admissions)"
 #     and post changes revoke the officer's edge sessions in the same
 #     transaction; every command stages one PII-free AUDIT_ENTRY.
 apply_sql "${RLS_DIR}/0033_officer_lifecycle.sql" "rls/0033 (officer lifecycle)"
+apply_sql "${RLS_DIR}/0035_operational_reads.sql" "rls/0035 (operational read indexes)"
 
 printf '\n'
 

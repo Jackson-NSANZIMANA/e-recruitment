@@ -43,6 +43,13 @@ export interface EdgeOperation {
    * authority. Absent only for session-local operations (logout).
    */
   readonly permission?: Permission;
+  /**
+   * Further permissions that ALSO admit the operation (any-of with `permission`,
+   * ADR-039). Used only where two posts legitimately share one read — the venue
+   * roster serves the gate (`admission.gate`) and the field station
+   * (`field.score.sync`). Absent means `permission` alone.
+   */
+  readonly alsoPermission?: readonly Permission[];
   readonly method: 'GET' | 'POST';
   /** Exact path. Always under /edge/v1/. */
   readonly path: string;
@@ -130,6 +137,17 @@ export const EDGE_OPERATIONS = Object.freeze({
   disableOfficer: { operationId: 'disableOfficer', method: 'POST', path: '/edge/v1/officers/disable', session: 'officer', permission: 'officer.disable', csrf: true, maxBodyBytes: SMALL_BODY, retryOnG2G: false, publicAllowlist: false, upstream: [UPSTREAM.officerDisable], composition: 'single' },
   enableOfficer: { operationId: 'enableOfficer', method: 'POST', path: '/edge/v1/officers/enable', session: 'officer', permission: 'officer.disable', csrf: true, maxBodyBytes: SMALL_BODY, retryOnG2G: false, publicAllowlist: false, upstream: [UPSTREAM.officerEnable], composition: 'single' },
   revokeOfficerSessions: { operationId: 'revokeOfficerSessions', method: 'POST', path: '/edge/v1/officers/sessions/revoke', session: 'officer', permission: 'officer.sessions.revoke', csrf: true, maxBodyBytes: SMALL_BODY, retryOnG2G: false, publicAllowlist: false, upstream: [UPSTREAM.officerRevokeSessions], composition: 'single' },
+  // ADR-039 operational read models. Agency-scoped officer reads; no write,
+  // all retry-safe. `searchApplications` is the versioned successor of
+  // `listApplications` (which keeps its v1 shape for compatibility).
+  listAgencyCampaigns: { operationId: 'listAgencyCampaigns', method: 'GET', path: '/edge/v1/campaigns/admin', session: 'officer', permission: 'campaign.read.admin', csrf: false, maxBodyBytes: SMALL_BODY, retryOnG2G: true, publicAllowlist: false, upstream: [UPSTREAM.adminCampaignList], composition: 'single' },
+  getCampaignAdminDetail: { operationId: 'getCampaignAdminDetail', method: 'GET', path: '/edge/v1/campaigns/admin/detail', session: 'officer', permission: 'campaign.read.admin', csrf: false, maxBodyBytes: SMALL_BODY, retryOnG2G: true, publicAllowlist: false, upstream: [UPSTREAM.adminCampaignDetail], composition: 'single' },
+  searchApplications: { operationId: 'searchApplications', method: 'GET', path: '/edge/v1/applications/search', session: 'officer', permission: 'application.read', csrf: false, maxBodyBytes: SMALL_BODY, retryOnG2G: true, publicAllowlist: false, upstream: [UPSTREAM.searchApplications], composition: 'single' },
+  getVenueRoster: { operationId: 'getVenueRoster', method: 'GET', path: '/edge/v1/gate/roster', session: 'officer', permission: 'admission.gate', alsoPermission: ['field.score.sync'], csrf: false, maxBodyBytes: SMALL_BODY, retryOnG2G: true, publicAllowlist: false, upstream: [UPSTREAM.venueRoster], composition: 'single' },
+  // ADR-039: the DPO's queue and decision. EXECUTE resolves the applicant from the
+  // queue server-side, so the browser never holds an applicant id.
+  listErasureRequests: { operationId: 'listErasureRequests', method: 'GET', path: '/edge/v1/erasure-requests', session: 'officer', permission: 'erasure.queue.read', csrf: false, maxBodyBytes: SMALL_BODY, retryOnG2G: true, publicAllowlist: false, upstream: [UPSTREAM.erasureQueue], composition: 'single' },
+  decideErasureRequest: { operationId: 'decideErasureRequest', method: 'POST', path: '/edge/v1/erasure-requests/decision', session: 'officer', permission: 'erasure.decide', csrf: true, maxBodyBytes: SMALL_BODY, retryOnG2G: false, publicAllowlist: false, upstream: [UPSTREAM.erasureDecline, UPSTREAM.erasureQueue, UPSTREAM.erasureExecute], composition: 'composed', compositionReason: 'EXECUTE must name the applicant to the gated erasure road without ever showing the browser an applicant id.' },
   // The officer redeems the one-time code and sets their password. Anonymous
   // (no session yet), CSRF double-submit, rate-limited like login.
   activateOfficer: { operationId: 'activateOfficer', method: 'POST', path: '/edge/v1/auth/officer/activate', session: 'anonymous', csrf: true, maxBodyBytes: SMALL_BODY, retryOnG2G: false, publicAllowlist: true, upstream: [UPSTREAM.officerActivate], composition: 'single' },

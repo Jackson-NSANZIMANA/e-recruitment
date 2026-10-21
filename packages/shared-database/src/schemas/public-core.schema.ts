@@ -229,6 +229,8 @@ export const recruitmentCampaigns = publicCore.table(
     uniqueIndex('idx_pc_campaign_id_agency').on(t.id, t.agency),
     index('idx_pc_campaign_agency').on(t.agency),
     index('idx_pc_campaign_status').on(t.status),
+    // rls/0035 (ADR-039): keyset order of the agency-scoped admin campaign list.
+    index('idx_pc_campaigns_read_keyset').on(t.agency, t.createdAt.desc(), t.id.desc()),
     check('campaign_public_code_format_check', sql`public_code ~ '^[A-Z0-9][A-Z0-9-]{2,63}$'`),
     check(
       'campaign_target_districts_array_check',

@@ -31,6 +31,8 @@ import { PgSubmissionLedger } from './adapters/submission-ledger.pg-repository.j
 import { PgOutboxDispatcher } from './adapters/outbox/pg-event-outbox.js';
 import { SubmitApplicationService } from './application/submit-application.service.js';
 import { ListApplicationsService } from './application/list-applications.service.js';
+import { OperationalReadService } from './application/operational-read.service.js';
+import { PgOperationalReadRepository } from './adapters/operational-read.pg-repository.js';
 import { OfficerTransitionsService } from './application/officer-transitions.service.js';
 import { WalkInService } from './application/walk-in.service.js';
 import { ProjectVettingResultService } from './application/project-vetting-result.service.js';
@@ -58,6 +60,8 @@ export interface ApplicationService {
    * (status-history). All four are agency-scoped through the same seam.
    */
   readonly list: ListApplicationsService;
+  /** ADR-039 operational reads (admin campaigns, application search, venue roster). */
+  readonly operationalReads: OperationalReadService;
   /** HTTP officer writes — DRIVE the tail of the green lane (medical/final/accept). */
   readonly officerTransitions: OfficerTransitionsService;
   /** HTTP officer writes — REGISTER + on-site-vet exam-day walk-ins (RDF, ADR-012). */
@@ -123,6 +127,7 @@ export function createApplicationService(
       events,
     }),
     list: new ListApplicationsService({ reader: readRepository }),
+    operationalReads: new OperationalReadService({ reader: new PgOperationalReadRepository() }),
     officerTransitions: new OfficerTransitionsService({
       repository: officerTransitionRepository,
       eventBus,
@@ -213,6 +218,15 @@ export {
 } from './adapters/http/campaign-public-read.controller.js';
 export { SubmitApplicationService } from './application/submit-application.service.js';
 export { ListApplicationsService } from './application/list-applications.service.js';
+export { OperationalReadService } from './application/operational-read.service.js';
+export { PgOperationalReadRepository } from './adapters/operational-read.pg-repository.js';
+export {
+  operationalReadRoutes,
+  ADMIN_CAMPAIGN_LIST_PATH,
+  ADMIN_CAMPAIGN_DETAIL_PATH,
+  SEARCH_APPLICATIONS_PATH,
+  VENUE_ROSTER_PATH,
+} from './adapters/http/operational-read.controller.js';
 export { OfficerTransitionsService } from './application/officer-transitions.service.js';
 export { WalkInService } from './application/walk-in.service.js';
 export { CampaignControlService } from './application/campaign-control.service.js';

@@ -2561,6 +2561,33 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "idx_pc_campaigns_read_keyset": {
+          "name": "idx_pc_campaigns_read_keyset",
+          "columns": [
+            {
+              "expression": "agency",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -3349,6 +3376,49 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_rcs_applications_read_keyset": {
+          "name": "idx_rcs_applications_read_keyset",
+          "columns": [
+            {
+              "expression": "(COALESCE(submitted_at, created_at)) DESC",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_rcs_applications_roster": {
+          "name": "idx_rcs_applications_roster",
+          "columns": [
+            {
+              "expression": "campaign_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "assigned_district",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "assigned_district IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -4554,6 +4624,49 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_rdf_applications_read_keyset": {
+          "name": "idx_rdf_applications_read_keyset",
+          "columns": [
+            {
+              "expression": "(COALESCE(submitted_at, created_at)) DESC",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_rdf_applications_roster": {
+          "name": "idx_rdf_applications_roster",
+          "columns": [
+            {
+              "expression": "campaign_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "assigned_district",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "assigned_district IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -5791,6 +5904,49 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_rnp_applications_read_keyset": {
+          "name": "idx_rnp_applications_read_keyset",
+          "columns": [
+            {
+              "expression": "(COALESCE(submitted_at, created_at)) DESC",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_rnp_applications_roster": {
+          "name": "idx_rnp_applications_roster",
+          "columns": [
+            {
+              "expression": "campaign_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "assigned_district",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "assigned_district IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
