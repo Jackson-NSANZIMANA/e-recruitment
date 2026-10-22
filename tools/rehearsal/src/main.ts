@@ -24,6 +24,7 @@ import { assertGasaboRoster, RosterAssertion } from './roster.js';
 import { REHEARSAL_STAFF_PASSWORD, provisionStaff } from './staff.js';
 import { recordShadowEvidence } from './biometric.js';
 import { FleetAssertion, rehearseFleet } from './fleet.js';
+import { completePhysicalTest } from './physical.js';
 import { ensureAgencyAdmin, ensureSecondAgencyAdmin } from './provision.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -205,6 +206,23 @@ async function fleet(where: { readonly edgeBaseUrl: string; readonly origin: str
   return ok ? 0 : 1;
 }
 
+/** S06, dev-only: sync one synthetic score so an admitted application reaches PHYSICAL_TEST_COMPLETE. */
+async function completePhysical(argv: readonly string[], where: { readonly edgeBaseUrl: string; readonly origin: string }): Promise<number> {
+  const at = argv.indexOf('--complete-physical');
+  const applicationId = argv[at + 1] ?? '';
+  const qrInvitationCode = argv[at + 2] ?? '';
+  const manifest = JSON.parse(readFileSync(join(REPO_ROOT, '.rehearsal', 'last-run.json'), 'utf8')) as RehearsalReport;
+  const rdf = manifest.campaigns.find((c) => c.agency === 'RDF');
+  const gate = rdf?.staffHandles.find((h) => h.endsWith('.gate.gasabo'));
+  if (gate === undefined) throw new ScenarioInvalid('The last run has no RDF Gasabo gate officer; run `pnpm rehearse` first.');
+  const steps = await completePhysicalTest({ ...where, agency: 'RDF', gate: { loginHandle: gate, password: REHEARSAL_STAFF_PASSWORD }, applicationId, qrInvitationCode, now: new Date() });
+  out('USRP REHEARSAL · complete the physical test (synthetic score)');
+  for (const s of steps) out(`  ${s.ok ? '✓' : '✗'} ${s.step}: ${s.detail}`);
+  const ok = steps.length > 0 && steps.every((s) => s.ok);
+  out(ok ? 'PHYSICAL TEST COMPLETED.' : 'COMPLETE-PHYSICAL FAILED — see ✗ above.');
+  return ok ? 0 : 1;
+}
+
 async function main(argv: readonly string[]): Promise<number> {
   const edgeBaseUrl = env('REHEARSAL_EDGE_URL') ?? `http://localhost:${env('PORT_EDGE_GATEWAY') ?? '4021'}`;
   const origin = env('REHEARSAL_ORIGIN') ?? 'http://localhost:3001';
@@ -217,6 +235,7 @@ async function main(argv: readonly string[]): Promise<number> {
     return roster(edgeBaseUrl, origin, at >= 0 ? (argv[at + 1] ?? null) : null);
   }
   if (argv.includes('--fleet')) return fleet({ edgeBaseUrl, origin, databaseUrl });
+  if (argv.includes('--complete-physical')) return completePhysical(argv, { edgeBaseUrl, origin });
   if (argv.includes('--biometric-shadow')) {
     return biometricShadow(argv, { edgeBaseUrl, origin, databaseUrl });
   }

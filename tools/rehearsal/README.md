@@ -67,3 +67,10 @@ repo: `USRP_LIVE=1 npx playwright test e2e/live-rehearsal.spec.ts` in
 
 Add a scenario by writing `scenarios/<id>.json` (validated before any call)
 and running `pnpm rehearse <id>`.
+
+`pnpm rehearse --complete-physical <applicationId> <qrInvitationCode>` (S06,
+dev-only, stand-in for the Field Station's score capture until S08): signs one
+synthetic score with a freshly enrolled rehearsal device and syncs it through the
+real `enrollFieldDevice` and `syncFieldScores` operations as the Gasabo gate
+officer, so an application admitted at the gate reaches `PHYSICAL_TEST_COMPLETE`
+(the state the medical officer acts on in the staff-and-decision live journey).
