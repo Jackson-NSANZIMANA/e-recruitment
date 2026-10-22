@@ -23,6 +23,7 @@ import { isRehearsalCode, ScenarioInvalid, validateScenario, type Scenario } fro
 import { assertGasaboRoster, RosterAssertion } from './roster.js';
 import { REHEARSAL_STAFF_PASSWORD, provisionStaff } from './staff.js';
 import { recordShadowEvidence } from './biometric.js';
+import { FleetAssertion, rehearseFleet } from './fleet.js';
 import { ensureAgencyAdmin } from './provision.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -172,6 +173,27 @@ async function biometricShadow(
   return ok ? 0 : 1;
 }
 
+/** S09: device fleet lifecycle and the Gasabo venue's live counts, on the real stack. */
+async function fleet(where: { readonly edgeBaseUrl: string; readonly origin: string; readonly databaseUrl: string }): Promise<number> {
+  const manifest = JSON.parse(readFileSync(join(REPO_ROOT, '.rehearsal', 'last-run.json'), 'utf8')) as RehearsalReport;
+  const rdf = manifest.campaigns.find((c) => c.agency === 'RDF');
+  const session = rdf?.sessions.find((s) => s.district === 'GASABO');
+  const gate = rdf?.staffHandles.find((h) => h.endsWith('.gate.gasabo'));
+  const supervisor = rdf?.staffHandles.find((h) => h.endsWith('.supervisor'));
+  if (rdf === undefined || session === undefined || gate === undefined || supervisor === undefined) {
+    throw new ScenarioInvalid('The last run has no RDF Gasabo session, gate officer and supervisor; run `pnpm rehearse` first.');
+  }
+  const steps = await rehearseFleet({
+    ...where, agency: 'RDF', campaignCode: rdf.publicCode, district: session.district, examDate: session.examDate,
+    gate: { loginHandle: gate, password: REHEARSAL_STAFF_PASSWORD }, supervisor: { loginHandle: supervisor, password: REHEARSAL_STAFF_PASSWORD }, now: new Date(),
+  });
+  out(`USRP REHEARSAL · device fleet and venue live counts · ${session.venueName} ${session.examDate}`);
+  for (const s of steps) out(`  ${s.ok ? '✓' : '✗'} ${s.step}: ${s.detail}`);
+  const ok = steps.length > 0 && steps.every((s) => s.ok);
+  out(ok ? 'FLEET REHEARSAL PASSED.' : 'FLEET REHEARSAL FAILED — see ✗ above.');
+  return ok ? 0 : 1;
+}
+
 async function main(argv: readonly string[]): Promise<number> {
   const edgeBaseUrl = env('REHEARSAL_EDGE_URL') ?? `http://localhost:${env('PORT_EDGE_GATEWAY') ?? '4021'}`;
   const origin = env('REHEARSAL_ORIGIN') ?? 'http://localhost:3001';
@@ -183,6 +205,7 @@ async function main(argv: readonly string[]): Promise<number> {
     const at = argv.indexOf('--expect-code');
     return roster(edgeBaseUrl, origin, at >= 0 ? (argv[at + 1] ?? null) : null);
   }
+  if (argv.includes('--fleet')) return fleet({ edgeBaseUrl, origin, databaseUrl });
   if (argv.includes('--biometric-shadow')) {
     return biometricShadow(argv, { edgeBaseUrl, origin, databaseUrl });
   }
@@ -202,7 +225,7 @@ main(process.argv.slice(2))
     process.exitCode = code;
   })
   .catch((error: unknown) => {
-    const known = error instanceof RehearsalRefused || error instanceof ScenarioInvalid || error instanceof EdgeUnavailable || error instanceof RosterAssertion;
+    const known = error instanceof RehearsalRefused || error instanceof ScenarioInvalid || error instanceof EdgeUnavailable || error instanceof RosterAssertion || error instanceof FleetAssertion;
     process.stderr.write(`rehearsal: ${known ? (error as Error).message : `unexpected failure: ${error instanceof Error ? error.message : String(error)}`}\n`);
     process.exitCode = known ? 2 : 1;
   });

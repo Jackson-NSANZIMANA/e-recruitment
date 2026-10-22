@@ -185,3 +185,18 @@ test('scenario: national-pilot-day declares SHADOW for RDF only', async () => {
   const scenario = JSON.parse(readFileSync(new URL('../scenarios/national-pilot-day.json', import.meta.url), 'utf8')) as { campaigns: { agency: string; biometricMode?: string }[] };
   assert.deepEqual(scenario.campaigns.filter((c) => c.biometricMode !== undefined).map((c) => [c.agency, c.biometricMode]), [['RDF', 'SHADOW']]);
 });
+
+import { assertVenueCounts, FleetAssertion } from '../src/fleet.js';
+
+const TRUTH = { expected: 3, admitted: 2, physicalCaptured: 1, medicalRecorded: 1, openConflicts: 0 };
+test('venue counts: equal to the engine, with an asOf, passes', () => {
+  assertVenueCounts({ counts: TRUTH, asOf: '2026-10-22T08:00:00.000Z' }, TRUTH);
+});
+test('venue counts: any drift from the engine fails and names the count', () => {
+  assert.throws(() => assertVenueCounts({ counts: { ...TRUTH, admitted: 1 }, asOf: '2026-10-22T08:00:00.000Z' }, TRUTH), (e: unknown) => e instanceof FleetAssertion && /admitted/.test((e as Error).message));
+});
+test('venue counts: a busy venue without asOf fails; an idle one may have asOf null', () => {
+  assert.throws(() => assertVenueCounts({ counts: TRUTH, asOf: null }, TRUTH), FleetAssertion);
+  const idle = { expected: 0, admitted: 0, physicalCaptured: 0, medicalRecorded: 0, openConflicts: 0 };
+  assertVenueCounts({ counts: idle, asOf: null }, idle);
+});
