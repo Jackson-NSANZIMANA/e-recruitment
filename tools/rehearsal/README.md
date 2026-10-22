@@ -42,6 +42,8 @@ officer, then fails unless the supervisor's `getBiometricEvidence` does not
 list it and the row is stored with mode `SHADOW`. The live spec can call the
 same helpers (`src/biometric.ts`).
 
+`pnpm rehearse --fleet` (S09, after `pnpm rehearse`): enrols a device, assigns it to the Gasabo venue day, asserts `getVenueLiveCounts` equals the counts taken from the engine tables (with an `asOf`), then revokes it with a reason and fails unless the next biometric evidence is `403 DEVICE_REVOKED`, the next score sync is `REJECTED REVOKED_DEVICE`, re-enrolment is `409` and the list shows it revoked.
+
 Everything it creates is marked as a rehearsal: `REH-<AGENCY>-<YYYYMMDD>` codes,
 `[REHEARSAL]` labels, "Rehearsal Venue — …" venues, legal basis
 `SYNTHETIC-REHEARSAL`. It refuses `NODE_ENV=production` and any non-local

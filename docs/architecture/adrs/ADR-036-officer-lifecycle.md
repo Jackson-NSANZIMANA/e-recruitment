@@ -169,3 +169,54 @@ remains for bootstrap only.
 ## Not in scope
 MFA, lockout, SSO/IdP, password reset of an activated account, a token
 revocation list (the one-hour residual), and the staff-admin UI (S06).
+
+## S09 device management
+
+*Addendum, 2026-10-21 (S09, rls/0036). Owner decision, settled.*
+
+**Permission.** A new `field.device.manage`, granted to `field_supervisor` and
+`agency_admin`, covers `listFieldDevices`, `assignDeviceToVenueDay` and
+`revokeFieldDevice`. Enrolment (`field.device.enroll`) is unchanged and stays
+with the screening officer, and so does the residual B1 recorded: a dishonest
+gate officer can still enrol a key. The mapping is in the `permissions.ts` role
+table comment. `getVenueLiveCounts` is read with `field.score.sync` or
+`field.device.manage`.
+
+**Revocation.**
+- It requires a reason from a closed vocabulary (`LOST`, `STOLEN`, `COMPROMISED`,
+  `RETIRED`, `OTHER`). There is no free text, so the audit stays PII-free.
+- It is final: a trigger refuses to change the key, the agency, the enrolment
+  record or a revocation. A replacement tablet enrols under a new device id, and
+  enrolling a revoked id answers `409 DEVICE_REVOKED`.
+- It is audited: `FIELD_DEVICE_REVOKED` is staged in the transactional outbox in
+  the same transaction as the update (a narrow outbox policy admits only
+  field-sync's two fleet actions) and relayed by field-sync's own relay.
+- A device of another agency is a bare 404 and stays active.
+
+**Offline exposure window.** Revocation takes effect on the device's *next
+contact*: the next score sync and the next biometric evidence (both read
+`revoked_at` on every record; the engine re-checks it), and any enrolment under
+that id. A revoked device that never reconnects keeps its local data, its
+enrolled key and whatever it captured until the device is wiped (S15 and the
+operations runbook). Nothing reaches into the tablet. A request already in
+flight when the revocation commits may still complete. Last-seen (below) tells a
+supervisor whether a device is still in contact.
+
+**Last seen.** `last_seen_at`, `last_seen_source` and `last_sync_at` are stamped
+only by `public_core.touch_field_device`, after a *signed* contact from an active
+device (a score sync past the signature check, or a verified evidence record).
+They are monotonic (`GREATEST`) and a forged or revoked contact stamps nothing.
+
+**Venue live counts.** `public_core.venue_day_counts` holds, per campaign,
+district and exam date: expected (the roster), admitted, physical captured,
+medical recorded, open conflicts and `as_of`. It is event-driven in the strict
+sense that matters here: SECURITY DEFINER triggers on the roster
+(`applications`), `gate_admissions` and `physical_test_scores` *recompute* the
+venue's five counts in the same transaction as the event, so the projection can
+neither lag nor drift, and a replay is harmless. It needs no message bus, so it
+works under the in-memory dev bus too. Cost: admissions at one venue serialise
+on one small row for the duration of their own transaction. Officers read their
+own agency's rows through FORCE'd RLS and cannot write the table. Medical
+recorded counts candidates with a score row carrying a fitness status; an
+application's own medical review is not counted. A venue with no event yet
+answers zeros with `asOf: null`.
