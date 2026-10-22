@@ -121,7 +121,12 @@ export class SyncFieldScoresService {
     // look alive — and never for a revoked device (refused above).
     if (!stamped.has(record.deviceId)) {
       stamped.add(record.deviceId);
-      await this.deps.registry.touch(record.deviceId, 'FIELD_SYNC');
+      // Observational: a failed stamp must never block a tablet's scores.
+      try {
+        await this.deps.registry.touch(record.deviceId, 'FIELD_SYNC');
+      } catch {
+        console.warn(JSON.stringify({ msg: 'device_last_seen_stamp_failed', deviceId: record.deviceId }));
+      }
     }
 
     // 4. Merge into the CRDT log (ticket-bound inside the store's lock).

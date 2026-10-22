@@ -316,6 +316,8 @@ async function main(): Promise<void> {
     check('a revoked contact does not refresh last seen', ((await device(DEV_OK))?.['last_seen_at'] as Date).getTime() === lastSeenBefore.getTime());
     const reenrol = await call('POST', ENROLL_DEVICE_PATH, SCREENING, { deviceId: DEV_OK, publicKeyPem: keysNew.publicKeyPem });
     check('re-enrolling a revoked id → 409 DEVICE_REVOKED', reenrol.status === 409 && rec(reenrol.json)['error'] === 'DEVICE_REVOKED', reenrol.text);
+    const probe = await call('POST', ENROLL_DEVICE_PATH, token(['screening_officer'], 'RNP'), { deviceId: DEV_OK, publicKeyPem: keysNew.publicKeyPem });
+    check("a sibling agency cannot probe a revoked id (no 409)", probe.status !== 409, probe.text);
     check('and its key is unchanged', (await device(DEV_OK))?.['public_key_pem'] === keysOk.publicKeyPem);
     check('assigning a revoked device → 409', (await assign(DEV_OK)).status === 409);
     const enrolNew = await call('POST', ENROLL_DEVICE_PATH, SCREENING, { deviceId: DEV_NEW, publicKeyPem: keysNew.publicKeyPem });
@@ -333,6 +335,7 @@ async function main(): Promise<void> {
 
     console.log('\n── 7. Venue live counts: the projection follows every event ──');
     check('no row before any event', (await counts()) === null);
+    await admin`DELETE FROM public_core.venue_day_counts WHERE campaign_id = ${CAMPAIGN}`;
     await insertApp(0, 'SLOT_ASSIGNED', DISTRICT);
     await insertApp(1, 'PHYSICAL_TEST_SCHEDULED', DISTRICT);
     await insertApp(2, 'PHYSICAL_TEST_SCHEDULED', DISTRICT);

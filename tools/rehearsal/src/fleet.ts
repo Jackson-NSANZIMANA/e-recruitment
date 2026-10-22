@@ -36,7 +36,7 @@ export class FleetAssertion extends Error {
 export function assertVenueCounts(body: unknown, truth: VenueCounts): VenueCounts {
   const b = (body ?? {}) as { counts?: Record<string, unknown>; asOf?: unknown };
   const c = b.counts;
-  if (c === undefined || c === null || typeof c !== 'object') throw new FleetAssertion('live counts answer has no counts');
+  if (typeof c !== 'object') throw new FleetAssertion('live counts answer has no counts');
   for (const key of Object.keys(truth) as (keyof VenueCounts)[]) {
     if (c[key] !== truth[key]) throw new FleetAssertion(`${key}: edge says ${String(c[key])}, engine says ${String(truth[key])}`);
   }

@@ -80,7 +80,8 @@ export class PgDeviceRegistry implements DeviceRegistry {
         const row = existing[0];
         if (!row) throw new FieldSyncPersistenceError('Device vanished during enrollment');
         // A revoked id is never revived (and never reported as enrolled).
-        if (row.revoked_at !== null) return { kind: 'REVOKED' };
+        // Only for the caller's OWN agency: a sibling's id must not be probeable.
+        if (row.revoked_at !== null && row.agency === input.agency) return { kind: 'REVOKED' };
         return { kind: 'ALREADY_ENROLLED', agency: row.agency };
       });
     } catch (cause) {
@@ -125,12 +126,12 @@ export class PgDeviceRegistry implements DeviceRegistry {
             SELECT x.district, x.exam_date, x.campaign_id
             FROM public_core.field_device_assignments x
             WHERE x.device_id = d.device_id
-            ORDER BY x.exam_date DESC LIMIT 1
+            ORDER BY abs(x.exam_date - current_date) ASC, x.exam_date DESC LIMIT 1
           ) a ON true
           LEFT JOIN public_core.recruitment_campaigns c ON c.id = a.campaign_id
           WHERE d.agency = ${scope.agency}::public_core.agency
-          ORDER BY d.enrolled_at DESC, d.device_id ASC
-          LIMIT 500
+          ORDER BY (d.revoked_at IS NULL) DESC, d.enrolled_at DESC, d.device_id ASC
+          LIMIT 1000
         `;
         return rows.map((r): FleetDevice => ({
           deviceId: r.device_id,
@@ -142,7 +143,7 @@ export class PgDeviceRegistry implements DeviceRegistry {
           revokedAt: r.revoked_at === null ? null : new Date(r.revoked_at).toISOString(),
           revokeReason: r.revoke_reason,
           assignment:
-            r.a_district === null || r.a_exam_date === null || r.a_campaign === null
+            r.revoked_at !== null || r.a_district === null || r.a_exam_date === null || r.a_campaign === null
               ? null
               : { campaignPublicCode: r.a_campaign, district: r.a_district, examDate: r.a_exam_date },
         }));

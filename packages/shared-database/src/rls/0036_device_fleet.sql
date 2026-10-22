@@ -30,6 +30,11 @@
 --     projection cannot drift and a replayed event is harmless. Officers read
 --     their own agency's rows only; nobody can write the table directly.
 --
+-- Residual: the projection is refreshed on INSERT/UPDATE of its sources, not on DELETE
+-- (applications and scores are never deleted; erasure tombstones) nor on edits to
+-- campaign_venue_assignments; each refresh is a full recount per venue day, which is
+-- cheap at one venue's size but would want statement-level triggers for bulk loads.
+--
 -- Run as usrp_admin AFTER db:migrate, 0001, 0008, 0009, 0026, 0032, 0034.
 -- Fully re-runnable.
 -- ══════════════════════════════════════════════════════════════════
@@ -234,6 +239,10 @@ BEGIN
     EXECUTE format($f$
       CREATE OR REPLACE FUNCTION %1$I.venue_day_refresh(p_campaign uuid, p_district text)
       RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $body$
+        -- Serialise refreshes of ONE venue day: a concurrent writer waits here, and
+        -- the statement below then sees its committed rows (READ COMMITTED), so the
+        -- last refresh never stores a stale count.
+        SELECT pg_advisory_xact_lock(hashtextextended(p_campaign::text || '/' || p_district, 36));
         INSERT INTO public_core.venue_day_counts
           (campaign_id, district, exam_date, agency, expected, admitted,
            physical_captured, medical_recorded, open_conflicts, as_of)
@@ -309,6 +318,14 @@ BEGIN
       EXECUTE format('REVOKE ALL ON FUNCTION %I.%s FROM PUBLIC', s, fn);
     END LOOP;
     EXECUTE format('REVOKE CREATE ON SCHEMA %I FROM usrp_venue_projection_owner', s);
+
+    -- Backfill: venue days that already have data must not read as empty.
+    EXECUTE format($q$
+      SELECT %1$I.venue_day_refresh(v.campaign_id, v.district)
+      FROM public_core.campaign_venue_assignments v
+      JOIN public_core.recruitment_campaigns c ON c.id = v.campaign_id
+      WHERE c.agency = %2$L::public_core.agency
+    $q$, s, upper(a));
 
     EXECUTE format('DROP TRIGGER IF EXISTS trg_venue_day_application ON %I.applications', s);
     EXECUTE format('CREATE TRIGGER trg_venue_day_application AFTER INSERT OR UPDATE OF status, assigned_district ON %I.applications FOR EACH ROW EXECUTE FUNCTION %I.trg_venue_day_application()', s, s);

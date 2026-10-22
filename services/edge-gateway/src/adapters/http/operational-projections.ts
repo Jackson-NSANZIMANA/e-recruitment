@@ -269,7 +269,7 @@ export function projectFleetDevices(body: unknown): { devices: Rec[] } | null {
             ? null
             : { campaign: str(a['campaignPublicCode'], 64), district: token(a['district']), examDate: day(a['examDate']) },
       };
-    }, 500),
+    }, 1_000),
   }));
 }
 
