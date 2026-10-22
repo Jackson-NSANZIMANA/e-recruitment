@@ -344,6 +344,7 @@ run_ts "biometric-service: check-in gate + persistence" services/biometric-servi
 # modes (SHADOW never shown), supervised manual identity, append-only, PII-free.
 run_ts "biometric-service: identity evidence LIVE (no image ever accepted; evidence never a verdict)" services/biometric-service/selfcheck/verify-biometric-evidence.ts
 run_ts "field-sync-service: offline capture + CRDT merge + adjudication" services/field-sync-service/selfcheck/verify-field-sync-slice.ts
+run_ts "field-sync-service: device fleet, revocation, last seen, venue live counts (S09, rls/0036)" services/field-sync-service/selfcheck/verify-device-fleet.ts
 run_ts "audit-service: immutable trail"           services/audit-service/selfcheck/verify-audit-slice.ts
 run_ts "document-forensics: bounded-real analyzer (MinIO+ClamAV)" services/document-forensics-service/selfcheck/verify-forensics-slice.ts
 # The document INGRESS (P1 #3). Runs straight after the analyzer proof because it
