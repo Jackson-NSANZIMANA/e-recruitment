@@ -116,7 +116,7 @@ END$$;
 GRANT USAGE ON SCHEMA public_core TO usrp_device_fleet_owner, usrp_venue_projection_owner;
 
 -- ── 3. touch_field_device: the last-seen stamp ────────────────────
-GRANT SELECT (device_id, revoked_at) ON public_core.field_devices TO usrp_device_fleet_owner;
+GRANT SELECT (device_id, revoked_at, last_seen_at, last_sync_at) ON public_core.field_devices TO usrp_device_fleet_owner;
 GRANT UPDATE (last_seen_at, last_seen_source, last_sync_at) ON public_core.field_devices TO usrp_device_fleet_owner;
 
 CREATE OR REPLACE FUNCTION public_core.touch_field_device(p_device_id text, p_source text)
@@ -168,6 +168,20 @@ DROP POLICY IF EXISTS pc_fda_rnp ON public_core.field_device_assignments;
 CREATE POLICY pc_fda_rnp ON public_core.field_device_assignments TO usrp_rnp_officer USING (agency = 'RNP');
 DROP POLICY IF EXISTS pc_fda_rcs ON public_core.field_device_assignments;
 CREATE POLICY pc_fda_rcs ON public_core.field_device_assignments TO usrp_rcs_officer USING (agency = 'RCS');
+
+-- ── Outbox lane for field-sync's fleet audits ─────────────────────
+-- pc_event_outbox_system admits only application-/scheduling-service rows. The
+-- fleet audit (revoke, assign) is staged by field-sync in the same transaction
+-- as the state change, so it needs its own narrow lane: one producer, one event
+-- type, two actions. (Permissive policies are OR-ed; nothing is widened.)
+DROP POLICY IF EXISTS pc_event_outbox_fleet ON public_core.event_outbox;
+CREATE POLICY pc_event_outbox_fleet ON public_core.event_outbox
+  FOR ALL TO usrp_system_service USING (producer = 'field-sync-service') WITH CHECK (
+    producer = 'field-sync-service'
+    AND event_type = 'AUDIT_ENTRY'
+    AND payload->>'eventType' = 'AUDIT_ENTRY'
+    AND payload->>'action' IN ('FIELD_DEVICE_REVOKED', 'FIELD_DEVICE_ASSIGNED')
+  );
 
 -- ── 5. Venue live counts ──────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS public_core.venue_day_counts (
