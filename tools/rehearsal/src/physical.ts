@@ -7,13 +7,15 @@
 // a freshly enrolled rehearsal device and syncs it through the real
 // enrollFieldDevice and syncFieldScores operations, as the gate officer.
 //
-//   pnpm rehearse --complete-physical <applicationId> <qrInvitationCode>
+//   pnpm rehearse --complete-physical <applicationId> [qrInvitationCode]
 //
-// The application must already be admitted at the gate (PHYSICAL_TEST_SCHEDULED)
-// and the QR code is the one on the citizen's exam pass.
+// The application must already be admitted at the gate (PHYSICAL_TEST_SCHEDULED).
+// The QR invitation code is read from the local rehearsal database when it is
+// not given (a spent pass is never shown to the citizen again).
 // ══════════════════════════════════════════════════════════════════
 
 import { randomUUID } from 'node:crypto';
+import postgres from 'postgres';
 import { generateDeviceKeyPair, signFieldScoreRecord, type SignableFieldPayload } from '@usrp/shared-security';
 import { EdgeSession } from './edge.js';
 
@@ -23,7 +25,9 @@ export interface PhysicalConfig {
   readonly agency: string;
   readonly gate: { readonly loginHandle: string; readonly password: string };
   readonly applicationId: string;
-  readonly qrInvitationCode: string;
+  /** Omit to read it from the (local, fenced) rehearsal database. */
+  readonly qrInvitationCode: string | null;
+  readonly databaseUrl: string;
   readonly now: Date;
 }
 
@@ -38,11 +42,26 @@ export function validatePhysicalInput(applicationId: string, qr: string): string
   return null;
 }
 
+const SCHEMA: Readonly<Record<string, string>> = { RDF: 'rdf_ops', RNP: 'rnp_ops', RCS: 'rcs_ops' };
+
+async function lookupQr(databaseUrl: string, agency: string, applicationId: string): Promise<string | null> {
+  const schema = SCHEMA[agency];
+  if (schema === undefined) return null;
+  const sql = postgres(databaseUrl, { max: 1, onnotice: () => undefined });
+  try {
+    const rows = await sql<{ qr: string | null }[]>`SELECT qr_invitation_code AS qr FROM ${sql(schema)}.applications WHERE id = ${applicationId}::uuid`;
+    return rows[0]?.qr ?? null;
+  } finally {
+    await sql.end({ timeout: 5 });
+  }
+}
+
 export async function completePhysicalTest(cfg: PhysicalConfig): Promise<readonly PhysicalStep[]> {
   const steps: PhysicalStep[] = [];
   const bad = (step: string, detail: string): readonly PhysicalStep[] => [...steps, { step, ok: false, detail }];
-  const problem = validatePhysicalInput(cfg.applicationId, cfg.qrInvitationCode);
-  if (problem !== null) return bad('input', problem);
+  const qr = cfg.qrInvitationCode ?? (UUID_RE.test(cfg.applicationId) ? await lookupQr(cfg.databaseUrl, cfg.agency, cfg.applicationId) : null);
+  const problem = validatePhysicalInput(cfg.applicationId, qr ?? '');
+  if (problem !== null) return bad('input', qr === null ? 'the application has no issued QR invitation (is it admitted?)' : problem);
 
   const gate = new EdgeSession(cfg.edgeBaseUrl, cfg.origin);
   if (!(await gate.signIn(cfg.gate.loginHandle, cfg.gate.password))) return bad('gate sign-in', cfg.gate.loginHandle);
@@ -55,7 +74,7 @@ export async function completePhysicalTest(cfg: PhysicalConfig): Promise<readonl
   steps.push({ step: 'enrol device', ok: true, detail: deviceId });
 
   const payload: SignableFieldPayload = {
-    applicationId: cfg.applicationId, qrInvitationCode: cfg.qrInvitationCode,
+    applicationId: cfg.applicationId, qrInvitationCode: qr ?? '',
     metrics: { heightCm: 178, weightKg: 72, run3kmTimeSeconds: 720, chestCm: 96, medicalFitnessStatus: 'FIT' },
     capturedAt: cfg.now.toISOString(), deviceId, capturingOfficerId: randomUUID(), vectorClock: { [deviceId]: 1 },
   };

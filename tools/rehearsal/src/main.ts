@@ -207,10 +207,10 @@ async function fleet(where: { readonly edgeBaseUrl: string; readonly origin: str
 }
 
 /** S06, dev-only: sync one synthetic score so an admitted application reaches PHYSICAL_TEST_COMPLETE. */
-async function completePhysical(argv: readonly string[], where: { readonly edgeBaseUrl: string; readonly origin: string }): Promise<number> {
+async function completePhysical(argv: readonly string[], where: { readonly edgeBaseUrl: string; readonly origin: string; readonly databaseUrl: string }): Promise<number> {
   const at = argv.indexOf('--complete-physical');
   const applicationId = argv[at + 1] ?? '';
-  const qrInvitationCode = argv[at + 2] ?? '';
+  const qrInvitationCode = argv[at + 2] ?? null;
   const manifest = JSON.parse(readFileSync(join(REPO_ROOT, '.rehearsal', 'last-run.json'), 'utf8')) as RehearsalReport;
   const rdf = manifest.campaigns.find((c) => c.agency === 'RDF');
   const gate = rdf?.staffHandles.find((h) => h.endsWith('.gate.gasabo'));
@@ -235,7 +235,7 @@ async function main(argv: readonly string[]): Promise<number> {
     return roster(edgeBaseUrl, origin, at >= 0 ? (argv[at + 1] ?? null) : null);
   }
   if (argv.includes('--fleet')) return fleet({ edgeBaseUrl, origin, databaseUrl });
-  if (argv.includes('--complete-physical')) return completePhysical(argv, { edgeBaseUrl, origin });
+  if (argv.includes('--complete-physical')) return completePhysical(argv, { edgeBaseUrl, origin, databaseUrl });
   if (argv.includes('--biometric-shadow')) {
     return biometricShadow(argv, { edgeBaseUrl, origin, databaseUrl });
   }
