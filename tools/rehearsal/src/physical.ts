@@ -62,8 +62,9 @@ export async function completePhysicalTest(cfg: PhysicalConfig): Promise<readonl
   const sig = signFieldScoreRecord(keys.privateKeyPem, payload);
   const res = await gate.post('/edge/v1/field-sync/scores', { records: [{ ...payload, ...sig }] });
   const result = ((res.body as { results?: Record<string, unknown>[] } | null)?.results ?? [])[0] ?? {};
-  const status = String(result['status'] ?? `HTTP ${String(res.status)}`);
-  if (status !== 'ACCEPTED' && status !== 'SUPERSEDED') return bad('sync the score', `${status}${result['reason'] !== undefined ? ` ${String(result['reason'])}` : ''}`);
+  const text = (v: unknown): string => (typeof v === 'string' ? v : '');
+  const status = text(result['status']) || `HTTP ${String(res.status)}`;
+  if (status !== 'ACCEPTED' && status !== 'SUPERSEDED') return bad('sync the score', `${status} ${text(result['reason'])}`.trim());
   steps.push({ step: 'sync the score', ok: true, detail: status });
   return steps;
 }
