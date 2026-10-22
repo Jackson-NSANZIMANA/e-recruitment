@@ -18,6 +18,8 @@ import {
   text,
   jsonb,
   check,
+  date,
+  primaryKey,
   foreignKey,
   unique,
   type AnyPgColumn,
@@ -265,8 +267,64 @@ export const fieldDevices = publicCore.table(
     enrolledAt: timestamp('enrolled_at', { withTimezone: true }).defaultNow().notNull(),
     // NULL = active; set = no longer trusted (verification rejects revoked devices).
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    // Fleet columns (rls/0036, S09). last_seen_* are stamped ONLY by
+    // public_core.touch_field_device on a signed contact; a revocation is final
+    // (guard trigger) and carries its actor and a closed reason code.
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
+    lastSeenSource: varchar('last_seen_source', { length: 16 }), // FIELD_SYNC | BIOMETRIC
+    lastSyncAt: timestamp('last_sync_at', { withTimezone: true }),
+    revokedBy: varchar('revoked_by', { length: 128 }),
+    revokeReason: varchar('revoke_reason', { length: 24 }), // LOST | STOLEN | COMPROMISED | RETIRED | OTHER
   },
   (t) => [index('idx_pc_field_devices_agency').on(t.agency)],
+);
+
+// ── field_device_assignments (rls/0036, S09) ─────────────────────
+// A device is bound to ONE venue day (campaign + district + exam date).
+export const fieldDeviceAssignments = publicCore.table(
+  'field_device_assignments',
+  {
+    deviceId: varchar('device_id', { length: 64 })
+      .references(() => fieldDevices.deviceId)
+      .notNull(),
+    examDate: date('exam_date').notNull(),
+    agency: agencyEnum('agency').notNull(),
+    campaignId: uuid('campaign_id')
+      .references(() => recruitmentCampaigns.id)
+      .notNull(),
+    district: varchar('district', { length: 30 }).notNull(),
+    assignedBy: varchar('assigned_by', { length: 128 }).notNull(),
+    assignedAt: timestamp('assigned_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.deviceId, t.examDate] }),
+    index('idx_pc_fda_agency_venue').on(t.agency, t.campaignId, t.district, t.examDate),
+  ],
+);
+
+// ── venue_day_counts (rls/0036, S09) ─────────────────────────────
+// Live per-venue/day projection, recomputed by SECURITY DEFINER triggers in the
+// same transaction as every admission, score, conflict and roster change.
+export const venueDayCounts = publicCore.table(
+  'venue_day_counts',
+  {
+    campaignId: uuid('campaign_id')
+      .references(() => recruitmentCampaigns.id)
+      .notNull(),
+    district: varchar('district', { length: 30 }).notNull(),
+    examDate: date('exam_date').notNull(),
+    agency: agencyEnum('agency').notNull(),
+    expected: integer('expected').default(0).notNull(),
+    admitted: integer('admitted').default(0).notNull(),
+    physicalCaptured: integer('physical_captured').default(0).notNull(),
+    medicalRecorded: integer('medical_recorded').default(0).notNull(),
+    openConflicts: integer('open_conflicts').default(0).notNull(),
+    asOf: timestamp('as_of', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.campaignId, t.district, t.examDate] }),
+    index('idx_pc_vdc_agency').on(t.agency, t.examDate),
+  ],
 );
 
 // ── campaign_venue_assignments ────────────────────────────────────

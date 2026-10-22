@@ -76,8 +76,10 @@ export class SyncFieldScoresService {
 
   async sync(command: SyncFieldScoresCommand): Promise<SyncFieldScoresOutcome> {
     const results: RecordSyncResult[] = [];
+    // One last-seen stamp per device per batch (monotonic, so once is enough).
+    const stamped = new Set<string>();
     for (const record of command.records) {
-      results.push(await this.syncOne(record, command.actorAgency, command.context));
+      results.push(await this.syncOne(record, command.actorAgency, command.context, stamped));
     }
     return { results };
   }
@@ -86,6 +88,7 @@ export class SyncFieldScoresService {
     record: FieldScoreRecord,
     actorAgency: Agency,
     context: EventContext,
+    stamped: Set<string>,
   ): Promise<RecordSyncResult> {
     const base = { applicationId: record.applicationId, deviceId: record.deviceId };
 
@@ -112,6 +115,19 @@ export class SyncFieldScoresService {
       signedPayloadHash: record.signedPayloadHash,
     });
     if (!signatureOk) return this.reject(base, 'BAD_SIGNATURE', actorAgency, context);
+
+    // A SIGNED contact from an active device of this agency: stamp last-seen
+    // (S09). Never before the signature check — a forger must not make a device
+    // look alive — and never for a revoked device (refused above).
+    if (!stamped.has(record.deviceId)) {
+      stamped.add(record.deviceId);
+      // Observational: a failed stamp must never block a tablet's scores.
+      try {
+        await this.deps.registry.touch(record.deviceId, 'FIELD_SYNC');
+      } catch {
+        console.warn(JSON.stringify({ msg: 'device_last_seen_stamp_failed', deviceId: record.deviceId }));
+      }
+    }
 
     // 4. Merge into the CRDT log (ticket-bound inside the store's lock).
     const outcome = await this.deps.store.sync({

@@ -132,6 +132,20 @@ export interface VenueRoster {
   readonly truncated: boolean;
 }
 
+// ── venue live counts (S09, rls/0036) ──
+export interface VenueLiveCounts {
+  readonly venueName: string;
+  readonly district: string;
+  readonly examDate: string;
+  readonly expected: number;
+  readonly admitted: number;
+  readonly physicalCaptured: number;
+  readonly medicalRecorded: number;
+  readonly openConflicts: number;
+  /** When the projection row was last recomputed; null = no event has touched this venue day yet. */
+  readonly asOf: string | null;
+}
+
 export interface OperationalReadRepository {
   searchApplications(scope: AgencyScope, search: ApplicationSearch): Promise<ApplicationSearchPage>;
   listCampaigns(scope: AgencyScope, search: CampaignAdminSearch): Promise<CampaignAdminPage>;
@@ -139,4 +153,6 @@ export interface OperationalReadRepository {
   findCampaignDetail(scope: AgencyScope, publicCode: string): Promise<CampaignAdminDetail | null>;
   /** null = no such campaign or no such venue day in the caller's agency. */
   venueRoster(scope: AgencyScope, query: RosterQuery): Promise<VenueRoster | null>;
+  /** null = no such campaign or venue day in the caller's agency. Reads the event-driven projection. */
+  venueLiveCounts(scope: AgencyScope, query: RosterQuery): Promise<VenueLiveCounts | null>;
 }

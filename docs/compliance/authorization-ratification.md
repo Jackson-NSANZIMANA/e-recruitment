@@ -11,7 +11,7 @@ agency must ratify or amend them. Nothing here is policy until signed.
 | `agency_admin` | all `campaign.*`, `application.read`, `adjudication.read` | May ever decide candidates? (default: no) |
 | `reviewer` | `campaign.read.admin`, `application.read`, `adjudication.read` | — |
 | `screening_officer` | `walkin.register`, `walkin.vet`, `identity.verify`, `biometric.verify`, `document.verify.venue`, `field.device.enroll`, `field.score.sync`, + read | Venue staffing. `document.verify.venue` = the front-door check-in post clears a paper at the venue (**decided 2026-10-14**, ADR-032) |
-| `field_supervisor` | `field.device.enroll`, `field.score.sync`, `field.conflict.resolve`, + read | Who resolves physical-evidence conflicts |
+| `field_supervisor` | `field.device.enroll`, `field.device.manage` (S09, decided 2026-10-21), `field.score.sync`, `field.conflict.resolve`, + read | Who resolves physical-evidence conflicts |
 | `medical_officer` | `medical.review`, + read | RDF board vs RNP/RCS certificate verification |
 | `adjudicator` | `adjudication.decide`, + read | Document / late-disqualification holds |
 | `decision_authority` | `decision.final`, `application.accept`, + read | **Who signs and who enlists** |

@@ -49,6 +49,12 @@ export const OPERATION_PERMISSION_LIST = [
   'identity.verify',
   /** Enrol a tablet; upload captured scores. */
   'field.device.enroll',
+  /**
+   * List the agency's field devices, bind one to a venue day, revoke one with a
+   * reason (S09; owner decision 2026-10-21, ADR-036 addendum "S09 device
+   * management"). field_supervisor and agency_admin.
+   */
+  'field.device.manage',
   'field.score.sync',
   /** Resolve a field-score conflict (authority over physical evidence). */
   'field.conflict.resolve',
@@ -144,6 +150,10 @@ const READ: readonly Permission[] = ['application.read', 'adjudication.read'];
 
 /**
  * role → permissions. PROVISIONAL (see header). Deliberately narrow:
+ *   • field.device.manage (S09, owner decision 2026-10-21, ADR-036 addendum
+ *     "S09 device management") is held by field_supervisor and agency_admin
+ *     only: list devices, assign a device to a venue day, revoke with a reason.
+ *     Enrolment (field.device.enroll) stays with the screening officer.
  *   • agency_admin  runs the campaign; does NOT decide candidates.
  *   • reviewer      read-only.
  *   • decision_authority is the only post that may finalise and accept.
@@ -158,6 +168,7 @@ const ROLE_PERMISSIONS: Readonly<Record<KnownRole, ReadonlySet<Permission>>> = {
     'campaign.complete',
     'campaign.cancel',
     'campaign.read.admin',
+    'field.device.manage',
     ...READ,
     ...OFFICER_ADMIN_PERMISSION_LIST,
   ]),
@@ -175,6 +186,7 @@ const ROLE_PERMISSIONS: Readonly<Record<KnownRole, ReadonlySet<Permission>>> = {
   ]),
   field_supervisor: new Set<Permission>([
     'field.device.enroll',
+    'field.device.manage',
     'field.score.sync',
     'field.conflict.resolve',
     'biometric.evidence.read',

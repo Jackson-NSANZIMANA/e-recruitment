@@ -80,6 +80,12 @@ import {
   syncFieldScoresHandler,
 } from './adapters/http/field-sync.controller.js';
 import {
+  assignDeviceToVenueDayHandler,
+  getVenueLiveCountsHandler,
+  listFieldDevicesHandler,
+  revokeFieldDeviceHandler,
+} from './adapters/http/fleet.controller.js';
+import {
   decideErasureRequestHandler,
   getCampaignAdminDetailHandler,
   getVenueRosterHandler,
@@ -164,6 +170,10 @@ export function edgeHandlers(deps: EdgeDeps): Record<EdgeOperationId, RouteHandl
     enrollFieldDevice: enrollFieldDeviceHandler(deps),
     syncFieldScores: syncFieldScoresHandler(deps),
     resolveFieldSyncConflict: resolveFieldSyncConflictHandler(deps),
+    listFieldDevices: listFieldDevicesHandler(deps),
+    assignDeviceToVenueDay: assignDeviceToVenueDayHandler(deps),
+    revokeFieldDevice: revokeFieldDeviceHandler(deps),
+    getVenueLiveCounts: getVenueLiveCountsHandler(deps),
 
     listOfficers: listOfficersHandler(deps),
     createOfficer: createOfficerHandler(deps),

@@ -32,6 +32,7 @@ import type {
   CampaignSessionOccupancy,
   OperationalReadRepository,
   RosterEntry,
+  VenueLiveCounts,
   VenueRoster,
 } from '../ports/operational-read-repository.js';
 
@@ -378,6 +379,46 @@ export class PgOperationalReadRepository implements OperationalReadRepository {
       });
     } catch (cause) {
       throw new ApplicationReadError('Could not read the venue roster.', { cause });
+    }
+  }
+  async venueLiveCounts(scope: AgencyScope, query: RosterQuery): Promise<VenueLiveCounts | null> {
+    try {
+      return await asOfficer(scope, async (tx) => {
+        const venues = await tx<{ campaign_id: string; venue_name: string }[]>`
+          SELECT c.id AS campaign_id, v.venue_name
+          FROM public_core.recruitment_campaigns c
+          JOIN public_core.campaign_venue_assignments v ON v.campaign_id = c.id
+          WHERE c.public_code = ${query.campaignPublicCode}
+            AND c.agency = ${scope.agency}::public_core.agency
+            AND v.district = ${query.district}
+            AND v.exam_date = ${query.examDate}
+          LIMIT 1`;
+        const venue = venues[0];
+        if (venue === undefined) return null;
+        // The projection row (rls/0036): FORCE'd RLS scopes it to the officer's agency.
+        const rows = await tx<{
+          expected: number; admitted: number; physical_captured: number; medical_recorded: number;
+          open_conflicts: number; as_of: Date;
+        }[]>`
+          SELECT expected, admitted, physical_captured, medical_recorded, open_conflicts, as_of
+          FROM public_core.venue_day_counts
+          WHERE campaign_id = ${venue.campaign_id} AND district = ${query.district}
+            AND exam_date = ${query.examDate}::date`;
+        const row = rows[0];
+        return {
+          venueName: venue.venue_name,
+          district: query.district,
+          examDate: query.examDate,
+          expected: row?.expected ?? 0,
+          admitted: row?.admitted ?? 0,
+          physicalCaptured: row?.physical_captured ?? 0,
+          medicalRecorded: row?.medical_recorded ?? 0,
+          openConflicts: row?.open_conflicts ?? 0,
+          asOf: row === undefined ? null : iso(row.as_of),
+        };
+      });
+    } catch (cause) {
+      throw new ApplicationReadError('Could not read the venue live counts.', { cause });
     }
   }
 }

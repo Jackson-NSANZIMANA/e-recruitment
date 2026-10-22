@@ -137,6 +137,8 @@ export class RecordEvidenceService {
         await uow.stage([refusalAudit(command, record, 'SIGNATURE_INVALID', context)]);
         return { kind: 'UNTRUSTED', reason: 'SIGNATURE_INVALID' };
       }
+      // A signed contact from an active device of this agency (S09 last-seen).
+      await uow.touchDevice(device.deviceId);
 
       const result = await uow.record({
         agency: command.agency,

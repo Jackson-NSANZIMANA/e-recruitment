@@ -122,6 +122,10 @@ export const UPSTREAM = Object.freeze({
   enrollDevice: op('enrollDevice', 'field-sync', 'POST', '/v1/field-sync/devices', 'officer-jwt'),
   syncScores: op('syncScores', 'field-sync', 'POST', '/v1/field-sync/scores', 'officer-jwt'),
   resolveConflict: op('resolveConflict', 'field-sync', 'POST', '/v1/field-sync/conflicts/resolve', 'officer-jwt'),
+  // S09 device fleet (field.device.manage) and the venue live-count projection.
+  fleetList: op('fleetList', 'field-sync', 'GET', '/v1/field-sync/devices/fleet', 'officer-jwt'),
+  fleetAssign: op('fleetAssign', 'field-sync', 'POST', '/v1/field-sync/devices/assign', 'officer-jwt'),
+  fleetRevoke: op('fleetRevoke', 'field-sync', 'POST', '/v1/field-sync/devices/revoke', 'officer-jwt'),
 
   // application-service — operational-read.controller.ts (ADR-039). Agency-scoped
   // officer reads; read-only, run under the officer's own agency DB role.
@@ -129,6 +133,7 @@ export const UPSTREAM = Object.freeze({
   adminCampaignDetail: op('adminCampaignDetail', 'application', 'GET', '/v1/campaigns/admin/detail', 'officer-jwt'),
   searchApplications: op('searchApplications', 'application', 'GET', '/v1/applications/search', 'officer-jwt'),
   venueRoster: op('venueRoster', 'application', 'GET', '/v1/venue-roster', 'officer-jwt'),
+  venueLiveCounts: op('venueLiveCounts', 'application', 'GET', '/v1/venue-live-counts', 'officer-jwt'),
 
   // identity-service — erasure-request.controller.ts / erasure.controller.ts (ADR-020,
   // ADR-015). The DPO queue, the accountable decline, and the gated execution road.

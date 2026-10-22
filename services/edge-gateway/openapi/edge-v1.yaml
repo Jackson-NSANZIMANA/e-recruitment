@@ -1122,6 +1122,81 @@ paths:
           description: Enrolled
         '400':
           description: Invalid
+        '409':
+          description: DEVICE_REVOKED (a revoked device id is final; enrol the tablet under a NEW id)
+    get:
+      operationId: listFieldDevices
+      x-usrp-session: officer
+      x-usrp-permission: field.device.manage
+      x-usrp-outcomes: {}
+      x-usrp-csrf: false
+      x-usrp-retry-on-g2g: true
+      summary: |
+        The agency's field devices (S09, ADR-036 addendum "S09 device management"):
+        device id, who enrolled it and when, last seen (and by which service), last
+        score sync, revoked (time and closed reason code) and its latest venue-day
+        binding. NEVER the public key. Agency from the session; no query accepted.
+      tags: [field-sync]
+      responses:
+        '200':
+          description: "{ devices: [ { deviceId, enrolledBy, enrolledAt, lastSeenAt|null, lastSeenSource|null, lastSyncAt|null, revoked, revokedAt|null, revokeReason|null, assignment: { campaign, district, examDate }|null } ] }"
+        '401':
+          description: Session ended ({ reason })
+        '403':
+          description: PERMISSION_DENIED
+        '502':
+          description: UPSTREAM_CONTRACT_MISMATCH
+
+  /edge/v1/field-sync/devices/assign:
+    post:
+      operationId: assignDeviceToVenueDay
+      x-usrp-session: officer
+      x-usrp-permission: field.device.manage
+      x-usrp-outcomes: { 409: [DEVICE_REVOKED] }
+      x-usrp-csrf: true
+      summary: |
+        Bind a device to one venue day (kit binding). Body { deviceId, campaign
+        (public code), district, examDate }; unknown keys are a 400. Assigning
+        again for the same device and date moves it. A device of another agency,
+        an unknown device and an unknown venue day are the same bare 404.
+      tags: [field-sync]
+      responses:
+        '200':
+          description: "{ status: ASSIGNED, deviceId, campaign, district, examDate }"
+        '400':
+          description: INVALID_REQUEST
+        '403':
+          description: PERMISSION_DENIED
+        '404':
+          description: NOT_FOUND
+        '409':
+          description: DEVICE_REVOKED
+
+  /edge/v1/field-sync/devices/revoke:
+    post:
+      operationId: revokeFieldDevice
+      x-usrp-session: officer
+      x-usrp-permission: field.device.manage
+      x-usrp-outcomes: {}
+      x-usrp-csrf: true
+      summary: |
+        Revoke a device. Body { deviceId, reason } where reason is one of LOST,
+        STOLEN, COMPROMISED, RETIRED, OTHER (required; closed vocabulary, no free
+        text). Final and audited (FIELD_DEVICE_REVOKED). Takes effect on the
+        device's NEXT contact: the next score sync, the next biometric evidence and
+        any enrolment under that id are refused. A device that never reconnects
+        keeps its local data until it is wiped (S15, operations runbook). Never
+        retried by the edge.
+      tags: [field-sync]
+      responses:
+        '200':
+          description: "{ status: REVOKED | ALREADY_REVOKED, deviceId }"
+        '400':
+          description: INVALID_REQUEST
+        '403':
+          description: PERMISSION_DENIED
+        '404':
+          description: NOT_FOUND (identical for a sibling agency's device)
 
   /edge/v1/field-sync/scores:
     post:
@@ -1576,6 +1651,40 @@ paths:
           description: PERMISSION_DENIED
         '404':
           description: NOT_FOUND (no such venue day in this agency; identical for a sibling agency's campaign)
+        '502':
+          description: UPSTREAM_CONTRACT_MISMATCH
+
+  /edge/v1/gate/live-counts:
+    get:
+      operationId: getVenueLiveCounts
+      x-usrp-session: officer
+      x-usrp-permission: field.score.sync
+      x-usrp-permission-also: [field.device.manage]
+      x-usrp-outcomes: {}
+      x-usrp-csrf: false
+      x-usrp-retry-on-g2g: true
+      summary: |
+        Live counts for one venue day (S09): expected (the roster), admitted,
+        physical captured, medical recorded, open conflicts, and `asOf`, the instant
+        the projection was last recomputed (null = no event has touched this venue
+        day yet; counts are then zero). Counts only: no candidate row. Any one of the
+        two permissions admits.
+      tags: [gate]
+      parameters:
+        - { name: campaign, in: query, required: true, schema: { type: string }, description: "Campaign public code." }
+        - { name: district, in: query, required: true, schema: { type: string } }
+        - { name: examDate, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: "{ agency, venue: { venueName, district, examDate }, counts: { expected, admitted, physicalCaptured, medicalRecorded, openConflicts }, asOf|null }"
+        '400':
+          description: INVALID_REQUEST
+        '401':
+          description: Session ended ({ reason })
+        '403':
+          description: PERMISSION_DENIED
+        '404':
+          description: NOT_FOUND (identical for a sibling agency's campaign)
         '502':
           description: UPSTREAM_CONTRACT_MISMATCH
 
