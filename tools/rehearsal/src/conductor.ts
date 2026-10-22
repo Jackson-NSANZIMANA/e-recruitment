@@ -14,7 +14,7 @@ import { kigaliDate } from './clock.js';
 import { EdgeSession } from './edge.js';
 import { deterministicKey } from './idempotency.js';
 import { syntheticPolicy } from './policy.js';
-import { ensureAgencyAdmin } from './provision.js';
+import { ensureAgencyAdmin, ensureSecondAgencyAdmin } from './provision.js';
 import { REHEARSAL_CODE_PREFIX, stageCampaigns, type Scenario, type StagedCampaign } from './scenario.js';
 import { REHEARSAL_STAFF_PASSWORD, provisionStaff } from './staff.js';
 
@@ -58,6 +58,8 @@ export interface ConductorConfig {
   readonly databaseUrl: string;
   readonly now: Date;
   readonly adminFor: (agency: Agency) => AdminCredential;
+  /** The second administrator who releases activation codes (four-eyes, ADR-036 addendum). */
+  readonly secondAdminFor: (agency: Agency) => AdminCredential;
 }
 
 function codeOf(body: unknown): string {
@@ -122,9 +124,21 @@ async function playCampaign(scenario: Scenario, staged: StagedCampaign, config: 
   }
   steps.push({ step: 'sign-in', outcome: 'APPLIED', httpStatus: 200, detail: admin.loginHandle });
 
+  // 2a. The SECOND administrator (four-eyes): the first creates each officer,
+  //     this one releases its one-time activation code.
+  const second = config.secondAdminFor(agency);
+  const seeded = await ensureSecondAgencyAdmin(config.databaseUrl, { agency, loginHandle: second.loginHandle, password: second.password });
+  const releaser = new EdgeSession(config.edgeBaseUrl, config.origin);
+  if (!(await releaser.signIn(second.loginHandle, second.password))) {
+    steps.push({ step: 'second administrator', outcome: 'FAILED', httpStatus: null, detail: `edge refused ${second.loginHandle}` });
+    return report(false);
+  }
+  steps.push({ step: 'second administrator', outcome: seeded === 'SEEDED' ? 'APPLIED' : 'ALREADY_DONE', httpStatus: 200, detail: second.loginHandle });
+
   // 2b. Staff the day through the officer-lifecycle operations (ADR-036), as
-  //     this administrator, and verify each officer from the agency's list.
-  const staffed = await provisionStaff(edge, () => new EdgeSession(config.edgeBaseUrl, config.origin), staged.staff);
+  //     this administrator (the second releases each code), and verify each
+  //     officer from the agency's list.
+  const staffed = await provisionStaff(edge, releaser, () => new EdgeSession(config.edgeBaseUrl, config.origin), staged.staff);
   for (const member of staffed) {
     steps.push({
       step: `staff ${member.handle}`,

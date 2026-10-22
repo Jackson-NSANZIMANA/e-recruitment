@@ -24,7 +24,8 @@ import { assertGasaboRoster, RosterAssertion } from './roster.js';
 import { REHEARSAL_STAFF_PASSWORD, provisionStaff } from './staff.js';
 import { recordShadowEvidence } from './biometric.js';
 import { FleetAssertion, rehearseFleet } from './fleet.js';
-import { ensureAgencyAdmin } from './provision.js';
+import { completePhysicalTest } from './physical.js';
+import { ensureAgencyAdmin, ensureSecondAgencyAdmin } from './provision.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = resolve(HERE, '..');
@@ -49,6 +50,13 @@ function adminFor(agency: Agency): AdminCredential {
   return {
     loginHandle: env(`REHEARSAL_${agency}_ADMIN_HANDLE`) ?? `${agency.toLowerCase()}.admin`,
     password: env(`REHEARSAL_${agency}_ADMIN_PASSWORD`) ?? DEFAULT_ADMIN_PASSWORD,
+  };
+}
+
+function secondAdminFor(agency: Agency): AdminCredential {
+  return {
+    loginHandle: env(`REHEARSAL_${agency}_ADMIN2_HANDLE`) ?? `${agency.toLowerCase()}.admin2`,
+    password: env(`REHEARSAL_${agency}_ADMIN2_PASSWORD`) ?? DEFAULT_ADMIN_PASSWORD,
   };
 }
 
@@ -152,7 +160,11 @@ async function biometricShadow(
   const edge = new EdgeSession(where.edgeBaseUrl, where.origin);
   if (!(await edge.signIn(admin.loginHandle, admin.password))) throw new RehearsalRefused(`edge refused ${admin.loginHandle}`);
   const staff = campaign.staff ?? [];
-  const staffed = await provisionStaff(edge, () => new EdgeSession(where.edgeBaseUrl, where.origin), staff);
+  const second = secondAdminFor(agency);
+  await ensureSecondAgencyAdmin(where.databaseUrl, { agency, loginHandle: second.loginHandle, password: second.password });
+  const releaser = new EdgeSession(where.edgeBaseUrl, where.origin);
+  if (!(await releaser.signIn(second.loginHandle, second.password))) throw new RehearsalRefused(`edge refused ${second.loginHandle}`);
+  const staffed = await provisionStaff(edge, releaser, () => new EdgeSession(where.edgeBaseUrl, where.origin), staff);
   const gate = staff.find((m) => m.posts.includes('screening_officer'));
   const reader = staff.find((m) => m.posts.includes('field_supervisor') || m.posts.includes('reviewer'));
   if (staffed.some((m) => !m.ok) || gate === undefined || reader === undefined) {
@@ -194,6 +206,23 @@ async function fleet(where: { readonly edgeBaseUrl: string; readonly origin: str
   return ok ? 0 : 1;
 }
 
+/** S06, dev-only: sync one synthetic score so an admitted application reaches PHYSICAL_TEST_COMPLETE. */
+async function completePhysical(argv: readonly string[], where: { readonly edgeBaseUrl: string; readonly origin: string; readonly databaseUrl: string }): Promise<number> {
+  const at = argv.indexOf('--complete-physical');
+  const applicationId = argv[at + 1] ?? '';
+  const qrInvitationCode = argv[at + 2] ?? null;
+  const manifest = JSON.parse(readFileSync(join(REPO_ROOT, '.rehearsal', 'last-run.json'), 'utf8')) as RehearsalReport;
+  const rdf = manifest.campaigns.find((c) => c.agency === 'RDF');
+  const gate = rdf?.staffHandles.find((h) => h.endsWith('.gate.gasabo'));
+  if (gate === undefined) throw new ScenarioInvalid('The last run has no RDF Gasabo gate officer; run `pnpm rehearse` first.');
+  const steps = await completePhysicalTest({ ...where, agency: 'RDF', gate: { loginHandle: gate, password: REHEARSAL_STAFF_PASSWORD }, applicationId, qrInvitationCode, now: new Date() });
+  out('USRP REHEARSAL · complete the physical test (synthetic score)');
+  for (const s of steps) out(`  ${s.ok ? '✓' : '✗'} ${s.step}: ${s.detail}`);
+  const ok = steps.length > 0 && steps.every((s) => s.ok);
+  out(ok ? 'PHYSICAL TEST COMPLETED.' : 'COMPLETE-PHYSICAL FAILED — see ✗ above.');
+  return ok ? 0 : 1;
+}
+
 async function main(argv: readonly string[]): Promise<number> {
   const edgeBaseUrl = env('REHEARSAL_EDGE_URL') ?? `http://localhost:${env('PORT_EDGE_GATEWAY') ?? '4021'}`;
   const origin = env('REHEARSAL_ORIGIN') ?? 'http://localhost:3001';
@@ -206,13 +235,14 @@ async function main(argv: readonly string[]): Promise<number> {
     return roster(edgeBaseUrl, origin, at >= 0 ? (argv[at + 1] ?? null) : null);
   }
   if (argv.includes('--fleet')) return fleet({ edgeBaseUrl, origin, databaseUrl });
+  if (argv.includes('--complete-physical')) return completePhysical(argv, { edgeBaseUrl, origin, databaseUrl });
   if (argv.includes('--biometric-shadow')) {
     return biometricShadow(argv, { edgeBaseUrl, origin, databaseUrl });
   }
   const scenarioId = argv.find((arg) => !arg.startsWith('--')) ?? 'national-pilot-day';
   const scenario = loadScenario(scenarioId);
 
-  const report = await conduct(scenario, { edgeBaseUrl, origin, databaseUrl, now: new Date(), adminFor });
+  const report = await conduct(scenario, { edgeBaseUrl, origin, databaseUrl, now: new Date(), adminFor, secondAdminFor });
   const manifestDir = join(REPO_ROOT, '.rehearsal');
   mkdirSync(manifestDir, { recursive: true });
   writeFileSync(join(manifestDir, 'last-run.json'), `${JSON.stringify({ ...report, personas: scenario.personas }, null, 2)}\n`);

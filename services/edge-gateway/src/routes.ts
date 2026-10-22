@@ -101,6 +101,7 @@ import {
   enableOfficerHandler,
   listOfficersHandler,
   reissueOfficerActivationHandler,
+  releaseOfficerActivationHandler,
   revokeOfficerSessionsHandler,
 } from './adapters/http/officer-admin.controller.js';
 import {
@@ -178,6 +179,7 @@ export function edgeHandlers(deps: EdgeDeps): Record<EdgeOperationId, RouteHandl
     listOfficers: listOfficersHandler(deps),
     createOfficer: createOfficerHandler(deps),
     reissueOfficerActivation: reissueOfficerActivationHandler(deps),
+    releaseOfficerActivation: releaseOfficerActivationHandler(deps),
     assignOfficerPosts: assignOfficerPostsHandler(deps),
     disableOfficer: disableOfficerHandler(deps),
     enableOfficer: enableOfficerHandler(deps),

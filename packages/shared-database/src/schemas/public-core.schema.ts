@@ -593,11 +593,15 @@ export const officerActivationCodes = publicCore.table('officer_activation_codes
   officerId: uuid('officer_id')
     .primaryKey()
     .references(() => officerAccounts.officerId, { onDelete: 'cascade' }),
-  codeHash: varchar('code_hash', { length: 64 }).notNull(),
+  // NULL until a DIFFERENT administrator releases the code (four-eyes, ADR-036 addendum).
+  codeHash: varchar('code_hash', { length: 64 }),
   issuedAt: timestamp('issued_at', { withTimezone: true }).defaultNow().notNull(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   issuedBy: uuid('issued_by').notNull(),
   redeemedAt: timestamp('redeemed_at', { withTimezone: true }),
+  createdBy: uuid('created_by'),
+  releasedAt: timestamp('released_at', { withTimezone: true }),
+  releasedBy: uuid('released_by'),
 });
 
 // ── service_accounts ──────────────────────────────────────────────

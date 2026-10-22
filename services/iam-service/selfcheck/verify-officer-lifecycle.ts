@@ -6,7 +6,9 @@
 // edge-gateway HTTP with its persistent session store. Nothing is stubbed.
 //
 // What it proves:
-//   • create → one-time code (stored only as a hash) → activate → login;
+//   • create (never a code) → a DIFFERENT administrator releases the one-time code
+//     once (stored only as a hash) → activate → login; creator, cross-agency and
+//     replayed releases refused (ADR-036 addendum, four-eyes);
 //     the code is single-use, a wrong code / weak password are refused;
 //   • reissue replaces an unredeemed code, never resets an activated account;
 //   • assign posts → the officer's ALREADY-OPEN edge session is refused on the
@@ -315,12 +317,12 @@ async function main(): Promise<void> {
     check('listOfficers answers 200 with the RDF officers', listed.status === 200 && handles.includes(H.adminA) && handles.includes(H.reviewer));
     check('the list never includes another agency\'s officer', !handles.includes(H.rnp));
     check('every listed row carries exactly the allowlisted fields',
-      listedOfficers.every((o) => Object.keys(o).sort().join() === 'activatedAt,activationExpiresAt,createdAt,lastLoginAt,loginHandle,officerId,posts,status'));
+      listedOfficers.every((o) => Object.keys(o).sort().join() === 'activatedAt,activationExpiresAt,activationState,createdAt,lastLoginAt,loginHandle,officerId,posts,releasableByYou,status'));
     const adminRow = listedOfficers.find((o) => o['loginHandle'] === H.adminA);
     check('the administrator\'s own last login is stamped', typeof adminRow?.['lastLoginAt'] === 'string');
     check('operator-provisioned accounts count as activated', typeof adminRow?.['activatedAt'] === 'string');
 
-    section('Create → one-time activation code → activate → login');
+    section('Create → (no code) → second-admin release → activate → login');
     const forbiddenAgency = await adminA.post('/edge/v1/officers', { loginHandle: H.gate, posts: ['screening_officer'], agency: 'RNP' });
     check('a body naming an agency is refused at the edge (FORBIDDEN_FIELD)', forbiddenAgency.status === 400 && forbiddenAgency.body['error'] === 'FORBIDDEN_FIELD');
     const adminPost = await adminA.post('/edge/v1/officers', { loginHandle: `${H.gate}x`, posts: ['agency_admin'] });
@@ -330,26 +332,79 @@ async function main(): Promise<void> {
 
     const createdGate = await adminA.post('/edge/v1/officers', { loginHandle: H.gate, posts: ['screening_officer'] });
     const gateOfficer = createdGate.body['officer'] as Record<string, unknown> | undefined;
-    const activation = createdGate.body['activation'] as Record<string, unknown> | undefined;
     const gateId = String(gateOfficer?.['officerId'] ?? '');
-    const code = String(activation?.['code'] ?? '');
-    const compactCode = code.replaceAll('-', '');
-    check('createOfficer answers 201 with a pending officer and a one-time code',
-      createdGate.status === 201 && gateOfficer?.['status'] === 'pending' && /^[A-Z2-9]{5}(-[A-Z2-9]{5}){3}$/.test(code));
+    check('createOfficer answers 201 with a pending officer awaiting release and NO code',
+      createdGate.status === 201 && gateOfficer?.['status'] === 'pending' && gateOfficer['activationState'] === 'PENDING_RELEASE' &&
+      Object.keys(createdGate.body).sort().join() === 'officer,outcome' && !/[A-Z2-9]{5}-[A-Z2-9]{5}-[A-Z2-9]{5}-[A-Z2-9]{5}/.test(JSON.stringify(createdGate.body)));
     const dup = await adminA.post('/edge/v1/officers', { loginHandle: H.gate, posts: ['reviewer'] });
     check('a taken handle is refused (409 HANDLE_TAKEN)', dup.status === 409 && dup.body['error'] === 'HANDLE_TAKEN');
 
-    const stored = await db<{ code_hash: string; expires_at: Date; issued_at: Date }[]>`
-      SELECT code_hash, expires_at, issued_at FROM public_core.officer_activation_codes WHERE officer_id = ${gateId}::uuid`;
+    const beforeRelease = await db<{ code_hash: string | null; released_at: Date | null; created_by: string; issued_by: string }[]>`
+      SELECT code_hash, released_at, created_by, issued_by FROM public_core.officer_activation_codes WHERE officer_id = ${gateId}::uuid`;
+    check('before release no code exists anywhere: the hash is NULL, nothing is released',
+      beforeRelease.length === 1 && beforeRelease[0]?.code_hash === null && beforeRelease[0].released_at === null &&
+      beforeRelease[0].created_by === RDF_ADMIN_A && beforeRelease[0].issued_by === RDF_ADMIN_A);
+
+    section('FOUR-EYES release (ADR-036 addendum)');
+    const adminB = browser();
+    check('a second RDF administrator signs in', (await adminB.login(H.adminB, PW.adminB)) === 204);
+    const rnp = browser();
+    check('the RNP administrator signs in', (await rnp.login(H.rnp, PW.rnp)) === 204);
+    const rowOf = async (b: Browser, id: string): Promise<Record<string, unknown> | undefined> =>
+      (((await b.get('/edge/v1/officers')).body['officers'] ?? []) as Record<string, unknown>[]).find((o) => o['officerId'] === id);
+    check('the creating administrator is NOT offered the release', (await rowOf(adminA, gateId))?.['releasableByYou'] === false);
+    check('the second administrator IS offered the release', (await rowOf(adminB, gateId))?.['releasableByYou'] === true);
+    const earlyAnon = browser();
+    await earlyAnon.get('/edge/v1/session');
+    const beforeActivate = await earlyAnon.post('/edge/v1/auth/officer/activate', { loginHandle: H.gate, activationCode: 'AAAAA-AAAAA-AAAAA-AAAAA', password: PW.gate });
+    check('an unreleased account cannot be activated (401 ACTIVATION_REJECTED)', beforeActivate.status === 401);
+
+    const creatorRelease = await adminA.post('/edge/v1/officers/activation/release', { targetOfficerId: gateId });
+    check('the CREATING administrator is refused (403 SAME_ADMIN) and receives no code',
+      creatorRelease.status === 403 && creatorRelease.body['error'] === 'SAME_ADMIN' && Object.keys(creatorRelease.body).join() === 'error');
+    const crossRelease = await rnp.post('/edge/v1/officers/activation/release', { targetOfficerId: gateId });
+    const crossGhost = await rnp.post('/edge/v1/officers/activation/release', { targetOfficerId: randomUUID() });
+    check('an administrator of ANOTHER agency is refused (404 NOT_FOUND, identical to a nonexistent officer)',
+      crossRelease.status === 404 && crossRelease.body['error'] === 'NOT_FOUND' && JSON.stringify(crossRelease.body) === JSON.stringify(crossGhost.body));
+    const stillNull = await db<{ code_hash: string | null }[]>`SELECT code_hash FROM public_core.officer_activation_codes WHERE officer_id = ${gateId}::uuid`;
+    check('the refused attempts released nothing', stillNull[0]?.code_hash === null);
+
+    const directToken = String((await iamLogin(H.adminA, PW.adminA)).body['token'] ?? '');
+    const directCreate = await iamAs(directToken, 'POST', '/v1/officers', { loginHandle: `s06.direct.${runId}`, posts: ['reviewer'] });
+    check('at the IDENTITY-SERVICE route too, create answers 201 with no activation, no code and no hash',
+      directCreate.status === 201 && Object.keys(directCreate.body).sort().join() === 'officer,outcome' &&
+      !/[A-Z2-9]{5}-[A-Z2-9]{5}|"code"|activation"|hash/i.test(JSON.stringify(directCreate.body)));
+    const directId = String((directCreate.body['officer'] as Record<string, unknown> | undefined)?.['officerId'] ?? '');
+    const directReissue = await iamAs(directToken, 'POST', '/v1/officers/activation/reissue', { targetOfficerId: directId });
+    check('…and reissue answers 200 with no code', directReissue.status === 200 && Object.keys(directReissue.body).sort().join() === 'officer,outcome');
+    const directSame = await iamAs(directToken, 'POST', '/v1/officers/activation/release', { targetOfficerId: directId });
+    check('…and the identity service itself refuses the creator (403 SAME_ADMIN)', directSame.status === 403 && directSame.body['error'] === 'SAME_ADMIN');
+
+    const released = await adminB.post('/edge/v1/officers/activation/release', { targetOfficerId: gateId });
+    const activation = released.body['activation'] as Record<string, unknown> | undefined;
+    const code = String(activation?.['code'] ?? '');
+    const compactCode = code.replaceAll('-', '');
+    check('a DIFFERENT administrator of the same agency releases the code once (200 RELEASED)',
+      released.status === 200 && released.body['outcome'] === 'RELEASED' && /^[A-Z2-9]{5}(-[A-Z2-9]{5}){3}$/.test(code) &&
+      (released.body['officer'] as Record<string, unknown> | undefined)?.['activationState'] === 'RELEASED');
+    const replayRelease = await adminB.post('/edge/v1/officers/activation/release', { targetOfficerId: gateId });
+    check('a replay is refused (409 ALREADY_RELEASED) and carries no code',
+      replayRelease.status === 409 && replayRelease.body['error'] === 'ALREADY_RELEASED' && Object.keys(replayRelease.body).join() === 'error');
+    const creatorAgain = await adminA.post('/edge/v1/officers/activation/release', { targetOfficerId: gateId });
+    check('the creator is still refused after the release (403 SAME_ADMIN)', creatorAgain.status === 403 && creatorAgain.body['error'] === 'SAME_ADMIN');
+    check('the list no longer offers a release', (await rowOf(adminB, gateId))?.['releasableByYou'] === false);
+
+    const stored = await db<{ code_hash: string; expires_at: Date; released_at: Date; released_by: string }[]>`
+      SELECT code_hash, expires_at, released_at, released_by FROM public_core.officer_activation_codes WHERE officer_id = ${gateId}::uuid`;
     const plaintextAnywhere = await db<{ n: string }[]>`
       SELECT (SELECT count(*) FROM public_core.officer_activation_codes WHERE code_hash LIKE ${'%' + compactCode + '%'})
            + (SELECT count(*) FROM public_core.officer_accounts WHERE credential LIKE ${'%' + compactCode + '%'})
            + (SELECT count(*) FROM public_core.event_outbox WHERE payload::text LIKE ${'%' + compactCode + '%'}) AS n`;
     check('only a 64-hex hash of the code is stored; the code appears nowhere in the database',
-      stored.length === 1 && /^[0-9a-f]{64}$/.test(stored[0]?.code_hash ?? '') && Number(plaintextAnywhere[0]?.n) === 0,
+      stored.length === 1 && /^[0-9a-f]{64}$/.test(stored[0]?.code_hash ?? '') && Number(plaintextAnywhere[0]?.n) === 0 && stored[0]?.released_by === RDF_ADMIN_B,
       `rows=${String(stored.length)} matches=${String(plaintextAnywhere[0]?.n)}`);
-    const ttlHours = stored[0] ? (stored[0].expires_at.getTime() - stored[0].issued_at.getTime()) / 3_600_000 : 0;
-    check('the code expires 24 hours after issue', Math.abs(ttlHours - 24) < 0.001, String(ttlHours));
+    const ttlHours = stored[0] ? (stored[0].expires_at.getTime() - stored[0].released_at.getTime()) / 3_600_000 : 0;
+    check('the code expires 24 hours after RELEASE', Math.abs(ttlHours - 24) < 0.001, String(ttlHours));
 
     const gate = browser();
     check('a pending officer cannot log in before activation', (await gate.login(H.gate, PW.gate)) === 401);
@@ -364,7 +419,7 @@ async function main(): Promise<void> {
     await db`UPDATE public_core.officer_activation_codes SET expires_at = now() - interval '1 second' WHERE officer_id = ${gateId}::uuid`;
     const expired = await anon.post('/edge/v1/auth/officer/activate', { loginHandle: H.gate, activationCode: code, password: PW.gate });
     check('an expired code is refused (401 ACTIVATION_REJECTED)', expired.status === 401);
-    await db`UPDATE public_core.officer_activation_codes SET expires_at = issued_at + interval '24 hours' WHERE officer_id = ${gateId}::uuid`;
+    await db`UPDATE public_core.officer_activation_codes SET expires_at = released_at + interval '24 hours' WHERE officer_id = ${gateId}::uuid`;
     const activated = await anon.post('/edge/v1/auth/officer/activate', { loginHandle: H.gate, activationCode: code.toLowerCase(), password: PW.gate });
     check('the right code activates the account (204)', activated.status === 204);
     const replayed = await anon.post('/edge/v1/auth/officer/activate', { loginHandle: H.gate, activationCode: code, password: `${PW.gate}-again` });
@@ -377,20 +432,35 @@ async function main(): Promise<void> {
     check('the stored credential is the officer\'s own scrypt digest; status active; activated_at set',
       credentialRow[0]?.credential.startsWith('scrypt$') === true && credentialRow[0]?.status === 'active' && credentialRow[0]?.activated === true);
 
-    section('Reissue — only for a never-activated account');
+    section('Reissue — only for a never-activated account; never carries a code');
     const createdPending = await adminA.post('/edge/v1/officers', { loginHandle: H.pending, posts: ['medical_officer'] });
     const pendingId = String((createdPending.body['officer'] as Record<string, unknown> | undefined)?.['officerId'] ?? '');
-    const firstCode = String((createdPending.body['activation'] as Record<string, unknown> | undefined)?.['code'] ?? '');
+    const firstRelease = await adminB.post('/edge/v1/officers/activation/release', { targetOfficerId: pendingId });
+    const firstCode = String((firstRelease.body['activation'] as Record<string, unknown> | undefined)?.['code'] ?? '');
+    check('a second officer is created and released', firstRelease.status === 200 && firstCode !== '');
     const reissued = await adminA.post('/edge/v1/officers/activation/reissue', { targetOfficerId: pendingId });
-    const secondCode = String((reissued.body['activation'] as Record<string, unknown> | undefined)?.['code'] ?? '');
-    check('reissue answers 200 with a different code', reissued.status === 200 && secondCode !== '' && secondCode !== firstCode);
+    check('reissue answers 200 with NO code', reissued.status === 200 && reissued.body['outcome'] === 'REISSUED' &&
+      Object.keys(reissued.body).sort().join() === 'officer,outcome' && (reissued.body['officer'] as Record<string, unknown> | undefined)?.['activationState'] === 'PENDING_RELEASE');
     const oldCode = await anon.post('/edge/v1/auth/officer/activate', { loginHandle: H.pending, activationCode: firstCode, password: PW.pending });
-    check('the replaced code no longer activates', oldCode.status === 401);
+    check('the previously released code no longer activates', oldCode.status === 401);
+    const reissuerSelf = await adminA.post('/edge/v1/officers/activation/release', { targetOfficerId: pendingId });
+    check('the reissuing administrator cannot release it (403 SAME_ADMIN)', reissuerSelf.status === 403 && reissuerSelf.body['error'] === 'SAME_ADMIN');
+    const reissuedByB = await adminB.post('/edge/v1/officers/activation/reissue', { targetOfficerId: pendingId });
+    check('another administrator reissues', reissuedByB.status === 200);
+    const bothRefused = await Promise.all([adminA, adminB].map((b) => b.post('/edge/v1/officers/activation/release', { targetOfficerId: pendingId })));
+    check('after that, neither the creator nor the latest reissuer may release (403 SAME_ADMIN)',
+      bothRefused.every((r) => r.status === 403 && r.body['error'] === 'SAME_ADMIN'));
+    await adminA.post('/edge/v1/officers/activation/reissue', { targetOfficerId: pendingId });
+    const secondRelease = await adminB.post('/edge/v1/officers/activation/release', { targetOfficerId: pendingId });
+    const secondCode = String((secondRelease.body['activation'] as Record<string, unknown> | undefined)?.['code'] ?? '');
+    check('the next release yields a different code', secondRelease.status === 200 && secondCode !== '' && secondCode !== firstCode);
     const newCode = await anon.post('/edge/v1/auth/officer/activate', { loginHandle: H.pending, activationCode: secondCode, password: PW.pending });
-    check('the reissued code activates', newCode.status === 204);
+    check('the released code activates', newCode.status === 204);
     const notPending = await adminA.post('/edge/v1/officers/activation/reissue', { targetOfficerId: gateId });
     check('reissue on an activated account is refused (409 NOT_PENDING_ACTIVATION) — never a password reset',
       notPending.status === 409 && notPending.body['error'] === 'NOT_PENDING_ACTIVATION');
+    const releaseActivated = await adminB.post('/edge/v1/officers/activation/release', { targetOfficerId: gateId });
+    check('release on an activated account is refused (409 NOT_PENDING_ACTIVATION)', releaseActivated.status === 409 && releaseActivated.body['error'] === 'NOT_PENDING_ACTIVATION');
 
     section('Assign posts — the open session ends; a new login carries the new posts');
     const forbiddenOfficerId = await adminA.post('/edge/v1/officers/posts', { officerId: gateId, posts: ['reviewer'], reasonCode: 'CORRECTION' });
@@ -441,8 +511,6 @@ async function main(): Promise<void> {
     check('the officer can still log in (account untouched)', (await gate.login(H.gate, PW.gate)) === 204);
 
     section('Cross-agency, self-escalation, last admin');
-    const rnp = browser();
-    check('RNP administrator signs in', (await rnp.login(H.rnp, PW.rnp)) === 204);
     const crossDisable = await rnp.post('/edge/v1/officers/disable', { targetOfficerId: gateId, reasonCode: 'OTHER' });
     check('an RNP administrator cannot touch an RDF officer (404 NOT_FOUND, same as nonexistent)',
       crossDisable.status === 404 && crossDisable.body['error'] === 'NOT_FOUND');
@@ -461,8 +529,6 @@ async function main(): Promise<void> {
     check('self session revocation is refused (SELF_MODIFICATION)', selfRevoke.status === 403);
 
     section('A disabled ADMINISTRATOR: open session ends; the residual token is refused');
-    const adminB = browser();
-    check('second RDF administrator signs in', (await adminB.login(H.adminB, PW.adminB)) === 204);
     const adminBToken = String((await iamLogin(H.adminB, PW.adminB)).body['token'] ?? '');
     check('precondition: their bearer token works against iam-service', (await iamAs(adminBToken, 'GET', '/v1/officers')).status === 200);
     const disableB = await adminA.post('/edge/v1/officers/disable', { targetOfficerId: RDF_ADMIN_B, reasonCode: 'LEFT_SERVICE' });
@@ -483,6 +549,8 @@ async function main(): Promise<void> {
     const reviewerCreate = await reviewer.post('/edge/v1/officers', { loginHandle: `s01.byreviewer.${runId}`, posts: ['reviewer'] });
     check('the edge refuses a reviewer (403 PERMISSION_DENIED) before any upstream call',
       reviewerList.status === 403 && reviewerCreate.status === 403 && reviewerList.body['error'] === 'PERMISSION_DENIED');
+    const reviewerRelease = await reviewer.post('/edge/v1/officers/activation/release', { targetOfficerId: gateId });
+    check('a reviewer cannot release an activation code (403 PERMISSION_DENIED)', reviewerRelease.status === 403 && reviewerRelease.body['error'] === 'PERMISSION_DENIED');
     const reviewerToken = String((await iamLogin(H.reviewer, PW.reviewer)).body['token'] ?? '');
     const reviewerDirect = await iamAs(reviewerToken, 'POST', '/v1/officers/disable', { targetOfficerId: gateId, reasonCode: 'OTHER' });
     check('iam-service refuses a reviewer too (403 PERMISSION_DENIED)', reviewerDirect.status === 403 && reviewerDirect.body['error'] === 'PERMISSION_DENIED');
@@ -501,10 +569,11 @@ async function main(): Promise<void> {
       ORDER BY id`;
     const actions = audits.map((a) => a.action);
     check('one AUDIT_ENTRY per state-changing command on the officer, in order',
-      actions.join() === 'OFFICER_CREATED,OFFICER_ACTIVATED,OFFICER_POSTS_ASSIGNED,OFFICER_DISABLED,OFFICER_ENABLED,OFFICER_SESSIONS_REVOKED',
+      actions.join() === 'OFFICER_CREATED,OFFICER_ACTIVATION_RELEASED,OFFICER_ACTIVATED,OFFICER_POSTS_ASSIGNED,OFFICER_DISABLED,OFFICER_ENABLED,OFFICER_SESSIONS_REVOKED',
       actions.join());
-    check('administrator commands are attributed to the administrator; activation to the officer',
-      audits.filter((a) => a.action !== 'OFFICER_ACTIVATED').every((a) => a.performed_by === RDF_ADMIN_A) &&
+    check('administrator commands are attributed to the administrator (the release to the SECOND one); activation to the officer',
+      audits.filter((a) => a.action !== 'OFFICER_ACTIVATED' && a.action !== 'OFFICER_ACTIVATION_RELEASED').every((a) => a.performed_by === RDF_ADMIN_A) &&
+      audits.find((a) => a.action === 'OFFICER_ACTIVATION_RELEASED')?.performed_by === RDF_ADMIN_B &&
       audits.find((a) => a.action === 'OFFICER_ACTIVATED')?.performed_by === gateId &&
       audits.every((a) => a.agency === 'RDF'));
     const postsAudit = audits.find((a) => a.action === 'OFFICER_POSTS_ASSIGNED')?.payload['metadata'] as Record<string, unknown> | undefined;
@@ -527,8 +596,8 @@ async function main(): Promise<void> {
     check('no response body carried a scrypt digest, the pending sentinel, or a code hash',
       !everything.includes('scrypt$') && !everything.includes('pending$') &&
       !everything.includes(stored[0]?.code_hash ?? 'unreachable') && !/"credential"|"codeHash"|"code_hash"|"password"/.test(everything));
-    check('the activation code appeared only in the create answer',
-      seenBodies.filter((b) => b.includes(code)).length === 1);
+    check('the activation code appeared only in the one release answer',
+      seenBodies.filter((b) => b.includes(code)).length === 1 && seenBodies.filter((b) => b.includes(secondCode)).length === 1);
   } catch (error) {
     fail += 1;
     console.error('  ✗ officer lifecycle proof crashed', error instanceof Error ? error.stack ?? error.message : String(error));

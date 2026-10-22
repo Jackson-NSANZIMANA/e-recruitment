@@ -2399,7 +2399,7 @@
           "name": "code_hash",
           "type": "varchar(64)",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "issued_at": {
           "name": "issued_at",
@@ -2423,6 +2423,24 @@
         "redeemed_at": {
           "name": "redeemed_at",
           "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "released_at": {
+          "name": "released_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "released_by": {
+          "name": "released_by",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": false
         }

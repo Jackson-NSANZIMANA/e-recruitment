@@ -5,9 +5,11 @@
 // provisioned THROUGH THE OFFICER-LIFECYCLE OPERATIONS, as the agency
 // administrator, at the edge — exactly what S06's staff screen will call:
 //
-//   listOfficers → createOfficer (one-time code) → activateOfficer (as the
-//   officer, anonymous) → assignOfficerPosts when the posts differ →
-//   enableOfficer / reissueOfficerActivation to recover an earlier run.
+//   listOfficers → createOfficer (NO code, four-eyes) →
+//   releaseOfficerActivation (as a SECOND administrator, who alone receives the
+//   one-time code) → activateOfficer (as the officer, anonymous) →
+//   assignOfficerPosts when the posts differ → enableOfficer /
+//   reissueOfficerActivation to recover an earlier run.
 //
 // Then it verifies from the list, not from its own bookkeeping: every
 // scenario officer exists, is active and holds EXACTLY its posts. The dev
@@ -88,9 +90,14 @@ function activationCodeOf(body: unknown): string | null {
   return typeof code === 'string' ? code : null;
 }
 
-/** Provision one agency's scenario staff as its signed-in administrator. */
+/**
+ * Provision one agency's scenario staff as its signed-in administrator. The
+ * creating `admin` never receives an activation code; the DIFFERENT `releaser`
+ * administrator releases it (ADR-036 addendum).
+ */
 export async function provisionStaff(
   admin: EdgeSession,
+  releaser: EdgeSession,
   newBrowser: () => EdgeSession,
   staff: readonly StaffMember[],
 ): Promise<readonly StaffOutcome[]> {
@@ -103,6 +110,14 @@ export async function provisionStaff(
       password: REHEARSAL_STAFF_PASSWORD,
     });
     return reply.status === 204;
+  };
+
+  const release = async (officerId: string): Promise<{ readonly code: string | null; readonly failure: string | null }> => {
+    const reply = await releaser.post('/edge/v1/officers/activation/release', { targetOfficerId: officerId });
+    const code = activationCodeOf(reply.body);
+    return reply.status === 200 && code !== null
+      ? { code, failure: null }
+      : { code: null, failure: `releaseOfficerActivation answered ${String(reply.status)} ${errorOf(reply.body)}`.trim() };
   };
 
   const outcomes: StaffOutcome[] = [];
@@ -122,14 +137,21 @@ export async function provisionStaff(
       applied = true;
       if (action.kind === 'CREATE') {
         const created = await admin.post('/edge/v1/officers', { loginHandle: member.handle, posts: member.posts });
-        const code = activationCodeOf(created.body);
-        if (created.status !== 201 || code === null) failure = `createOfficer answered ${String(created.status)} ${errorOf(created.body)}`.trim();
-        else if (!(await activate(member.handle, code))) failure = 'activateOfficer refused the fresh code';
+        const createdId = (created.body as { officer?: { officerId?: unknown } } | null)?.officer?.officerId;
+        if (created.status !== 201 || typeof createdId !== 'string') failure = `createOfficer answered ${String(created.status)} ${errorOf(created.body)}`.trim();
+        else {
+          const released = await release(createdId);
+          if (released.code === null) failure = released.failure;
+          else if (!(await activate(member.handle, released.code))) failure = 'activateOfficer refused the released code';
+        }
       } else if (action.kind === 'REISSUE') {
         const reissued = await admin.post('/edge/v1/officers/activation/reissue', { targetOfficerId: action.officerId });
-        const code = activationCodeOf(reissued.body);
-        if (reissued.status !== 200 || code === null) failure = `reissueOfficerActivation answered ${String(reissued.status)} ${errorOf(reissued.body)}`.trim();
-        else if (!(await activate(member.handle, code))) failure = 'activateOfficer refused the reissued code';
+        if (reissued.status !== 200) failure = `reissueOfficerActivation answered ${String(reissued.status)} ${errorOf(reissued.body)}`.trim();
+        else {
+          const released = await release(action.officerId);
+          if (released.code === null) failure = released.failure;
+          else if (!(await activate(member.handle, released.code))) failure = 'activateOfficer refused the released code';
+        }
       } else if (action.kind === 'ENABLE') {
         const enabled = await admin.post('/edge/v1/officers/enable', { targetOfficerId: action.officerId, reasonCode: 'RETURNED_TO_DUTY' });
         if (enabled.status !== 200) failure = `enableOfficer answered ${String(enabled.status)} ${errorOf(enabled.body)}`.trim();

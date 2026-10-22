@@ -17,9 +17,15 @@ What `pnpm rehearse` does, in order, per agency, through the real interfaces onl
    through the first-admin function; an agency that already has a different
    administrator is never given a second one (set `REHEARSAL_<AGENCY>_ADMIN_HANDLE`
    and `REHEARSAL_<AGENCY>_ADMIN_PASSWORD` instead);
-2. sign in at the edge as that administrator;
+2. seed and sign in a **second** administrator (`<agency>.admin2`, same dev
+   password; `REHEARSAL_<AGENCY>_ADMIN2_HANDLE` / `_PASSWORD` to override): the
+   four-eyes release (ADR-036 addendum) needs a different administrator from the
+   one who creates officers. Dev-only direct insert, local database only;
+   then sign in at the edge as both;
 3. **staff** the day (ADR-036): create each scenario officer (`reh.<agency>.…`)
-   through `createOfficer`, redeem its one-time code through `activateOfficer`
+   through `createOfficer` (no code is returned), have the **second**
+   administrator release the one-time code through `releaseOfficerActivation`,
+   redeem it through `activateOfficer`
    with the dev password `RehearsalStaff#2026`, and align its posts through
    `assignOfficerPosts` (recovering an earlier run with `enableOfficer` /
    `reissueOfficerActivation`); then fail unless `listOfficers` shows each one
@@ -61,3 +67,10 @@ repo: `USRP_LIVE=1 npx playwright test e2e/live-rehearsal.spec.ts` in
 
 Add a scenario by writing `scenarios/<id>.json` (validated before any call)
 and running `pnpm rehearse <id>`.
+
+`pnpm rehearse --complete-physical <applicationId> [qrInvitationCode]` (S06,
+dev-only, stand-in for the Field Station's score capture until S08): signs one
+synthetic score with a freshly enrolled rehearsal device and syncs it through the
+real `enrollFieldDevice` and `syncFieldScores` operations as the Gasabo gate
+officer (the QR code is read from the local rehearsal database unless given), so an application admitted at the gate reaches `PHYSICAL_TEST_COMPLETE`
+(the state the medical officer acts on in the staff-and-decision live journey).

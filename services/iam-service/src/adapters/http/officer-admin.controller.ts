@@ -2,8 +2,10 @@
 // iam-service — HTTP ingress for the officer lifecycle (ADR-036)
 //
 //   GET  /v1/officers                         officer.read          → 200 { officers }
-//   POST /v1/officers                         officer.create        → 201 { officer, activation }
-//   POST /v1/officers/activation/reissue      officer.create        → 200 { officer, activation }
+//   POST /v1/officers                         officer.create        → 201 { outcome, officer }   (NEVER a code)
+//   POST /v1/officers/activation/reissue      officer.create        → 200 { outcome, officer }   (NEVER a code)
+//   POST /v1/officers/activation/release      officer.create        → 200 { outcome, officer, activation }
+//        a DIFFERENT administrator only: SAME_ADMIN 403, ALREADY_RELEASED 409 (ADR-036 addendum)
 //   POST /v1/officers/posts                   officer.posts.assign  → 200 { outcome, officer, sessionsRevoked }
 //   POST /v1/officers/disable                 officer.disable       → 200 { … }
 //   POST /v1/officers/enable                  officer.disable       → 200 { … }
@@ -36,10 +38,12 @@ import type {
   CreateOfficerResult,
   OfficerChangeResult,
   ReissueActivationResult,
+  ReleaseActivationResult,
 } from '../../ports/officer-admin-repository.js';
 
 export const OFFICERS_PATH = '/v1/officers';
 export const OFFICER_REISSUE_ACTIVATION_PATH = '/v1/officers/activation/reissue';
+export const OFFICER_RELEASE_ACTIVATION_PATH = '/v1/officers/activation/release';
 export const OFFICER_POSTS_PATH = '/v1/officers/posts';
 export const OFFICER_DISABLE_PATH = '/v1/officers/disable';
 export const OFFICER_ENABLE_PATH = '/v1/officers/enable';
@@ -58,6 +62,9 @@ const REFUSAL_STATUS: Readonly<Record<OfficerRefusal, number>> = {
   HANDLE_TAKEN: 409,
   LAST_ACTIVE_ADMIN: 409,
   NOT_PENDING_ACTIVATION: 409,
+  SAME_ADMIN: 403,
+  ALREADY_RELEASED: 409,
+  ACTIVATION_EXPIRED: 409,
 };
 
 function refusedResult(reason: OfficerRefusal): HttpResult {
@@ -108,6 +115,8 @@ function viewBody(officer: OfficerView): Record<string, unknown> {
     activatedAt: officer.activatedAt,
     lastLoginAt: officer.lastLoginAt,
     activationExpiresAt: officer.activationExpiresAt,
+    activationState: officer.activationState,
+    releasableByYou: officer.releasableByYou,
   };
 }
 
@@ -122,7 +131,8 @@ function changeResult(result: OfficerChangeResult | InvalidRequest): HttpResult 
   };
 }
 
-function credentialResult(
+/** create / reissue: the officer only. The creating administrator never receives a code. */
+function openedResult(
   result: CreateOfficerResult | ReissueActivationResult | InvalidRequest,
   successStatus: number,
 ): HttpResult {
@@ -130,12 +140,20 @@ function credentialResult(
     return { status: 400, body: { error: 'INVALID_REQUEST', field: result.field } };
   }
   if (result.outcome === 'REFUSED') return refusedResult(result.reason);
+  return { status: successStatus, body: { outcome: result.outcome, officer: viewBody(result.officer) } };
+}
+
+/** release: the only answer that carries a code, to a different administrator, once. */
+function releasedResult(result: ReleaseActivationResult | InvalidRequest): HttpResult {
+  if (result.outcome === 'INVALID_REQUEST') {
+    return { status: 400, body: { error: 'INVALID_REQUEST', field: result.field } };
+  }
+  if (result.outcome === 'REFUSED') return refusedResult(result.reason);
   return {
-    status: successStatus,
+    status: 200,
     body: {
       outcome: result.outcome,
       officer: viewBody(result.officer),
-      // Shown to the administrator exactly once; stored only as a hash.
       activation: { code: result.activation.code, expiresAt: result.activation.expiresAt },
     },
   };
@@ -160,7 +178,7 @@ export function officerAdminRoutes(service: OfficerAdminService, verify: AuthVer
       handler: withAuth(verify, officer, async (ctx, principal) => asAdmin(async () => {
         const actor = adminPrincipal(principal, 'officer.create', ctx);
         const body = await commandBody(ctx, ['loginHandle', 'posts']);
-        return credentialResult(await service.create(actor, body['loginHandle'], body['posts']), 201);
+        return openedResult(await service.create(actor, body['loginHandle'], body['posts']), 201);
       })),
     },
     {
@@ -169,7 +187,16 @@ export function officerAdminRoutes(service: OfficerAdminService, verify: AuthVer
       handler: withAuth(verify, officer, async (ctx, principal) => asAdmin(async () => {
         const actor = adminPrincipal(principal, 'officer.create', ctx);
         const body = await commandBody(ctx, ['targetOfficerId']);
-        return credentialResult(await service.reissueActivation(actor, body['targetOfficerId']), 200);
+        return openedResult(await service.reissueActivation(actor, body['targetOfficerId']), 200);
+      })),
+    },
+    {
+      method: 'POST',
+      path: OFFICER_RELEASE_ACTIVATION_PATH,
+      handler: withAuth(verify, officer, async (ctx, principal) => asAdmin(async () => {
+        const actor = adminPrincipal(principal, 'officer.create', ctx);
+        const body = await commandBody(ctx, ['targetOfficerId']);
+        return releasedResult(await service.releaseActivation(actor, body['targetOfficerId']));
       })),
     },
     {

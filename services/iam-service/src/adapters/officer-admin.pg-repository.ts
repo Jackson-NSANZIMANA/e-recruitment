@@ -11,13 +11,15 @@
 // becomes OfficerAdminForbiddenError (→ 403); anything else that throws is an
 // infrastructure fault (→ IamPersistenceError → 500). Business refusals come
 // back as data. Nothing returned here carries a credential or a code hash;
-// the one-time activation code is returned only by create/reissue.
+// the one-time activation code is returned only by releaseActivation, to a
+// DIFFERENT administrator than the one who created or reissued (four-eyes).
 // ══════════════════════════════════════════════════════════════════
 
 import { sql, type SqlTransaction } from '@usrp/shared-database';
 import {
   OFFICER_REFUSALS,
   type ActivationCode,
+  type ActivationState,
   type AssignablePost,
   type OfficerRefusal,
   type OfficerStatus,
@@ -31,6 +33,7 @@ import type {
   OfficerAdminRepository,
   OfficerChangeResult,
   ReissueActivationResult,
+  ReleaseActivationResult,
 } from '../ports/officer-admin-repository.js';
 
 const IAM_DB_ROLE = 'usrp_iam_service';
@@ -61,6 +64,12 @@ function status(value: unknown): OfficerStatus {
   throw new IamPersistenceError('Officer command returned an unknown status');
 }
 
+function activationState(value: unknown): ActivationState | null {
+  if (value === null || value === undefined) return null;
+  if (value === 'PENDING_RELEASE' || value === 'RELEASED' || value === 'EXPIRED') return value;
+  throw new IamPersistenceError('Officer command returned an unknown activation state');
+}
+
 /** Rebuild the view from the allowlisted fields only. */
 function toView(raw: unknown): OfficerView {
   const row = asRecord(raw);
@@ -80,6 +89,8 @@ function toView(raw: unknown): OfficerView {
     activatedAt: instant(row['activatedAt']),
     lastLoginAt: instant(row['lastLoginAt']),
     activationExpiresAt: instant(row['activationExpiresAt']),
+    activationState: activationState(row['activationState']),
+    releasableByYou: row['releasableByYou'] === true,
   };
 }
 
@@ -139,7 +150,7 @@ export class PgOfficerAdminRepository implements OfficerAdminRepository {
       ) AS result
     `));
     if (row['outcome'] === 'CREATED') {
-      return { outcome: 'CREATED', officer: toView(row['officer']), activation: toActivation(row['activation']) };
+      return { outcome: 'CREATED', officer: toView(row['officer']) };
     }
     if (row['outcome'] === 'REFUSED') return { outcome: 'REFUSED', reason: refusal(row) };
     throw new IamPersistenceError('Officer create returned an unknown outcome');
@@ -152,10 +163,23 @@ export class PgOfficerAdminRepository implements OfficerAdminRepository {
       ) AS result
     `));
     if (row['outcome'] === 'REISSUED') {
-      return { outcome: 'REISSUED', officer: toView(row['officer']), activation: toActivation(row['activation']) };
+      return { outcome: 'REISSUED', officer: toView(row['officer']) };
     }
     if (row['outcome'] === 'REFUSED') return { outcome: 'REFUSED', reason: refusal(row) };
     throw new IamPersistenceError('Activation reissue returned an unknown outcome');
+  }
+
+  async releaseActivation(actor: OfficerAdminActor, officerId: string): Promise<ReleaseActivationResult> {
+    const row = asRecord(await this.#run(actor, (tx) => tx<ResultRows>`
+      SELECT public_core.officer_release_activation(
+        ${actor.actorId}::uuid, ${actor.agency}::public_core.agency, ${officerId}::uuid, ${actor.correlationId}
+      ) AS result
+    `));
+    if (row['outcome'] === 'RELEASED') {
+      return { outcome: 'RELEASED', officer: toView(row['officer']), activation: toActivation(row['activation']) };
+    }
+    if (row['outcome'] === 'REFUSED') return { outcome: 'REFUSED', reason: refusal(row) };
+    throw new IamPersistenceError('Activation release returned an unknown outcome');
   }
 
   #change(raw: unknown): OfficerChangeResult {

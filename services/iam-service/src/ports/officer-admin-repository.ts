@@ -24,12 +24,14 @@ export interface OfficerAdminActor {
 
 export type Refused = { readonly outcome: 'REFUSED'; readonly reason: OfficerRefusal };
 
-export type CreateOfficerResult =
-  | { readonly outcome: 'CREATED'; readonly officer: OfficerView; readonly activation: ActivationCode }
-  | Refused;
+/** Create and reissue open a pending activation; they never return a code (four-eyes). */
+export type CreateOfficerResult = { readonly outcome: 'CREATED'; readonly officer: OfficerView } | Refused;
 
-export type ReissueActivationResult =
-  | { readonly outcome: 'REISSUED'; readonly officer: OfficerView; readonly activation: ActivationCode }
+export type ReissueActivationResult = { readonly outcome: 'REISSUED'; readonly officer: OfficerView } | Refused;
+
+/** The one-time release to a DIFFERENT administrator: the only place a code is returned. */
+export type ReleaseActivationResult =
+  | { readonly outcome: 'RELEASED'; readonly officer: OfficerView; readonly activation: ActivationCode }
   | Refused;
 
 export type OfficerChangeResult =
@@ -46,6 +48,7 @@ export interface OfficerAdminRepository {
   list(actor: OfficerAdminActor): Promise<readonly OfficerView[]>;
   create(actor: OfficerAdminActor, loginHandle: string, posts: readonly AssignablePost[]): Promise<CreateOfficerResult>;
   reissueActivation(actor: OfficerAdminActor, officerId: string): Promise<ReissueActivationResult>;
+  releaseActivation(actor: OfficerAdminActor, officerId: string): Promise<ReleaseActivationResult>;
   assignPosts(
     actor: OfficerAdminActor,
     officerId: string,

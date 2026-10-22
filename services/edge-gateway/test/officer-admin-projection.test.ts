@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  projectActivationRelease,
   projectCredentialIssue,
   projectOfficer,
   projectOfficerChange,
@@ -16,6 +17,8 @@ const OFFICER = {
   activatedAt: null,
   lastLoginAt: null,
   activationExpiresAt: '2026-10-19T08:45:46.265Z',
+  activationState: 'PENDING_RELEASE',
+  releasableByYou: false,
 };
 const LEAKS = { credential: 'scrypt$16384$8$1$leak-1', codeHash: 'leak-2', code_hash: 'leak-3', agency: 'RNP', password: 'leak-4' };
 
@@ -26,7 +29,7 @@ test('an officer row crosses with exactly the allowlisted fields — never a cre
 });
 
 test('the list is all-or-nothing: one off-contract row is a contract fault, never a partial relay', () => {
-  const ok = projectOfficerList({ officers: [{ ...OFFICER, ...LEAKS }, { ...OFFICER, status: 'active', activationExpiresAt: null }] });
+  const ok = projectOfficerList({ officers: [{ ...OFFICER, ...LEAKS }, { ...OFFICER, status: 'active', activationExpiresAt: null, activationState: null }] });
   assert.ok(ok !== null);
   assert.equal(ok.status, 200);
   assert.ok(!JSON.stringify(ok.body).includes('leak-'));
@@ -36,16 +39,43 @@ test('the list is all-or-nothing: one off-contract row is a contract fault, neve
   assert.equal(projectOfficerList({}), null);
 });
 
-test('create/reissue pass the officer and the one-time code only', () => {
-  const body = { outcome: 'CREATED', officer: { ...OFFICER, ...LEAKS }, activation: { code: 'BQMX3-BPRPQ-THZGX-A2R59', expiresAt: '2026-10-19T08:45:46.265Z', codeHash: 'leak-5' }, extra: 'leak-6' };
-  const r = projectCredentialIssue(201, body, 201);
+test('FOUR-EYES: create/reissue never carry an activation code, even if upstream sends one', () => {
+  const leaky = {
+    outcome: 'CREATED',
+    officer: { ...OFFICER, ...LEAKS },
+    activation: { code: 'BQMX3-BPRPQ-THZGX-A2R59', expiresAt: '2026-10-19T08:45:46.265Z', codeHash: 'leak-5' },
+    code: 'BQMX3-BPRPQ-THZGX-A2R59',
+    activationCode: 'BQMX3BPRPQTHZGXA2R59',
+    extra: 'leak-6',
+  };
+  const created = projectCredentialIssue(201, leaky, 201);
+  assert.ok(created !== null);
+  assert.deepEqual(created.body, { outcome: 'CREATED', officer: OFFICER });
+  const reissued = projectCredentialIssue(200, { ...leaky, outcome: 'REISSUED' }, 200);
+  assert.deepEqual(reissued?.body, { outcome: 'REISSUED', officer: OFFICER });
+  for (const r of [created, reissued]) {
+    const text = JSON.stringify(r?.body);
+    assert.ok(!text.includes('BQMX3') && !text.includes('activation"') && !text.includes('leak-') && !text.includes('"code"'));
+  }
+  assert.equal(projectCredentialIssue(200, { ...leaky, outcome: 'CREATED' }, 200), null, 'a reissue must say REISSUED');
+  assert.equal(projectCredentialIssue(201, { outcome: 'CREATED', officer: { ...OFFICER, activationState: 'LEAKED' } }, 201), null);
+});
+
+test('release carries the officer and the one-time code only, and only a well-formed code', () => {
+  const body = { outcome: 'RELEASED', officer: { ...OFFICER, ...LEAKS, activationState: 'RELEASED' }, activation: { code: 'BQMX3-BPRPQ-THZGX-A2R59', expiresAt: '2026-10-19T08:45:46.265Z', codeHash: 'leak-5' }, extra: 'leak-6' };
+  const r = projectActivationRelease(200, body);
   assert.ok(r !== null);
-  assert.deepEqual(r.body, { outcome: 'CREATED', officer: OFFICER, activation: { code: 'BQMX3-BPRPQ-THZGX-A2R59', expiresAt: '2026-10-19T08:45:46.265Z' } });
-  assert.equal(projectCredentialIssue(201, { ...body, activation: { code: 'password123', expiresAt: body.activation.expiresAt } }, 201), null,
-    'anything not shaped like an activation code is refused');
-  assert.equal(projectCredentialIssue(200, { ...body, outcome: 'CREATED' }, 200), null, 'a reissue must say REISSUED');
-  const reissued = projectCredentialIssue(200, { ...body, outcome: 'REISSUED' }, 200);
-  assert.equal(reissued?.status, 200);
+  assert.deepEqual(r.body, { outcome: 'RELEASED', officer: { ...OFFICER, activationState: 'RELEASED' }, activation: { code: 'BQMX3-BPRPQ-THZGX-A2R59', expiresAt: '2026-10-19T08:45:46.265Z' } });
+  assert.ok(!JSON.stringify(r.body).includes('leak-'));
+  assert.equal(projectActivationRelease(200, { ...body, activation: { code: 'password123', expiresAt: body.activation.expiresAt } }), null);
+  assert.equal(projectActivationRelease(200, { ...body, outcome: 'CREATED' }), null);
+  assert.equal(projectActivationRelease(200, { outcome: 'RELEASED', officer: OFFICER }), null, 'no code, no release');
+});
+
+test('the release refusals cross with their own statuses', () => {
+  const cases: [number, string][] = [[403, 'SAME_ADMIN'], [404, 'NOT_FOUND'], [409, 'ALREADY_RELEASED'], [409, 'ACTIVATION_EXPIRED'], [409, 'NOT_PENDING_ACTIVATION']];
+  for (const [status, error] of cases) assert.deepEqual(projectActivationRelease(status, { error, who: 'leak' })?.body, { error });
+  assert.equal(projectActivationRelease(409, { error: 'SAME_ADMIN' }), null, 'wrong status is off-contract');
 });
 
 test('every documented refusal crosses with its own status and nothing else; an unknown one is a fault', () => {
@@ -53,6 +83,7 @@ test('every documented refusal crosses with its own status and nothing else; an 
     [422, 'INVALID_HANDLE'], [422, 'INVALID_POSTS'], [422, 'UNKNOWN_POST'], [422, 'INVALID_REASON'],
     [403, 'AGENCY_ADMIN_NOT_ASSIGNABLE'], [403, 'SELF_MODIFICATION'], [404, 'NOT_FOUND'],
     [409, 'HANDLE_TAKEN'], [409, 'LAST_ACTIVE_ADMIN'], [409, 'NOT_PENDING_ACTIVATION'],
+    [403, 'SAME_ADMIN'], [409, 'ALREADY_RELEASED'], [409, 'ACTIVATION_EXPIRED'],
   ];
   for (const [status, error] of cases) {
     assert.deepEqual(projectOfficerChange(status, { error, otherAdmin: 'leak' })?.body, { error });

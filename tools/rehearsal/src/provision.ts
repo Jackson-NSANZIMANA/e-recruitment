@@ -59,3 +59,38 @@ export async function ensureAgencyAdmin(databaseUrl: string, request: AdminReque
     await sql.end({ timeout: 5 });
   }
 }
+
+/**
+ * DEV/REHEARSAL ONLY. The four-eyes release (ADR-036 addendum) needs a SECOND
+ * active agency_admin: the administrator who creates an officer never sees its
+ * activation code, a different one releases it. The first-admin function
+ * provisions only the first administrator, so the rehearsal seeds the second
+ * the way the dev seeder seeds its officers: a direct, privileged, LOCAL insert
+ * (the fence refuses any non-local database) of an already-activated account.
+ * Idempotent: an existing account with this handle is never touched.
+ */
+export async function ensureSecondAgencyAdmin(
+  databaseUrl: string,
+  request: { readonly agency: Agency; readonly loginHandle: string; readonly password: string },
+): Promise<'SEEDED' | 'EXISTS'> {
+  const sql = postgres(databaseUrl, { max: 1, onnotice: () => undefined });
+  try {
+    const rows = await sql<{ officer_id: string }[]>`
+      INSERT INTO public_core.officer_accounts (officer_id, login_handle, credential, agency, roles, status, created_at, activated_at)
+      VALUES (${randomUUID()}::uuid, ${request.loginHandle}, ${hashPassword(request.password)},
+              ${request.agency}::public_core.agency, ARRAY['agency_admin']::text[], 'active', now(), now())
+      ON CONFLICT (login_handle) DO NOTHING
+      RETURNING officer_id
+    `;
+    if (rows.length === 1) return 'SEEDED';
+    const existing = await sql<{ ok: boolean }[]>`
+      SELECT (agency = ${request.agency}::public_core.agency AND 'agency_admin' = ANY(roles) AND status = 'active') AS ok
+      FROM public_core.officer_accounts WHERE login_handle = ${request.loginHandle}`;
+    if (existing[0]?.ok !== true) {
+      throw new Error(`${request.loginHandle} exists but is not an active ${request.agency} agency_admin; set REHEARSAL_${request.agency}_ADMIN2_HANDLE to another handle.`);
+    }
+    return 'EXISTS';
+  } finally {
+    await sql.end({ timeout: 5 });
+  }
+}
