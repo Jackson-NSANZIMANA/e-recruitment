@@ -127,8 +127,8 @@ Ordered by lead time. Engineering cannot shorten these.
 | M1 | **S05** minimal Campaign Studio (draft → policy → sessions → publish; policy-hash parity with the rehearsal) | ready | FE | — |
 | M2 | **S09** venue roster + device fleet (rls/0036) | ready | BE | who may enrol and revoke devices |
 | M2 | **S08** Field Station, online capture | ready | FE | pilot agency, district, tablet model |
-| M2 | **S14** operator relocation and superseding invitations | **to write** | BE+FE | relocation authority and fairness rules |
-| M2 | **P1 pilot continuity kit** (new package): printed roster and run sheet from `getVenueRoster`, paper score sheets with two-person re-entry and reconciliation, assisted desk with pass printing | **to write** | FE + procedure | paper procedure; assisted-desk operation |
+| M2 | **S14** operator relocation and superseding invitations | ready | BE+FE | relocation authority and fairness rules |
+| M2 | **P1 pilot continuity kit** (new package): printed roster and run sheet from `getVenueRoster`, paper score sheets with two-person re-entry and reconciliation, assisted desk with pass printing | ready | BE+FE + procedure | paper procedure; assisted-desk operation |
 | M3 | **S11a** observability (any free lane, from now) | ready | infra | — |
 | M3 | **S07** provider-neutral staging → **S11b** backup + restore | ready | infra | production hosting only |
 | M3 | **S12** SMS + G2G production adapters | **to write** | BE | provider contract; G2G authorisation |
