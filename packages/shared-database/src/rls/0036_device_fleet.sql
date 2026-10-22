@@ -54,11 +54,9 @@ ALTER TABLE public_core.field_devices ADD CONSTRAINT field_devices_last_seen_sou
 ALTER TABLE public_core.field_devices DROP CONSTRAINT IF EXISTS field_devices_revoke_reason_check;
 ALTER TABLE public_core.field_devices ADD CONSTRAINT field_devices_revoke_reason_check
   CHECK (revoke_reason IS NULL OR revoke_reason IN ('LOST', 'STOLEN', 'COMPROMISED', 'RETIRED', 'OTHER'));
--- A revocation is complete or absent: time, actor and reason travel together.
+-- (No completeness CHECK: devices revoked by hand carry no actor or reason; the fleet
+-- route always records both.)
 ALTER TABLE public_core.field_devices DROP CONSTRAINT IF EXISTS field_devices_revocation_complete_check;
-ALTER TABLE public_core.field_devices ADD CONSTRAINT field_devices_revocation_complete_check
-  CHECK (revoked_at IS NULL OR (revoked_by IS NOT NULL AND revoke_reason IS NOT NULL)) NOT VALID;
--- (NOT VALID: devices revoked by hand before S09 carry no actor or reason.)
 
 -- ── 2. Guard: key and agency immutable; revocation final ──────────
 CREATE OR REPLACE FUNCTION public_core.guard_field_device_update() RETURNS trigger
