@@ -115,7 +115,7 @@ UPDATE public_core.officer_activation_codes SET created_by = issued_by WHERE cre
 -- A code issued under the S01 contract was visible to its creator: it is void.
 -- Those accounts need a release by a second administrator.
 UPDATE public_core.officer_activation_codes
-SET code_hash = NULL
+SET code_hash = NULL, expires_at = now() + interval '24 hours'
 WHERE released_at IS NULL AND code_hash IS NOT NULL AND redeemed_at IS NULL;
 ALTER TABLE public_core.officer_activation_codes
   DROP CONSTRAINT IF EXISTS officer_activation_codes_release_check;
@@ -426,8 +426,20 @@ AS $function$
       ELSE 'null'::jsonb END,
     'activationState', CASE
       WHEN oa.status = 'pending' AND ac.officer_id IS NOT NULL AND ac.redeemed_at IS NULL
-        THEN to_jsonb(CASE WHEN ac.released_at IS NULL THEN 'PENDING_RELEASE' ELSE 'RELEASED' END)
-      ELSE 'null'::jsonb END
+        THEN to_jsonb(CASE
+          WHEN ac.expires_at <= clock_timestamp() THEN 'EXPIRED'
+          WHEN ac.released_at IS NULL THEN 'PENDING_RELEASE'
+          ELSE 'RELEASED' END)
+      ELSE 'null'::jsonb END,
+    -- Relative to the viewing administrator (the transaction-bound actor), so
+    -- every officer row in every answer says the same thing.
+    'releasableByYou', (
+      oa.status = 'pending' AND ac.officer_id IS NOT NULL AND ac.redeemed_at IS NULL
+      AND ac.released_at IS NULL AND ac.expires_at > clock_timestamp()
+      AND nullif(current_setting('usrp.officer_actor_id', true), '') IS NOT NULL
+      AND ac.issued_by <> nullif(current_setting('usrp.officer_actor_id', true), '')::uuid
+      AND COALESCE(ac.created_by, ac.issued_by) <> nullif(current_setting('usrp.officer_actor_id', true), '')::uuid
+    )
   )
   FROM public_core.officer_accounts AS oa
   LEFT JOIN public_core.officer_activation_codes AS ac ON ac.officer_id = oa.officer_id
@@ -483,14 +495,9 @@ BEGIN
   PERFORM public_core.officer_private_authorize_admin(p_actor_id, p_agency);
   RETURN COALESCE(
     (SELECT jsonb_agg(
-              public_core.officer_private_view(oa.officer_id) || jsonb_build_object(
-                'releasableByYou',
-                oa.status = 'pending' AND ac.officer_id IS NOT NULL AND ac.redeemed_at IS NULL
-                  AND ac.released_at IS NULL AND ac.expires_at > clock_timestamp()
-                  AND ac.issued_by <> p_actor_id AND COALESCE(ac.created_by, ac.issued_by) <> p_actor_id)
+              public_core.officer_private_view(oa.officer_id)
               ORDER BY oa.login_handle)
      FROM public_core.officer_accounts AS oa
-     LEFT JOIN public_core.officer_activation_codes AS ac ON ac.officer_id = oa.officer_id
      WHERE oa.agency = p_agency),
     '[]'::jsonb
   );
@@ -628,8 +635,9 @@ DECLARE
   v_row public_core.officer_activation_codes;
   v_bytes bytea;
   v_raw text := '';
-  v_expires timestamptz := transaction_timestamp() + interval '24 hours';
+  v_expires timestamptz;
 BEGIN
+  v_expires := v_now + interval '24 hours';
   PERFORM public_core.officer_private_authorize_admin(p_actor_id, p_agency);
   PERFORM public_core.officer_private_assert_correlation(p_correlation_id);
 

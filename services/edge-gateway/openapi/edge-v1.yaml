@@ -1244,7 +1244,7 @@ paths:
       tags: [officer-admin]
       responses:
         '200':
-          description: "{ officers: [ { officerId, loginHandle, posts[], status: active|disabled|pending, createdAt, activatedAt|null, lastLoginAt|null, activationExpiresAt|null, activationState: PENDING_RELEASE|RELEASED|null, releasableByYou: boolean } ] }"
+          description: "{ officers: [ { officerId, loginHandle, posts[], status: active|disabled|pending, createdAt, activatedAt|null, lastLoginAt|null, activationExpiresAt|null, activationState: PENDING_RELEASE|RELEASED|EXPIRED|null, releasableByYou: boolean (relative to the viewing administrator, in every answer) } ] }"
         '401':
           description: Session ended ({ reason })
         '403':

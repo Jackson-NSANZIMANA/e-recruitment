@@ -54,7 +54,7 @@ export type OfficerRefusal = (typeof OFFICER_REFUSALS)[number];
 export type OfficerStatus = 'active' | 'disabled' | 'pending';
 
 /** A pending activation waits for a second administrator, then for the officer. */
-export type ActivationState = 'PENDING_RELEASE' | 'RELEASED';
+export type ActivationState = 'PENDING_RELEASE' | 'RELEASED' | 'EXPIRED';
 
 /** The listing row. Never a credential, a code or a code hash. */
 export interface OfficerView {
@@ -67,7 +67,7 @@ export interface OfficerView {
   readonly lastLoginAt: string | null;
   readonly activationExpiresAt: string | null;
   readonly activationState: ActivationState | null;
-  /** True only in the list: the viewing administrator may release this officer's code. */
+  /** Relative to the viewing administrator: they may release this officer's code now. */
   readonly releasableByYou: boolean;
 }
 

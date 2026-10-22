@@ -66,7 +66,7 @@ function status(value: unknown): OfficerStatus {
 
 function activationState(value: unknown): ActivationState | null {
   if (value === null || value === undefined) return null;
-  if (value === 'PENDING_RELEASE' || value === 'RELEASED') return value;
+  if (value === 'PENDING_RELEASE' || value === 'RELEASED' || value === 'EXPIRED') return value;
   throw new IamPersistenceError('Officer command returned an unknown activation state');
 }
 

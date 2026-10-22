@@ -82,7 +82,14 @@ export async function ensureSecondAgencyAdmin(
       ON CONFLICT (login_handle) DO NOTHING
       RETURNING officer_id
     `;
-    return rows.length === 1 ? 'SEEDED' : 'EXISTS';
+    if (rows.length === 1) return 'SEEDED';
+    const existing = await sql<{ ok: boolean }[]>`
+      SELECT (agency = ${request.agency}::public_core.agency AND 'agency_admin' = ANY(roles) AND status = 'active') AS ok
+      FROM public_core.officer_accounts WHERE login_handle = ${request.loginHandle}`;
+    if (existing[0]?.ok !== true) {
+      throw new Error(`${request.loginHandle} exists but is not an active ${request.agency} agency_admin; set REHEARSAL_${request.agency}_ADMIN2_HANDLE to another handle.`);
+    }
+    return 'EXISTS';
   } finally {
     await sql.end({ timeout: 5 });
   }

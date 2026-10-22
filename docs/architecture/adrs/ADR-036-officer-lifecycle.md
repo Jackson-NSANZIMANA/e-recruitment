@@ -288,6 +288,20 @@ nowhere in the database or outbox in plaintext.
 `services/edge-gateway/test/officer-admin-projection.test.ts`: the allowlist.
 
 ### Residual
+- **The releaser holds the code and knows the handle.** The anonymous `activateOfficer`
+  takes only handle and code, so the releasing administrator could redeem it with a
+  password of their choosing and control the account. Four-eyes here separates creator
+  from code holder; it does not authenticate the redeemer. Mitigations: the releaser is
+  recorded (`OFFICER_ACTIVATION_RELEASED`), the activation is recorded
+  (`OFFICER_ACTIVATED`), and the officer's first login shows in `lastLoginAt`; the pilot
+  procedure hands the printed code to the officer in person. Binding the redeemer (a
+  second factor sent to the officer's own channel) is deferred.
+- **Deadlock recovery.** If the releasing administrator reissues, neither they nor the
+  creator may release. In a two-administrator agency the other one reissues again, after
+  which the first can release. `activationState` is `EXPIRED` once the window passed,
+  so a client can offer "reissue" rather than "wait".
+- Rolling deploy: edge and iam-service must be upgraded together (the officer row gained
+  two required fields).
 Two administrators can still collude (that is the point of four-eyes, not a defect). A
 single agency with one active administrator cannot onboard anyone until a second is
 provisioned through the operator path; the pilot runbook must say so.

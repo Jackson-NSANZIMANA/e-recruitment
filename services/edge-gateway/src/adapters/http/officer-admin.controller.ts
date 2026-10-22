@@ -38,7 +38,7 @@ const CODE_RE = /^[A-HJ-NP-Z2-9]{5}(?:-[A-HJ-NP-Z2-9]{5}){3}$/;
 const TOKEN_RE = /^[A-Z][A-Z_]{1,63}$/;
 const POST_RE = /^[a-z][a-z_]{1,63}$/;
 const STATUSES = new Set(['active', 'disabled', 'pending']);
-const ACTIVATION_STATES = new Set(['PENDING_RELEASE', 'RELEASED']);
+const ACTIVATION_STATES = new Set(['PENDING_RELEASE', 'RELEASED', 'EXPIRED']);
 const CHANGE_OUTCOMES = new Set(['ASSIGNED', 'DISABLED', 'ENABLED', 'REVOKED', 'UNCHANGED']);
 /** The upstream refusals that may cross, each with its own HTTP status. */
 const REFUSALS: Readonly<Record<string, number>> = {
