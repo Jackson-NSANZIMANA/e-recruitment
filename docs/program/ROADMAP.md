@@ -134,6 +134,7 @@ Ordered by lead time. Engineering cannot shorten these.
 | M3 | **S07** provider-neutral staging → **S11b** backup + restore | ready | infra | production hosting only |
 | M3 | **S12a** G2G production sandbox: platform, NIDA, NESA on the real wire formats (ADR-047) | ready | BE | — (decided 2026-10-25) |
 | M3 | **S12b** criminal clearance by Irembo certificate + Twilio SMS (ADR-048, rls/0040) | ready | BE | clearance validity window; Irembo certificate type code |
+| M3 | **S12c** full-stack production sandbox: campaign policy v2 for the six real campaigns, NIDA pre-fill, `pnpm sandbox:up`, live journeys across the three apps (ADR-049, rls/0041, ADR-FE-019) | ready | BE+FE | RCS walk-in on exam day |
 | M3 | **S12** production cutover of the S12a/S12b adapters (transport, credentials, contract tests) | to write | BE | provider contract; G2G authorisation |
 | M3 | **S10a → S10b** citizen timeline and screens | ready | BE → FE | — |
 | M3 | **S13 (minimal)** control room: exam-day live and field-health panels | **to write** | BE+FE | — |
@@ -145,7 +146,7 @@ A kit marked **to write** is written, and its ADR and migration numbers are rese
 ### 8.3 Immediate order
 
 1. **S06**: finish (S09 merged #44; S06 backend merged #45; frontend #35/#36 open).
-2. **S12a** (backend, Opus) runs alongside S06's frontend: from 2026-10-25 the sandbox is the backend lane. **S12b** follows once S12a's simulator harness merges. Its Twilio half may start earlier.
+2. **S12a** (backend, Opus) runs alongside S06's frontend: from 2026-10-25 the sandbox is the backend lane. **S12b** follows once S12a's simulator harness merges. Its Twilio half may start earlier. **S12c** follows both: the full life cycle running end to end in the sandbox.
 3. **S08 ‖ S14**, once the pilot agency, district and tablet are decided (§6 #2–3).
 4. **S05** and **S11a** in whichever lane frees first.
 5. M3 packages: S07 → S11b; S12 cutover when the contracts arrive; S10a → S10b; minimal S13.
