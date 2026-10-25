@@ -55,6 +55,9 @@ Parallel sessions must not pick "the next number". These are reserved; use only 
 | B3 | ADR-044 biometric evaluation and thresholds | — | — |
 | S14 | ADR-045 relocation and superseding invitations | `0038_relocation.sql` | — |
 | P1 | ADR-046 paper records and reconciliation | `0039_paper_continuity.sql` | ADR-FE-018 paper and assisted-desk screens |
+| S12a | ADR-047 G2G production sandbox | — | — |
+| S12b | ADR-048 identity binding and Irembo clearance | `0040_clearance_certificates.sql` | — |
+| S12c | ADR-049 campaign policy v2 | `0041_campaign_policy_v2.sql` | ADR-FE-019 sandbox presentation and NIDA pre-fill |
 
 `ADR-035` is the rehearsal ADR (backend `feat/rehearsal`, merged in S00). Drizzle migrations, if needed, use the next free `000N_*.sql` **at rebase time**. Migrations are linear by design, so the later session renumbers its migration before merging.
 
@@ -97,5 +100,8 @@ Parallel sessions must not pick "the next number". These are reserved; use only 
 | S11b Backup + restore | waiting on S07 (M3) | | |
 | S14 Operator relocation | ready (M2) | | kit written 2026-10-21; owner: relocation authority and fairness rules |
 | P1 Pilot continuity kit | ready (M2; after S06 + S09) | | kit written 2026-10-21; owner: paper procedure, assisted-desk operation; DPO: NID on paper |
+| S12a G2G sandbox: platform, NIDA, NESA | ready (M3; starts now) | | kit written 2026-10-25; real wire formats from the owner's captures; privacy rules in the kit |
+| S12b Irembo clearance + SMS | ready after S12a's harness (Twilio half can start now) | | kit written 2026-10-25; owner: clearance validity window, Irembo certificate type code |
+| S12c Full-stack sandbox (six real campaigns, three apps, one command) | waiting on S12a, S12b | | kit written 2026-10-25; owner: RCS walk-in on exam day |
 | B2 Biometric capture | waiting on S08 (M5) | | owner: model licence |
 | B3 Biometric evaluation | waiting on B2 (M5) | | owner: evaluation dataset |
