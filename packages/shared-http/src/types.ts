@@ -26,6 +26,13 @@ export interface HttpResult {
    * header map cannot represent a correct response at all.
    */
   readonly cookies?: readonly SetCookie[];
+  /**
+   * Send these exact bytes instead of the JSON serialisation of `body` (set
+   * `content-type` in `headers`). For simulators that must answer a non-JSON
+   * or deliberately malformed payload (tools/g2g-sandbox truncated bodies,
+   * form-encoded callbacks). Services answer JSON and never set it.
+   */
+  readonly rawBody?: string | Buffer;
 }
 
 /** Per-request handle passed to handlers. Body parsing is lazy and bounded. */
@@ -144,6 +151,18 @@ export interface HttpServerOptions {
    * build facts every service reports. Omit when there is nothing to add.
    */
   readonly version?: VersionInfo;
+  /**
+   * Headers stamped on EVERY response, including /health, /ready, /version,
+   * 404s and errors. Used by the G2G simulators for `x-usrp-sandbox: 1`
+   * (ADR-047 §3.1), which must be impossible to forget on any path.
+   */
+  readonly responseHeaders?: Readonly<Record<string, string>>;
+  /**
+   * Called for a request no exact route matches, before the 404. Lets a
+   * process dispatch on path patterns (e.g. `/Accounts/{sid}/Messages.json`)
+   * without the substrate growing a router. Return null to fall through to 404.
+   */
+  readonly fallback?: (ctx: RequestContext) => Promise<HttpResult | null> | HttpResult | null;
 }
 
 /** A running server handle. */
