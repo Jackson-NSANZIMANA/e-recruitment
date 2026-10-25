@@ -92,7 +92,7 @@ Parallel sessions must not pick "the next number". These are reserved; use only 
 | S05 Campaign Studio | ready (M1) | | |
 | S06 Officer workspace + staff admin | ready (M1) — next | | carries the four-eyes activation-code fix |
 | S07 Deployment + staging | ready (M3) | | provider-neutral staging first; production hosting decision gates production only (ROADMAP §4) |
-| S08 Field Station | ready (M2) | | owner: pilot agency, district, device model |
+| S08 Field Station | ready (M2; wave B) | | pilot: **RDF, Nyagatare, Galaxy Tab A7–A10** (decided 2026-10-25) |
 | S09 Fleet + venue ops | done | BE [#44](https://github.com/Jackson-NSANZIMANA/e-recruitment/pull/44) | rls/0036; `field.device.manage`; 4 edge operations; ADR-036 addendum; enrolment still with the screening officer |
 | S10a Citizen timeline | ready (M3) | | |
 | S10b Citizen screens | waiting on S10a (M3) | | |
