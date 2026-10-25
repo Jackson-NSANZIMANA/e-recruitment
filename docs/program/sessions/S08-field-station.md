@@ -50,8 +50,8 @@ Revamp plan §2.5 and §2.6; ADR-034, ADR-003/010, ADR-012 and ADR-013 (backend)
 | Decision | Default |
 |---|---|
 | Pilot agency (fixes the medical mode) | **Decided (2026-10-25): RDF is the pilot agency and the sandbox target**, on the RDF 2026 regular + Reserve campaign. Prove RDF end to end: the in-house medical-board verdict, and the walk-in lane on exam day. Also build the RNP and RCS government-physician certificate modes (ADR-013), proven by unit and mocked tests. |
-| Pilot district | ask (default: Gasabo, the rehearsal district) |
-| Managed device model | one Android model, Chrome pinned |
+| Pilot district | **Decided (2026-10-25): Nyagatare** (Eastern Province). RDF 2026 schedules it for 6–7 June at Nyagatare stadium. |
+| Managed device model | **Decided (2026-10-25): Samsung Galaxy Tab A-series, A7 to A10 generation** (no larger or premium tiers). Chrome pinned through device management. |
 | Who enrols devices | **Decided (2026-10-21):** `field.device.manage` for `field_supervisor` and `agency_admin` (S09) |
 
 ### Addendum (2026-10-25): what this session must close
@@ -59,6 +59,12 @@ Revamp plan §2.5 and §2.6; ADR-034, ADR-003/010, ADR-012 and ADR-013 (backend)
 - **Gate:** keep the merged camera/hand-held QR scan and the national-ID check. Add the biometric step as *evidence only* behind the B1 policy read (`getBiometricPolicy`): in SHADOW, nothing is shown; capture itself is B2.
 - **Venue roster and live counts:** use S04's `getVenueRoster` and S09's venue live counts on the supervisor station.
 - **Walk-in:** the RDF lane exists; walk-in is enabled per campaign once S12c's policy v2 lands. Don't hard-code the agency.
+- **Device budget (Galaxy Tab A7–A10):**
+  - Design for the weakest device, the A7: about 3 GB RAM, an entry-level octa-core, Android 10 or later, an 8.7–11-inch screen.
+  - Budgets: first load under 3 s on a cached shell; QR verify-and-admit under 3 s (the baseline gate target); the station bundle within the S02 size budget; no memory growth over a 4-hour session.
+  - Test on landscape and portrait at 800 dp wide. The rear camera is the QR scanner, so test low light and glare.
+  - Confirm Ed25519 in WebCrypto on the pinned Chrome. If it's missing, use one audited pure-JS implementation behind the existing signing interface. Record which in ADR-FE-016.
+  - Assume no NFC.
 - **Data sources:** campaigns and venues come from docs/product/recruitment-announcements-2025-2026.md (via S12a's rehearsal scenarios), never from the English translations.
 
 ## Session starter
