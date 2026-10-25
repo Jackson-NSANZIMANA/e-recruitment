@@ -27,6 +27,7 @@
 import { createHash } from 'node:crypto';
 
 import { EnvValidationError, type EnvSource } from './env.js';
+import { isSandboxPermittedDevAdapter, resolveUsrpEnvironment, sandboxFenceIssues } from './sandbox-fence.js';
 
 // ── Rule 1: the committed dev secrets, as digests ──────────────────
 //
@@ -144,6 +145,11 @@ interface ForbiddenToggle {
   readonly key: string;
   readonly forbidden: 'true' | 'false';
   readonly why: string;
+  /**
+   * True for transport-TLS toggles a SINGLE-HOST sandbox may relax (ADR-047
+   * §3.1; default taken, owner to confirm). Mock toggles are never relaxed.
+   */
+  readonly sandboxSingleHostMayRelax?: true;
 }
 
 const FORBIDDEN_TOGGLES: readonly ForbiddenToggle[] = [
@@ -171,11 +177,13 @@ const FORBIDDEN_TOGGLES: readonly ForbiddenToggle[] = [
     key: 'KAFKA_SSL',
     forbidden: 'false',
     why: 'the event backbone carries applicant PII between services',
+    sandboxSingleHostMayRelax: true,
   },
   {
     key: 'MINIO_USE_SSL',
     forbidden: 'false',
     why: 'scanned identity documents would cross the network in the clear',
+    sandboxSingleHostMayRelax: true,
   },
   {
     key: 'EDGE_COOKIE_SECURE',
@@ -216,6 +224,17 @@ export function assertProductionSecrets(source: EnvSource = process.env): void {
 
   const issues: string[] = [];
 
+  // The runtime profile and its fences (ADR-047 §3.1). A sandbox runs every
+  // rule below EXCEPT the two single-host relaxations, which are documented
+  // in sandbox-fence.ts and proven by selfcheck/verify-sandbox-fences.ts.
+  issues.push(...sandboxFenceIssues(source));
+  let sandbox = false;
+  try {
+    sandbox = resolveUsrpEnvironment(source) === 'sandbox';
+  } catch {
+    sandbox = false; // already reported by sandboxFenceIssues; apply every rule
+  }
+
   // Rule 1 + 2 — secret-bearing variables.
   for (const key of SECRET_KEYS) {
     const raw = source[key];
@@ -237,8 +256,8 @@ export function assertProductionSecrets(source: EnvSource = process.env): void {
     }
   }
 
-  // Rule 3 — endpoints.
-  for (const key of NETWORK_ENDPOINT_KEYS) {
+  // Rule 3 — endpoints. A sandbox is allowed to be single-host.
+  for (const key of sandbox ? [] : NETWORK_ENDPOINT_KEYS) {
     const raw = source[key];
     if (!present(raw)) continue;
     if (LOOPBACK_PATTERN.test(raw)) {
@@ -251,6 +270,7 @@ export function assertProductionSecrets(source: EnvSource = process.env): void {
 
   // Rule 4 — toggles.
   for (const toggle of FORBIDDEN_TOGGLES) {
+    if (sandbox && toggle.sandboxSingleHostMayRelax === true) continue;
     const raw = source[toggle.key];
     if (!present(raw)) continue;
     const normalized = raw.trim().toLowerCase();
@@ -344,6 +364,8 @@ export function assertDevAdapterAllowed(
   source: EnvSource = process.env,
 ): void {
   if (!isProduction(source)) return;
+  // A sandbox may keep a named dev adapter until its emulator lands (S12b).
+  if (isSandboxPermittedDevAdapter(adapter, source)) return;
   throw new EnvValidationError([
     `${adapter} is a DEVELOPMENT adapter and is forbidden in production — ${consequence}. ` +
       `Wire the production adapter behind the same port before deploying this service.`,

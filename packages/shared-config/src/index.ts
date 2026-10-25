@@ -81,3 +81,20 @@ export {
   resolveEventTransport,
   type EventTransport,
 } from './production-guard.js';
+
+export {
+  G2G_BASE_URL_KEYS,
+  SANDBOX_RESPONSE_HEADER,
+  USRP_ENVIRONMENTS,
+  assertSandboxFences,
+  assertSimulatorAllowed,
+  isForbiddenSandboxResponse,
+  isRealRegistryHost,
+  isSandbox,
+  isSandboxPermittedDevAdapter,
+  isSimulatorHost,
+  resolveUsrpEnvironment,
+  sandboxFenceIssues,
+  type HeaderReader,
+  type UsrpEnvironment,
+} from './sandbox-fence.js';
