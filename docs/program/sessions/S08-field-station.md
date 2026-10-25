@@ -49,9 +49,16 @@ Revamp plan §2.5 and §2.6; ADR-034, ADR-003/010, ADR-012 and ADR-013 (backend)
 ## Owner decisions (ask; default if no answer)
 | Decision | Default |
 |---|---|
-| Pilot agency (fixes the medical mode) | RDF |
+| Pilot agency (fixes the medical mode) | **Decided for the sandbox (2026-10-25): RNP Basic 2025 is the target campaign.** Build the medical station for all three agency modes (RDF board verdict; RNP and RCS government-physician certificate, ADR-013), and prove RNP end to end. The real pilot agency is still the owner's decision before M4. |
 | Managed device model | one Android model, Chrome pinned |
-| Who enrols devices | `field_supervisor` |
+| Who enrols devices | **Decided (2026-10-21):** `field.device.manage` for `field_supervisor` and `agency_admin` (S09) |
+
+### Addendum (2026-10-25): what this session must close
+- **The Basic Course life cycle breaks today at the physical test:** the backend accepts signed scores, but there is no station screen. Physical capture (ledger-first, signed, acknowledged per record) and medical are the critical path for S12c's live journeys.
+- **Gate:** keep the merged camera/hand-held QR scan and the national-ID check. Add the biometric step as *evidence only* behind the B1 policy read (`getBiometricPolicy`): in SHADOW, nothing is shown; capture itself is B2.
+- **Venue roster and live counts:** use S04's `getVenueRoster` and S09's venue live counts on the supervisor station.
+- **Walk-in:** the RDF lane exists; walk-in is enabled per campaign once S12c's policy v2 lands. Don't hard-code the agency.
+- **Data sources:** campaigns and venues come from docs/product/recruitment-announcements-2025-2026.md (via S12a's rehearsal scenarios), never from the English translations.
 
 ## Session starter
 ```text
