@@ -126,6 +126,18 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
+  packages/shared-identity-match:
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.2
+      tsx:
+        specifier: ^4.21.0
+        version: 4.23.0
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
   packages/shared-logging:
     devDependencies:
       '@types/node':
