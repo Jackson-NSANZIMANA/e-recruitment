@@ -553,6 +553,9 @@ importers:
       '@usrp/shared-http':
         specifier: workspace:*
         version: link:../../packages/shared-http
+      '@usrp/shared-identity-match':
+        specifier: workspace:*
+        version: link:../../packages/shared-identity-match
       '@usrp/shared-logging':
         specifier: workspace:*
         version: link:../../packages/shared-logging
@@ -575,6 +578,9 @@ importers:
       '@usrp/document-forensics-service':
         specifier: workspace:*
         version: link:../document-forensics-service
+      '@usrp/g2g-sandbox':
+        specifier: workspace:*
+        version: link:../../tools/g2g-sandbox
       '@usrp/iam-service':
         specifier: workspace:*
         version: link:../iam-service

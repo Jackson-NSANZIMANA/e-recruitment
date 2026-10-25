@@ -2,7 +2,7 @@
   "name": "@usrp/identity-service",
   "version": "1.0.0",
   "private": true,
-  "description": "USRP Identity Service \u2014 NIDA-anchored applicant identity creation (the system-of-record for applicant_identities)",
+  "description": "USRP Identity Service — NIDA-anchored applicant identity creation (the system-of-record for applicant_identities)",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -30,12 +30,13 @@
     "selfcheck:document-door": "tsx selfcheck/verify-applicant-document-door.ts"
   },
   "dependencies": {
-    "@usrp/shared-logging": "workspace:*",
     "@usrp/shared-auth": "workspace:*",
     "@usrp/shared-config": "workspace:*",
     "@usrp/shared-database": "workspace:*",
     "@usrp/shared-events": "workspace:*",
     "@usrp/shared-http": "workspace:*",
+    "@usrp/shared-identity-match": "workspace:*",
+    "@usrp/shared-logging": "workspace:*",
     "@usrp/shared-security": "workspace:*",
     "@usrp/shared-sms": "workspace:*",
     "@usrp/shared-types": "workspace:*"
@@ -44,6 +45,7 @@
     "@types/node": "^24.0.0",
     "@usrp/application-service": "workspace:*",
     "@usrp/document-forensics-service": "workspace:*",
+    "@usrp/g2g-sandbox": "workspace:*",
     "@usrp/iam-service": "workspace:*",
     "postgres": "^3.4.5",
     "tsx": "^4.21.0",

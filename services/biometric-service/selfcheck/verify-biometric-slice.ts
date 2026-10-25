@@ -45,6 +45,7 @@ const THRESHOLDS = { livenessThreshold: 0.85, faceMatchThreshold: 85.0 };
 process.env['NATIONAL_ID_HMAC_KEY'] ??= 'dev_national_id_hmac_key_min_32_chars!!';
 process.env['PII_ENCRYPTION_KEY'] ??= 'dev_pii_encryption_key_min_32_chars_ok!!';
 process.env['NIDA_BASE_URL'] ??= 'http://localhost:3100';
+process.env['NIDA_CLIENT_TOKEN'] ??= 'dev_g2g_sandbox_client_token';
 process.env['NIDA_HMAC_SECRET'] ??= 'dev_nida_hmac_secret';
 
 let failures = 0;

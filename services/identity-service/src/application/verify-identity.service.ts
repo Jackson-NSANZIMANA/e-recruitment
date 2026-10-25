@@ -15,6 +15,7 @@ import type { AuditEvent, NIDAVerificationCompletedEvent } from '@usrp/shared-ty
 import type { ApplicationChannel } from '@usrp/shared-database';
 import type { NidaGateway } from '../ports/nida.gateway.js';
 import type { IdentityRepository } from '../ports/identity.repository.js';
+import { nationalIdHintOf } from '@usrp/shared-identity-match';
 import { RWANDAN_CITIZEN } from '../domain/nida.types.js';
 
 export interface VerifyIdentityCommand {
@@ -88,6 +89,7 @@ export class VerifyIdentityService {
     const { applicantId, created } = await this.deps.repository.createVerifiedIdentity({
       nationalIdHash,
       nidaLookupHash: lookup.nidaLookupHash,
+      nationalIdHint: nationalIdHintOf(command.rawNationalId),
       fullName: lookup.citizen.fullName,
       dateOfBirth: lookup.citizen.dateOfBirth,
       homeDistrict: lookup.citizen.homeDistrict,

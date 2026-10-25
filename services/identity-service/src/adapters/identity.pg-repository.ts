@@ -63,6 +63,7 @@ export class PgIdentityRepository implements IdentityRepository {
           INSERT INTO public_core.applicant_identities
             (national_id_hash, encrypted_full_name, encrypted_date_of_birth,
              encrypted_home_district, encrypted_home_province, encrypted_nida_lookup_hash,
+             encrypted_national_id_hint,
              gender, registration_channel, identity_status, nida_verification_request_id,
              nida_verified_at, nida_match_confidence, phone_number_hash)
           VALUES (
@@ -72,6 +73,8 @@ export class PgIdentityRepository implements IdentityRepository {
             pgp_sym_encrypt(${input.homeDistrict},   current_setting(${ENCRYPTION_KEY_SETTING})),
             pgp_sym_encrypt(${input.homeProvince},   current_setting(${ENCRYPTION_KEY_SETTING})),
             pgp_sym_encrypt(${input.nidaLookupHash}, current_setting(${ENCRYPTION_KEY_SETTING})),
+            CASE WHEN ${input.nationalIdHint}::text IS NULL THEN NULL
+                 ELSE pgp_sym_encrypt(${input.nationalIdHint}::text, current_setting(${ENCRYPTION_KEY_SETTING})) END,
             ${input.gender}::public_core.gender,
             ${input.registrationChannel}::public_core.application_channel,
             'VERIFIED',

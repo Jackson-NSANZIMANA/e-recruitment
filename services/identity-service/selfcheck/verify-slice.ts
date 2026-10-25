@@ -2,7 +2,7 @@
 // identity-service — Live vertical-slice self-check
 //
 // Exercises the WHOLE slice against real infrastructure (live PostgreSQL
-// as usrp_app + live usrp-nida-mock + InMemoryEventBus) and asserts every
+// as usrp_app + live the g2g-sandbox nida-irembo simulator + InMemoryEventBus) and asserts every
 // correctness claim end-to-end. Repeatable: cleans its test rows before
 // and after. Exits non-zero on the first failed assertion.
 //

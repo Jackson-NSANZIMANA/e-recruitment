@@ -4,7 +4,7 @@
 // Boots the real service over @usrp/shared-http on an ephemeral port and
 // drives it through an actual TCP socket with fetch — proving the ingress
 // end-to-end against live infrastructure (PostgreSQL as usrp_app + live
-// usrp-nida-mock; InMemoryEventBus so we can inspect emitted events and
+// the g2g-sandbox nida-irembo simulator; InMemoryEventBus so we can inspect emitted events and
 // correlation propagation). Repeatable: cleans its rows before and after.
 // Exits non-zero on the first failed assertion.
 //

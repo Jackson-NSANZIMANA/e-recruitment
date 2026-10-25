@@ -619,6 +619,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "encrypted_national_id_hint": {
+          "name": "encrypted_national_id_hint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "gender": {
           "name": "gender",
           "type": "gender",

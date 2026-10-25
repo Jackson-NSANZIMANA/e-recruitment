@@ -22,7 +22,6 @@ import {
   type AuthVerifyConfig,
   type DatabaseConfig,
   type EnvSource,
-  type G2GEndpointConfig,
   type RuntimeConfig,
   type SecurityConfig,
 } from '@usrp/shared-config';
@@ -31,7 +30,7 @@ export interface IdentityServiceConfig {
   readonly runtime: RuntimeConfig;
   readonly database: DatabaseConfig;
   readonly security: SecurityConfig;
-  readonly nida: G2GEndpointConfig;
+  readonly nida: NidaIremboConfig;
   /** Ingress auth: verify inbound bearer tokens (front door is service-internal). */
   readonly auth: AuthVerifyConfig;
 }
@@ -122,11 +121,25 @@ export function loadDocumentUploadConfig(source: EnvSource = process.env): Docum
   };
 }
 
-/** Load just the NIDA endpoint config (base URL, HMAC secret, timeout). */
-export function loadNidaConfig(source: EnvSource = process.env): G2GEndpointConfig {
+/**
+ * The NIDA identity endpoint on the IremboGov format (ADR-047):
+ *   NIDA_BASE_URL          the G2G channel (the nida-irembo simulator in dev/sandbox);
+ *   NIDA_CLIENT_TOKEN      USRP's G2G client credential (never a citizen token);
+ *   NIDA_HMAC_SECRET       key of the G2G subject token re-presented to HEC/RIB;
+ *   NIDA_REQUEST_TIMEOUT_MS.
+ */
+export interface NidaIremboConfig {
+  readonly baseUrl: string;
+  readonly clientToken: string;
+  readonly subjectHmacSecret: string;
+  readonly timeoutMs: number;
+}
+
+export function loadNidaConfig(source: EnvSource = process.env): NidaIremboConfig {
   const env = loadEnv(
     {
       NIDA_BASE_URL: url({ protocols: ['http', 'https'] }),
+      NIDA_CLIENT_TOKEN: string({ minLength: 16, secret: true }),
       NIDA_HMAC_SECRET: string({ minLength: 8, secret: true }),
       NIDA_REQUEST_TIMEOUT_MS: withDefault(integer({ min: 500, max: 60_000 }), 5_000),
     },
@@ -134,7 +147,8 @@ export function loadNidaConfig(source: EnvSource = process.env): G2GEndpointConf
   );
   return {
     baseUrl: env.NIDA_BASE_URL,
-    hmacSecret: env.NIDA_HMAC_SECRET,
+    clientToken: env.NIDA_CLIENT_TOKEN,
+    subjectHmacSecret: env.NIDA_HMAC_SECRET,
     timeoutMs: env.NIDA_REQUEST_TIMEOUT_MS,
   };
 }

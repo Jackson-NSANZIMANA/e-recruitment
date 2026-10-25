@@ -9,7 +9,7 @@ export { validateContract, CONTRACTS, type ContractName } from './contracts.js';
 export { loadPrivatePersona, enclosingGitWorkTree, PrivatePersonaRefused, type PrivatePersona } from './overlay.js';
 export { createLiveNesa, type LiveNesaPassthrough } from './live-nesa.js';
 export { consoleLog, silentLog, redact, type SandboxLog } from './log.js';
-export { BEHAVIOUR_HEADER } from './behaviour.js';
+export { BEHAVIOUR_HEADER, DEFAULT_PROFILES, type AuthorityProfile } from './behaviour.js';
 export { NIDA_IDENTITY_PATH, SUBJECT_HEADER } from './modules/nida-irembo.js';
 export { SDMS_RESULTS_PATH } from './modules/nesa-sdms.js';
 export { DEV_G2G_CLIENT_TOKEN } from './dev-token.js';

@@ -117,6 +117,7 @@ check('GREEN: production may name the real registry (cutover)', issuesOf(() => {
 
 console.log('\n── the production guard runs IN FULL in the sandbox');
 check('RED: sandbox with a committed dev secret', refused(() => { assertProductionSecrets({ ...SANDBOX_ENV, NIDA_HMAC_SECRET: 'dev_nida_hmac_secret' }); }, /DEVELOPMENT value/));
+check('RED: sandbox with the published g2g dev client token', refused(() => { assertProductionSecrets({ ...SANDBOX_ENV, NIDA_CLIENT_TOKEN: 'dev_g2g_sandbox_client_token' }); }, /DEVELOPMENT value/));
 check('RED: sandbox with a placeholder', refused(() => { assertProductionSecrets({ ...SANDBOX_ENV, PII_ENCRYPTION_KEY: 'CHANGE_ME_32_CHAR_MIN_AES256_KEY' }); }, /placeholder/));
 check('RED: sandbox with a mock toggle', refused(() => { assertProductionSecrets({ ...SANDBOX_ENV, FEATURE_USE_NIDA_MOCK: 'true' }); }, /FEATURE_USE_NIDA_MOCK/));
 check('RED: sandbox with insecure cookies', refused(() => { assertProductionSecrets({ ...SANDBOX_ENV, EDGE_COOKIE_SECURE: 'false' }); }, /EDGE_COOKIE_SECURE/));
