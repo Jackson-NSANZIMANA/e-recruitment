@@ -151,7 +151,7 @@ test('roster: minimal rows pass, identifying fields and missing codes fail', () 
   assert.equal(assertGasaboRoster({ candidates: [] }, null), 0);
   assert.throws(() => assertGasaboRoster({ candidates: [row] }, 'PC-9999'), RosterAssertion);
   assert.throws(() => assertGasaboRoster({ candidates: [{ ...row, fullName: 'X' }] }, null), RosterAssertion);
-  assert.throws(() => assertGasaboRoster({ candidates: [{ ...row, processingCode: '1200380123456789' }] }, null), RosterAssertion);
+  assert.throws(() => assertGasaboRoster({ candidates: [{ ...row, processingCode: '1200389990001000' }] }, null), RosterAssertion);
   assert.throws(() => assertGasaboRoster({ nothing: true }, null), RosterAssertion);
 });
 

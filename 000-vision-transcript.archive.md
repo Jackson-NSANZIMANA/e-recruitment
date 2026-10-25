@@ -5316,23 +5316,23 @@ are loaded docker exec usrp-postgres psql \\ -U usrp_admin \\ -d usrp_db
 require(\'crypto\'); const HMAC_SECRET = \'dev_nida_hmac_secret\'; //
 Realistic Rwandan NID format: 16 digits // Format: YYYYGXXXXXXXXXX where
 YYYY=birth year, G=gender(1=male,2=female) const testProfiles = \[ {
-nid: \'1200380123456789\', dob: \'2003-03-15\', gender: \'MALE\',
+nid: \'1200389990001000\', dob: \'2003-03-15\', gender: \'MALE\',
 district: ****\'GASABO\', province: \'KIGALI_CITY\', desc: \'Age 22 ---
-eligible all RDF/RNP/RCS categories\' }, { nid: \'1200180234567890\',
+eligible all RDF/RNP/RCS categories\' }, { nid: \'1200179990007000\',
 dob: \'2001-07-22\', gender: \'FEMALE\', district: \'MUSANZE\',
 province: \'NORTHERN_PROVINCE\', desc: \'Age 24 --- eligible A-Level+
-categories\' }, { nid: \'1199980345678901\', dob: \'1999-11-08\',
+categories\' }, { nid: \'1199989990003000\', dob: \'1999-11-08\',
 gender: \'MALE\', district: \'HUYE\', province: \'SOUTHERN_PROVINCE\',
 desc: \'Age 26 --- eligible RDF Reserve University/Specialist only\' },
-{ nid: \'1200580456789012\', dob: \'2005-06-01\', gender: \'MALE\',
+{ nid: \'1200589990005000\', dob: \'2005-06-01\', gender: \'MALE\',
 district: \'NYAGATARE\', province: \'EASTERN_PROVINCE\', desc: \'Age 20
 --- eligible ALL including RCS 4-year UR (≤21)\' }, { nid:
-\'1199080567890123\', dob: \'1990-01-15\', gender: \'MALE\', district:
+\'1199089990004000\', dob: \'1990-01-15\', gender: \'MALE\', district:
 \'NYARUGENGE\', province: \'KIGALI_CITY\', desc: \'Age 35 --- INELIGIBLE
-all categories (too old)\' }, { nid: \'1200280678901234\', dob:
+all categories (too old)\' }, { nid: \'1200279990002000\', dob:
 \'2002-09-30\', gender: \'FEMALE\', district: \'RUBAVU\', province:
 \'WESTERN_PROVINCE\', desc: \'FLAGGED --- criminal record test case\' },
-{ nid: \'1200480789012345\', dob: \'2004-04-12\', gender: \'MALE\',
+{ nid: \'1200489990006000\', dob: \'2004-04-12\', gender: \'MALE\',
 district: \'KAYONZA\', province: \'EASTERN_PROVINCE\', desc: \'RCS
 prosecution flag test case\' }, \]; const results = {};
 console.log(\'\'); console.log(\'NIDA Mock Hash Computation Results:\');
@@ -5354,20 +5354,20 @@ console.log(JSON.stringify(results, null, 2)); \" 2\>&1 \`\`\`
 /home/uruti/Documents/projects/usrp && \\ node -e \" const crypto =
 require(\'crypto\'); const fs = require(\'fs\'); const HMAC_SECRET =
 \'dev_nida_hmac_secret\'; const testProfiles = \[ { nid:
-\'1200380123456789\', dob: \'2003-03-15\', gender: \'MALE\', district:
+\'1200389990001000\', dob: \'2003-03-15\', gender: \'MALE\', district:
 \'GASABO\', province: \'KIGALI_CITY\', name: \'UWIMANA Jean Pierre\' },
-{ nid: \'1200180234567890\', dob: \'2001-07-22\', gender: \'FEMALE\',
+{ nid: \'1200179990007000\', dob: \'2001-07-22\', gender: \'FEMALE\',
 district: \'MUSANZE\', province: ****\'NORTHERN_PROVINCE\', name:
-\'MUKAMANA Aline\' }, { nid: \'1199980345678901\', dob: \'1999-11-08\',
+\'MUKAMANA Aline\' }, { nid: \'1199989990003000\', dob: \'1999-11-08\',
 gender: \'MALE\', district: \'HUYE\', province: \'SOUTHERN_PROVINCE\',
-name: \'HABIMANA Eric\' }, { nid: \'1200580456789012\', dob:
+name: \'HABIMANA Eric\' }, { nid: \'1200589990005000\', dob:
 \'2005-06-01\', gender: \'MALE\', district: \'NYAGATARE\', province:
 \'EASTERN_PROVINCE\', name: \'NSHIMIYIMANA Patrick\' }, { nid:
-\'1199080567890123\', dob: \'1990-01-15\', gender: \'MALE\', district:
+\'1199089990004000\', dob: \'1990-01-15\', gender: \'MALE\', district:
 \'NYARUGENGE\', province: \'KIGALI_CITY\', name: \'NZEYIMANA Paul\' }, {
-nid: \'1200280678901234\', dob: \'2002-09-30\', gender: \'FEMALE\',
+nid: \'1200279990002000\', dob: \'2002-09-30\', gender: \'FEMALE\',
 district: \'RUBAVU\', province: \'WESTERN_PROVINCE\', name: \'UWAMARIYA
-Divine\' }, { nid: \'1200480789012345\', dob: \'2004-04-12\', gender:
+Divine\' }, { nid: \'1200489990006000\', dob: \'2004-04-12\', gender:
 \'MALE\', district: \'KAYONZA\', province: \'EASTERN_PROVINCE\', name:
 \'NKURUNZIZA Eric\' }, \]; const citizens = {}; const criminalHashes =
 \[\]; const prosecutionHashes = \[\]; testProfiles.forEach((p, i) =\> {
@@ -5388,11 +5388,11 @@ under_investigation_hashes: prosecutionHashes }; fs.writeFileSync(
 JSON.stringify(ribData, null, 2) ); // Write HEC degrees.json with real
 NID hashes const degrees = {}; const hash001 =
 crypto.createHmac(\'sha256\',
-HMAC_SECRET).update(\'1200380123456789\').digest(\'hex\'); const hash002
+HMAC_SECRET).update(\'1200389990001000\').digest(\'hex\'); const hash002
 = crypto.createHmac(\'sha256\',
-HMAC_SECRET).update(\'1200180234567890\').digest(\'hex\'); const hash003
+HMAC_SECRET).update(\'1200179990007000\').digest(\'hex\'); const hash003
 = crypto.createHmac(\'sha256\',
-HMAC_SECRET).update(\'1199980345678901\').digest(\'hex\');
+HMAC_SECRET).update(\'1199989990003000\').digest(\'hex\');
 degrees\[\'UR/2023/CS/001\'\] = { registrationNumber:
 \'UR/2023/CS/001\', holderNationalIdHash: hash001, institutionName:
 \'University of Rwanda\', degreeTitle: \'Bachelor of Science in Computer
@@ -5425,7 +5425,7 @@ docker logs usrp-hec-mock \--tail 5 docker logs usrp-rib-mock \--tail 5
 Test the full NIDA lookup flow with a real hash cd
 /home/uruti/Documents/projects/usrp && \\ node -e \" const crypto =
 require(\'crypto\'); const HMAC_SECRET = \'dev_nida_hmac_secret\'; const
-TEST_NID = \'1200380123456789\'; const hash = crypto
+TEST_NID = \'1200389990001000\'; const hash = crypto
 .createHmac(\'sha256\', HMAC_SECRET)
 .update(TEST_NID.trim().toUpperCase()) .digest(\'hex\'); const requestId
 = crypto.randomUUID(); const timestamp = new Date().toISOString(); const
@@ -5443,7 +5443,7 @@ Response:\'); console.log(JSON.stringify(data, null, 2)); }) .catch(e
 =\> console.error(\'Error:\', e.message)); \" 2\>&1 \`\`\` \`\`\`bash \#
 Test HEC lookup cd /home/uruti/Documents/projects/usrp && \\ node -e \"
 const crypto = require(\'crypto\'); const HMAC_SECRET =
-\'dev_nida_hmac_secret\'; const TEST_NID = \'1200380123456789\'; const
+\'dev_nida_hmac_secret\'; const TEST_NID = \'1200389990001000\'; const
 hash = crypto.createHmac(\'sha256\',
 HMAC_SECRET).update(TEST_NID).digest(\'hex\');
 fetch(\'http://localhost:3103/v1/degree/verify\', { method: \'POST\',
@@ -5666,23 +5666,23 @@ uruti@jackson-HP-EliteBook-840-G3:\~/Documents/projects/usrp\$ cd
 require(\'crypto\'); const HMAC_SECRET = \'dev_nida_hmac_secret\'; //
 Realistic Rwandan NID format: 16 digits // Format: YYYYGXXXXXXXXXX where
 YYYY=birth year, G=gender(1=male,2=female) const testProfiles = \[ {
-nid: \'1200380123456789\', dob: \'2003-03-15\', gender: \'MALE\',
+nid: \'1200389990001000\', dob: \'2003-03-15\', gender: \'MALE\',
 district: \'GASABO\', province: \'KIGALI_CITY\', desc: \'Age 22 ---
-eligible all RDF/RNP/RCS categories\' }, { nid: \'1200180234567890\',
+eligible all RDF/RNP/RCS categories\' }, { nid: \'1200179990007000\',
 dob: \'2001-07-22\', gender: \'FEMALE\', district: \'MUSANZE\',
 province: \'NORTHERN_PROVINCE\', desc: \'Age 24 --- eligible A-Level+
-categories\' }, { nid: \'1199980345678901\', dob: \'1999-11-08\',
+categories\' }, { nid: \'1199989990003000\', dob: \'1999-11-08\',
 gender: \'MALE\', district: \'HUYE\', province: \'SOUTHERN_PROVINCE\',
 desc: \'Age 26 --- eligible RDF Reserve University/Specialist only\' },
-{ nid: \'1200580456789012\', dob: \'2005-06-01\', ****gender: \'MALE\',
+{ nid: \'1200589990005000\', dob: \'2005-06-01\', ****gender: \'MALE\',
 district: \'NYAGATARE\', province: \'EASTERN_PROVINCE\', desc: \'Age 20
 --- eligible ALL including RCS 4-year UR (≤21)\' }, { nid:
-\'1199080567890123\', dob: \'1990-01-15\', gender: \'MALE\', district:
+\'1199089990004000\', dob: \'1990-01-15\', gender: \'MALE\', district:
 \'NYARUGENGE\', province: \'KIGALI_CITY\', desc: \'Age 35 --- INELIGIBLE
-all categories (too old)\' }, { nid: \'1200280678901234\', dob:
+all categories (too old)\' }, { nid: \'1200279990002000\', dob:
 \'2002-09-30\', gender: \'FEMALE\', district: \'RUBAVU\', province:
 \'WESTERN_PROVINCE\', desc: \'FLAGGED --- criminal record test case\' },
-{ nid: \'1200480789012345\', dob: \'2004-04-12\', gender: \'MALE\',
+{ nid: \'1200489990006000\', dob: \'2004-04-12\', gender: \'MALE\',
 district: \'KAYONZA\', province: \'EASTERN_PROVINCE\', desc: \'RCS
 prosecution flag test case\' }, \]; const results = {};
 console.log(\'\'); console.log(\'NIDA Mock Hash Computation Results:\');
@@ -5701,23 +5701,23 @@ console.log(\'Full citizens.json content:\');
 console.log(\'============================\');
 console.log(JSON.stringify(results, null, 2)); \" 2\>&1 NIDA Mock Hash
 Computation Results: ===================================== NID:
-1200380123456789 Hash:
+1200389990001000 Hash:
 6561ef4517673f33b321cf2004b9d8e31c805c0a927346a4c4b6a71a36b648b0
 Profile: Age 22 --- eligible all RDF/RNP/RCS categories NID:
-1200180234567890 Hash:
+1200179990007000 Hash:
 64d32ed6e2852caa6f28017cd7dcff3c54dac8a1b31bf29f1105fe2f27cfb795
-Profile: Age 24 --- eligible A-Level+ categories NID: 1199980345678901
+Profile: Age 24 --- eligible A-Level+ categories NID: 1199989990003000
 Hash: 8f516afd16ff960bc22c1614ed1e98956fe9f55bc491c6666520d5d87616e015
 Profile: Age 26 --- eligible RDF Reserve University/Specialist only NID:
-1200580456789012 Hash:
+1200589990005000 Hash:
 d95beec31cc542a832e93012a763fe83c5f456d67d58f78f711893cbf260d5d9
 Profile: Age 20 --- eligible ALL including RCS 4-year UR (≤21) NID:
-1199080567890123 Hash:
+1199089990004000 Hash:
 ****e8be4a5ba726f1bf4bbe2daf13df8760bc257b2dffc44030e832bddf73638b26
 Profile: Age 35 --- INELIGIBLE all categories (too old) NID:
-1200280678901234 Hash:
+1200279990002000 Hash:
 6709cb62a5872432d0126af9f6abc92922d1e5fc0e8de58168a8ecb58159c2b5
-Profile: FLAGGED --- criminal record test case NID: 1200480789012345
+Profile: FLAGGED --- criminal record test case NID: 1200489990006000
 Hash: 9f15bc15a8765bf059d71626d80fc1a879d55e193793db0e2ad94d331c87a291
 Profile: RCS prosecution flag test case Full citizens.json content:
 ============================ {
@@ -5761,20 +5761,20 @@ Capture the output and write to citizens.json cd
 /home/uruti/Documents/projects/usrp && \\ node -e \" const crypto =
 require(\'crypto\'); const fs = require(\'fs\'); const HMAC_SECRET =
 \'dev_nida_hmac_secret\'; const testProfiles = \[ { nid:
-\'1200380123456789\', dob: \'2003-03-15\', gender: \'MALE\', district:
+\'1200389990001000\', dob: \'2003-03-15\', gender: \'MALE\', district:
 \'GASABO\', province: \'KIGALI_CITY\', name: \'UWIMANA Jean Pierre\' },
-{ nid: \'1200180234567890\', dob: \'2001-07-22\', gender: \'FEMALE\',
+{ nid: \'1200179990007000\', dob: \'2001-07-22\', gender: \'FEMALE\',
 district: \'MUSANZE\', province: \'NORTHERN_PROVINCE\', name: \'MUKAMANA
-Aline\' }, { nid: \'1199980345678901\', dob: \'1999-11-08\', gender:
+Aline\' }, { nid: \'1199989990003000\', dob: \'1999-11-08\', gender:
 \'MALE\', district: \'HUYE\', province: \'SOUTHERN_PROVINCE\', name:
-\'HABIMANA Eric\' }, { nid: \'1200580456789012\', dob: \'2005-06-01\',
+\'HABIMANA Eric\' }, { nid: \'1200589990005000\', dob: \'2005-06-01\',
 gender: \'MALE\', district: \'NYAGATARE\', province:
 \'EASTERN_PROVINCE\', name: \'NSHIMIYIMANA Patrick\' }, { nid:
-\'1199080567890123\', dob: \'1990-01-15\', gender: \'MALE\', district:
+\'1199089990004000\', dob: \'1990-01-15\', gender: \'MALE\', district:
 \'NYARUGENGE\', province: \'KIGALI_CITY\', name: \'NZEYIMANA Paul\' }, {
-nid: \'1200280678901234\', dob: \'2002-09-30\', gender: \'FEMALE\',
+nid: \'1200279990002000\', dob: \'2002-09-30\', gender: \'FEMALE\',
 district: \'RUBAVU\', province: \'WESTERN_PROVINCE\', name: \'UWAMARIYA
-Divine\' }, { nid: \'1200480789012345\', dob: \'2004-04-12\', gender:
+Divine\' }, { nid: \'1200489990006000\', dob: \'2004-04-12\', gender:
 \'MALE\', district: \'KAYONZA\', province: \'EASTERN_PROVINCE\', name:
 \'NKURUNZIZA Eric\' }, \]; const citizens = {}; const criminalHashes =
 \[\]; const prosecutionHashes = \[\]; testProfiles.forEach((p, i) =\> {
@@ -5810,7 +5810,7 @@ uruti@jackson-HP-EliteBook-840-G3:\~/Documents/projects/usrp\$ \# Test
 the full NIDA lookup flow with a real hash cd
 /home/uruti/Documents/projects/usrp && \\ node -e \" const crypto =
 require(\'crypto\'); const HMAC_SECRET = \'dev_nida_hmac_secret\'; const
-TEST_NID = \'1200380123456789\'; const hash = crypto
+TEST_NID = \'1200389990001000\'; const hash = crypto
 .createHmac(\'sha256\', HMAC_SECRET)
 .update(TEST_NID.trim().toUpperCase()) .digest(\'hex\'); const requestId
 = crypto.randomUUID(); const timestamp = new Date().toISOString(); const
@@ -5826,7 +5826,7 @@ JSON.stringify({ nationalIdHash: hash, requestId }) }) .then(r =\>
 r.json()) .then(data =\> { console.log(\'\'); console.log(\'NIDA
 Response:\'); console.log(JSON.stringify(data, null, 2)); }) .catch(e
 =\> console.error(\'Error:\', e.message)); \" 2\>&1 Testing NIDA lookup
-for NID: 1200380123456789 Hash:
+for NID: 1200389990001000 Hash:
 ****6561ef4517673f33b321cf2004b9d8e31c805c0a927346a4c4b6a71a36b648b0
 NIDA Response: { \"status\": \"NOT_FOUND\", \"requestId\":
 \"a35cfe8f-72e9-43f5-9799-54a8aa89b64d\", \"respondedAt\":
@@ -5834,7 +5834,7 @@ NIDA Response: { \"status\": \"NOT_FOUND\", \"requestId\":
 uruti@jackson-HP-EliteBook-840-G3:\~/Documents/projects/usrp\$ \# Test
 HEC lookup cd /home/uruti/Documents/projects/usrp && \\ node -e \" const
 crypto = require(\'crypto\'); const HMAC_SECRET =
-\'dev_nida_hmac_secret\'; const TEST_NID = \'1200380123456789\'; const
+\'dev_nida_hmac_secret\'; const TEST_NID = \'1200389990001000\'; const
 hash = crypto.createHmac(\'sha256\',
 HMAC_SECRET).update(TEST_NID).digest(\'hex\');
 fetch(\'http://localhost:3103/v1/degree/verify\', { method: \'POST\',
@@ -6090,7 +6090,7 @@ containers (the 4-citizen old file). After Fix 2 above, rerun the
 integration tests: \`\`\`bash \# Retest NIDA with real hash after
 restart cd /home/uruti/Documents/projects/usrp && \\ node -e \" const
 crypto = require(\'crypto\'); const HMAC_SECRET =
-\'dev_nida_hmac_secret\'; const TEST_NID = \'1200380123456789\'; const
+\'dev_nida_hmac_secret\'; const TEST_NID = \'1200389990001000\'; const
 hash = crypto .createHmac(\'sha256\', HMAC_SECRET)
 .update(TEST_NID.trim().toUpperCase()) .digest(\'hex\'); const requestId
 = crypto.randomUUID(); const timestamp = new Date().toISOString(); const
@@ -6110,7 +6110,7 @@ data.citizen.fullName, \'\| District:\', data.citizen.homeDistrict); })
 \`\`\` \`\`\`bash \# Retest HEC with aligned hash cd
 /home/uruti/Documents/projects/usrp && \\ node -e \" const crypto =
 require(\'crypto\'); const HMAC_SECRET = \'dev_nida_hmac_secret\'; const
-TEST_NID = \'1200380123456789\'; const hash =
+TEST_NID = \'1200389990001000\'; const hash =
 crypto.createHmac(\'sha256\',
 HMAC_SECRET).update(TEST_NID).digest(\'hex\');
 fetch(\'http://localhost:3103/v1/degree/verify\', { method: \'POST\',
@@ -6126,7 +6126,7 @@ Degree:\', data.degreeTitle, \'\| Field:\', data.specialistField); })
 /home/uruti/Documents/projects/usrp && \\ node -e \" const crypto =
 require(\'crypto\'); const HMAC_SECRET = \'dev_nida_hmac_secret\'; //
 UWAMARIYA Divine --- should be flagged const FLAGGED_NID =
-\'1200280678901234\'; const hash = crypto.createHmac(\'sha256\',
+\'1200279990002000\'; const hash = crypto.createHmac(\'sha256\',
 HMAC_SECRET).update(FLAGGED_NID).digest(\'hex\');
 fetch(\'http://localhost:3102/v1/vetting/check\', { method: \'POST\',
 headers: { \'Content-Type\': \'application/json\' }, body:
@@ -6194,7 +6194,7 @@ degrees HEC Mock Server running on port 3103 Loaded 3 mock degrees
 uruti@jackson-HP-EliteBook-840-G3:\~/Documents/projects/usrp\$ \# Retest
 NIDA with real hash after restart cd /home/uruti/Documents/projects/usrp
 && \\ node -e \" const crypto = require(\'crypto\'); const HMAC_SECRET =
-\'dev_nida_hmac_secret\'; const TEST_NID = \'1200380123456789\'; const
+\'dev_nida_hmac_secret\'; const TEST_NID = \'1200389990001000\'; const
 hash = crypto .createHmac(\'sha256\', HMAC_SECRET)
 .update(TEST_NID.trim().toUpperCase()) .digest(\'hex\'); const requestId
 = crypto.randomUUID(); const timestamp = new Date().toISOString(); const
@@ -6215,7 +6215,7 @@ data.citizen.fullName, \'\| District:\', data.citizen.homeDistrict); })
 uruti@jackson-HP-EliteBook-840-G3:\~/Documents/projects/usrp\$ \# Retest
 HEC with aligned hash cd /home/uruti/Documents/projects/usrp && \\ node
 -e \" const crypto = require(\'crypto\'); const HMAC_SECRET =
-\'dev_nida_hmac_secret\'; const TEST_NID = \'1200380123456789\'; const
+\'dev_nida_hmac_secret\'; const TEST_NID = \'1200389990001000\'; const
 hash = crypto.createHmac(\'sha256\',
 HMAC_SECRET).update(TEST_NID).digest(\'hex\');
 fetch(\'http://localhost:3103/v1/degree/verify\', { method: \'POST\',
@@ -6232,7 +6232,7 @@ uruti@jackson-HP-EliteBook-840-G3:\~/Documents/projects/usrp\$ \# Test
 the criminal flag case cd /home/uruti/Documents/projects/usrp && \\ node
 -e \" const crypto = require(\'crypto\'); const HMAC_SECRET =
 \'dev_nida_hmac_secret\'; // UWAMARIYA Divine --- should be flagged
-const FLAGGED_NID = \'1200280678901234\'; const hash =
+const FLAGGED_NID = \'1200279990002000\'; const hash =
 crypto.createHmac(\'sha256\',
 HMAC_SECRET).update(FLAGGED_NID).digest(\'hex\');
 fetch(\'http://localhost:3102/v1/vetting/check\', { method: \'POST\',
@@ -6416,7 +6416,7 @@ function hmacSign(payload) { return crypto.createHmac(\'sha256\',
 HMAC_SECRET).update(payload).digest(\'hex\'); } function hashNID(nid) {
 return crypto.createHmac(\'sha256\',
 HMAC_SECRET).update(nid.trim().toUpperCase()).digest(\'hex\'); } async
-function testNIDA() { const nid = \'1200380123456789\'; const hash =
+function testNIDA() { const nid = \'1200389990001000\'; const hash =
 hashNID(nid); const requestId = crypto.randomUUID(); const timestamp =
 new Date().toISOString(); const sig = await hmacSign(requestId + \':\' +
 timestamp + \':\' + hash); const res = await
@@ -6429,7 +6429,7 @@ const pass = data.status === \'FOUND\' && data.citizen?.fullName ===
 \'UWIMANA Jean Pierre\'; console.log(pass ? \'✅ NIDA lookup (Age 22,
 Gasabo): PASS\' : \'❌ NIDA lookup: FAIL --- \' + JSON.stringify(data));
 return pass; } async function testNIDAAge35Ineligible() { const nid =
-\'1199080567890123\'; const hash = hashNID(nid); const requestId =
+\'1199089990004000\'; const hash = hashNID(nid); const requestId =
 crypto.randomUUID(); const timestamp = new Date().toISOString(); const
 sig = await hmacSign(requestId + \':\' + timestamp + \':\' + hash);
 const res = await fetch(\'http://localhost:3100/v1/citizen/lookup\', {
@@ -6441,7 +6441,7 @@ await res.json(); const pass = data.status === \'FOUND\' &&
 data.citizen?.fullName === \'NZEYIMANA Paul\'; console.log(pass ? \'✅
 NIDA lookup (Age 35, ineligible test): PASS\' : \'❌ NIDA age-35 lookup:
 FAIL --- \' + JSON.stringify(data)); return pass; } async function
-testHEC() { const nid = \'1200380123456789\'; const hash = hashNID(nid);
+testHEC() { const nid = \'1200389990001000\'; const hash = hashNID(nid);
 const res = await fetch(\'http://localhost:3103/v1/degree/verify\', {
 method: \'POST\', headers: { \'Content-Type\': \'application/json\' },
 body: JSON.stringify({ registrationNumber: \'UR/2023/CS/001\',
@@ -6450,7 +6450,7 @@ await res.json(); const pass = data.verified === true &&
 data.specialistField === \'ENGINEERING\'; console.log(pass ? \'✅ HEC
 degree verify (CS Engineering): PASS\' : \'❌ HEC lookup: FAIL --- \' +
 JSON.stringify(data)); return pass; } async function testRIBFlagged() {
-const nid = \'1200280678901234\'; const hash = hashNID(nid); const res =
+const nid = \'1200279990002000\'; const hash = hashNID(nid); const res =
 await fetch(\'http://localhost:3102/v1/vetting/check\', { method:
 \'POST\', headers: { \'Content-Type\': \'application/json\' }, body:
 JSON.stringify({ nationalIdHash: hash, requestId: crypto.randomUUID() })
@@ -6458,7 +6458,7 @@ JSON.stringify({ nationalIdHash: hash, requestId: crypto.randomUUID() })
 \'HAS_RECORDS\'; console.log(pass ? \'✅ RIB criminal flag (UWAMARIYA
 Divine): PASS\' : \'❌ RIB flag: FAIL --- \' + data.status); return
 pass; } async function testRIBProsecution() { const nid =
-\'1200480789012345\'; const hash = hashNID(nid); const res = await
+\'1200489990006000\'; const hash = hashNID(nid); const res = await
 fetch(\'http://localhost:3102/v1/vetting/check\', { method: \'POST\',
 headers: { \'Content-Type\': \'application/json\' }, body:
 JSON.stringify({ nationalIdHash: hash, requestId: crypto.randomUUID() })
@@ -6466,7 +6466,7 @@ JSON.stringify({ nationalIdHash: hash, requestId: crypto.randomUUID() })
 \'UNDER_INVESTIGATION\'; console.log(pass ? \'✅ RIB prosecution flag
 (NKURUNZIZA Eric): PASS\' : \'❌ RIB prosecution: FAIL --- \' +
 data.status); return pass; } async function testRIBClean() { const nid =
-\'1200580456789012\'; const hash = hashNID(nid); const res = await
+\'1200589990005000\'; const hash = hashNID(nid); const res = await
 fetch(\'http://localhost:3102/v1/vetting/check\', { method: \'POST\',
 headers: { \'Content-Type\': \'application/json\' }, body:
 JSON.stringify({ nationalIdHash: hash, requestId: crypto.randomUUID() })
@@ -6640,7 +6640,7 @@ function hmacSign(payload) { return crypto.createHmac(\'sha256\',
 HMAC_SECRET).update(payload).digest(\'hex\'); } function hashNID(nid) {
 return crypto.createHmac(\'sha256\',
 HMAC_SECRET).update(nid.trim().toUpperCase()).digest(\'hex\'); } async
-function testNIDA() { const nid = \'1200380123456789\'; const hash =
+function testNIDA() { const nid = \'1200389990001000\'; const hash =
 hashNID(nid); const requestId = crypto.randomUUID(); const timestamp =
 new Date().toISOString(); const sig = await hmacSign(requestId + \':\' +
 timestamp + \':\' + hash); const res = await
@@ -6653,7 +6653,7 @@ const pass = data.status === \'FOUND\' && data.citizen?.fullName ===
 \'UWIMANA Jean Pierre\'; console.log(pass ? \'✅ NIDA lookup (Age 22,
 Gasabo): PASS\' : \'❌ NIDA lookup: FAIL --- \' + JSON.stringify(data));
 return pass; } async function testNIDAAge35Ineligible() { const nid =
-\'1199080567890123\'; const hash = hashNID(nid); const requestId =
+\'1199089990004000\'; const hash = hashNID(nid); const requestId =
 crypto.randomUUID(); const timestamp = new Date().toISOString(); const
 sig = await hmacSign(requestId + \':\' + timestamp + \':\' + hash);
 const res = await fetch(\'http://localhost:3100/v1/citizen/lookup\', {

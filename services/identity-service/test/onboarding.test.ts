@@ -10,7 +10,7 @@ import { normalizeRwandanMsisdn } from '../src/domain/rwanda-phone.js';
 import { issueOnboardingToken, verifyOnboardingToken } from '../src/domain/onboarding-token.js';
 
 const KEY = 'unit_test_national_id_hmac_key_32_chars!!';
-const NID = '1200380123456789';
+const NID = '1200389990001000';
 const DOB = '2002-05-14';
 const APPLICANT = '11111111-1111-4111-8111-111111111111';
 
@@ -94,7 +94,7 @@ function harness(
 const codeOf = (sms: OutboundSms | undefined): string => /code: (\d{6})/.exec(sms?.body ?? '')?.[1] ?? '';
 
 test('phone normalisation accepts MTN/Airtel spellings and rejects the rest', () => {
-  for (const ok of ['0781234567', '250781234567', '+250 781 234 567', '079-123-4567', '0721234567', '0731234567']) {
+  for (const ok of ['0781234567', '250781234567', '+250 788 001 234', '079-123-4567', '0721234567', '0731234567']) {
     assert.match(normalizeRwandanMsisdn(ok) ?? '', /^\+250(72|73|78|79)\d{7}$/, ok);
   }
   for (const bad of ['0711234567', '078123456', '+254712345678', 'abc', '', '07812345678']) {

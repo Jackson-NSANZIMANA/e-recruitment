@@ -140,7 +140,7 @@ test('NID hint: masked and plain forms; a contradiction is NOT_BOUND', () => {
   assert.equal(parseNationalIdHint('1200********9999'), '12009999');
   assert.equal(parseNationalIdHint('12009999'), '12009999');
   assert.equal(parseNationalIdHint('1200****9999'), null);
-  assert.equal(nationalIdHintOf('1200370999900100'), '12000100');
+  assert.equal(nationalIdHintOf('1200379990001000'), '12001000');
   assert.equal(nationalIdHintOf('123'), null);
   const identity = { fullName: 'KAMANZI Eric', dateOfBirth: '2003-03-15', sex: 'MALE', nationalIdHint: '12000100' };
   assert.equal(bindCredential(identity, { holderName: 'Eric KAMANZI', sex: 'MALE', nationalIdHint: '1200********0100' }).outcome, 'BOUND');

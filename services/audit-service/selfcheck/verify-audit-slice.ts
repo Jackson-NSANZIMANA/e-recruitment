@@ -42,7 +42,7 @@ const ADMIN_URL =
 const admin = postgres(ADMIN_URL, { onnotice: () => {} });
 
 // A distinctive PII-shaped sentinel that must NEVER reach the trail.
-const RAW_NID_SENTINEL = '1200380123456789';
+const RAW_NID_SENTINEL = '1200389990001000';
 const RAW_NAME_SENTINEL = 'Mugisha Fictional';
 
 let failures = 0;

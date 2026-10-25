@@ -10,7 +10,7 @@ import { UpstreamUnavailableError } from '../src/domain/identity.errors.js';
 import type { GateAdmissionGateway, GateAdmissionRequest } from '../src/ports/gate-admission-gateway.js';
 
 const KEY = 'k'.repeat(48);
-const NID = '1199880012345678';
+const NID = '1199889990009000';
 const APP = '22222222-2222-4222-8222-222222222222';
 const CANDIDATE = { applicationId: APP, processingCode: 'RDF-90001', category: 'GENERAL_ENLISTMENT' };
 

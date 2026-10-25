@@ -62,7 +62,7 @@
     {
       "id": "A",
       "role": "Eligible citizen, digital lane",
-      "nationalId": "1200380123456789",
+      "nationalId": "1200389990001000",
       "dateOfBirth": "2003-03-15",
       "phone": "0788123456",
       "homeDistrict": "GASABO",
@@ -72,7 +72,7 @@
     {
       "id": "B",
       "role": "Over-age citizen",
-      "nationalId": "1199980345678901",
+      "nationalId": "1199989990003000",
       "dateOfBirth": "1999-11-08",
       "phone": "0722000021",
       "homeDistrict": "HUYE",

@@ -30,11 +30,11 @@ const ADMIN_URL =
 const admin = postgres(ADMIN_URL, { onnotice: () => {} });
 
 // ── Known seeded test citizen (see infrastructure/docker/mocks/nida) ──
-const CITIZEN_NID = '1200380123456789'; // UWIMANA Jean Pierre — RWANDAN_CITIZEN, GASABO
+const CITIZEN_NID = '1200389990001000'; // UWIMANA Jean Pierre — RWANDAN_CITIZEN, GASABO
 const CITIZEN_NAME = 'UWIMANA Jean Pierre';
 const CITIZEN_DISTRICT = 'GASABO';
 // A syntactically-valid NID that is NOT in the NIDA seed → NOT_FOUND path.
-const UNKNOWN_NID = '1200380123400000';
+const UNKNOWN_NID = '1200389990008000';
 
 let failures = 0;
 function check(label: string, condition: boolean, detail = ''): void {
