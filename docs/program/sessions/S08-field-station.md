@@ -49,7 +49,8 @@ Revamp plan §2.5 and §2.6; ADR-034, ADR-003/010, ADR-012 and ADR-013 (backend)
 ## Owner decisions (ask; default if no answer)
 | Decision | Default |
 |---|---|
-| Pilot agency (fixes the medical mode) | **Decided for the sandbox (2026-10-25): RNP Basic 2025 is the target campaign.** Build the medical station for all three agency modes (RDF board verdict; RNP and RCS government-physician certificate, ADR-013), and prove RNP end to end. The real pilot agency is still the owner's decision before M4. |
+| Pilot agency (fixes the medical mode) | **Decided (2026-10-25): RDF is the pilot agency and the sandbox target**, on the RDF 2026 regular + Reserve campaign. Prove RDF end to end: the in-house medical-board verdict, and the walk-in lane on exam day. Also build the RNP and RCS government-physician certificate modes (ADR-013), proven by unit and mocked tests. |
+| Pilot district | ask (default: Gasabo, the rehearsal district) |
 | Managed device model | one Android model, Chrome pinned |
 | Who enrols devices | **Decided (2026-10-21):** `field.device.manage` for `field_supervisor` and `agency_admin` (S09) |
 

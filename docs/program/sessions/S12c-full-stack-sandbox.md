@@ -58,7 +58,7 @@ Policy versions stay immutable and hash-bound (ADR-030). The rehearsal scenarios
 ### D. Live journeys (Playwright, opt-in `USRP_SANDBOX=1`)
 Across all three apps, on `sandbox:up`, with synthetic personas:
 
-1. RNP Basic 2025: eligible persona → sign-in (SMS) → pre-filled apply → NIDA, NESA bound and clearance verified → slot → exam pass → gate admission → physical → medical → decision → acceptance; the citizen sees the outcome.
+1. **RDF regular 2026 (the pilot agency):** eligible persona (S3+, 18–25) → sign-in (SMS) → pre-filled apply → NIDA, NESA bound and clearance verified → slot → exam pass → gate admission → physical → medical board → decision → acceptance; the citizen sees the outcome. Plus an RNP Basic 2025 variant (government-physician certificate mode).
 2. RDF Reserve 2026: A0 persona aged 26 accepted, aged 27 refused with the cap named; Medicine graduate aged 27 accepted.
 3. RCS officer 4-year track: science ≥70% accepted, 69% refused with the reason.
 4. Failures:

@@ -127,7 +127,7 @@ Ordered by lead time. Engineering cannot shorten these.
 | M1 | **S06** officer workspace + staff admin (two PRs; carries the four-eyes activation-code fix) | ready | FE | — |
 | M1 | **S05** minimal Campaign Studio (draft → policy → sessions → publish; policy-hash parity with the rehearsal) | ready | FE | — |
 | M2 | **S09** venue roster + device fleet (rls/0036) | ready | BE | who may enrol and revoke devices |
-| M2 | **S08** Field Station, online capture | ready | FE | pilot agency, district, tablet model |
+| M2 | **S08** Field Station, online capture | ready | FE | pilot district, tablet model (pilot agency: **RDF**, decided 2026-10-25) |
 | M2 | **S14** operator relocation and superseding invitations | ready | BE+FE | relocation authority and fairness rules |
 | M2 | **P1 pilot continuity kit** (new package): printed roster and run sheet from `getVenueRoster`, paper score sheets with two-person re-entry and reconciliation, assisted desk with pass printing | ready | BE+FE + procedure | paper procedure; assisted-desk operation |
 | M3 | **S11a** observability (any free lane, from now) | ready | infra | — |
@@ -150,7 +150,7 @@ The owner's instruction: **deliver everything, at national-government grade.** T
 | Wave | Lane 1 | Lane 2 | Closes |
 |---|---|---|---|
 | **A** (running) | **S12a** G2G sandbox: platform, NIDA, NESA on real formats; binding | **S06 finish**: frontend #36 contract re-pin, SPA image CVE (Go pin refresh), ready to merge | M1 staff screens |
-| **B** | **S12b** Irembo clearance + Twilio SMS | **S08** Field Station, online: setup, gate, physical, medical, walk-in, supervisor. **Sandbox target campaign: RNP Basic 2025** (the pilot agency still decides the real pilot) | the Basic Course life cycle in the UI |
+| **B** | **S12b** Irembo clearance + Twilio SMS | **S08** Field Station, online: setup, gate, physical, medical, walk-in, supervisor. **Target: RDF 2026 (regular + Reserve), the pilot agency.** Medical modes for all three agencies are built; RDF is proven end to end | the Basic Course life cycle in the UI |
 | **C** | **S12c** full-stack sandbox: policy v2, NIDA pre-fill, `pnpm sandbox:up`, live journeys across the three apps | **S05** Campaign Studio | **M1 closed** (rehearsal driven entirely through the UI); end-to-end sandbox |
 | **D** | **S13** control room: command dashboard on event-fed projections (read-model ADR first) | **S14** operator relocation | M2 `venue-down` drill |
 | **E** | **P1** paper continuity and assisted desk | **S10a → S10b** citizen timeline and notices | **M2 closed** |
@@ -164,7 +164,7 @@ The owner decision that gates a lane is asked when that wave starts:
 - B2's model licence;
 - relocation authority (S14);
 - RCS walk-in (S12c);
-- the real pilot agency (before M4).
+- the pilot district and tablet model (S08; the pilot agency is **RDF**, decided 2026-10-25).
 
 ### 8.4 Session practice (learned in M0)
 
