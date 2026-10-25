@@ -143,13 +143,28 @@ Ordered by lead time. Engineering cannot shorten these.
 
 A kit marked **to write** is written, and its ADR and migration numbers are reserved in README.md, before the session starts. Kits are written one milestone ahead, never further.
 
-### 8.3 Immediate order
+### 8.3 Execution plan (adopted 2026-10-25)
 
-1. **S06**: finish (S09 merged #44; S06 backend merged #45; frontend #35/#36 open).
-2. **S12a** (backend, Opus) runs alongside S06's frontend: from 2026-10-25 the sandbox is the backend lane. **S12b** follows once S12a's simulator harness merges. Its Twilio half may start earlier. **S12c** follows both: the full life cycle running end to end in the sandbox.
-3. **S08 ‖ S14**, once the pilot agency, district and tablet are decided (§6 #2–3).
-4. **S05** and **S11a** in whichever lane frees first.
-5. M3 packages: S07 → S11b; S12 cutover when the contracts arrive; S10a → S10b; minimal S13.
+The owner's instruction: **deliver everything, at national-government grade.** Two agent lanes run at a time (usage limits). A wave starts when its predecessors' contracts merge, not when every PR is finished. Each wave ends with its proofs in the §3.1 ledger.
+
+| Wave | Lane 1 | Lane 2 | Closes |
+|---|---|---|---|
+| **A** (running) | **S12a** G2G sandbox: platform, NIDA, NESA on real formats; binding | **S06 finish**: frontend #36 contract re-pin, SPA image CVE (Go pin refresh), ready to merge | M1 staff screens |
+| **B** | **S12b** Irembo clearance + Twilio SMS | **S08** Field Station, online: setup, gate, physical, medical, walk-in, supervisor. **Sandbox target campaign: RNP Basic 2025** (the pilot agency still decides the real pilot) | the Basic Course life cycle in the UI |
+| **C** | **S12c** full-stack sandbox: policy v2, NIDA pre-fill, `pnpm sandbox:up`, live journeys across the three apps | **S05** Campaign Studio | **M1 closed** (rehearsal driven entirely through the UI); end-to-end sandbox |
+| **D** | **S13** control room: command dashboard on event-fed projections (read-model ADR first) | **S14** operator relocation | M2 `venue-down` drill |
+| **E** | **P1** paper continuity and assisted desk | **S10a → S10b** citizen timeline and notices | **M2 closed** |
+| **F** | **S11a** observability → **S07** staging → **S11b** backup + restore | **B2** on-device biometric capture (after the model-licence decision) | **M3 closed** |
+| **G** | **S16** security assurance · **S17** load + failure drills | **B3** biometric evaluation · **S15** durable offline | M4 evidence |
+| **H** | **S18** pilot pack → go/no-go | — | **M4** |
+
+Kits still to write, one wave ahead: **S13** (with the read-model ADR), **S15**, **S16**, **S17**, **S18**, and **S12** cutover once the agreements arrive.
+
+The owner decision that gates a lane is asked when that wave starts:
+- B2's model licence;
+- relocation authority (S14);
+- RCS walk-in (S12c);
+- the real pilot agency (before M4).
 
 ### 8.4 Session practice (learned in M0)
 
