@@ -17,3 +17,5 @@ packages:
   # Dev and training tooling that is a real package (typed, linted, tested).
   # Named, not globbed: tools/native-stack is a script folder, not a package.
   - 'tools/rehearsal'
+  # The G2G production sandbox (ADR-047): simulators + synthetic population.
+  - 'tools/g2g-sandbox'

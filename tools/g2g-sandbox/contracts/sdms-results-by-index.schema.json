@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "usrp:g2g-sandbox:sdms-results-by-index",
+  "title": "SDMS (NESA) public results by index — GET /api/v1/public/results/by-index?indexNumber=",
+  "description": "Shape captured from the live rne.sdms.gov.rw endpoint (ADR-047 §1). Values stripped: only names, types and formats remain. combinationLevelType 'TVET' was observed; other values are sandbox assumptions (README.md).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["studentNames", "studentIndexNumber", "studentCode", "gender", "resultsAggregate", "division", "placedSchoolName", "placedCombinationName", "placedSchoolContact", "placedSchoolProvince", "placedSchoolDistrict", "placedSchoolSector", "combinationLevelType", "academicYear", "published", "malpractice", "attendedSchool", "combination", "weightedPercent", "studentNationalIdHint", "rawMark"],
+  "properties": {
+    "studentNames": { "type": "string", "minLength": 1 },
+    "studentIndexNumber": { "type": "string", "pattern": "^[0-9]{6}[A-Z]{3}[0-9]{3}[0-9]{4}$" },
+    "studentCode": { "type": "string", "pattern": "^[0-9]{12}$" },
+    "gender": { "type": "string", "enum": ["MALE", "FEMALE"] },
+    "resultsAggregate": { "type": ["number", "null"] },
+    "division": { "type": "string", "minLength": 1 },
+    "placedSchoolName": { "type": ["string", "null"] },
+    "placedCombinationName": { "type": ["string", "null"] },
+    "placedSchoolContact": { "type": ["string", "null"] },
+    "placedSchoolProvince": { "type": ["string", "null"] },
+    "placedSchoolDistrict": { "type": ["string", "null"] },
+    "placedSchoolSector": { "type": ["string", "null"] },
+    "combinationLevelType": { "type": "string", "minLength": 1 },
+    "academicYear": { "type": "string", "pattern": "^[0-9]{4}/[0-9]{4}$" },
+    "published": { "type": "boolean" },
+    "malpractice": { "type": "boolean" },
+    "attendedSchool": { "type": "string" },
+    "combination": { "type": "string" },
+    "weightedPercent": { "type": "number", "minimum": 0, "maximum": 100 },
+    "studentNationalIdHint": { "type": "string", "pattern": "^[0-9]{4}\\*{8}[0-9]{4}$" },
+    "rawMark": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["markPercent", "letterGrade", "subject"],
+        "properties": {
+          "markPercent": { "type": "number", "minimum": 0, "maximum": 100 },
+          "letterGrade": { "type": "string", "pattern": "^[A-Z]$" },
+          "subject": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["code", "subjectName", "numberOfPeriods", "subsidiary"],
+            "properties": {
+              "code": { "type": ["string", "null"] },
+              "subjectName": { "type": "string", "minLength": 1 },
+              "numberOfPeriods": { "type": "integer", "minimum": 0 },
+              "subsidiary": { "type": ["boolean", "null"] }
+            }
+          }
+        }
+      }
+    }
+  }
+}
