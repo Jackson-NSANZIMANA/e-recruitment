@@ -15,7 +15,7 @@
   - RNP: never sentenced to six months or more;
   - RCS: never convicted, and not under prosecution.
 
-  So the *content* of a clearance matters, not only its authenticity.
+  So the *content* of a clearance matters, not only its authenticity. RNP Basic says "six months **or more**" and RNP Cadet "**more than** six months" (docs/product/recruitment-announcements-2025-2026.md §9), so the rule belongs to the campaign policy, not to the agency.
 
 ## 2. Decision
 

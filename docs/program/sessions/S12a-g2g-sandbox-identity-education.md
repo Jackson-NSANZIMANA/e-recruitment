@@ -62,9 +62,17 @@ Every G2G adapter today talks to an invented contract (hash-keyed HMAC POSTs), s
    **Confirm first** that the binding gap is real (read `verify-nesa-education.service.ts` end to end). Record what you find in ADR-047 or ADR-048.
 10. **Live-NESA passthrough** (ADR-047 §3.6): opt-in, one allowlisted index set locally, 1 request per minute, and its schema re-validated. It is **not** run in CI.
 11. **`pnpm sandbox`:** boots the sandbox profile on its own database (`usrp_sandbox`) and its own ports (49xx). `pnpm sandbox:reset` drops that database.
-12. **Rehearsal scenarios from the five real announcements** in `sandbox-demo/` (RDF basic and reserve 2026, RNP basic 2025, RNP cadet 2025, RCS junior 2025, RCS officer 2026). Encode their real criteria (age bounds, A2/S3/A0/A1, specialisms with higher age caps, the documents list), venues and districts as `tools/rehearsal/scenarios/*.json`.
-    - Keep them fenced as rehearsal (`REH-` codes and labels).
-    - **Do not silently fix the source discrepancies.** The RDF announcement prints exam dates (2–17 June) *before* its registration window (23 June–1 July), states 2:00 a.m., and mislabels the provinces of several districts. Record each as a scenario note, and show that the publication preflight rejects the chronology as printed. The corrected scenario is a separate file that cites the discrepancy.
+12. **Rehearsal scenarios from the real announcements**, encoded from **`docs/product/recruitment-announcements-2025-2026.md` only.** That document was extracted from the signed Kinyarwanda originals.
+    - **The English translations in sandbox-demo are wrong in material ways** (§7 of that document: dates, exam hour, a reversed age limit, provinces, an invented bankruptcy requirement). Never use them.
+    - There are six campaigns: RDF regular + Reserve 2026, RNP Basic 2025, RNP Cadet 2025, RCS junior 2025, RCS officer 2026 (1-year and 4-year tracks). Each becomes a `tools/rehearsal/scenarios/*.json`, fenced as rehearsal (`REH-` codes and labels), with:
+      - the per-category and per-qualification age caps;
+      - education alternatives;
+      - the agency's conviction rule;
+      - the documents list;
+      - venues and dates as in the originals.
+    - The genuine inconsistencies in the originals (§8: RCS junior heading vs district dates; RNP brochure vs announcements; walk-in on exam day announced by RCS officer as well as RDF) are recorded as scenario notes and listed in the hand-off. Do not silently fix them.
+    - Where the policy model cannot yet express a fact (for example several age caps by qualification within one category, or "not under prosecution"), say so in the hand-off. Do not approximate it silently.
+    - **Pre-fill:** the forms' identity block maps onto the NIDA record (§6). Add the mapping to the hand-off, as an input for the frontend apply flow.
 
 ## Owns
 - `tools/g2g-sandbox/**`
