@@ -255,7 +255,7 @@ apply_sql "${RLS_DIR}/0036_device_fleet.sql" "rls/0036 (device fleet and venue l
 
 # S12a (ADR-048 §2.1): the encrypted first-4/last-4 NID hint that lets
 # credential binding check a registry's masked hint without storing the NID.
-apply_sql "${RLS_DIR}/0041_national_id_hint.sql" "rls/0041 (encrypted national ID hint)"
+apply_sql "${RLS_DIR}/0042_national_id_hint.sql" "rls/0042 (encrypted national ID hint)"
 
 printf '\n'
 

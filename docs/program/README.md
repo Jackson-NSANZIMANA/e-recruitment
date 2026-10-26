@@ -55,7 +55,7 @@ Parallel sessions must not pick "the next number". These are reserved; use only 
 | B3 | ADR-044 biometric evaluation and thresholds | — | — |
 | S14 | ADR-045 relocation and superseding invitations | `0038_relocation.sql` | — |
 | P1 | ADR-046 paper records and reconciliation | `0039_paper_continuity.sql` | ADR-FE-018 paper and assisted-desk screens |
-| S12a | ADR-047 G2G production sandbox | — | — |
+| S12a | ADR-047 G2G production sandbox | `0042_national_id_hint.sql` | — |
 | S12b | ADR-048 identity binding and Irembo clearance | `0040_clearance_certificates.sql` | — |
 | S12c | ADR-049 campaign policy v2 | `0041_campaign_policy_v2.sql` | ADR-FE-019 sandbox presentation and NIDA pre-fill |
 
