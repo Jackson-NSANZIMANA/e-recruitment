@@ -48,7 +48,7 @@ export interface IdentityFacts {
   readonly sex?: string | null;
   /**
    * The first 4 and last 4 digits of the applicant's NID, as 8 digits. Null
-   * for identities verified before the hint was captured (rls/0041).
+   * for identities verified before the hint was captured (rls/0042).
    */
   readonly nationalIdHint?: string | null;
 }

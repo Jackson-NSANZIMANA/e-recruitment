@@ -41,7 +41,7 @@ export interface ApplicantBindingSubject {
   readonly fullName: string;
   readonly dateOfBirth: string;
   readonly sex: 'MALE' | 'FEMALE';
-  /** 8 digits (first 4 + last 4 of the NID); null for identities verified before rls/0041. */
+  /** 8 digits (first 4 + last 4 of the NID); null for identities verified before rls/0042. */
   readonly nationalIdHint: string | null;
 }
 

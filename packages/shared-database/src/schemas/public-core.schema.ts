@@ -90,7 +90,7 @@ export const applicantIdentities = publicCore.table(
 
     // First 4 + last 4 digits of the NID — the part registries print as a
     // masked hint (SDMS studentNationalIdHint) — encrypted at rest, for
-    // credential binding (rls/0041, ADR-048 §2.1). Nullable: older rows.
+    // credential binding (rls/0042, ADR-048 §2.1). Nullable: older rows.
     encryptedNationalIdHint: text('encrypted_national_id_hint'),
 
     // Non-PII from NIDA — unencrypted for query performance
