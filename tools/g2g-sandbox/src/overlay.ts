@@ -46,6 +46,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/**
+ * Opt-in drill override (SANDBOX_PRIVATE_PERSONA_DISTRICT): move the overlay's
+ * home district IN MEMORY to a rehearsal district (the pilot is Nyagatare), so
+ * the owner's run is slotted where the drill is staged. Lower administrative
+ * levels become synthetic labels. Nothing is written anywhere.
+ */
+export function withDistrict(persona: PrivatePersona, districtLabel: string, provinceLabel: string): PrivatePersona {
+  return {
+    ...persona,
+    identityInfo: { ...persona.identityInfo, district: districtLabel, province: provinceLabel, sector: 'Synthetic sector (drill)', cell: 'Synthetic cell (drill)', village: 'Synthetic village (drill)', villageId: null },
+  };
+}
+
 /** Load the overlay, or null when unset. Throws PrivatePersonaRefused on any guard. */
 export function loadPrivatePersona(dir: string | undefined): PrivatePersona | null {
   if (dir === undefined || dir.trim() === '') return null;

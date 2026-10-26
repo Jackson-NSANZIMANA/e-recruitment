@@ -13,7 +13,9 @@
 import { assertSimulatorAllowed, EnvValidationError } from '@usrp/shared-config';
 import { consoleLog } from './log.js';
 import { createLiveNesa } from './live-nesa.js';
-import { loadPrivatePersona, PrivatePersonaRefused } from './overlay.js';
+import { loadPrivatePersona, PrivatePersonaRefused, withDistrict } from './overlay.js';
+import { DISTRICT_TO_PROVINCE, type District } from '@usrp/shared-types';
+import { districtLabel, PROVINCE_LABEL_RW } from './population/geography.js';
 import { kigaliReferenceDate, Population } from './population/population.js';
 import { PERSONAS } from './population/personas.js';
 import { createSandboxServer } from './server.js';
@@ -40,7 +42,14 @@ async function main(): Promise<void> {
     throw new EnvValidationError(['SANDBOX_G2G_CLIENT_TOKENS must not contain the published development token in the sandbox profile.']);
   }
 
-  const overlay = loadPrivatePersona(process.env['SANDBOX_PRIVATE_PERSONA_DIR']);
+  const loaded = loadPrivatePersona(process.env['SANDBOX_PRIVATE_PERSONA_DIR']);
+  const drillDistrict = process.env['SANDBOX_PRIVATE_PERSONA_DISTRICT']?.trim().toUpperCase() ?? '';
+  let overlay = loaded;
+  if (loaded !== null && drillDistrict !== '') {
+    if (!Object.hasOwn(DISTRICT_TO_PROVINCE, drillDistrict)) throw new EnvValidationError(['SANDBOX_PRIVATE_PERSONA_DISTRICT must be a district.']);
+    const district = drillDistrict as District;
+    overlay = withDistrict(loaded, districtLabel(district), PROVINCE_LABEL_RW[DISTRICT_TO_PROVINCE[district]]);
+  }
   const liveWanted = process.env['SANDBOX_NESA_LIVE'] === '1';
   const liveIndex = process.env['SANDBOX_NESA_LIVE_INDEX']?.trim() ?? '';
   if (liveWanted && environment !== 'sandbox') throw new EnvValidationError(['SANDBOX_NESA_LIVE is allowed in the sandbox profile only (never in development or CI).']);

@@ -100,7 +100,11 @@ function printReport(report: RehearsalReport, scenario: Scenario, edgeBaseUrl: s
   out();
   out('Personas');
   for (const p of scenario.personas) {
-    out(`  ${p.id}  ${p.role}: NID ${p.nationalId} · born ${p.dateOfBirth} · phone ${p.phone} · ${p.homeDistrict}`);
+    out(
+      p.sandboxPersona !== undefined
+        ? `  ${p.id}  ${p.role}: sandbox persona ${p.sandboxPersona} (facts served by the g2g-sandbox simulators)`
+        : `  ${p.id}  ${p.role}: NID ${p.nationalId ?? '?'} · born ${p.dateOfBirth ?? '?'} · phone ${p.phone ?? '?'} · ${p.homeDistrict ?? '?'}`,
+    );
     out(`     rehearses: ${p.rehearses}`);
     out(`     expected:  ${p.expectedOutcome}`);
   }
@@ -173,7 +177,7 @@ async function biometricShadow(
   }
   const steps = await recordShadowEvidence({
     edgeBaseUrl: where.edgeBaseUrl, origin: where.origin, databaseUrl: where.databaseUrl, agency,
-    nationalId: persona.nationalId,
+    nationalId: persona.nationalId ?? '',
     gateOfficer: { loginHandle: gate.handle, password: REHEARSAL_STAFF_PASSWORD },
     reader: { loginHandle: reader.handle, password: REHEARSAL_STAFF_PASSWORD },
     now: new Date(),

@@ -23,6 +23,6 @@
     "outDir": "./dist",
     "noEmit": true
   },
-  "include": ["src/**/*", "selfcheck/**/*", "test/**/*"],
+  "include": ["src/**/*", "selfcheck/**/*", "test/**/*", "scripts/**/*"],
   "exclude": ["node_modules", "dist"]
 }

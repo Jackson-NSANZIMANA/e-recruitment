@@ -1,0 +1,308 @@
+{
+  "id": "rnp-cadet-2025",
+  "version": 1,
+  "title": "RNP 2025: Cadet course",
+  "purpose": "Encoded from §3 of the Kinyarwanda original. No exam dates or venues are printed; the playable day examines at each district DPU today (assumption). Degree verification is HEC (unchanged mock); the sandbox personas here exercise identity and age.",
+  "campaigns": [
+    {
+      "agency": "RNP",
+      "categories": [
+        "CADET_OFFICER"
+      ],
+      "registration": {
+        "opensOffsetDays": -1,
+        "closesOffsetDays": 2
+      },
+      "examination": {
+        "startOffsetDays": 0,
+        "endOffsetDays": 0
+      },
+      "reportingHour": 8,
+      "allowsWalkIn": false,
+      "targetIntakeCount": 120,
+      "sessions": [
+        {
+          "district": "NYARUGENGE",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 80,
+          "venue": "Nyarugenge DPU"
+        },
+        {
+          "district": "KICUKIRO",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 80,
+          "venue": "Kicukiro DPU"
+        },
+        {
+          "district": "GASABO",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 80,
+          "venue": "Gasabo DPU"
+        },
+        {
+          "district": "GICUMBI",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 80,
+          "venue": "Gicumbi DPU"
+        },
+        {
+          "district": "BURERA",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 80,
+          "venue": "Burera DPU"
+        },
+        {
+          "district": "MUSANZE",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 80,
+          "venue": "Musanze DPU"
+        },
+        {
+          "district": "GAKENKE",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 80,
+          "venue": "Gakenke DPU"
+        },
+        {
+          "district": "RULINDO",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 80,
+          "venue": "Rulindo DPU"
+        },
+        {
+          "district": "NYAMAGABE",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 80,
+          "venue": "Nyamagabe DPU"
+        },
+        {
+          "district": "NYARUGURU",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 80,
+          "venue": "Nyaruguru DPU"
+        },
+        {
+          "district": "GISAGARA",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 80,
+          "venue": "Gisagara DPU"
+        },
+        {
+          "district": "HUYE",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 80,
+          "venue": "Huye DPU"
+        },
+        {
+          "district": "NYANZA",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 80,
+          "venue": "Nyanza DPU"
+        },
+        {
+          "district": "RUHANGO",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 80,
+          "venue": "Ruhango DPU"
+        },
+        {
+          "district": "MUHANGA",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 80,
+          "venue": "Muhanga DPU"
+        },
+        {
+          "district": "KAMONYI",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 80,
+          "venue": "Kamonyi DPU"
+        },
+        {
+          "district": "KIREHE",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 80,
+          "venue": "Kirehe DPU"
+        },
+        {
+          "district": "NGOMA",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 80,
+          "venue": "Ngoma DPU"
+        },
+        {
+          "district": "NYAGATARE",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 80,
+          "venue": "Nyagatare DPU"
+        },
+        {
+          "district": "GATSIBO",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 80,
+          "venue": "Gatsibo DPU"
+        },
+        {
+          "district": "KAYONZA",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 80,
+          "venue": "Kayonza DPU"
+        },
+        {
+          "district": "RWAMAGANA",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 80,
+          "venue": "Rwamagana DPU"
+        },
+        {
+          "district": "BUGESERA",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 80,
+          "venue": "Bugesera DPU"
+        },
+        {
+          "district": "RUSIZI",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 80,
+          "venue": "Rusizi DPU"
+        },
+        {
+          "district": "NYAMASHEKE",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 80,
+          "venue": "Nyamasheke DPU"
+        },
+        {
+          "district": "KARONGI",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 80,
+          "venue": "Karongi DPU"
+        },
+        {
+          "district": "RUTSIRO",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 80,
+          "venue": "Rutsiro DPU"
+        },
+        {
+          "district": "RUBAVU",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 80,
+          "venue": "Rubavu DPU"
+        },
+        {
+          "district": "NYABIHU",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 80,
+          "venue": "Nyabihu DPU"
+        },
+        {
+          "district": "NGORORERO",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 80,
+          "venue": "Ngororero DPU"
+        }
+      ],
+      "staff": [
+        {
+          "handle": "reh.rnp.gate.huye",
+          "posts": [
+            "screening_officer"
+          ]
+        }
+      ]
+    }
+  ],
+  "personas": [],
+  "announcement": {
+    "source": "docs/product/recruitment-announcements-2025-2026.md §3",
+    "agency": "RNP",
+    "title": "RNP Cadet course",
+    "signedOn": "2025-05-05",
+    "registration": {
+      "opens": "2025-05-07",
+      "closes": "2025-05-17",
+      "where": "DPU of residence, 08:00–17:00 working days"
+    },
+    "walkInOnExamDay": false,
+    "examination": null,
+    "categories": [
+      {
+        "category": "CADET_OFFICER",
+        "track": "Cadet course",
+        "educationAnyOf": [
+          "BACHELOR_A0",
+          "A1_IPRC"
+        ],
+        "ageCaps": [
+          {
+            "qualification": "A0 or A1 IPRC",
+            "minAge": 18,
+            "maxAge": 25
+          }
+        ],
+        "convictionRule": "NEVER_SENTENCED_TO_MORE_THAN_6_MONTHS",
+        "extraConditions": [
+          "Statistics, Medicine, Veterinary Medicine, Nursing, Education and Engineering graduates encouraged (not a condition)",
+          "good conduct certified by the sector executive secretary",
+          "never dismissed from public service",
+          "in good health",
+          "ready to serve anywhere"
+        ]
+      }
+    ],
+    "documents": [
+      "form with a passport photo",
+      "copy of the national ID",
+      "copy of the degree",
+      "good-conduct certificate"
+    ],
+    "venues": [],
+    "notes": [
+      {
+        "kind": "NOT_IN_ANNOUNCEMENT",
+        "section": "§3",
+        "text": "No exam dates or venues are printed; DPU-today is a rehearsal assumption."
+      },
+      {
+        "kind": "INCONSISTENCY_IN_ORIGINAL",
+        "section": "§8.2",
+        "text": "The RNP brochure gives the cadet age as \"not more than 35\"; this announcement says 18–25. The announcement governs (platform: 18–25)."
+      },
+      {
+        "kind": "POLICY_MODEL_GAP",
+        "section": "§3",
+        "text": "The age-relevant personas (A-RNP-CADET-A1-AGE25) need an HEC degree record; the HEC mock is unchanged and holds no sandbox persona, so this scenario is staged without a journey."
+      }
+    ]
+  }
+}

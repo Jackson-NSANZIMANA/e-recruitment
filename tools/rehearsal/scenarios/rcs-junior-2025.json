@@ -1,0 +1,422 @@
+{
+  "id": "rcs-junior-2025",
+  "version": 1,
+  "title": "RCS 2025: junior staff",
+  "purpose": "Encoded from §4 of the Kinyarwanda original. The playable day examines in Nyagatare today (the RDF pilot district) and keeps every printed venue in announcement.venues.",
+  "campaigns": [
+    {
+      "agency": "RCS",
+      "categories": [
+        "GENERAL_ENLISTEE"
+      ],
+      "registration": {
+        "opensOffsetDays": -1,
+        "closesOffsetDays": 2
+      },
+      "examination": {
+        "startOffsetDays": 0,
+        "endOffsetDays": 0
+      },
+      "reportingHour": 9,
+      "allowsWalkIn": false,
+      "targetIntakeCount": 150,
+      "sessions": [
+        {
+          "district": "NYAGATARE",
+          "examOffsetDays": 0,
+          "reportingHour": 9,
+          "capacity": 200,
+          "venue": "Nyagatare stadium"
+        }
+      ],
+      "staff": [
+        {
+          "handle": "reh.rcs.gate.nyagatare",
+          "posts": [
+            "screening_officer"
+          ]
+        }
+      ]
+    }
+  ],
+  "personas": [
+    {
+      "id": "J1",
+      "role": "Eligible A2 citizen (RCS junior)",
+      "sandboxPersona": "A-RCS-JUNIOR-NYAGATARE-ELIGIBLE",
+      "category": "GENERAL_ENLISTEE",
+      "expect": {
+        "outcome": "ADMITTED"
+      },
+      "rehearses": "RCS junior journey at Nyagatare stadium.",
+      "expectedOutcome": "Admitted at the gate."
+    }
+  ],
+  "announcement": {
+    "source": "docs/product/recruitment-announcements-2025-2026.md §4",
+    "agency": "RCS",
+    "title": "Itangazo ku bifuza kwinjira muri RCS ku rwego rw'abakozi bato",
+    "signedOn": "2025-08-09",
+    "registration": {
+      "opens": "2025-08-09",
+      "closes": "2025-08-24",
+      "where": "districts"
+    },
+    "walkInOnExamDay": false,
+    "examination": {
+      "start": "2025-08-25",
+      "end": "2025-08-31",
+      "hour": "09:00"
+    },
+    "categories": [
+      {
+        "category": "GENERAL_ENLISTEE",
+        "track": "junior staff",
+        "educationAnyOf": [
+          "A_LEVEL_A2"
+        ],
+        "ageCaps": [
+          {
+            "qualification": "A2",
+            "minAge": 18,
+            "maxAge": 25
+          }
+        ],
+        "convictionRule": "NEVER_CONVICTED",
+        "underProsecutionBars": true,
+        "extraConditions": [
+          "in good health",
+          "not definitively dismissed from public service unless rehabilitated",
+          "not on the list of persons barred from public service",
+          "good conduct",
+          "willing",
+          "ready to serve anywhere"
+        ]
+      }
+    ],
+    "documents": [
+      "national ID",
+      "notarised academic certificate",
+      "good-conduct certificate approved by the sector head",
+      "certificate of no criminal conviction",
+      "certificate of single status (ingaragu)",
+      "medical certificate from an approved government doctor"
+    ],
+    "venues": [
+      {
+        "province": "NORTHERN_PROVINCE",
+        "districts": [
+          "GICUMBI"
+        ],
+        "dates": [
+          "2025-08-25"
+        ],
+        "venue": "District hall"
+      },
+      {
+        "province": "NORTHERN_PROVINCE",
+        "districts": [
+          "MUSANZE"
+        ],
+        "dates": [
+          "2025-08-25"
+        ],
+        "venue": "Ubworoherane stadium"
+      },
+      {
+        "province": "NORTHERN_PROVINCE",
+        "districts": [
+          "BURERA"
+        ],
+        "dates": [
+          "2025-08-25"
+        ],
+        "venue": "Kirambo stadium"
+      },
+      {
+        "province": "NORTHERN_PROVINCE",
+        "districts": [
+          "GAKENKE"
+        ],
+        "dates": [
+          "2025-08-26"
+        ],
+        "venue": "District hall"
+      },
+      {
+        "province": "NORTHERN_PROVINCE",
+        "districts": [
+          "RULINDO"
+        ],
+        "dates": [
+          "2025-08-27"
+        ],
+        "venue": "Gasiza ground"
+      },
+      {
+        "province": "EASTERN_PROVINCE",
+        "districts": [
+          "RWAMAGANA"
+        ],
+        "dates": [
+          "2025-08-25"
+        ],
+        "venue": "District office"
+      },
+      {
+        "province": "EASTERN_PROVINCE",
+        "districts": [
+          "NGOMA"
+        ],
+        "dates": [
+          "2025-08-25"
+        ],
+        "venue": "Ngoma stadium"
+      },
+      {
+        "province": "EASTERN_PROVINCE",
+        "districts": [
+          "NYAGATARE"
+        ],
+        "dates": [
+          "2025-08-25"
+        ],
+        "venue": "Nyagatare stadium"
+      },
+      {
+        "province": "EASTERN_PROVINCE",
+        "districts": [
+          "BUGESERA"
+        ],
+        "dates": [
+          "2025-08-25"
+        ],
+        "venue": "Bugesera stadium"
+      },
+      {
+        "province": "EASTERN_PROVINCE",
+        "districts": [
+          "GATSIBO"
+        ],
+        "dates": [
+          "2025-08-25"
+        ],
+        "venue": "District office"
+      },
+      {
+        "province": "EASTERN_PROVINCE",
+        "districts": [
+          "KAYONZA"
+        ],
+        "dates": [
+          "2025-08-26"
+        ],
+        "venue": "District office"
+      },
+      {
+        "province": "EASTERN_PROVINCE",
+        "districts": [
+          "KIREHE"
+        ],
+        "dates": [
+          "2025-08-27"
+        ],
+        "venue": "District hall"
+      },
+      {
+        "province": "SOUTHERN_PROVINCE",
+        "districts": [
+          "NYAMAGABE"
+        ],
+        "dates": [
+          "2025-08-25"
+        ],
+        "venue": "Nyamagabe stadium"
+      },
+      {
+        "province": "SOUTHERN_PROVINCE",
+        "districts": [
+          "NYANZA"
+        ],
+        "dates": [
+          "2025-08-25"
+        ],
+        "venue": "Nyanza stadium"
+      },
+      {
+        "province": "SOUTHERN_PROVINCE",
+        "districts": [
+          "HUYE"
+        ],
+        "dates": [
+          "2025-08-25"
+        ],
+        "venue": "Huye correctional facility (Igororero rya Huye)"
+      },
+      {
+        "province": "SOUTHERN_PROVINCE",
+        "districts": [
+          "MUHANGA"
+        ],
+        "dates": [
+          "2025-08-25"
+        ],
+        "venue": "Muhanga stadium"
+      },
+      {
+        "province": "SOUTHERN_PROVINCE",
+        "districts": [
+          "NYARUGURU"
+        ],
+        "dates": [
+          "2025-08-25"
+        ],
+        "venue": "Ndago football ground"
+      },
+      {
+        "province": "SOUTHERN_PROVINCE",
+        "districts": [
+          "GISAGARA"
+        ],
+        "dates": [
+          "2025-08-26"
+        ],
+        "venue": "District office"
+      },
+      {
+        "province": "SOUTHERN_PROVINCE",
+        "districts": [
+          "RUHANGO"
+        ],
+        "dates": [
+          "2025-08-27"
+        ],
+        "venue": "District office"
+      },
+      {
+        "province": "SOUTHERN_PROVINCE",
+        "districts": [
+          "KAMONYI"
+        ],
+        "dates": [
+          "2025-08-28"
+        ],
+        "venue": "District office"
+      },
+      {
+        "province": "WESTERN_PROVINCE",
+        "districts": [
+          "RUBAVU"
+        ],
+        "dates": [
+          "2025-08-25"
+        ],
+        "venue": "Rubavu stadium"
+      },
+      {
+        "province": "WESTERN_PROVINCE",
+        "districts": [
+          "RUSIZI"
+        ],
+        "dates": [
+          "2025-08-25"
+        ],
+        "venue": "Rusizi stadium"
+      },
+      {
+        "province": "WESTERN_PROVINCE",
+        "districts": [
+          "NYAMASHEKE"
+        ],
+        "dates": [
+          "2025-08-25"
+        ],
+        "venue": "District office"
+      },
+      {
+        "province": "WESTERN_PROVINCE",
+        "districts": [
+          "KARONGI"
+        ],
+        "dates": [
+          "2025-08-26"
+        ],
+        "venue": "District youth hall"
+      },
+      {
+        "province": "WESTERN_PROVINCE",
+        "districts": [
+          "RUTSIRO"
+        ],
+        "dates": [
+          "2025-08-27"
+        ],
+        "venue": "Rutsiro stadium"
+      },
+      {
+        "province": "WESTERN_PROVINCE",
+        "districts": [
+          "NGORORERO"
+        ],
+        "dates": [
+          "2025-08-28"
+        ],
+        "venue": "District stadium"
+      },
+      {
+        "province": "WESTERN_PROVINCE",
+        "districts": [
+          "NYABIHU"
+        ],
+        "dates": [
+          "2025-08-29"
+        ],
+        "venue": "Nyabihu stadium"
+      },
+      {
+        "province": "KIGALI_CITY",
+        "districts": [
+          "NYARUGENGE",
+          "KICUKIRO",
+          "GASABO"
+        ],
+        "dates": [
+          "2025-08-28"
+        ],
+        "venue": "Gasabo district office"
+      }
+    ],
+    "notes": [
+      {
+        "kind": "INCONSISTENCY_IN_ORIGINAL",
+        "section": "§8.1",
+        "text": "CORRECTED: the examination window starts on 25 August to match the district list; the as-printed file rcs-junior-2025-as-printed.json is kept and is rejected by the preflight."
+      },
+      {
+        "kind": "INCONSISTENCY_IN_ORIGINAL",
+        "section": "§8.1",
+        "text": "The heading says exams run 26–31 August 2025, but the district list dates them 25–29 August. Several districts sit on 25 August, the day after registration closes (24 August)."
+      },
+      {
+        "kind": "POLICY_MODEL_GAP",
+        "section": "§4, §9",
+        "text": "\"Not under prosecution\" has no check in the platform model (only the RIB-by-hash UNDER_INVESTIGATION status of the legacy mock; the Irembo certificate flow, ADR-048, cannot show it)."
+      },
+      {
+        "kind": "POLICY_MODEL_GAP",
+        "section": "§4",
+        "text": "A NOTARISED academic certificate is required; the document catalogue has notarisation only for degrees (DEGREE_DIPLOMA_NOTARIZED), not for an A2 certificate."
+      },
+      {
+        "kind": "POLICY_MODEL_GAP",
+        "section": "§4",
+        "text": "\"Not on the list of persons barred from public service\" and \"not definitively dismissed unless rehabilitated\" have no registry check."
+      },
+      {
+        "kind": "POLICY_MODEL_GAP",
+        "section": "§4, §9",
+        "text": "Nyarugenge, Kicukiro and Gasabo share one venue; sessions are per district, so the shared venue capacity is not one number."
+      }
+    ]
+  }
+}
