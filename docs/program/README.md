@@ -90,7 +90,7 @@ Parallel sessions must not pick "the next number". These are reserved; use only 
 | B1 Biometric evidence | done | BE [#40](https://github.com/Jackson-NSANZIMANA/e-recruitment/pull/40) | ADR-037, rls/0034; 4 edge operations; SHADOW for the pilot; **DPO sign-off on the DPIA rows pending** |
 | S04 Read models | done | BE [#41](https://github.com/Jackson-NSANZIMANA/e-recruitment/pull/41) | ADR-039, rls/0035; 6 edge operations + permission metadata |
 | S05 Campaign Studio | ready (M1) | | |
-| S06 Officer workspace + staff admin | ready (M1) — next | | carries the four-eyes activation-code fix |
+| S06 Officer workspace + staff admin | in review (M1): backend four-eyes release merged (#45); FE PR 1/2 merged (e-recruitment-ui #35); FE PR 2/2 (e-recruitment-ui #36) draft, live staff journey 5/5 at backend main | e-recruitment-ui #36 | carries the four-eyes activation-code fix; blocked only by the repo-wide zod Trivy advisory CVE-2023-54404 |
 | S07 Deployment + staging | ready (M3) | | provider-neutral staging first; production hosting decision gates production only (ROADMAP §4) |
 | S08 Field Station | ready (M2; wave B) | | pilot: **RDF, Nyagatare, Galaxy Tab A7–A10** (decided 2026-10-25) |
 | S09 Fleet + venue ops | done | BE [#44](https://github.com/Jackson-NSANZIMANA/e-recruitment/pull/44) | rls/0036; `field.device.manage`; 4 edge operations; ADR-036 addendum; enrolment still with the screening officer |
