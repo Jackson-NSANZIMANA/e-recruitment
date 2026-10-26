@@ -713,6 +713,12 @@ importers:
 
   tools/rehearsal:
     dependencies:
+      '@usrp/g2g-sandbox':
+        specifier: workspace:*
+        version: link:../g2g-sandbox
+      '@usrp/shared-identity-match':
+        specifier: workspace:*
+        version: link:../../packages/shared-identity-match
       '@usrp/shared-security':
         specifier: workspace:*
         version: link:../../packages/shared-security
@@ -726,9 +732,6 @@ importers:
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.2
-      '@usrp/g2g-sandbox':
-        specifier: workspace:*
-        version: link:../g2g-sandbox
       tsx:
         specifier: ^4.21.0
         version: 4.23.0

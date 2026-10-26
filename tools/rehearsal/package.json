@@ -11,13 +11,14 @@
     "test": "tsx --test test/*.test.ts"
   },
   "dependencies": {
+    "@usrp/g2g-sandbox": "workspace:*",
+    "@usrp/shared-identity-match": "workspace:*",
     "@usrp/shared-security": "workspace:*",
     "@usrp/shared-types": "workspace:*",
     "postgres": "^3.4.5"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "@usrp/g2g-sandbox": "workspace:*",
     "tsx": "^4.21.0",
     "typescript": "^5.8.3"
   }

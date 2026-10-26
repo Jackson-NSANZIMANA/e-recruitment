@@ -65,7 +65,9 @@ export interface ScenarioCampaign {
 export type JourneyExpectation =
   | { readonly outcome: 'ADMITTED' }
   | { readonly outcome: 'REJECTED'; readonly gate: 'AGE' | 'ACADEMIC' }
-  | { readonly outcome: 'ACADEMIC_PENDING'; readonly failureCode: string };
+  | { readonly outcome: 'ACADEMIC_PENDING'; readonly failureCode: string }
+  /** The private-persona run only: the NESA record binds (no outcome beyond that is asserted). */
+  | { readonly outcome: 'BOUND' };
 
 /**
  * A persona: either literal identity facts (dev stack, national-pilot-day),

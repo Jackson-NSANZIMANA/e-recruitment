@@ -19,13 +19,16 @@ import type { Agency } from '@usrp/shared-types';
 import { conduct, type AdminCredential, type RehearsalReport } from './conductor.js';
 import { EdgeSession, EdgeUnavailable } from './edge.js';
 import { RehearsalRefused, assertRehearsalAllowed } from './fence.js';
-import { isRehearsalCode, ScenarioInvalid, validateScenario, type Scenario } from './scenario.js';
+import { isRehearsalCode, rehearsalCode, ScenarioInvalid, validateScenario, type Scenario } from './scenario.js';
 import { assertGasaboRoster, RosterAssertion } from './roster.js';
 import { REHEARSAL_STAFF_PASSWORD, provisionStaff } from './staff.js';
 import { recordShadowEvidence } from './biometric.js';
 import { FleetAssertion, rehearseFleet } from './fleet.js';
 import { completePhysicalTest } from './physical.js';
 import { ensureAgencyAdmin, ensureSecondAgencyAdmin } from './provision.js';
+import { runJourney, type JourneySubject } from './journey.js';
+import { kigaliReferenceDate, loadPrivatePersona, Population } from '@usrp/g2g-sandbox';
+import { parseDateOfBirth } from '@usrp/shared-identity-match';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = resolve(HERE, '..');
@@ -227,6 +230,59 @@ async function completePhysical(argv: readonly string[], where: { readonly edgeB
   return ok ? 0 : 1;
 }
 
+/**
+ * S12a: the sandbox journey for every catalogue persona of a staged scenario
+ * (`pnpm rehearse <id>` first). `--private` adds the owner's private persona
+ * (SANDBOX_PRIVATE_PERSONA_DIR, read in memory, reported as PRIVATE with
+ * pass/fail only).
+ */
+async function journey(argv: readonly string[], where: { readonly edgeBaseUrl: string; readonly origin: string }): Promise<number> {
+  const scenarioId = argv.find((arg) => !arg.startsWith('--')) ?? 'rnp-basic-2025';
+  const scenario = loadScenario(scenarioId);
+  const campaign = scenario.campaigns[0];
+  if (campaign === undefined) throw new ScenarioInvalid('The scenario has no campaign.');
+  const gate = campaign.staff?.find((m) => m.posts.includes('screening_officer'));
+  const reader = campaign.staff?.find((m) => m.posts.includes('reviewer') || m.posts.includes('field_supervisor'));
+  if (gate === undefined || reader === undefined) throw new ScenarioInvalid('The journey needs a screening officer and a reviewer in the scenario staff.');
+  const now = new Date();
+  const population = new Population({ seed: 1, size: 0, referenceDate: kigaliReferenceDate(now) });
+  const subjects: JourneySubject[] = [];
+  for (const p of scenario.personas) {
+    if (p.sandboxPersona === undefined || p.expect === undefined || p.category === undefined) continue;
+    const c = population.persona(p.sandboxPersona);
+    subjects.push({ label: `${p.id}/${p.sandboxPersona}`, nationalId: c.nid, dateOfBirth: c.dateOfBirth, phone: c.phone, nesaIndexNumber: c.nesa?.studentIndexNumber ?? null, category: p.category, expect: p.expect });
+  }
+  if (argv.includes('--private')) {
+    const persona = loadPrivatePersona(process.env['SANDBOX_PRIVATE_PERSONA_DIR']);
+    if (persona === null) throw new ScenarioInvalid('--private needs SANDBOX_PRIVATE_PERSONA_DIR.');
+    const dobRaw = persona.identityInfo['dateOfBirth'];
+    const dob = typeof dobRaw === 'string' ? parseDateOfBirth(dobRaw) : null;
+    const index = typeof persona.nesa?.['studentIndexNumber'] === 'string' ? persona.nesa['studentIndexNumber'] : (env('SANDBOX_NESA_LIVE_INDEX') ?? null);
+    if (dob === null) throw new ScenarioInvalid('The private persona has no readable date of birth.');
+    const at = argv.indexOf('--private-category');
+    subjects.push({ label: 'PRIVATE', nationalId: persona.nid, dateOfBirth: dob, phone: '0788009999', nesaIndexNumber: index, category: at >= 0 ? (argv[at + 1] ?? campaign.categories[0] ?? '') : (campaign.categories[0] ?? ''), expect: { outcome: 'BOUND' } });
+  }
+  const config = {
+    ...where,
+    smsInbox: env('REHEARSAL_SMS_INBOX') ?? join(REPO_ROOT, '.sandbox', 'sms', 'inbox.jsonl'),
+    campaignCode: rehearsalCode(campaign.agency as Agency, now),
+    gateOfficer: { loginHandle: gate.handle, password: REHEARSAL_STAFF_PASSWORD },
+    reader: { loginHandle: reader.handle, password: REHEARSAL_STAFF_PASSWORD },
+  };
+  out(`USRP SANDBOX JOURNEY · ${scenario.title} · ${config.campaignCode}`);
+  let ok = true;
+  for (const subject of subjects) {
+    const steps = await runJourney(subject, config);
+    const passed = steps.length > 0 && steps.every((s) => s.ok);
+    ok &&= passed;
+    out(`${passed ? '✓' : '✗'} ${subject.label} → expected ${subject.expect.outcome}${'gate' in subject.expect ? ` (${subject.expect.gate})` : ''}${'failureCode' in subject.expect ? ` (${subject.expect.failureCode})` : ''}`);
+    // The private run reports pass/fail only, never step details.
+    if (subject.label !== 'PRIVATE') for (const s of steps) out(`    ${s.ok ? '✓' : '✗'} ${s.step}${s.detail === '' ? '' : `: ${s.detail}`}`);
+  }
+  out(ok ? 'SANDBOX JOURNEY PASSED.' : 'SANDBOX JOURNEY FAILED — see ✗ above.');
+  return ok ? 0 : 1;
+}
+
 async function main(argv: readonly string[]): Promise<number> {
   const edgeBaseUrl = env('REHEARSAL_EDGE_URL') ?? `http://localhost:${env('PORT_EDGE_GATEWAY') ?? '4021'}`;
   const origin = env('REHEARSAL_ORIGIN') ?? 'http://localhost:3001';
@@ -240,6 +296,7 @@ async function main(argv: readonly string[]): Promise<number> {
   }
   if (argv.includes('--fleet')) return fleet({ edgeBaseUrl, origin, databaseUrl });
   if (argv.includes('--complete-physical')) return completePhysical(argv, { edgeBaseUrl, origin, databaseUrl });
+  if (argv.includes('--journey')) return journey(argv, { edgeBaseUrl, origin });
   if (argv.includes('--biometric-shadow')) {
     return biometricShadow(argv, { edgeBaseUrl, origin, databaseUrl });
   }
