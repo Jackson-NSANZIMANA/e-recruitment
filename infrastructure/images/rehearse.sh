@@ -45,7 +45,7 @@ up() {
   for port in "$USRP_APPLICANT_PORT" "$USRP_OFFICER_PORT"; do
     if (printf '' > "/dev/tcp/127.0.0.1/$port") 2>/dev/null; then echo "port $port is already in use" >&2; exit 1; fi
   done
-  docker inspect -f '{{.State.Running}}' "$PG_CONTAINER" usrp-minio usrp-clamav usrp-nida-mock usrp-nesa-mock usrp-rib-mock usrp-hec-mock > /dev/null \
+  docker inspect -f '{{.State.Running}}' "$PG_CONTAINER" usrp-minio usrp-clamav usrp-g2g-sandbox usrp-rib-mock usrp-hec-mock > /dev/null \
     || { echo "tier1/ClamAV are not running (pnpm infra:up)" >&2; exit 1; }
   mkdir -p "$USRP_SMS_DIR" && chmod 0777 "$USRP_SMS_DIR"
   if [[ "$(psql_admin -c "SELECT 1 FROM pg_database WHERE datname = '$DB'")" != "1" ]]; then

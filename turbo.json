@@ -69,6 +69,8 @@
         "G2G_TIMEOUT_MS",
         "NIDA_BASE_URL",
         "NIDA_HMAC_SECRET",
+        "NIDA_CLIENT_TOKEN",
+        "USRP_ENVIRONMENT",
         "NIDA_REQUEST_TIMEOUT_MS",
         "NESA_BASE_URL",
         "NESA_HMAC_SECRET",

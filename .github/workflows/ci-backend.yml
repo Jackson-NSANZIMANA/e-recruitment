@@ -167,8 +167,7 @@ jobs:
           echo '── kafka ──';       docker logs usrp-kafka --tail 100 || true
           echo '── kafka-init ──';  docker logs usrp-kafka-init --tail 50 || true
           echo '── postgres ──';    docker logs usrp-postgres --tail 50 || true
-          echo '── nida-mock ──';   docker logs usrp-nida-mock --tail 30 || true
-          echo '── nesa-mock ──';   docker logs usrp-nesa-mock --tail 30 || true
+          echo '── g2g-sandbox ──'; docker logs usrp-g2g-sandbox --tail 30 || true
           echo '── clamav ──';      docker logs usrp-clamav --tail 50 || true
           echo '── minio ──';       docker logs usrp-minio --tail 30 || true
 

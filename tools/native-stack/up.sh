@@ -57,6 +57,7 @@ if [[ "${1:-}" == "--stop" ]]; then
   # The four G2G mocks, matched on this repo's own mocks path so nothing
   # unrelated on the box is touched.
   pkill -f "$REPO_ROOT/infrastructure/docker/mocks/[a-z]*/server.js" 2>/dev/null || true
+  pkill -f "$REPO_ROOT/tools/g2g-sandbox/dist/main.js" 2>/dev/null || true
 
   if [[ -d "$PGDATA" && -x "$PGROOT/bin/pg_ctl" ]]; then
     LD_LIBRARY_PATH="$PGROOT/lib" "$PGROOT/bin/pg_ctl" -D "$PGDATA" stop -m fast >/dev/null 2>&1 || true
@@ -165,9 +166,20 @@ start_mock() {
       setsid nohup node "$MOCKS/$name/server.js" > "$STACK_DIR/$name.log" 2>&1 < /dev/null &
     echo $! >> "$PIDFILE" )
 }
-log "starting the four G2G registry mocks"
-start_mock nida 3100 nida/data/citizens.json dev_nida_hmac_secret
-start_mock nesa 3101 nesa/data/results.json  dev_nesa_hmac_secret
+# The g2g-sandbox simulators (ADR-047) replace the NIDA and NESA mocks. One
+# instance per legacy port, so NIDA_BASE_URL / NESA_BASE_URL keep their
+# defaults. Needs `pnpm build` (it runs the built dist/).
+start_sandbox() {
+  local port="$1" main="$REPO_ROOT/tools/g2g-sandbox/dist/main.js"
+  [[ -f "$main" ]] || fail "tools/g2g-sandbox is not built — run pnpm build first"
+  if (printf '' > "/dev/tcp/127.0.0.1/$port") 2>/dev/null; then warn "port $port already in use — assuming the simulator is up"; return; fi
+  ( USRP_ENVIRONMENT=development SANDBOX_PORT="$port" SANDBOX_LATENCY_SCALE=0 \
+      setsid nohup node "$main" > "$STACK_DIR/g2g-sandbox-$port.log" 2>&1 < /dev/null &
+    echo $! >> "$PIDFILE" )
+}
+log "starting the G2G sandbox simulators and the RIB/HEC mocks"
+start_sandbox 3100
+start_sandbox 3101
 start_mock rib  3102 rib/data/records.json   dev_rib_hmac_secret
 start_mock hec  3103 hec/data/degrees.json
 for p in 3100 3101 3102 3103; do

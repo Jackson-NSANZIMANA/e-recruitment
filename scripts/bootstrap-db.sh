@@ -253,6 +253,10 @@ apply_sql "${RLS_DIR}/0034_biometric_evidence.sql" "rls/0034 (biometric identity
 #     each admission, score, conflict and roster change.
 apply_sql "${RLS_DIR}/0036_device_fleet.sql" "rls/0036 (device fleet and venue live counts)"
 
+# S12a (ADR-048 §2.1): the encrypted first-4/last-4 NID hint that lets
+# credential binding check a registry's masked hint without storing the NID.
+apply_sql "${RLS_DIR}/0041_national_id_hint.sql" "rls/0041 (encrypted national ID hint)"
+
 printf '\n'
 
 ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts + applicant auth + erasure requests + stored contact + edge sessions + event outbox + slot reservations + submission integrity + walk-in outbox grant + shared rate-limit buckets + required extensions + campaign control plane + functions-only command boundary + onboarding lockout + application policy binding + document venue verification + exam invitation + gate admissions + officer lifecycle + biometric identity evidence in place"
