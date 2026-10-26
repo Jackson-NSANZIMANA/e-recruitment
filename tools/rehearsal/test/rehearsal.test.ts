@@ -71,6 +71,7 @@ test('scenario: the shipped scenario is valid and every artefact is marked as a 
     ['HUYE', 'SOUTHERN_PROVINCE', '2026-10-16'],
   ]);
   assert.equal(rehearsalCode('RNP', NOW), 'REH-RNP-20261016');
+  assert.equal(rehearsalCode('RNP', NOW, 'CAD25'), 'REH-RNP-CAD25-20261016');
 });
 
 test('scenario: rejects what the control plane would refuse', () => {

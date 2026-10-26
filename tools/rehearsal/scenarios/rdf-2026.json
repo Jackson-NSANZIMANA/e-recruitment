@@ -6,6 +6,7 @@
   "campaigns": [
     {
       "agency": "RDF",
+      "codeTag": "RDF26",
       "categories": [
         "GENERAL_ENLISTMENT",
         "RESERVE_FORCE_ALEVEL",

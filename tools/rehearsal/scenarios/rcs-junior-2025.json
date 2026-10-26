@@ -6,6 +6,7 @@
   "campaigns": [
     {
       "agency": "RCS",
+      "codeTag": "JR25",
       "categories": [
         "GENERAL_ENLISTEE"
       ],
@@ -34,6 +35,12 @@
           "handle": "reh.rcs.gate.nyagatare",
           "posts": [
             "screening_officer"
+          ]
+        },
+        {
+          "handle": "reh.rcs.reviewer",
+          "posts": [
+            "reviewer"
           ]
         }
       ]

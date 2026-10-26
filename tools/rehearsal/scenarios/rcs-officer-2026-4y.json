@@ -6,6 +6,7 @@
   "campaigns": [
     {
       "agency": "RCS",
+      "codeTag": "OF4Y",
       "categories": [
         "OFFICER_FOUR_YEAR_UR"
       ],
@@ -69,6 +70,12 @@
           "handle": "reh.rcs.gate.kayonza",
           "posts": [
             "screening_officer"
+          ]
+        },
+        {
+          "handle": "reh.rcs.reviewer",
+          "posts": [
+            "reviewer"
           ]
         }
       ]

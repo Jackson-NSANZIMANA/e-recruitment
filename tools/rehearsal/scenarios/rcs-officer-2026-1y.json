@@ -6,6 +6,7 @@
   "campaigns": [
     {
       "agency": "RCS",
+      "codeTag": "OF1Y",
       "categories": [
         "OFFICER_ONE_YEAR",
         "OFFICER_ONE_YEAR_SPECIALIST"

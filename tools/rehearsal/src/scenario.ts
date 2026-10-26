@@ -44,6 +44,12 @@ export const ASSIGNABLE_POSTS: readonly string[] = [
 
 export interface ScenarioCampaign {
   readonly agency: string;
+  /**
+   * Optional code tag (2–8 of A–Z, 0–9) so several scenarios for one agency can
+   * be staged on the same day without sharing a campaign: REH-RNP-CAD25-20261026.
+   * Absent keeps the plain REH-<AGENCY>-<date> code the live specs rely on.
+   */
+  readonly codeTag?: string;
   readonly categories: readonly string[];
   readonly registration: { readonly opensOffsetDays: number; readonly closesOffsetDays: number };
   readonly examination: { readonly startOffsetDays: number; readonly endOffsetDays: number };
@@ -170,6 +176,7 @@ export function validateScenario(scenario: Scenario): void {
     check(isAgency(campaign.agency), `Unknown agency "${campaign.agency}".`);
     check(!agencies.has(campaign.agency), `Agency ${campaign.agency} appears twice; one rehearsal campaign per agency per day.`);
     agencies.add(campaign.agency);
+    check(campaign.codeTag === undefined || /^[A-Z0-9]{2,8}$/.test(campaign.codeTag), `${campaign.agency}: codeTag must be 2–8 of A–Z and 0–9.`);
     check(campaign.categories.length > 0, `${campaign.agency}: at least one category.`);
     for (const category of campaign.categories) {
       check(CATEGORY_TO_AGENCY.get(category) === campaign.agency, `${campaign.agency}: category ${category} belongs to another agency.`);
@@ -302,8 +309,8 @@ export interface StagedCampaign {
 }
 
 /** PURE. The public code of an agency's rehearsal campaign for the Kigali day of `now`. */
-export function rehearsalCode(agency: Agency, now: Date): string {
-  return `${REHEARSAL_CODE_PREFIX}${agency}-${kigaliStamp(now)}`;
+export function rehearsalCode(agency: Agency, now: Date, codeTag?: string): string {
+  return `${REHEARSAL_CODE_PREFIX}${agency}-${codeTag === undefined ? '' : `${codeTag}-`}${kigaliStamp(now)}`;
 }
 
 /** PURE. True for any rehearsal campaign code (any day). */
@@ -320,7 +327,7 @@ export function stageCampaigns(scenario: Scenario, now: Date): readonly StagedCa
   validateScenario(scenario);
   return scenario.campaigns.map((campaign) => {
     const agency = campaign.agency as Agency;
-    const publicCode = rehearsalCode(agency, now);
+    const publicCode = rehearsalCode(agency, now, campaign.codeTag);
     const today = kigaliDate(now);
     const sessions = campaign.sessions.map((session): SessionCommand => {
       const district = session.district as District;
@@ -339,7 +346,7 @@ export function stageCampaigns(scenario: Scenario, now: Date): readonly StagedCa
       agency,
       draft: {
         publicCode,
-        campaignLabel: `${REHEARSAL_LABEL_PREFIX} ${agency} ${shortDay(today)}`,
+        campaignLabel: `${REHEARSAL_LABEL_PREFIX} ${agency}${campaign.codeTag === undefined ? '' : ` ${campaign.codeTag}`} ${shortDay(today)}`,
         targetCategories: campaign.categories as readonly ApplicationCategory[],
         targetDistricts: sessions.map((session) => session.district),
         registrationOpensAt: kigaliInstant(now, campaign.registration.opensOffsetDays, 'start'),

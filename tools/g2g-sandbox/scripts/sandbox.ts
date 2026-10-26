@@ -298,7 +298,8 @@ function status(): void {
   }
 }
 
-const command = process.argv[2] ?? 'up';
+// `pnpm sandbox --status` arrives as `up --status` (the root script names `up`), so a flag wins over the word.
+const command = process.argv.includes('--status') ? 'status' : (process.argv[2] ?? 'up');
 if (command === 'up') await up();
 else if (command === 'down') down();
 else if (command === 'reset') reset();

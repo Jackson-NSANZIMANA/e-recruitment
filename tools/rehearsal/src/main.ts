@@ -36,6 +36,9 @@ const REPO_ROOT = resolve(PACKAGE_ROOT, '..', '..');
 
 /** Same local default as scripts/bootstrap-db.sh; the fence rejects anything non-local. */
 const DEFAULT_DATABASE_URL = 'postgresql://usrp_admin:usrp_dev_password@localhost:5432/usrp_db';
+const SANDBOX_EDGE_URL = 'http://localhost:4921';
+const SANDBOX_ORIGIN = 'http://localhost:4930';
+const SANDBOX_DATABASE_URL = 'postgresql://usrp_admin:usrp_dev_password@localhost:5432/usrp_sandbox';
 /** DEV-ONLY, documented like seed-dev-officers' DevOfficer#2026. */
 const DEFAULT_ADMIN_PASSWORD = 'RehearsalAdmin#2026';
 const DEV_OFFICER_PASSWORD = 'DevOfficer#2026';
@@ -241,6 +244,10 @@ async function journey(argv: readonly string[], where: { readonly edgeBaseUrl: s
   const scenario = loadScenario(scenarioId);
   const campaign = scenario.campaigns[0];
   if (campaign === undefined) throw new ScenarioInvalid('The scenario has no campaign.');
+  if (!scenario.personas.some((p) => p.sandboxPersona !== undefined)) {
+    out(`${scenarioId}: no catalogue personas to drive (staged only).`);
+    return 0;
+  }
   const gate = campaign.staff?.find((m) => m.posts.includes('screening_officer'));
   const reader = campaign.staff?.find((m) => m.posts.includes('reviewer') || m.posts.includes('field_supervisor'));
   if (gate === undefined || reader === undefined) throw new ScenarioInvalid('The journey needs a screening officer and a reviewer in the scenario staff.');
@@ -265,7 +272,7 @@ async function journey(argv: readonly string[], where: { readonly edgeBaseUrl: s
   const config = {
     ...where,
     smsInbox: env('REHEARSAL_SMS_INBOX') ?? join(REPO_ROOT, '.sandbox', 'sms', 'inbox.jsonl'),
-    campaignCode: rehearsalCode(campaign.agency as Agency, now),
+    campaignCode: rehearsalCode(campaign.agency as Agency, now, campaign.codeTag),
     gateOfficer: { loginHandle: gate.handle, password: REHEARSAL_STAFF_PASSWORD },
     reader: { loginHandle: reader.handle, password: REHEARSAL_STAFF_PASSWORD },
   };
@@ -284,9 +291,11 @@ async function journey(argv: readonly string[], where: { readonly edgeBaseUrl: s
 }
 
 async function main(argv: readonly string[]): Promise<number> {
-  const edgeBaseUrl = env('REHEARSAL_EDGE_URL') ?? `http://localhost:${env('PORT_EDGE_GATEWAY') ?? '4021'}`;
-  const origin = env('REHEARSAL_ORIGIN') ?? 'http://localhost:3001';
-  const databaseUrl = env('REHEARSAL_DATABASE_URL') ?? env('DEV_SEED_DATABASE_URL') ?? DEFAULT_DATABASE_URL;
+  // --sandbox targets a running `pnpm sandbox` (edge :4921, its own usrp_sandbox database) instead of `pnpm dev`.
+  const sandbox = argv.includes('--sandbox');
+  const edgeBaseUrl = env('REHEARSAL_EDGE_URL') ?? (sandbox ? SANDBOX_EDGE_URL : `http://localhost:${env('PORT_EDGE_GATEWAY') ?? '4021'}`);
+  const origin = env('REHEARSAL_ORIGIN') ?? (sandbox ? SANDBOX_ORIGIN : 'http://localhost:3001');
+  const databaseUrl = env('REHEARSAL_DATABASE_URL') ?? (sandbox ? SANDBOX_DATABASE_URL : env('DEV_SEED_DATABASE_URL') ?? DEFAULT_DATABASE_URL);
   assertRehearsalAllowed({ nodeEnv: process.env['NODE_ENV'], databaseUrl, edgeBaseUrl });
 
   if (argv.includes('--status')) return status(edgeBaseUrl, origin);

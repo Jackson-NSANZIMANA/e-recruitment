@@ -6,6 +6,7 @@
   "campaigns": [
     {
       "agency": "RNP",
+      "codeTag": "CAD25",
       "categories": [
         "CADET_OFFICER"
       ],
