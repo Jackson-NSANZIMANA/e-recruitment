@@ -80,6 +80,16 @@ async function otpFromInbox(inbox: string, phone: string, since: number, timeout
 
 const statusOf = (r: EdgeResponse): string => `${txt(r.status)} ${txt(rec(r.body)['error'] ?? rec(r.body)['status'] ?? '')}`.trim();
 
+/** POST, waiting out the edge's per-client rate limit (429 is never a verdict): up to 3 attempts, 61 s apart. */
+async function postPaced(session: EdgeSession, path: string, body: unknown): Promise<EdgeResponse> {
+  let response = await session.post(path, body);
+  for (let attempt = 1; attempt < 3 && response.status === 429; attempt += 1) {
+    await sleep(61_000);
+    response = await session.post(path, body);
+  }
+  return response;
+}
+
 /** Drive one persona end to end. Returns the steps (no personal values in any detail). */
 export async function runJourney(subject: JourneySubject, config: JourneyConfig): Promise<readonly JourneyStep[]> {
   const steps: JourneyStep[] = [];
@@ -88,17 +98,17 @@ export async function runJourney(subject: JourneySubject, config: JourneyConfig)
   await citizen.get('/edge/v1/session');
 
   // 1. NID + DOB → NIDA (simulator) → onboarding token.
-  const begin = await citizen.post('/edge/v1/auth/applicant/identity', { nationalId: subject.nationalId, dateOfBirth: subject.dateOfBirth });
+  const begin = await postPaced(citizen, '/edge/v1/auth/applicant/identity', { nationalId: subject.nationalId, dateOfBirth: subject.dateOfBirth });
   const token = rec(begin.body)['onboardingToken'];
   if (!note('NIDA lookup and onboarding', begin.status >= 200 && begin.status < 300 && typeof token === 'string', statusOf(begin))) return steps;
 
   // 2. OTP through the sandbox SMS inbox.
   const since = Date.now() - 1_000;
-  const request = await citizen.post('/edge/v1/auth/applicant/otp/request', { onboardingToken: token, phoneNumber: subject.phone });
+  const request = await postPaced(citizen, '/edge/v1/auth/applicant/otp/request', { onboardingToken: token, phoneNumber: subject.phone });
   if (!note('OTP requested', request.status >= 200 && request.status < 300, statusOf(request))) return steps;
   const otp = await otpFromInbox(config.smsInbox, subject.phone, since);
   if (!note('OTP read from the sandbox inbox', otp !== null, otp === null ? 'no code arrived' : '')) return steps;
-  const verify = await citizen.post('/edge/v1/auth/applicant/otp/verify', { onboardingToken: token, phoneNumber: subject.phone, otp });
+  const verify = await postPaced(citizen, '/edge/v1/auth/applicant/otp/verify', { onboardingToken: token, phoneNumber: subject.phone, otp });
   if (!note('signed in', verify.status >= 200 && verify.status < 300, statusOf(verify))) return steps;
 
   // 3. Apply.

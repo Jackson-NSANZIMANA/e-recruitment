@@ -139,6 +139,10 @@ function secrets(): Secrets {
 function serviceEnv(s: Secrets): Record<string, string> {
   const env: Record<string, string> = { ...templateEnv(), ...s };
   delete env['POSTGRES_PASSWORD']; // services connect with DATABASE_URL only
+  // Template keys still holding a placeholder are reserved for integrations no
+  // service consumes yet (NIDA_API_KEY, ...). The guard refuses placeholders in
+  // the sandbox exactly as in production, so they are not passed at all.
+  for (const [key, value] of Object.entries(env)) if (/CHANGE_ME|REPLACE_ME|INSERT_YOUR/i.test(value)) delete env[key];
   for (const key of Object.keys(env)) if (key.startsWith('FEATURE_USE_') && key.endsWith('_MOCK')) env[key] = 'false';
   const local = (port: number): string => `http://localhost:${String(port)}`;
   Object.assign(env, {
