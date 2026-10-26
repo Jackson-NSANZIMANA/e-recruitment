@@ -13,6 +13,7 @@ import type { ApplicationCategory } from '@usrp/shared-types';
 import { ALL_CATEGORIES } from '../../domain/category-agency.js';
 import { EligibilityReadError } from '../../domain/eligibility.errors.js';
 import { NesaUnavailableError } from '../../domain/nesa.types.js';
+import { NESA_NOT_BOUND_CITIZEN_MESSAGE } from '../../domain/nesa-binding.js';
 import type {
   VerifyNesaEducationOutcome,
   VerifyNesaEducationService,
@@ -21,7 +22,7 @@ import type {
 export const EDUCATION_CHECK_PATH = '/v1/eligibility/education-check';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-// NESA index numbers are short public identifiers (e.g. "RW2024/1001").
+// NESA index numbers are short public identifiers (SDMS shape e.g. "990301PCM0012024").
 const NESA_INDEX_PATTERN = /^[A-Za-z0-9/-]{4,32}$/;
 
 interface EducationCheckBody {
@@ -105,6 +106,13 @@ function mapOutcome(outcome: VerifyNesaEducationOutcome): HttpResult {
       };
     case 'NESA_RECORD_NOT_FOUND':
       return { status: 422, body: { status: 'NESA_RECORD_NOT_FOUND' } };
+    case 'NESA_NOT_BOUND':
+      // Correctable, citizen-safe: names nobody, carries no value (ADR-048 §2.1).
+      return { status: 422, body: { status: 'NESA_RECORD_NOT_BOUND', detail: NESA_NOT_BOUND_CITIZEN_MESSAGE } };
+    case 'NESA_RESULTS_PENDING':
+      return { status: 202, body: { status: 'NESA_RESULTS_PENDING', academicStatus: 'PENDING' } };
+    case 'NESA_REVIEW_REQUIRED':
+      return { status: 202, body: { status: 'NESA_REVIEW_REQUIRED', academicStatus: 'PENDING', reasons: outcome.reasons } };
     default:
       return assertNever(outcome);
   }

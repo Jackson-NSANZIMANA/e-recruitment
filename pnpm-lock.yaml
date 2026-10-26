@@ -433,6 +433,9 @@ importers:
       '@usrp/shared-http':
         specifier: workspace:*
         version: link:../../packages/shared-http
+      '@usrp/shared-identity-match':
+        specifier: workspace:*
+        version: link:../../packages/shared-identity-match
       '@usrp/shared-logging':
         specifier: workspace:*
         version: link:../../packages/shared-logging
@@ -446,6 +449,9 @@ importers:
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.2
+      '@usrp/g2g-sandbox':
+        specifier: workspace:*
+        version: link:../../tools/g2g-sandbox
       postgres:
         specifier: ^3.4.5
         version: 3.4.9

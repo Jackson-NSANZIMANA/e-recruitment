@@ -10,7 +10,8 @@
 
 import type { EventBus } from '@usrp/shared-events';
 import { PgIdentityReader } from './adapters/identity.pg-reader.js';
-import { NesaHttpGateway } from './adapters/nesa.http-gateway.js';
+import { NesaSdmsGateway } from './adapters/nesa.sdms-gateway.js';
+import { HttpNesaSdmsTransport } from './adapters/nesa.sdms-transport.js';
 import { HecHttpGateway } from './adapters/hec.http-gateway.js';
 import { EvaluateAgeEligibilityService } from './application/evaluate-age-eligibility.service.js';
 import { VerifyNesaEducationService } from './application/verify-nesa-education.service.js';
@@ -30,10 +31,8 @@ export function createEligibilityService(
   eventBus: EventBus,
 ): EligibilityServices {
   const identityReader = new PgIdentityReader(config.security.encryptionKey);
-  const nesaGateway = new NesaHttpGateway({
-    baseUrl: config.nesa.baseUrl,
-    hmacSecret: config.nesa.hmacSecret,
-    timeoutMs: config.nesa.timeoutMs,
+  const nesaGateway = new NesaSdmsGateway({
+    transport: new HttpNesaSdmsTransport({ baseUrl: config.nesa.baseUrl, timeoutMs: config.nesa.timeoutMs }),
   });
   const hecGateway = new HecHttpGateway({
     baseUrl: config.hec.baseUrl,
@@ -79,8 +78,13 @@ export type {
   VerifyHecEducationOutcome,
 } from './application/verify-hec-education.service.js';
 export { PgIdentityReader } from './adapters/identity.pg-reader.js';
-export { NesaHttpGateway } from './adapters/nesa.http-gateway.js';
-export type { NesaHttpGatewayOptions } from './adapters/nesa.http-gateway.js';
+export { NesaSdmsGateway } from './adapters/nesa.sdms-gateway.js';
+export type { NesaSdmsGatewayOptions } from './adapters/nesa.sdms-gateway.js';
+export { HttpNesaSdmsTransport, SDMS_RESULTS_PATH } from './adapters/nesa.sdms-transport.js';
+export type { NesaSdmsTransport, NesaTransportResponse } from './adapters/nesa.sdms-transport.js';
+export { mapSdmsResults } from './adapters/nesa.sdms-mapping.js';
+export { decideNesaGate, NESA_GATE_CODES, NESA_NOT_BOUND_CITIZEN_MESSAGE } from './domain/nesa-binding.js';
+export type { NesaGateDecision, NesaReviewReason, EducationFacts } from './domain/nesa-binding.js';
 export { HecHttpGateway } from './adapters/hec.http-gateway.js';
 export type { HecHttpGatewayOptions } from './adapters/hec.http-gateway.js';
 export { ageInYears, evaluateAgeEligibility } from './domain/age-rules.js';
@@ -94,7 +98,7 @@ export type { HecEducationEligibilityResult } from './domain/education-rules-hec
 export { ALL_CATEGORIES, CATEGORY_TO_AGENCY, agencyForCategory } from './domain/category-agency.js';
 export { EligibilityReadError, InvalidDateOfBirthError } from './domain/eligibility.errors.js';
 export { NesaUnavailableError } from './domain/nesa.types.js';
-export type { NesaLookupResult } from './domain/nesa.types.js';
+export type { NesaLookupResult, NesaResults, NesaHolder } from './domain/nesa.types.js';
 export { HecUnavailableError } from './domain/hec.types.js';
 export type { HecLookupResult } from './domain/hec.types.js';
 export type { NesaGateway } from './ports/nesa.gateway.js';

@@ -26,17 +26,19 @@
     "selfcheck:degree": "tsx selfcheck/verify-degree-eligibility.ts"
   },
   "dependencies": {
-    "@usrp/shared-logging": "workspace:*",
     "@usrp/shared-auth": "workspace:*",
     "@usrp/shared-config": "workspace:*",
     "@usrp/shared-database": "workspace:*",
     "@usrp/shared-events": "workspace:*",
     "@usrp/shared-http": "workspace:*",
+    "@usrp/shared-identity-match": "workspace:*",
+    "@usrp/shared-logging": "workspace:*",
     "@usrp/shared-security": "workspace:*",
     "@usrp/shared-types": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@usrp/g2g-sandbox": "workspace:*",
     "postgres": "^3.4.5",
     "tsx": "^4.21.0",
     "typescript": "^5.8.3"

@@ -35,27 +35,30 @@ export interface EligibilityServiceConfig {
   readonly runtime: RuntimeConfig;
   readonly database: DatabaseConfig;
   readonly security: EligibilitySecurityConfig;
-  readonly nesa: G2GEndpointConfig;
+  readonly nesa: NesaSdmsConfig;
   readonly hec: G2GEndpointConfig;
   /** Ingress auth: verify inbound bearer tokens (front door is service-internal). */
   readonly auth: AuthVerifyConfig;
 }
 
-/** Load just the NESA endpoint config (base URL, HMAC secret, timeout). */
-export function loadNesaConfig(source: EnvSource = process.env): G2GEndpointConfig {
+/**
+ * The SDMS results endpoint (ADR-047). Public in production too, so there is
+ * no credential: NESA_HMAC_SECRET is no longer read by this service.
+ */
+export interface NesaSdmsConfig {
+  readonly baseUrl: string;
+  readonly timeoutMs: number;
+}
+
+export function loadNesaConfig(source: EnvSource = process.env): NesaSdmsConfig {
   const env = loadEnv(
     {
       NESA_BASE_URL: url({ protocols: ['http', 'https'] }),
-      NESA_HMAC_SECRET: string({ minLength: 8, secret: true }),
       NESA_REQUEST_TIMEOUT_MS: withDefault(integer({ min: 500, max: 60_000 }), 5_000),
     },
     source,
   );
-  return {
-    baseUrl: env.NESA_BASE_URL,
-    hmacSecret: env.NESA_HMAC_SECRET,
-    timeoutMs: env.NESA_REQUEST_TIMEOUT_MS,
-  };
+  return { baseUrl: env.NESA_BASE_URL, timeoutMs: env.NESA_REQUEST_TIMEOUT_MS };
 }
 
 /** Load just the HEC endpoint config (base URL, HMAC secret, timeout). */

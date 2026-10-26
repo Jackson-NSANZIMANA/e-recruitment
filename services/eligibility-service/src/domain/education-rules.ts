@@ -10,7 +10,9 @@
 // eligibility is computed.
 //
 // SCOPE: this evaluates the NESA/A-Level requirement (accepted level +, for
-// the RCS 4-year UR track, the ≥70% science threshold). Degree (HEC) paths
+// the RCS 4-year UR track, the ≥70% science threshold, evaluated on SDMS's
+// weightedPercent: default taken, owner to confirm, ADR-048 §2.2). It runs
+// only AFTER the results are bound to the applicant (nesa-binding.ts). Degree (HEC) paths
 // and the UR-program match (which needs the applicant's DECLARED program,
 // not present in a NESA results payload) are handled in the HEC slice.
 // ══════════════════════════════════════════════════════════════════
@@ -20,9 +22,9 @@ import {
   type AcademicEligibilityStatus,
   type ApplicationCategory,
   type EducationLevel,
-  type NESAVerifiedPayload,
   type QualificationLevel,
 } from '@usrp/shared-types';
+import type { EducationFacts } from './nesa-binding.js';
 
 /**
  * Map a NESA qualification level onto the canonical education-level ladder.
@@ -61,7 +63,7 @@ export interface EducationEligibilityResult {
  */
 export function evaluateNesaEducation(
   category: ApplicationCategory,
-  payload: NESAVerifiedPayload,
+  payload: EducationFacts,
   asOf: Date,
 ): EducationEligibilityResult {
   const requirement = EDUCATION_REQUIREMENTS[category];

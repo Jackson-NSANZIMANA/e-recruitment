@@ -26,9 +26,9 @@
 //
 // Fixtures arranged so all three gates PASS for the green applicant:
 //   • age — DOB 2003-03-15 → ~23, inside GENERAL_ENLISTMENT band (18–25)
-//   • academic — NESA index RW2024/1001 → A-Level A2, meets GENERAL_ENLISTMENT
+//   • academic — NESA index 990301PCM0012024 (persona L-01, bound) → A-Level A2, meets GENERAL_ENLISTMENT
 //   • criminal — a random nationalIdHash is UNKNOWN to the RIB mock → CLEAR
-// The reject applicant uses NESA index RW2024/NOPE (not found → INELIGIBLE).
+// The reject applicant uses NESA index 990000ZZZ9992020 (not found → INELIGIBLE).
 //
 // Repeatable: seeds a VERIFIED identity + open RDF campaign, files through the
 // real repository, cleans up. Requires tier1 Postgres + NESA/RIB mocks and
@@ -177,7 +177,8 @@ async function seedIdentity(id: string, nationalIdHash: string): Promise<void> {
          nida_verified_at, nida_match_confidence, phone_number_hash)
       VALUES (
         ${id}, ${nationalIdHash},
-        pgp_sym_encrypt('Pipeline Person', current_setting('app.encryption_key')),
+        -- The g2g-sandbox legacy persona L-01, so the NESA record binds (ADR-048).
+        pgp_sym_encrypt('UWIMANA Jean Pierre', current_setting('app.encryption_key')),
         pgp_sym_encrypt(${FIXTURE_DOB},    current_setting('app.encryption_key')),
         pgp_sym_encrypt(${HOME_DISTRICT},  current_setting('app.encryption_key')),
         pgp_sym_encrypt('KIGALI_CITY',     current_setting('app.encryption_key')),
@@ -414,7 +415,7 @@ async function main(): Promise<void> {
     applicantId: GREEN_APPLICANT,
     category: CATEGORY,
     channel: 'WEB',
-    nesaIndexNumber: 'RW2024/1001', // known-good A-Level fixture
+    nesaIndexNumber: '990301PCM0012024', // persona L-01's A-Level record (SDMS shape)
     hecRegistrationNumber: null,
   });
   check('front door returned SUBMITTED', green.kind === 'SUBMITTED', green.kind);
@@ -617,7 +618,7 @@ async function main(): Promise<void> {
     applicantId: REJECT_APPLICANT,
     category: CATEGORY,
     channel: 'WEB',
-    nesaIndexNumber: 'RW2024/NOPE', // unknown → NESA INELIGIBLE
+    nesaIndexNumber: '990000ZZZ9992020', // unknown → NESA INELIGIBLE
     hecRegistrationNumber: null,
   });
   check('front door returned SUBMITTED', reject.kind === 'SUBMITTED', reject.kind);

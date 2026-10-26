@@ -31,7 +31,10 @@ export class Population {
     const citizens: SyntheticCitizen[] = [];
     for (const entry of PERSONAS) {
       // Per-persona sub-stream: adding a persona never reshuffles the others.
-      citizens.push(buildCitizen(seededRng(seedOf(`${String(options.seed)}:${entry.personaId}`)), entry, options.referenceDate));
+      // Per-persona stream, INDEPENDENT of the population seed: a persona is
+      // the same on every sandbox (proofs and rehearsals rely on it), and
+      // adding a persona never reshuffles the others.
+      citizens.push(buildCitizen(seededRng(seedOf(`persona:${entry.personaId}`)), entry, options.referenceDate));
     }
     const rng = seededRng(options.seed);
     for (let i = 0; i < options.size; i += 1) {

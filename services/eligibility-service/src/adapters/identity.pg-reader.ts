@@ -12,6 +12,7 @@
 import { sql } from '@usrp/shared-database';
 import type { IdentityVerificationStatus } from '@usrp/shared-database';
 import type {
+  ApplicantBindingSubject,
   ApplicantG2GSubjectRecord,
   ApplicantIdentityRecord,
   IdentityReader,
@@ -47,6 +48,35 @@ export class PgIdentityReader implements IdentityReader {
       });
     } catch (cause) {
       throw new EligibilityReadError('Failed to read applicant identity', { cause });
+    }
+  }
+
+  async findBindingSubjectById(applicantId: string): Promise<ApplicantBindingSubject | null> {
+    try {
+      return await sql.begin(async (tx) => {
+        await tx`SET LOCAL ROLE ${sql(SYSTEM_ROLE)}`;
+        await tx`SELECT set_config(${ENCRYPTION_KEY_SETTING}, ${this.encryptionKey}, true)`;
+        const rows = await tx<{ full_name: string; date_of_birth: string; gender: 'MALE' | 'FEMALE'; national_id_hint: string | null; identity_status: IdentityVerificationStatus }[]>`
+          SELECT
+            pgp_sym_decrypt(encrypted_full_name::bytea, current_setting(${ENCRYPTION_KEY_SETTING})) AS full_name,
+            pgp_sym_decrypt(encrypted_date_of_birth::bytea, current_setting(${ENCRYPTION_KEY_SETTING})) AS date_of_birth,
+            gender,
+            CASE
+              WHEN encrypted_national_id_hint IS NULL THEN NULL
+              ELSE pgp_sym_decrypt(encrypted_national_id_hint::bytea, current_setting(${ENCRYPTION_KEY_SETTING}))
+            END AS national_id_hint,
+            identity_status
+          FROM public_core.applicant_identities
+          WHERE id = ${applicantId}
+            AND deleted_at IS NULL
+          LIMIT 1
+        `;
+        const row = rows[0];
+        if (!row) return null;
+        return { identityStatus: row.identity_status, fullName: row.full_name, dateOfBirth: row.date_of_birth, sex: row.gender, nationalIdHint: row.national_id_hint };
+      });
+    } catch (cause) {
+      throw new EligibilityReadError('Failed to read applicant binding subject', { cause });
     }
   }
 
