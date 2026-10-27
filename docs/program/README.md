@@ -90,9 +90,9 @@ Parallel sessions must not pick "the next number". These are reserved; use only 
 | B1 Biometric evidence | done | BE [#40](https://github.com/Jackson-NSANZIMANA/e-recruitment/pull/40) | ADR-037, rls/0034; 4 edge operations; SHADOW for the pilot; **DPO sign-off on the DPIA rows pending** |
 | S04 Read models | done | BE [#41](https://github.com/Jackson-NSANZIMANA/e-recruitment/pull/41) | ADR-039, rls/0035; 6 edge operations + permission metadata |
 | S05 Campaign Studio | ready (M1) | | |
-| S06 Officer workspace + staff admin | in review (M1): backend four-eyes release merged (#45); FE PR 1/2 merged (e-recruitment-ui #35); FE PR 2/2 (e-recruitment-ui #36) draft, live staff journey 5/5 at backend main | e-recruitment-ui #36 | carries the four-eyes activation-code fix; blocked only by the repo-wide zod Trivy advisory CVE-2023-54404 |
+| S06 Officer workspace + staff admin | done | BE [#45](https://github.com/Jackson-NSANZIMANA/e-recruitment/pull/45) · FE [#35](https://github.com/Jackson-NSANZIMANA/e-recruitment-ui/pull/35) [#36](https://github.com/Jackson-NSANZIMANA/e-recruitment-ui/pull/36) [#37](https://github.com/Jackson-NSANZIMANA/e-recruitment-ui/pull/37) | four-eyes activation-code release (ADR-036 Addendum A); staff admin, queues, application search, DPO queue; zod 4 migration closed CVE-2023-54404 (FE #37) |
 | S07 Deployment + staging | ready (M3) | | provider-neutral staging first; production hosting decision gates production only (ROADMAP §4) |
-| S08 Field Station | ready (M2; wave B) | | pilot: **RDF, Nyagatare, Galaxy Tab A7–A10** (decided 2026-10-25) |
+| S08 Field Station | in progress (M2; wave B), started 2026-10-26 | | pilot: **RDF, Nyagatare, Galaxy Tab A7–A10** (decided 2026-10-25) |
 | S09 Fleet + venue ops | done | BE [#44](https://github.com/Jackson-NSANZIMANA/e-recruitment/pull/44) | rls/0036; `field.device.manage`; 4 edge operations; ADR-036 addendum; enrolment still with the screening officer |
 | S10a Citizen timeline | ready (M3) | | |
 | S10b Citizen screens | waiting on S10a (M3) | | |
@@ -100,7 +100,7 @@ Parallel sessions must not pick "the next number". These are reserved; use only 
 | S11b Backup + restore | waiting on S07 (M3) | | |
 | S14 Operator relocation | ready (M2) | | kit written 2026-10-21; owner: relocation authority and fairness rules |
 | P1 Pilot continuity kit | ready (M2; after S06 + S09) | | kit written 2026-10-21; owner: paper procedure, assisted-desk operation; DPO: NID on paper |
-| S12a G2G sandbox: platform, NIDA, NESA | ready (M3; starts now) | | kit written 2026-10-25; real wire formats from the owner's captures; privacy rules in the kit |
+| S12a G2G sandbox: platform, NIDA, NESA | in progress (M3) | BE [#49](https://github.com/Jackson-NSANZIMANA/e-recruitment/pull/49) (draft) | kit written 2026-10-25; real wire formats from the owner's captures; privacy rules in the kit |
 | S12b Irembo clearance + SMS | ready after S12a's harness (Twilio half can start now) | | kit written 2026-10-25; owner: clearance validity window, Irembo certificate type code |
 | S12c Full-stack sandbox (six real campaigns, three apps, one command) | waiting on S12a, S12b | | kit written 2026-10-25; owner: RCS walk-in on exam day |
 | B2 Biometric capture | waiting on S08 (M5) | | owner: model licence |
