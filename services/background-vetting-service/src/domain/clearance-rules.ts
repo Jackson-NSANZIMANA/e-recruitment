@@ -1,15 +1,19 @@
 // ══════════════════════════════════════════════════════════════════
 // background-vetting-service — the clearance decision (ADR-048 §2.3), pure
 //
-// The ordered checks, each stopping the chain:
+// The ordered checks, each stopping the chain (ADR-048 §2.3, with one security
+// refinement: the binding runs right after "found", so a citizen who is not the
+// holder learns nothing about another person's certificate beyond "no such
+// certificate" or "not yours"):
 //
-//   1. authentic        NOT_FOUND / a withdrawn certificate → correctable
-//   2. allowed type     the policy's allowlist; an equivalence certificate
-//                       fails here as WRONG_TYPE
-//   3. validity window  issued within `validityDays` of the reference date
-//   4. identity binding bindCredential: the certificate must be THIS
+//   1. found            NOT_FOUND → correctable
+//   2. identity binding bindCredential: the certificate must be THIS
 //                       applicant's (NOT_BOUND is correctable, never a verdict)
-//   5. content          a distinct "no record" type is conclusive → CLEARED;
+//   3. authentic        a withdrawn certificate → correctable
+//   4. allowed type     the policy's allowlist; an equivalence certificate
+//                       fails here as WRONG_TYPE
+//   5. validity window  issued within `validityDays` of the reference date
+//   6. content          a distinct "no record" type is conclusive → CLEARED;
 //                       any other allowed type can carry a conviction → REVIEW
 //                       (CLEARANCE_CONTENT_REVIEW), an officer decides
 //
@@ -80,18 +84,21 @@ export function decideClearance(
   const c = lookup.certificate;
   const known = { certificateType: c.type, issuedOn: c.issuedOn };
 
-  if (!c.authentic) return { kind: 'CORRECTION_NEEDED', code: 'CERTIFICATE_NOT_VALID', ...known, binding: null };
-  if (!policy.allowedTypes.has(c.type)) return { kind: 'CORRECTION_NEEDED', code: 'CERTIFICATE_WRONG_TYPE', ...known, binding: null };
+  // Binding FIRST among the checks that can reach the citizen's screen: whoever is not
+  // the holder learns only "not found" or "not yours", never the type, validity or
+  // age of someone else's certificate (the security review, S12b finding 1).
+  const binding = bindCredential(identity, { holderName: c.holderName, dateOfBirth: c.holderDob });
+  if (binding.outcome === 'NOT_BOUND') {
+    return { kind: 'CORRECTION_NEEDED', code: 'CERTIFICATE_NOT_BOUND', ...known, binding: binding.fields };
+  }
+
+  if (!c.authentic) return { kind: 'CORRECTION_NEEDED', code: 'CERTIFICATE_NOT_VALID', ...known, binding: binding.fields };
+  if (!policy.allowedTypes.has(c.type)) return { kind: 'CORRECTION_NEEDED', code: 'CERTIFICATE_WRONG_TYPE', ...known, binding: binding.fields };
 
   const age = daysBetween(c.issuedOn, referenceDate);
   // A future-dated or unreadable issue date cannot be inside a window that ends today.
   if (age === null || age < 0 || age > policy.validityDays) {
-    return { kind: 'CORRECTION_NEEDED', code: 'CERTIFICATE_EXPIRED', ...known, binding: null };
-  }
-
-  const binding = bindCredential(identity, { holderName: c.holderName, dateOfBirth: c.holderDob });
-  if (binding.outcome === 'NOT_BOUND') {
-    return { kind: 'CORRECTION_NEEDED', code: 'CERTIFICATE_NOT_BOUND', ...known, binding: binding.fields };
+    return { kind: 'CORRECTION_NEEDED', code: 'CERTIFICATE_EXPIRED', ...known, binding: binding.fields };
   }
 
   const reasons: ClearanceReviewReason[] = [];

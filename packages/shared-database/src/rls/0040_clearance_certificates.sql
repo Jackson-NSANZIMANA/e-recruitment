@@ -18,7 +18,7 @@
 -- SECURITY DEFINER, owned by the NOLOGIN BYPASSRLS usrp_clearance_owner,
 -- EXECUTE for the NOLOGIN usrp_vetting_service alone. The function re-checks,
 -- in the engine, that the session login is usrp_app and the active role is
--- usrp_vetting_service, and that the application exists in THIS agency. It is
+-- usrp_vetting_service, and that the application exists in THIS agency AND belongs to the named applicant (a forged event cannot attach a verification to someone else's application). It is
 -- idempotent: a redelivered event that concludes the same thing is
 -- ALREADY_RECORDED. Rows are append-only (trigger, also for the owner).
 --
@@ -127,7 +127,7 @@ BEGIN
     EXECUTE format('GRANT SELECT ON %I.clearance_certificate_verifications TO %I, usrp_system_service', s, officer);
     EXECUTE format('GRANT USAGE ON SCHEMA %I TO usrp_clearance_owner, usrp_vetting_service', s);
     EXECUTE format('GRANT SELECT, INSERT ON %I.clearance_certificate_verifications TO usrp_clearance_owner', s);
-    EXECUTE format('GRANT SELECT (id) ON %I.applications TO usrp_clearance_owner', s);
+    EXECUTE format('GRANT SELECT (id, applicant_id) ON %I.applications TO usrp_clearance_owner', s);
 
     -- ── FORCE RLS: reads for the officer role and the system service only ──
     EXECUTE format('ALTER TABLE %I.clearance_certificate_verifications ENABLE ROW LEVEL SECURITY', s);
@@ -185,9 +185,12 @@ BEGIN
     EXECUTE format('CREATE TRIGGER trg_clearance_verif_guard BEFORE INSERT ON %I.clearance_certificate_verifications FOR EACH ROW EXECUTE FUNCTION %I.guard_clearance_verification()', s, s);
 
     -- ── the write boundary ──────────────────────────────────────
+    -- Converge a database that applied the draft signature (without the applicant check).
+    EXECUTE format('DROP FUNCTION IF EXISTS %I.record_clearance_verification(uuid, text, text, text, date, text, text, text[], jsonb, text, text)', s);
     EXECUTE format($f$
       CREATE OR REPLACE FUNCTION %1$I.record_clearance_verification(
         p_application_id uuid,
+        p_applicant_id uuid,
         p_reference_hmac text,
         p_reference_last4 text,
         p_certificate_type text,
@@ -212,7 +215,7 @@ BEGIN
         IF session_user <> 'usrp_app' OR current_setting('role', true) IS DISTINCT FROM 'usrp_vetting_service' THEN
           RAISE EXCEPTION 'clearance verification requires the vetting-service database role' USING ERRCODE = '42501';
         END IF;
-        IF NOT EXISTS (SELECT 1 FROM %1$I.applications AS app WHERE app.id = p_application_id) THEN
+        IF NOT EXISTS (SELECT 1 FROM %1$I.applications AS app WHERE app.id = p_application_id AND app.applicant_id = p_applicant_id) THEN
           RETURN jsonb_build_object('outcome', 'REFUSED', 'reason', 'UNKNOWN_APPLICATION');
         END IF;
 
@@ -244,9 +247,9 @@ BEGIN
       END
       $body$;
     $f$, s);
-    EXECUTE format('ALTER FUNCTION %I.record_clearance_verification(uuid, text, text, text, date, text, text, text[], jsonb, text, text) OWNER TO usrp_clearance_owner', s);
-    EXECUTE format('REVOKE ALL ON FUNCTION %I.record_clearance_verification(uuid, text, text, text, date, text, text, text[], jsonb, text, text) FROM PUBLIC', s);
-    EXECUTE format('GRANT EXECUTE ON FUNCTION %I.record_clearance_verification(uuid, text, text, text, date, text, text, text[], jsonb, text, text) TO usrp_vetting_service', s);
+    EXECUTE format('ALTER FUNCTION %I.record_clearance_verification(uuid, uuid, text, text, text, date, text, text, text[], jsonb, text, text) OWNER TO usrp_clearance_owner', s);
+    EXECUTE format('REVOKE ALL ON FUNCTION %I.record_clearance_verification(uuid, uuid, text, text, text, date, text, text, text[], jsonb, text, text) FROM PUBLIC', s);
+    EXECUTE format('GRANT EXECUTE ON FUNCTION %I.record_clearance_verification(uuid, uuid, text, text, text, date, text, text, text[], jsonb, text, text) TO usrp_vetting_service', s);
   END LOOP;
 END $$;
 

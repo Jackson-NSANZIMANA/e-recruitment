@@ -41,7 +41,7 @@
 
 import { execFileSync, spawn } from 'node:child_process';
 import { generateKeyPairSync, randomBytes } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hashPassword } from '@usrp/shared-security';
@@ -221,6 +221,7 @@ function smsEnv(s: Secrets, local: (port: number) => string): Record<string, str
   if (path === '' || !existsSync(path)) return fail('SANDBOX_SMS=twilio needs SANDBOX_TWILIO_ENV_FILE (an untracked file outside every git work tree).');
   if (enclosingGitWorkTree(path) !== null) return fail('SANDBOX_TWILIO_ENV_FILE is inside a git work tree; keep the owner credentials outside every repository.');
   const wanted = new Set(['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_FROM', 'TWILIO_MESSAGING_SERVICE_SID']);
+  if ((statSync(path).mode & 0o077) !== 0) return fail('SANDBOX_TWILIO_ENV_FILE must be readable by its owner only (chmod 600).');
   const real: Record<string, string> = { SANDBOX_SMS: 'twilio' };
   for (const raw of readFileSync(path, 'utf8').split('\n')) {
     const line = raw.trim();
@@ -233,6 +234,14 @@ function smsEnv(s: Secrets, local: (port: number) => string): Record<string, str
   if ((real['TWILIO_ACCOUNT_SID'] ?? '') === '' || (real['TWILIO_AUTH_TOKEN'] ?? '') === '') return fail('SANDBOX_TWILIO_ENV_FILE must define TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN.');
   if ((real['TWILIO_FROM'] ?? '') === '' && (real['TWILIO_MESSAGING_SERVICE_SID'] ?? '') === '') return fail('SANDBOX_TWILIO_ENV_FILE must define TWILIO_FROM or TWILIO_MESSAGING_SERVICE_SID.');
   return real;
+}
+
+/** Only the services that send SMS receive the provider credentials (least exposure). */
+const SMS_SERVICES: ReadonlySet<string> = new Set(['identity-service', 'notification-service']);
+function withoutSmsCredentials(env: Record<string, string>): Record<string, string> {
+  const copy = { ...env };
+  for (const key of ['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_FROM', 'TWILIO_MESSAGING_SERVICE_SID']) delete copy[key];
+  return copy;
 }
 
 function startDetached(name: string, args: readonly string[], env: Record<string, string>): number {
@@ -322,7 +331,7 @@ async function up(): Promise<void> {
   const env = serviceEnv(s);
   for (const svc of Object.keys(SERVICE_PORTS)) {
     out(`▶ ${svc} on :${String(SERVICE_PORTS[svc])}`);
-    startDetached(svc, [`services/${svc}/dist/main.js`], env);
+    startDetached(svc, [`services/${svc}/dist/main.js`], SMS_SERVICES.has(svc) ? env : withoutSmsCredentials(env));
   }
   for (const [svc, port] of Object.entries(SERVICE_PORTS)) await waitReady(svc, port, '/ready');
   out('');

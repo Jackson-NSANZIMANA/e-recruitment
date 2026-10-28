@@ -94,6 +94,7 @@ export class VerifyClearanceCertificateService {
     const base = {
       agency: command.agency,
       applicationId: command.applicationId,
+      applicantId: command.applicantId,
       referenceHmac: this.hmac(referenceKey),
       referenceLast4: referenceKey.slice(-4).padStart(4, '*'),
       correlationId: context.correlationId,
@@ -133,7 +134,7 @@ export class VerifyClearanceCertificateService {
   }
 
   /** Best effort: the retry matters more than the note, so a failed write is logged, not thrown. */
-  private async recordPending(base: Pick<ClearanceVerificationRecord, 'agency' | 'applicationId' | 'referenceHmac' | 'referenceLast4' | 'correlationId'>, requestId: string): Promise<void> {
+  private async recordPending(base: Pick<ClearanceVerificationRecord, 'agency' | 'applicationId' | 'applicantId' | 'referenceHmac' | 'referenceLast4' | 'correlationId'>, requestId: string): Promise<void> {
     try {
       await this.deps.repository.record({
         ...base, certificateType: null, issuedOn: null, outcome: 'PENDING', failureCode: 'REGISTRY_UNAVAILABLE',
@@ -147,7 +148,7 @@ export class VerifyClearanceCertificateService {
   private async conclude(
     command: VerifyClearanceCertificateCommand,
     context: EventContext,
-    base: Pick<ClearanceVerificationRecord, 'agency' | 'applicationId' | 'referenceHmac' | 'referenceLast4' | 'correlationId'>,
+    base: Pick<ClearanceVerificationRecord, 'agency' | 'applicationId' | 'applicantId' | 'referenceHmac' | 'referenceLast4' | 'correlationId'>,
     decision: ClearanceDecision,
     requestId: string | null,
   ): Promise<VerifyClearanceCertificateOutcome> {

@@ -158,7 +158,7 @@ export class TwilioSmsChannel implements SmsChannel {
       }
       if (response !== null && response.status >= 200 && response.status < 300) {
         const sid = await readSid(response);
-        this.#cap.record();
+        try { this.#cap.record(); } catch { logError('sms_cap_not_recorded', { channel: 'TWILIO' }); } // sent: the caller must not see a failure
         logInfo('sms_sent', { channel: 'TWILIO', destinationMasked: maskDestination(to), bodyLength: message.body.length, ...(sid === null ? {} : { sid }) });
         return 'ACCEPTED';
       }

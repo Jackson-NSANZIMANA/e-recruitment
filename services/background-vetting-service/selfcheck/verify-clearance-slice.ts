@@ -176,7 +176,7 @@ async function main(): Promise<void> {
       }), /permission denied|row-level security/);
     }
     const app = applicationOf.get('P-CLEARANCE-VALID') ?? '';
-    const call = (args: { hmac?: string; outcome?: string; failure?: string | null; binding?: string | null }) => `SELECT rdf_ops.record_clearance_verification('${app}'::uuid, '${args.hmac ?? '1'.repeat(64)}', 'ABCD', NULL, NULL, '${args.outcome ?? 'PENDING'}', ${args.failure === null ? 'NULL' : `'${args.failure ?? 'REGISTRY_UNAVAILABLE'}'`}, ARRAY[]::text[], ${args.binding === undefined || args.binding === null ? 'NULL' : `'${args.binding}'::jsonb`}, NULL, NULL)`;
+    const call = (args: { hmac?: string; outcome?: string; failure?: string | null; binding?: string | null }) => `SELECT rdf_ops.record_clearance_verification('${app}'::uuid, '${applicantOf.get('P-CLEARANCE-VALID') ?? ''}'::uuid, '${args.hmac ?? '1'.repeat(64)}', 'ABCD', NULL, NULL, '${args.outcome ?? 'PENDING'}', ${args.failure === null ? 'NULL' : `'${args.failure ?? 'REGISTRY_UNAVAILABLE'}'`}, ARRAY[]::text[], ${args.binding === undefined || args.binding === null ? 'NULL' : `'${args.binding}'::jsonb`}, NULL, NULL)`;
     await refused('the command function refuses the system-service role', () => sql.begin(async (tx) => { await tx`SET LOCAL ROLE usrp_system_service`; await tx.unsafe(call({})); }), /permission denied|vetting-service/);
     await refused('the command function refuses an officer role', () => sql.begin(async (tx) => { await tx`SET LOCAL ROLE usrp_rdf_officer`; await tx.unsafe(call({})); }), /permission denied|vetting-service/);
     await refused('the command function refuses the bare login with no service role', () => sql.begin(async (tx) => { await tx.unsafe(call({})); }), /permission denied|vetting-service/);
@@ -185,6 +185,12 @@ async function main(): Promise<void> {
       const r = await tx.unsafe(call(args));
       return (r[0] as unknown as { record_clearance_verification: { outcome?: string } }).record_clearance_verification;
     });
+    const wrongApplicant = await sql.begin(async (tx) => {
+      await tx`SET LOCAL ROLE usrp_vetting_service`;
+      const r = await tx.unsafe(call({ hmac: '6'.repeat(64) }).replace(applicantOf.get('P-CLEARANCE-VALID') ?? '', applicantOf.get('P-CLEARANCE-CONVICTION') ?? ''));
+      return (r[0] as unknown as { record_clearance_verification: { outcome?: string; reason?: string } }).record_clearance_verification;
+    });
+    check('a verification for an application that is not the named applicant\'s is refused', wrongApplicant.outcome === 'REFUSED' && wrongApplicant.reason === 'UNKNOWN_APPLICATION', JSON.stringify(wrongApplicant));
     const first = await viaFn({ hmac: '2'.repeat(64) });
     const second = await viaFn({ hmac: '2'.repeat(64) });
     check('a redelivery concluding the same thing is idempotent (RECORDED then ALREADY_RECORDED)', first.outcome === 'RECORDED' && second.outcome === 'ALREADY_RECORDED', `${String(first.outcome)}/${String(second.outcome)}`);

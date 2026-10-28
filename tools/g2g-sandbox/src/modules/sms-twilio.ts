@@ -175,6 +175,7 @@ export function createSmsTwilioModule(options: SmsTwilioOptions = {}): SmsTwilio
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded', 'x-twilio-signature': signature },
       body: new URLSearchParams(params).toString(),
+      redirect: 'manual', // a loopback listener must not bounce the signed POST elsewhere
       signal: AbortSignal.timeout(3000),
     }).catch(() => undefined);
   };

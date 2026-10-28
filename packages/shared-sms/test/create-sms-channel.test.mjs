@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { LogSmsChannel, TwilioSmsChannel, createSmsChannel } from '../dist/index.js';
 
 const BASE = { consequence: 'no citizen could authenticate' };
+const CAP = { SMS_CAP_STATE_FILE: '/tmp/usrp-test-cap.log' };
 const TWILIO = { TWILIO_ACCOUNT_SID: 'AC' + 'c'.repeat(32), TWILIO_AUTH_TOKEN: 'unit-test-twilio-token-not-real', TWILIO_FROM: '+15005550006' };
 const SANDBOX = { NODE_ENV: 'production', USRP_ENVIRONMENT: 'sandbox' };
 const throwsWith = (fn, re) => assert.throws(fn, (e) => re.test(e instanceof Error ? `${e.message} ${(e.issues ?? []).join(' ')}` : ''));
@@ -18,9 +19,9 @@ test('LogSmsChannel stays refused in production and in the sandbox', () => {
 });
 
 test('TwilioSmsChannel is accepted in the sandbox (emulator) and in production', () => {
-  const sandbox = createSmsChannel({ ...BASE, source: { ...SANDBOX, ...TWILIO, TWILIO_BASE_URL: 'http://localhost:4900' } });
+  const sandbox = createSmsChannel({ ...BASE, source: { ...SANDBOX, ...TWILIO, ...CAP, TWILIO_BASE_URL: 'http://localhost:4900' } });
   assert.ok(sandbox instanceof TwilioSmsChannel);
-  const prod = createSmsChannel({ ...BASE, source: { NODE_ENV: 'production', ...TWILIO, SMS_DAILY_CAP: '500' } });
+  const prod = createSmsChannel({ ...BASE, source: { NODE_ENV: 'production', ...TWILIO, ...CAP, SMS_DAILY_CAP: '500' } });
   assert.ok(prod instanceof TwilioSmsChannel);
 });
 
@@ -29,7 +30,7 @@ test('the sandbox cannot reach the real API by accident', () => {
   throwsWith(() => createSmsChannel({ ...BASE, source: { ...SANDBOX, ...TWILIO, TWILIO_BASE_URL: 'https://api.twilio.com' } }), /emulator/);
   throwsWith(() => createSmsChannel({ ...BASE, source: { ...SANDBOX, ...TWILIO, TWILIO_BASE_URL: 'https://example.org' } }), /emulator/);
   // The owner's opt-in permits Twilio's own host, and only that.
-  assert.ok(createSmsChannel({ ...BASE, source: { ...SANDBOX, ...TWILIO, SANDBOX_SMS: 'twilio' } }) instanceof TwilioSmsChannel);
+  assert.ok(createSmsChannel({ ...BASE, source: { ...SANDBOX, ...TWILIO, ...CAP, SANDBOX_SMS: 'twilio' } }) instanceof TwilioSmsChannel);
   throwsWith(() => createSmsChannel({ ...BASE, source: { ...SANDBOX, ...TWILIO, SANDBOX_SMS: 'twilio', TWILIO_BASE_URL: 'http://localhost:4900' } }), /api\.twilio\.com/);
 });
 
@@ -39,4 +40,9 @@ test('a sender is required, the token is a secret, and production demands an exp
   throwsWith(() => createSmsChannel({ ...BASE, source: { NODE_ENV: 'development', ...TWILIO, TWILIO_AUTH_TOKEN: 'short' } }), /TWILIO_AUTH_TOKEN/);
   throwsWith(() => createSmsChannel({ ...BASE, source: { NODE_ENV: 'production', ...TWILIO } }), /SMS_DAILY_CAP/);
   throwsWith(() => createSmsChannel({ ...BASE, source: { NODE_ENV: 'development', ...TWILIO, SMS_DAILY_CAP: '0' } }), /SMS_DAILY_CAP/);
+});
+
+test('outside development the cap state file is required, so a restart cannot reset the cap', () => {
+  throwsWith(() => createSmsChannel({ ...BASE, source: { ...SANDBOX, ...TWILIO, TWILIO_BASE_URL: 'http://localhost:4900' } }), /SMS_CAP_STATE_FILE/);
+  throwsWith(() => createSmsChannel({ ...BASE, source: { NODE_ENV: 'production', ...TWILIO, SMS_DAILY_CAP: '500' } }), /SMS_CAP_STATE_FILE/);
 });

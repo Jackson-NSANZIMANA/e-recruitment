@@ -34,6 +34,7 @@ export class PgClearanceVerificationRepository implements ClearanceVerificationR
         const rows = await tx<{ result: { outcome?: string } }[]>`
           SELECT ${schema}.record_clearance_verification(
             ${input.applicationId}::uuid,
+            ${input.applicantId}::uuid,
             ${input.referenceHmac},
             ${input.referenceLast4},
             ${input.certificateType},

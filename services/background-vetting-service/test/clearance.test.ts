@@ -109,6 +109,15 @@ test('the clearance matrix: each persona lands in its outcome', async () => {
   });
 });
 
+test('a citizen who is not the holder learns nothing about another certificate (binding before type and window)', async () => {
+  await withGateway(async (gateway) => {
+    for (const other of ['P-CLEARANCE-WRONG-TYPE', 'P-CLEARANCE-EXPIRED', 'P-CLEARANCE-CONVICTION']) {
+      const d = decideClearance(await gateway.verify(numberOf(other)), identityOf('P-CLEARANCE-VALID'), POLICY, TODAY);
+      assert.deepEqual(d.kind === 'CORRECTION_NEEDED' && d.code, 'CERTIFICATE_NOT_BOUND', other);
+    }
+  });
+});
+
 test('the validity window: 90 days inclusive, a future date and an unreadable date are out', () => {
   const lookup = (issuedOn: string, authentic = true) => ({
     status: 'FOUND' as const, requestId: 'r',

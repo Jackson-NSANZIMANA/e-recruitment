@@ -94,6 +94,11 @@ export function createSmsChannel(options: CreateSmsChannelOptions): SmsChannel {
       issues.push('In the sandbox TWILIO_BASE_URL must name the Twilio emulator; a real send needs the owner opt-in SANDBOX_SMS=twilio.');
     }
   }
+  // The counter must survive a restart and be shared by the services (a crash loop must
+  // not reset a cost cap): outside development the state file is required.
+  if (environment !== 'development' && (env.SMS_CAP_STATE_FILE ?? '').trim() === '') {
+    issues.push('SMS_CAP_STATE_FILE is required in the sandbox and production: the daily cost cap must survive a restart.');
+  }
   if (issues.length > 0) throw new EnvValidationError(issues);
 
   const stateFile = (env.SMS_CAP_STATE_FILE ?? '').trim();

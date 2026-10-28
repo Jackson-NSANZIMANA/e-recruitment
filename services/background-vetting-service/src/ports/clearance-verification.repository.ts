@@ -14,6 +14,8 @@ export type VerificationOutcome = 'CLEARED' | 'REVIEW' | 'CORRECTION_NEEDED' | '
 export interface ClearanceVerificationRecord {
   readonly agency: Agency;
   readonly applicationId: string;
+  /** The applicant the event names; the command function proves the application is theirs. */
+  readonly applicantId: string;
   /** hex HMAC-SHA256 of the normalised number under CLEARANCE_REFERENCE_HMAC_KEY. */
   readonly referenceHmac: string;
   /** The last 4 characters of the number. */
