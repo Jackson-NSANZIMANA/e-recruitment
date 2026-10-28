@@ -87,7 +87,8 @@ export function decideClearance(
   // Binding FIRST among the checks that can reach the citizen's screen: whoever is not
   // the holder learns only "not found" or "not yours", never the type, validity or
   // age of someone else's certificate (the security review, S12b finding 1).
-  const binding = bindCredential(identity, { holderName: c.holderName, dateOfBirth: c.holderDob });
+  // A certificate always prints a date of birth: a binding that did not compare it can never be BOUND on name alone.
+  const binding = bindCredential(identity, { holderName: c.holderName, dateOfBirth: c.holderDob }, { requiredFields: ['dateOfBirth'] });
   if (binding.outcome === 'NOT_BOUND') {
     return { kind: 'CORRECTION_NEEDED', code: 'CERTIFICATE_NOT_BOUND', ...known, binding: binding.fields };
   }

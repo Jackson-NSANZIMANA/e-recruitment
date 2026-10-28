@@ -118,6 +118,12 @@ test('a citizen who is not the holder learns nothing about another certificate (
   });
 });
 
+test('a certificate never binds on name alone: an identity with no comparable date of birth goes to a human', () => {
+  const found = { status: 'FOUND' as const, requestId: 'r', certificate: { authentic: true, type: NO_RECORD, issuedOn: '2026-10-20', holderName: 'KAMANZI Olivier', holderDob: '2004-01-01', reference: 'x' } };
+  const noDob = decideClearance(found, { fullName: 'KAMANZI Olivier', dateOfBirth: 'unreadable', sex: 'MALE' as const, nationalIdHint: null }, POLICY, TODAY);
+  assert.notEqual(noDob.kind, 'CLEARED');
+});
+
 test('the validity window: 90 days inclusive, a future date and an unreadable date are out', () => {
   const lookup = (issuedOn: string, authentic = true) => ({
     status: 'FOUND' as const, requestId: 'r',
