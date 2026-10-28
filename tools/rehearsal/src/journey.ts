@@ -243,7 +243,8 @@ async function clearanceSteps(subject: JourneySubject, expect: ClearanceExpectat
   const rows = Array.isArray(queue.body) ? (queue.body as Record<string, unknown>[]) : [];
   const mine = rows.find((r) => r['applicationId'] === applicationId);
   if (expect.queueReasons !== undefined) {
-    const got = Array.isArray(mine?.['reasons']) ? [...(mine?.['reasons'] as string[])].sort() : null;
+    const reasons = mine?.['reasons'];
+    const got = Array.isArray(reasons) ? [...(reasons as string[])].sort() : null;
     note(`amber queue reasons ${expect.queueReasons.join(',')}`, got !== null && JSON.stringify(got) === JSON.stringify([...expect.queueReasons].sort()), `got ${txt(got)}`);
     const officerChecklist = rec(clearanceItem((await reader.get(`/edge/v1/applications/document-checklist?applicationId=${applicationId}`)).body));
     note('the officer checklist carries the same reasons', JSON.stringify(officerChecklist['reasons']) === JSON.stringify([...expect.queueReasons].sort()), txt(officerChecklist['reasons']));

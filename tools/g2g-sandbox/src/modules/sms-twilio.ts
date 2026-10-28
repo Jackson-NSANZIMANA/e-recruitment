@@ -195,7 +195,7 @@ export function createSmsTwilioModule(options: SmsTwilioOptions = {}): SmsTwilio
     messages,
     duplicatesSuppressed: () => suppressed,
     matches: (method, path) => (method === 'POST' && TWILIO_MESSAGES_PATTERN.test(path)) || (method === 'GET' && TWILIO_MESSAGE_PATTERN.test(path)),
-    authorize(req) {
+    authorize(req): { readonly client: string } | SimResponse {
       const refusal = authorizeRequest(req, pathSid(req.path));
       return refusal ?? { client: 'account' };
     },
