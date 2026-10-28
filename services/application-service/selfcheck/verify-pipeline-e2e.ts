@@ -172,7 +172,7 @@ async function seedIdentity(id: string, nationalIdHash: string): Promise<void> {
     await tx`
       INSERT INTO public_core.applicant_identities
         (id, national_id_hash, encrypted_full_name, encrypted_date_of_birth,
-         encrypted_home_district, encrypted_home_province, gender,
+         encrypted_home_district, encrypted_home_province, encrypted_national_id_hint, gender,
          registration_channel, identity_status, nida_verification_request_id,
          nida_verified_at, nida_match_confidence, phone_number_hash)
       VALUES (
@@ -182,6 +182,9 @@ async function seedIdentity(id: string, nationalIdHash: string): Promise<void> {
         pgp_sym_encrypt(${FIXTURE_DOB},    current_setting('app.encryption_key')),
         pgp_sym_encrypt(${HOME_DISTRICT},  current_setting('app.encryption_key')),
         pgp_sym_encrypt('KIGALI_CITY',     current_setting('app.encryption_key')),
+        -- L-01's NID hint (first 4 + last 4), as identity verification stores it (rls/0042):
+        -- without it the binding cannot compare the hint and the record goes to REVIEW.
+        pgp_sym_encrypt('12001000',        current_setting('app.encryption_key')),
         'MALE'::public_core.gender, 'WEB'::public_core.application_channel,
         'VERIFIED'::public_core.identity_verification_status,
         ${randomUUID()}, now(), null, null

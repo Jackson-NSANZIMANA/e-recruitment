@@ -104,6 +104,16 @@ test('gate: an unknown level type or a non-PASS division is REVIEW, never automa
   assert.ok(division.kind === 'REVIEW' && division.reasons.includes('DIVISION_NOT_PASS'));
 });
 
+test('gate: an identity without a stored NID hint (verified before rls/0042) is REVIEW, not bound on name and sex alone', () => {
+  const base = mapSdmsResults(pop.persona('L-01').nesa, '990301PCM0012024');
+  assert.ok(base.kind === 'FOUND');
+  const withHint = decideNesaGate(identityOf('L-01'), base.results);
+  assert.equal(withHint.kind, 'EVALUATE');
+  const noHint = decideNesaGate({ ...identityOf('L-01'), nationalIdHint: null }, base.results);
+  assert.ok(noHint.kind === 'REVIEW' && noHint.reasons.includes('NID_HINT_NOT_COMPARED'));
+  assert.equal(noHint.binding.fields.nationalIdHint, 'NOT_COMPARED');
+});
+
 test('evaluation after binding: S3 meets RDF regular only; the RCS science bar uses weightedPercent', () => {
   const asOf = new Date('2026-10-25T00:00:00Z');
   const s3 = decide('P-S3-ONLY');
