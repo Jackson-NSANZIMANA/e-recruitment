@@ -396,6 +396,47 @@ export function withdrawMyApplicationHandler(deps: EdgeDeps): RouteHandler {
   });
 }
 
+/** The observed shape of an Irembo application number: a letter, 12 digits, 4 letters. */
+const CLEARANCE_NUMBER_RE = /^[A-Z][0-9]{12}[A-Z]{4}$/;
+
+/**
+ * Give the number of one's own Irembo criminal-record certificate (ADR-048
+ * §2.3). The subject is the session; the body names the application and the
+ * number. The edge checks only the SHAPE (422 CLEARANCE_NUMBER_MALFORMED so the
+ * field can be corrected); the verification itself is asynchronous, so a
+ * success is 202 and the outcome reaches the document checklist. The number is
+ * never echoed back.
+ */
+export function attachMyClearanceCertificateHandler(deps: EdgeDeps): RouteHandler {
+  return withApplicantSession(deps, 'attachMyClearanceCertificate', async (ctx, session) => {
+    const body = await readJsonBody(ctx);
+    const applicationId = requireUuid(body.applicationId, 'applicationId');
+    const raw = body.clearanceCertificateNumber;
+    if (typeof raw !== 'string' || raw.length === 0 || raw.length > 64) {
+      throw new HttpError(400, 'INVALID_REQUEST', 'Field "clearanceCertificateNumber" must be a string of 1–64 characters.');
+    }
+    const number = raw.trim().replace(/[\s-]/g, '').toUpperCase();
+    if (!CLEARANCE_NUMBER_RE.test(number)) {
+      return { status: 422, body: { error: 'CLEARANCE_NUMBER_MALFORMED' } };
+    }
+
+    const upstream = await deps.upstream.call({
+      operation: UPSTREAM.myClearanceCertificate,
+      correlationId: ctx.correlationId,
+      credential: session.upstreamCredential,
+      body: { applicationId, clearanceCertificateNumber: number },
+    });
+
+    if (upstream.status === 202) return { status: 202, body: { applicationId, outcome: 'ACCEPTED' } };
+    if (upstream.status === 200) return { status: 200, body: { applicationId, outcome: 'ALREADY_VERIFIED' } };
+    if (upstream.status === 404) return NOT_FOUND;
+    if (upstream.status === 409) return { status: 409, body: { error: 'APPLICATION_CLOSED' } };
+    if (upstream.status === 422) return { status: 422, body: { error: 'CLEARANCE_NUMBER_MALFORMED' } };
+    if (upstream.status === 401) return { status: 401, body: { reason: 'revoked' } };
+    return { status: 502, body: { error: 'UPSTREAM_CONTRACT_MISMATCH' } };
+  });
+}
+
 /**
  * Erasure-request status (Law N° 058/2021 data-subject right). The upstream 404
  * becomes a 200 `{ exists: false }`: "you have no open request" is an ANSWER.

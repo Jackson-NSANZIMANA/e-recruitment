@@ -19,7 +19,7 @@ import {
 } from '@usrp/shared-types';
 import { ApplicationPersistenceError, ApplicationReadError } from '../domain/application.errors.js';
 import { schemaForAgency } from '../domain/agency-schema.js';
-import type { StoredDocument } from '../domain/document-requirements.js';
+import type { ClearanceVerificationFacts, StoredDocument } from '../domain/document-requirements.js';
 import type {
   ChecklistFacts,
   DocumentChecklistRepository,
@@ -87,6 +87,15 @@ async function readFacts(
     FROM ${schema}.document_records
     WHERE application_id = ${applicationId}
   `;
+  // The latest Irembo certificate verification (rls/0040): closed codes only.
+  const verification = await tx<{ outcome: string; failure_code: string | null; review_reasons: string[] }[]>`
+    SELECT outcome, failure_code, review_reasons
+    FROM ${schema}.clearance_certificate_verifications
+    WHERE application_id = ${applicationId}
+    ORDER BY verified_at DESC, id DESC
+    LIMIT 1
+  `;
+  const latest = verification[0];
   return {
     agency,
     category: row.category,
@@ -96,6 +105,9 @@ async function readFacts(
       identityVerified: row.identity_status === 'VERIFIED',
       academicStatus: row.academic_status,
       criminalStatus: row.criminal_clearance_status,
+      clearance: latest === undefined
+        ? null
+        : { outcome: latest.outcome as ClearanceVerificationFacts['outcome'], failureCode: latest.failure_code, reviewReasons: latest.review_reasons },
     },
     documents: docs.map(
       (d): StoredDocument => ({

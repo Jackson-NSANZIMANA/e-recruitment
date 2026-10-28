@@ -56,6 +56,7 @@ import {
 } from './adapters/http/list-applications.controller.js';
 import { officerTransitionRoutes } from './adapters/http/officer-transitions.controller.js';
 import { withdrawOwnRoute } from './adapters/http/self-withdrawal.controller.js';
+import { attachClearanceOwnRoute } from './adapters/http/attach-clearance.controller.js';
 import { documentChecklistRoutes } from './adapters/http/document-checklist.controller.js';
 import { examInvitationRoute } from './adapters/http/exam-invitation.controller.js';
 import { walkInRoutes } from './adapters/http/walk-in.controller.js';
@@ -168,6 +169,7 @@ async function main(): Promise<void> {
       statusHistoryRoute(service.list, verify), // GET /v1/applications/status-history?applicationId=
       byApplicantRoute(service.list, verify), // system-token: applicant portal's cross-agency self read (ADR-018)
       withdrawOwnRoute(service.selfWithdrawal, verify), // system-token: the citizen's own voluntary withdrawal (ADR-020)
+      attachClearanceOwnRoute(service.attachClearance, verify), // system-token: the citizen's Irembo clearance certificate number (ADR-048)
       ...documentChecklistRoutes(service.documentChecklist, verify), // ADR-032 advisory checklist + venue verification
       examInvitationRoute(service.examInvitation, verify), // ADR-033 system-token: the citizen's downloadable exam QR
       ...gateAdmissionRoutes(service.gateAdmission, verify), // BUILD-003 officer-token: single-use QR admission at the gate

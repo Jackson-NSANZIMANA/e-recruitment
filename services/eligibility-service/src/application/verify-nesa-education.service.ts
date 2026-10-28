@@ -235,6 +235,8 @@ export class VerifyNesaEducationService {
       eligible: education.meetsRequirement,
       reason: education.reason,
       ...(failureCode === null ? {} : { failureCode }),
+      // Closed codes for the amber queue (S12b); never a value.
+      ...(gate.reviewReasons.length === 0 ? {} : { reviewReasons: [...gate.reviewReasons] }),
       evaluatedAt: asOf.toISOString(),
       details: {
         citizenshipCheck: null,

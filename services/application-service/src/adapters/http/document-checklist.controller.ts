@@ -40,6 +40,7 @@ function body(agency: string, checklist: DocumentChecklist): Record<string, unkn
       documentType: i.documentType,
       satisfaction: i.satisfaction,
       registry: i.registry,
+      ...(i.clearance === undefined ? {} : { clearance: { state: i.clearance.state, code: i.clearance.code, reasons: i.clearance.reasons } }),
     })),
   };
 }

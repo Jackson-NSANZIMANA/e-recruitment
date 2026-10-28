@@ -28,9 +28,28 @@ const SATISFACTIONS = new Set([
   'MISSING',
 ]);
 const REGISTRIES = new Set(['NIDA', 'NESA', 'HEC', 'RIB']);
+const CLEARANCE_STATES = new Set(['NUMBER_REQUIRED', 'VERIFYING', 'CORRECTION_NEEDED', 'UNDER_OFFICER_REVIEW', 'VERIFIED']);
+const CLEARANCE_CODE_RE = /^[A-Z][A-Z0-9_]{2,47}$/;
+/** The amber-queue reasons an OFFICER may see; a citizen never does. */
+const CLEARANCE_REASONS = new Set(['CLEARANCE_CONTENT_REVIEW', 'IDENTITY_NAME_PARTIAL', 'IDENTITY_HOLDER_UNREADABLE']);
+
+/** The clearance state of the RIB item, rebuilt from an allowlist; null when malformed. */
+function projectClearance(value: unknown, audience: 'citizen' | 'officer'): Record<string, unknown> | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || typeof value !== 'object') return null;
+  const c = value as Record<string, unknown>;
+  const state = c['state'];
+  const code = c['code'];
+  const reasons = c['reasons'];
+  if (typeof state !== 'string' || !CLEARANCE_STATES.has(state)) return null;
+  if (code !== null && (typeof code !== 'string' || !CLEARANCE_CODE_RE.test(code))) return null;
+  if (!Array.isArray(reasons) || !reasons.every((r) => typeof r === 'string' && CLEARANCE_REASONS.has(r))) return null;
+  // A citizen is told THAT an officer will look, never why (a partial name is not theirs to be told).
+  return { state, code, ...(audience === 'officer' ? { reasons } : {}) };
+}
 
 /** The allowlisted checklist, or null when the upstream shape is wrong. */
-export function projectChecklist(value: unknown): Record<string, unknown> | null {
+export function projectChecklist(value: unknown, audience: 'citizen' | 'officer' = 'officer'): Record<string, unknown> | null {
   if (value === null || typeof value !== 'object') return null;
   const v = value as Record<string, unknown>;
   const items = v['items'];
@@ -47,7 +66,9 @@ export function projectChecklist(value: unknown): Record<string, unknown> | null
     if (typeof documentType !== 'string' || !DOCUMENT_TYPE_RE.test(documentType)) return null;
     if (typeof satisfaction !== 'string' || !SATISFACTIONS.has(satisfaction)) return null;
     if (registry !== null && (typeof registry !== 'string' || !REGISTRIES.has(registry))) return null;
-    projected.push({ documentType, satisfaction, registry });
+    const clearance = projectClearance(i['clearance'], audience);
+    if (clearance === null) return null;
+    projected.push({ documentType, satisfaction, registry, ...(clearance === undefined ? {} : { clearance }) });
   }
   return { agency: v['agency'], source: v['source'], complete: v['complete'], items: projected };
 }
@@ -66,7 +87,7 @@ export function getMyDocumentChecklistHandler(deps: EdgeDeps): RouteHandler {
     if (upstream.status === 401) return { status: 401, body: { reason: 'revoked' } };
     if (upstream.status === 404) return NOT_FOUND;
     if (upstream.status !== 200) return MISMATCH;
-    const checklist = projectChecklist(upstream.body);
+    const checklist = projectChecklist(upstream.body, 'citizen');
     return checklist === null ? MISMATCH : { status: 200, body: checklist };
   });
 }

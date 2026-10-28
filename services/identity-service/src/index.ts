@@ -172,6 +172,7 @@ export {
   OTP_VERIFY_PATH,
   ME_APPLICATIONS_PATH,
   ME_WITHDRAW_PATH,
+  ME_CLEARANCE_PATH,
   ME_DOCUMENT_CHECKLIST_PATH,
   ME_EXAM_INVITATION_PATH,
   LOGOUT_PATH,
@@ -213,6 +214,7 @@ export type {
   ApplicantSubmitResult,
   ApplicationsGateway,
   WithdrawApplicationResult,
+  AttachClearanceResult,
 } from './ports/applications-gateway.js';
 export { RetentionSweepService } from './application/retention-sweep.service.js';
 export type {

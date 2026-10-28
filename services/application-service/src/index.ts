@@ -45,6 +45,8 @@ import { ProjectForensicsResultService } from './application/project-forensics-r
 import { ProjectApplicationAcceptedService } from './application/project-application-accepted.service.js';
 import { PgWithdrawalRepository } from './adapters/withdrawal.pg-repository.js';
 import { SelfWithdrawalService } from './application/self-withdrawal.service.js';
+import { AttachClearanceCertificateService } from './application/attach-clearance-certificate.service.js';
+import { PgClearanceAttachRepository } from './adapters/clearance-attach.pg-repository.js';
 import { PgSelfWithdrawalRepository } from './adapters/self-withdrawal.pg-repository.js';
 import { PgCampaignControlRepository } from './adapters/campaign-control.pg-repository.js';
 import { PgCampaignPublicReadRepository } from './adapters/campaign-public-read.pg-repository.js';
@@ -82,6 +84,8 @@ export interface ApplicationService {
   readonly withdrawalProjector: ProjectApplicationAcceptedService;
   /** HTTP system-token write — the citizen's OWN voluntary withdrawal (ADR-020). */
   readonly selfWithdrawal: SelfWithdrawalService;
+  /** HTTP system-token write: the citizen gives the number of their Irembo criminal-record certificate (ADR-048 §2.3). */
+  readonly attachClearance: AttachClearanceCertificateService;
   /** Advisory document checklist + venue verification (ADR-032). */
   readonly documentChecklist: DocumentChecklistService;
   /** The citizen's downloadable exam QR (ADR-033). */
@@ -167,6 +171,7 @@ export function createApplicationService(
       repository: new PgSelfWithdrawalRepository(),
       eventBus,
     }),
+    attachClearance: new AttachClearanceCertificateService({ repository: new PgClearanceAttachRepository(), eventBus }),
     campaignControl: new CampaignControlService({ repository: new PgCampaignControlRepository() }),
     campaignPublicRead: new CampaignPublicReadService({ repository: new PgCampaignPublicReadRepository() }),
   };
@@ -508,3 +513,9 @@ export { PgStalledClearanceRepository } from './adapters/stalled-clearance.pg-re
 export { PgExamInvitationReader } from './adapters/exam-invitation.pg-reader.js';
 export { examInvitationRoute, EXAM_INVITATION_BY_APPLICANT_PATH } from './adapters/http/exam-invitation.controller.js';
 export { decideInvitation, readInvitationClaims } from './domain/exam-invitation.js';
+export { ATTACH_CLEARANCE_OWN_PATH, attachClearanceOwnRoute } from './adapters/http/attach-clearance.controller.js';
+export { AttachClearanceCertificateService } from './application/attach-clearance-certificate.service.js';
+export type { AttachClearanceCommand, AttachClearanceOutcome, AttachClearanceDeps } from './application/attach-clearance-certificate.service.js';
+export { PgClearanceAttachRepository } from './adapters/clearance-attach.pg-repository.js';
+export type { ClearanceAttachRepository, OwnApplicationForClearance } from './ports/clearance-attach-repository.js';
+export { parseClearanceNumber as parseApplicationClearanceNumber } from './domain/clearance-number.js';

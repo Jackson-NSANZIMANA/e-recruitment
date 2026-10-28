@@ -67,6 +67,7 @@ import {
   verifyDocumentAtVenueHandler,
 } from './adapters/http/document-checklist.controller.js';
 import {
+  attachMyClearanceCertificateHandler,
   fileMyErasureRequestHandler,
   getMyErasureRequestHandler,
   listMyApplicationsHandler,
@@ -165,6 +166,7 @@ export function edgeHandlers(deps: EdgeDeps): Record<EdgeOperationId, RouteHandl
     getMyDocumentChecklist: getMyDocumentChecklistHandler(deps),
     uploadMyDocument: uploadMyDocumentHandler(deps),
     withdrawMyApplication: withdrawMyApplicationHandler(deps),
+    attachMyClearanceCertificate: attachMyClearanceCertificateHandler(deps),
     getMyErasureRequest: getMyErasureRequestHandler(deps),
     fileMyErasureRequest: fileMyErasureRequestHandler(deps),
 
