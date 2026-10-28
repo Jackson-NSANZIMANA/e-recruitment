@@ -94,6 +94,8 @@ export interface DocumentChecklistView {
     readonly documentType: string;
     readonly satisfaction: string;
     readonly registry: string | null;
+    /** S12b: the clearance certificate state (never the officer-only reasons). */
+    readonly clearance?: { readonly state: string; readonly code: string | null };
   }[];
 }
 
