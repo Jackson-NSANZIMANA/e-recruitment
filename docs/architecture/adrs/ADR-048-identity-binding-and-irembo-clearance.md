@@ -1,7 +1,7 @@
 # ADR-048 — Credential-to-identity binding, and criminal clearance by Irembo certificate
 
 **Status:** Accepted · §2.1–2.2 2026-10-28 (S12a, backend PR #49); §2.3–2.5 2026-10-28 (S12b) · proposed 2026-10-25
-**Deciders:** platform owner (clearance flow chosen 2026-10-25); DPO and agencies for the defaults marked *owner to confirm* (S12b took them: see §2.5)
+**Deciders:** platform owner (clearance flow chosen 2026-10-25); DPO and agencies for the defaults marked *owner to confirm* (S12b took the defaults; the owner confirmed them on 2026-10-28, see §2.5)
 **Relates to:** ADR-007 age, ADR-029 onboarding, ADR-030 campaign-bound submission, ADR-032 document requirements, ADR-047 G2G sandbox
 
 ## 1. Context
@@ -75,7 +75,7 @@ Writes go only through a SECURITY DEFINER command function, as in rls/0033 and 0
 
 ### 2.5 How S12b implemented it (decisions taken)
 
-**Defaults taken, owner to confirm** (recorded 2026-10-28; each is configuration, not code):
+**Confirmed by the owner, 2026-10-28** (the four defaults S12b took; each is configuration, not code):
 
 | Decision | Default taken | Where it lives |
 |---|---|---|

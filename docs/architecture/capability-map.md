@@ -30,7 +30,7 @@ Legend: ✅ built and proven by a live selfcheck · 🟡 partial · ❌ missing 
 | Exam invitation + QR in the portal (download PNG / print) | ✅ **(S)** | ADR-033; rls/0031; `verify-exam-invitation.ts`; portal `/applications/:id/exam-qr` (jsQR round-trip test) |
 | Deferred scheduling retried (no venue yet / venue full) | ✅ **(S)** | application-service re-announce sweep, bounded and outbox-staged; `verify-slot-retry.ts` |
 | Withdraw, erasure request | ✅ | ADR-020, ADR-015 |
-| Real SMS delivery | 🟡 **S12b**: `TwilioSmsChannel` (E.164, basic auth, timeout, idempotent bounded retries, per-day cost cap, per-number limit, signed callback verifier) behind `createSmsChannel`; identity and notification boot with it in sandbox/production, `LogSmsChannel` is refused there; CI and the sandbox use the Twilio emulator only. ❌ the real MTN/Airtel operator (contract) and the owner's local `SANDBOX_SMS=twilio` live check are pending; no public status-callback route yet |
+| Real SMS delivery | 🟡 **S12b**: `TwilioSmsChannel` (E.164, basic auth, timeout, idempotent bounded retries, per-day cost cap, per-number limit, signed callback verifier) behind `createSmsChannel`; identity and notification boot with it in sandbox/production, `LogSmsChannel` is refused there; CI and the sandbox use the Twilio emulator only; the owner-run live SMS test is confirmed (2026-10-28). ❌ the real MTN/Airtel operator (contract); no public status-callback route yet |
 | USSD / kiosk channels | ❌ | channel enum only |
 
 ## 2. Administrative officer dashboard
