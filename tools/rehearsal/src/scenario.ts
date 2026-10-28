@@ -73,7 +73,19 @@ export type JourneyExpectation =
   | { readonly outcome: 'REJECTED'; readonly gate: 'AGE' | 'ACADEMIC' }
   | { readonly outcome: 'ACADEMIC_PENDING'; readonly failureCode: string }
   /** The private-persona run only: the NESA record binds (no outcome beyond that is asserted). */
-  | { readonly outcome: 'BOUND' };
+  | { readonly outcome: 'BOUND' }
+  /**
+   * S12b (ADR-048 §2.3): the persona gives its Irembo clearance certificate number
+   * after applying; the document checklist's clearance state must reach `clearance`
+   * (with `code` for a correctable failure), and the amber queue must carry exactly
+   * `queueReasons` for the application (absent = not in the queue for clearance).
+   */
+  | {
+      readonly outcome: 'CLEARANCE';
+      readonly clearance: 'VERIFIED' | 'UNDER_OFFICER_REVIEW' | 'CORRECTION_NEEDED' | 'VERIFYING';
+      readonly code?: string;
+      readonly queueReasons?: readonly string[];
+    };
 
 /**
  * A persona: either literal identity facts (dev stack, national-pilot-day),
@@ -90,6 +102,11 @@ export interface ScenarioPersona {
   readonly sandboxPersona?: string;
   /** The category the journey applies to (sandbox personas). */
   readonly category?: string;
+  /**
+   * S12b: a literal certificate number to give instead of the persona's own
+   * (a SANDBOX-block number that no simulator holds, for the not-found case).
+   */
+  readonly clearanceNumber?: string;
   readonly expect?: JourneyExpectation;
   readonly rehearses: string;
   readonly expectedOutcome: string;

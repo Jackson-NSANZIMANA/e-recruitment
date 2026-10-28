@@ -30,6 +30,8 @@ export interface JourneySubject {
   readonly dateOfBirth: string;
   readonly phone: string;
   readonly nesaIndexNumber: string | null;
+  /** S12b: the Irembo clearance certificate number the persona gives after applying. */
+  readonly clearanceNumber?: string | null;
   readonly category: string;
   readonly expect: JourneyExpectation;
 }
@@ -133,6 +135,8 @@ export async function runJourney(subject: JourneySubject, config: JourneyConfig)
   const until = Date.now() + timeout;
   const expect = subject.expect;
 
+  if (expect.outcome === 'CLEARANCE') return clearanceSteps(subject, expect, { citizen, reader, applicationId: applicationId ?? '', until, steps, note, detail });
+
   // 4. The gates, until the expected end state (or the timeout).
   let last: Record<string, unknown> = {};
   let invitation: Record<string, unknown> = {};
@@ -181,5 +185,70 @@ export async function runJourney(subject: JourneySubject, config: JourneyConfig)
   note('admitted at the gate', admit.status >= 200 && admit.status < 300 && rec(admit.body)['outcome'] === 'ADMITTED', `${statusOf(admit)} at ${txt(inv['venueName'])}`);
   const after = rec((await citizen.get(`/edge/v1/me/applications/exam-invitation?applicationId=${applicationId ?? ''}`)).body);
   note('the citizen sees ADMITTED', after['state'] === 'ADMITTED', txt(after['state']));
+  return steps;
+}
+
+type ClearanceExpectation = Extract<JourneyExpectation, { outcome: 'CLEARANCE' }>;
+
+interface ClearanceContext {
+  readonly citizen: EdgeSession;
+  readonly reader: EdgeSession;
+  readonly applicationId: string;
+  readonly until: number;
+  readonly steps: JourneyStep[];
+  readonly note: (step: string, ok: boolean, detail?: string) => boolean;
+  readonly detail: () => Promise<Record<string, unknown>>;
+}
+
+/** The clearance item of a checklist body (the RIB-verified paper), or {}. */
+function clearanceItem(body: unknown): Record<string, unknown> {
+  const items = rec(body)['items'];
+  const item = Array.isArray(items) ? (items as Record<string, unknown>[]).find((i) => i['registry'] === 'RIB') : undefined;
+  return rec(item?.['clearance']);
+}
+
+/**
+ * S12b: give the certificate number, wait for the checklist state, then check
+ * the officer's view and the amber queue. Output: states and closed codes only.
+ */
+async function clearanceSteps(subject: JourneySubject, expect: ClearanceExpectation, ctx: ClearanceContext): Promise<readonly JourneyStep[]> {
+  const { citizen, reader, applicationId, until, steps, note, detail } = ctx;
+  if (subject.clearanceNumber === null || subject.clearanceNumber === undefined) { note('a clearance number to give', false, 'the persona has no certificate'); return steps; }
+
+  const before = rec(clearanceItem((await citizen.get(`/edge/v1/me/applications/document-checklist?applicationId=${applicationId}`)).body));
+  note('clearance outstanding before a number is given', before['state'] === 'NUMBER_REQUIRED' || before['state'] === 'VERIFIED', txt(before['state']));
+
+  const malformed = await citizen.post('/edge/v1/me/applications/clearance-certificate', { applicationId, clearanceCertificateNumber: 'not-a-number' });
+  note('a malformed number is refused where it can be corrected', malformed.status === 422 && rec(malformed.body)['error'] === 'CLEARANCE_NUMBER_MALFORMED', statusOf(malformed));
+
+  const attach = await citizen.post('/edge/v1/me/applications/clearance-certificate', { applicationId, clearanceCertificateNumber: subject.clearanceNumber });
+  if (!note('certificate number accepted', attach.status === 202 || attach.status === 200, statusOf(attach))) return steps;
+
+  let item: Record<string, unknown> = {};
+  let checklistBody: unknown = null;
+  while (Date.now() < until) {
+    checklistBody = (await citizen.get(`/edge/v1/me/applications/document-checklist?applicationId=${applicationId}`)).body;
+    item = clearanceItem(checklistBody);
+    if (item['state'] === expect.clearance && (expect.code === undefined || item['code'] === expect.code)) break;
+    await sleep(2_000);
+  }
+  note(`checklist clearance ${expect.clearance}${expect.code === undefined ? '' : ` (${expect.code})`}`, item['state'] === expect.clearance && (expect.code === undefined || item['code'] === expect.code), `state ${txt(item['state'])}, code ${txt(item['code'] ?? 'none')}`);
+  note('the citizen is never told why an officer is looking (no reasons)', !('reasons' in item) && !JSON.stringify(checklistBody).includes('IDENTITY_'), '');
+
+  const last = await detail();
+  const wantCriminal = expect.clearance === 'VERIFIED' ? 'CLEARED' : expect.clearance === 'UNDER_OFFICER_REVIEW' ? 'UNDER_REVIEW' : 'PENDING';
+  note(`criminal gate ${wantCriminal}, application not rejected`, last['criminalClearanceStatus'] === wantCriminal && last['status'] !== 'REJECTED', `status ${txt(last['status'])}, criminal ${txt(last['criminalClearanceStatus'])}`);
+
+  const queue = await reader.get('/edge/v1/applications/amber-queue');
+  const rows = Array.isArray(queue.body) ? (queue.body as Record<string, unknown>[]) : [];
+  const mine = rows.find((r) => r['applicationId'] === applicationId);
+  if (expect.queueReasons !== undefined) {
+    const got = Array.isArray(mine?.['reasons']) ? [...(mine?.['reasons'] as string[])].sort() : null;
+    note(`amber queue reasons ${expect.queueReasons.join(',')}`, got !== null && JSON.stringify(got) === JSON.stringify([...expect.queueReasons].sort()), `got ${txt(got)}`);
+    const officerChecklist = rec(clearanceItem((await reader.get(`/edge/v1/applications/document-checklist?applicationId=${applicationId}`)).body));
+    note('the officer checklist carries the same reasons', JSON.stringify(officerChecklist['reasons']) === JSON.stringify([...expect.queueReasons].sort()), txt(officerChecklist['reasons']));
+  } else {
+    note('not in the amber queue for clearance', mine === undefined, mine === undefined ? '' : `reasons ${txt(mine['reasons'])}`);
+  }
   return steps;
 }

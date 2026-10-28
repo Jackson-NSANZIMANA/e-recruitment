@@ -1,0 +1,183 @@
+{
+  "id": "clearance-matrix",
+  "version": 1,
+  "title": "S12b: criminal clearance by Irembo certificate (the persona matrix)",
+  "purpose": "ADR-048 section 2.3 on the sandbox: every clearance persona gives its Irembo certificate number after applying and must land in its outcome. Stage with pnpm rehearse --sandbox clearance-matrix, then drive with pnpm rehearse --sandbox --journey clearance-matrix. The APPLICATION_CODE values are clearly named placeholders (owner/RIB to confirm).",
+  "campaigns": [
+    {
+      "agency": "RDF",
+      "codeTag": "CLRM",
+      "categories": [
+        "GENERAL_ENLISTMENT"
+      ],
+      "registration": {
+        "opensOffsetDays": -1,
+        "closesOffsetDays": 2
+      },
+      "examination": {
+        "startOffsetDays": 0,
+        "endOffsetDays": 1
+      },
+      "reportingHour": 8,
+      "allowsWalkIn": false,
+      "targetIntakeCount": 100,
+      "sessions": [
+        {
+          "district": "NYAGATARE",
+          "venue": "Nyagatare stadium",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 400
+        }
+      ],
+      "staff": [
+        {
+          "handle": "reh.rdf.clrm.gate",
+          "posts": [
+            "screening_officer"
+          ]
+        },
+        {
+          "handle": "reh.rdf.clrm.reviewer",
+          "posts": [
+            "reviewer"
+          ]
+        }
+      ]
+    }
+  ],
+  "personas": [
+    {
+      "id": "C1",
+      "role": "Clean criminal-record certificate (distinct no-record type)",
+      "sandboxPersona": "P-CLEARANCE-VALID",
+      "category": "GENERAL_ENLISTMENT",
+      "expect": {
+        "outcome": "CLEARANCE",
+        "clearance": "VERIFIED"
+      },
+      "rehearses": "Authentic, allowed type, within 90 days, bound to the identity.",
+      "expectedOutcome": "Clearance VERIFIED; criminal gate CLEARED; no officer step."
+    },
+    {
+      "id": "C2",
+      "role": "Certificate type that can carry a conviction",
+      "sandboxPersona": "P-CLEARANCE-CONVICTION",
+      "category": "GENERAL_ENLISTMENT",
+      "expect": {
+        "outcome": "CLEARANCE",
+        "clearance": "UNDER_OFFICER_REVIEW",
+        "queueReasons": [
+          "CLEARANCE_CONTENT_REVIEW"
+        ]
+      },
+      "rehearses": "Content cannot be read from the public verification.",
+      "expectedOutcome": "UNDER_REVIEW with CLEARANCE_CONTENT_REVIEW in the amber queue."
+    },
+    {
+      "id": "C3",
+      "role": "An equivalence certificate offered as clearance",
+      "sandboxPersona": "P-CLEARANCE-WRONG-TYPE",
+      "category": "GENERAL_ENLISTMENT",
+      "expect": {
+        "outcome": "CLEARANCE",
+        "clearance": "CORRECTION_NEEDED",
+        "code": "CERTIFICATE_WRONG_TYPE"
+      },
+      "rehearses": "Wrong certificate type.",
+      "expectedOutcome": "Correctable; criminal gate PENDING; not rejected."
+    },
+    {
+      "id": "C4",
+      "role": "Certificate issued 200 days ago",
+      "sandboxPersona": "P-CLEARANCE-EXPIRED",
+      "category": "GENERAL_ENLISTMENT",
+      "expect": {
+        "outcome": "CLEARANCE",
+        "clearance": "CORRECTION_NEEDED",
+        "code": "CERTIFICATE_EXPIRED"
+      },
+      "rehearses": "Outside the 90-day validity window.",
+      "expectedOutcome": "Correctable; not rejected."
+    },
+    {
+      "id": "C5",
+      "role": "Certificate names another person",
+      "sandboxPersona": "P-CLEARANCE-NAME-MISMATCH",
+      "category": "GENERAL_ENLISTMENT",
+      "expect": {
+        "outcome": "CLEARANCE",
+        "clearance": "CORRECTION_NEEDED",
+        "code": "CERTIFICATE_NOT_BOUND"
+      },
+      "rehearses": "This record does not match your identity.",
+      "expectedOutcome": "Correctable; the citizen copy names no one."
+    },
+    {
+      "id": "C6",
+      "role": "Certificate date of birth contradicts the identity",
+      "sandboxPersona": "P-CLEARANCE-DOB-MISMATCH",
+      "category": "GENERAL_ENLISTMENT",
+      "expect": {
+        "outcome": "CLEARANCE",
+        "clearance": "CORRECTION_NEEDED",
+        "code": "CERTIFICATE_NOT_BOUND"
+      },
+      "rehearses": "DOB contradiction is NOT_BOUND.",
+      "expectedOutcome": "Correctable."
+    },
+    {
+      "id": "C7",
+      "role": "Certificate omits a given name",
+      "sandboxPersona": "P-CLEARANCE-NAME-PARTIAL",
+      "category": "GENERAL_ENLISTMENT",
+      "expect": {
+        "outcome": "CLEARANCE",
+        "clearance": "UNDER_OFFICER_REVIEW",
+        "queueReasons": [
+          "IDENTITY_NAME_PARTIAL"
+        ]
+      },
+      "rehearses": "A partial name is a human decision.",
+      "expectedOutcome": "UNDER_REVIEW with IDENTITY_NAME_PARTIAL in the amber queue; the citizen is not told why."
+    },
+    {
+      "id": "C8",
+      "role": "A number no certificate holds",
+      "sandboxPersona": "P-ELIG-A2",
+      "category": "GENERAL_ENLISTMENT",
+      "expect": {
+        "outcome": "CLEARANCE",
+        "clearance": "CORRECTION_NEEDED",
+        "code": "CERTIFICATE_NOT_FOUND"
+      },
+      "rehearses": "Not found is an answer, correctable.",
+      "expectedOutcome": "Correctable; not rejected.",
+      "clearanceNumber": "S990000000000ZZZZ"
+    },
+    {
+      "id": "C9",
+      "role": "Irembo answers 429",
+      "sandboxPersona": "P-CLEARANCE-429",
+      "category": "GENERAL_ENLISTMENT",
+      "expect": {
+        "outcome": "CLEARANCE",
+        "clearance": "VERIFYING"
+      },
+      "rehearses": "A registry fault is never a negative verdict.",
+      "expectedOutcome": "VERIFYING; retried; criminal gate PENDING."
+    },
+    {
+      "id": "C10",
+      "role": "Irembo in a maintenance window (503)",
+      "sandboxPersona": "P-CLEARANCE-503",
+      "category": "GENERAL_ENLISTMENT",
+      "expect": {
+        "outcome": "CLEARANCE",
+        "clearance": "VERIFYING"
+      },
+      "rehearses": "Outage: PENDING and retried.",
+      "expectedOutcome": "VERIFYING; retried; not rejected."
+    }
+  ]
+}
