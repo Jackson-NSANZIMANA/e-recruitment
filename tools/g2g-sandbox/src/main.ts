@@ -7,6 +7,9 @@
 //   SANDBOX_G2G_CLIENT_TOKENS  comma list; development defaults to the
 //                              published dev token, sandbox REQUIRES it
 //   SANDBOX_PRIVATE_PERSONA_DIR (optional; outside every git work tree)
+//   SANDBOX_TWILIO_ACCOUNT_SID / SANDBOX_TWILIO_AUTH_TOKEN  the emulator's credentials
+//                              (sandbox REQUIRES them; development defaults)
+//   SANDBOX_SMS_INBOX_FILE     the emulator's inbox (JSON lines, mode 0600)
 //   SANDBOX_NESA_LIVE=1 + SANDBOX_NESA_LIVE_INDEX (optional; sandbox only)
 // ══════════════════════════════════════════════════════════════════
 
@@ -19,6 +22,8 @@ import { districtLabel, PROVINCE_LABEL_RW } from './population/geography.js';
 import { kigaliReferenceDate, Population } from './population/population.js';
 import { PERSONAS } from './population/personas.js';
 import { createSandboxServer } from './server.js';
+import { buildModules } from './modules/index.js';
+import { DEV_TWILIO_ACCOUNT_SID, DEV_TWILIO_AUTH_TOKEN } from './modules/sms-twilio.js';
 import { DEV_G2G_CLIENT_TOKEN } from './dev-token.js';
 
 
@@ -42,6 +47,15 @@ async function main(): Promise<void> {
     throw new EnvValidationError(['SANDBOX_G2G_CLIENT_TOKENS must not contain the published development token in the sandbox profile.']);
   }
 
+  const twilioSid = process.env['SANDBOX_TWILIO_ACCOUNT_SID']?.trim() ?? '';
+  const twilioToken = process.env['SANDBOX_TWILIO_AUTH_TOKEN']?.trim() ?? '';
+  if (environment === 'sandbox' && (twilioSid === '' || twilioToken === '')) {
+    throw new EnvValidationError(['SANDBOX_TWILIO_ACCOUNT_SID and SANDBOX_TWILIO_AUTH_TOKEN are required in the sandbox profile (the dev credentials are development-only).']);
+  }
+  if (environment === 'sandbox' && (twilioSid === DEV_TWILIO_ACCOUNT_SID || twilioToken === DEV_TWILIO_AUTH_TOKEN)) {
+    throw new EnvValidationError(['The SMS emulator must not use the published development credentials in the sandbox profile.']);
+  }
+
   const loaded = loadPrivatePersona(process.env['SANDBOX_PRIVATE_PERSONA_DIR']);
   const drillDistrict = process.env['SANDBOX_PRIVATE_PERSONA_DISTRICT']?.trim().toUpperCase() ?? '';
   let overlay = loaded;
@@ -63,6 +77,11 @@ async function main(): Promise<void> {
     world: { population, overlay, live, now: () => new Date(), log, clientTokens },
     environment,
     port,
+    modules: buildModules({
+      ...(twilioSid === '' ? {} : { accountSid: twilioSid }),
+      ...(twilioToken === '' ? {} : { authToken: twilioToken }),
+      inboxFile: process.env['SANDBOX_SMS_INBOX_FILE'] ?? null,
+    }),
     latencyScale: intEnv('SANDBOX_LATENCY_SCALE', 1),
     timeoutHoldMs: intEnv('SANDBOX_TIMEOUT_HOLD_MS', 65_000),
   });

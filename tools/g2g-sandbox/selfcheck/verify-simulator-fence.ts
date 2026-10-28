@@ -69,6 +69,8 @@ console.log('\n── RED');
 check('production (NODE_ENV=production, profile unset) refuses to start', refusedToStart(await run({ NODE_ENV: 'production' })));
 check('production profile named explicitly refuses to start', refusedToStart(await run({ NODE_ENV: 'production', USRP_ENVIRONMENT: 'production' })));
 check('sandbox without its own client tokens refuses', refusedToStart(await run({ NODE_ENV: 'production', USRP_ENVIRONMENT: 'sandbox' })));
+check('sandbox without its own Twilio emulator credentials refuses', refusedToStart(await run({ NODE_ENV: 'production', USRP_ENVIRONMENT: 'sandbox', SANDBOX_G2G_CLIENT_TOKENS: 'fence-proof-token-1f9a' })));
+check('sandbox with the published dev Twilio credentials refuses', refusedToStart(await run({ NODE_ENV: 'production', USRP_ENVIRONMENT: 'sandbox', SANDBOX_G2G_CLIENT_TOKENS: 'fence-proof-token-1f9a', SANDBOX_TWILIO_ACCOUNT_SID: 'AC00000000000000000000000000000dev', SANDBOX_TWILIO_AUTH_TOKEN: 'sandbox-dev-twilio-auth-token' })));
 check('sandbox with the published dev token refuses', refusedToStart(await run({ NODE_ENV: 'production', USRP_ENVIRONMENT: 'sandbox', SANDBOX_G2G_CLIENT_TOKENS: 'dev_g2g_sandbox_client_token' })));
 check('live NESA passthrough refused in development (so never in CI)', refusedToStart(await run({ SANDBOX_NESA_LIVE: '1', SANDBOX_NESA_LIVE_INDEX: '990301PCM0012024' })));
 check('an overlay directory inside a git work tree is refused', refusedToStart(await run({ SANDBOX_PRIVATE_PERSONA_DIR: REPO })));
@@ -78,7 +80,7 @@ check('...and the refusal names no path', !leaked.stderr.includes(REPO));
 console.log('\n── GREEN');
 for (const [label, env] of [
   ['development', {}],
-  ['sandbox with its own token', { NODE_ENV: 'production', USRP_ENVIRONMENT: 'sandbox', SANDBOX_G2G_CLIENT_TOKENS: 'fence-proof-token-1f9a' }],
+  ['sandbox with its own token', { NODE_ENV: 'production', USRP_ENVIRONMENT: 'sandbox', SANDBOX_G2G_CLIENT_TOKENS: 'fence-proof-token-1f9a', SANDBOX_TWILIO_ACCOUNT_SID: 'ACfenceproof0000000000000000000001', SANDBOX_TWILIO_AUTH_TOKEN: 'fence-proof-twilio-token-7c2' }],
 ] as const) {
   const server = await run(env);
   check(`${label}: listens`, server.port !== null, server.stderr.slice(0, 200));

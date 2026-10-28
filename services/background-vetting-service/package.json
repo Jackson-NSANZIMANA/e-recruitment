@@ -2,7 +2,7 @@
   "name": "@usrp/background-vetting-service",
   "version": "1.0.0",
   "private": true,
-  "description": "USRP Background-Vetting Service — event-driven criminal-clearance gate: consumes applicant.submitted, checks RIB over G2G, emits RIB_VETTING_COMPLETED + AUDIT_ENTRY (stage 3)",
+  "description": "USRP Background-Vetting Service \u2014 event-driven criminal-clearance gate: consumes applicant.submitted, checks RIB over G2G, emits RIB_VETTING_COMPLETED + AUDIT_ENTRY (stage 3)",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -19,18 +19,24 @@
     "dev": "tsx watch src/main.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint 'src/**/*.ts'",
-    "selfcheck": "tsx selfcheck/verify-vetting-slice.ts"
+    "selfcheck": "tsx selfcheck/verify-vetting-slice.ts",
+    "test": "tsx --test test/*.test.ts",
+    "selfcheck:clearance": "tsx selfcheck/verify-clearance-slice.ts"
   },
   "dependencies": {
-    "@usrp/shared-logging": "workspace:*",
     "@usrp/shared-config": "workspace:*",
+    "@usrp/shared-database": "workspace:*",
     "@usrp/shared-events": "workspace:*",
     "@usrp/shared-http": "workspace:*",
+    "@usrp/shared-identity-match": "workspace:*",
+    "@usrp/shared-logging": "workspace:*",
     "@usrp/shared-security": "workspace:*",
     "@usrp/shared-types": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@usrp/g2g-sandbox": "workspace:*",
+    "postgres": "^3.4.5",
     "tsx": "^4.21.0",
     "typescript": "^5.8.3"
   }

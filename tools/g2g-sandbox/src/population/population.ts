@@ -6,7 +6,7 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { seededRng, seedOf } from '../prng.js';
-import type { SdmsResultsRecord, SyntheticCitizen } from './model.js';
+import type { SandboxCertificate, SdmsResultsRecord, SyntheticCitizen } from './model.js';
 import { PERSONAS } from './personas.js';
 import { buildCitizen } from './records.js';
 
@@ -25,6 +25,7 @@ export class Population {
   readonly citizens: readonly SyntheticCitizen[];
   private readonly byNid = new Map<string, SyntheticCitizen>();
   private readonly byIndex = new Map<string, SyntheticCitizen>();
+  private readonly byCertificate = new Map<string, { citizen: SyntheticCitizen; certificate: SandboxCertificate }>();
   private readonly byPersona = new Map<string, SyntheticCitizen>();
 
   constructor(readonly options: PopulationOptions) {
@@ -54,6 +55,10 @@ export class Population {
         if (this.byIndex.has(citizen.nesa.studentIndexNumber)) throw new Error(`duplicate index number for ${citizen.key}`);
         this.byIndex.set(citizen.nesa.studentIndexNumber, citizen);
       }
+      for (const certificate of citizen.certificates) {
+        if (this.byCertificate.has(certificate.applicationNumber)) throw new Error(`duplicate certificate number for ${citizen.key}`);
+        this.byCertificate.set(certificate.applicationNumber, { citizen, certificate });
+      }
       if (citizen.personaId !== null) this.byPersona.set(citizen.personaId, citizen);
     }
     this.citizens = citizens;
@@ -66,6 +71,10 @@ export class Population {
   findByIndex(indexNumber: string): { readonly citizen: SyntheticCitizen; readonly record: SdmsResultsRecord } | null {
     const citizen = this.byIndex.get(indexNumber);
     return citizen?.nesa ? { citizen, record: citizen.nesa } : null;
+  }
+
+  findByCertificate(applicationNumber: string): { readonly citizen: SyntheticCitizen; readonly certificate: SandboxCertificate } | null {
+    return this.byCertificate.get(applicationNumber) ?? null;
   }
 
   persona(personaId: string): SyntheticCitizen {

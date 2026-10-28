@@ -65,6 +65,8 @@ export const UPSTREAM = Object.freeze({
   // nothing else of the browser's.
   mySubmit: op('mySubmit', 'identity', 'POST', '/v1/applicants/me/applications', 'applicant-opaque'),
   myWithdraw: op('myWithdraw', 'identity', 'POST', '/v1/applicants/me/applications/withdraw', 'applicant-opaque'),
+  // ADR-048 §2.3: the citizen gives the number of their Irembo criminal-record certificate.
+  myClearanceCertificate: op('myClearanceCertificate', 'identity', 'POST', '/v1/applicants/me/applications/clearance-certificate', 'applicant-opaque'),
   // The citizen document door (BUILD-002): identity-service authenticates the
   // opaque session, derives the subject, and forwards to document-forensics
   // under its OWN system token. The edge never talks to forensics.

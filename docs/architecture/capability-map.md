@@ -30,7 +30,7 @@ Legend: ✅ built and proven by a live selfcheck · 🟡 partial · ❌ missing 
 | Exam invitation + QR in the portal (download PNG / print) | ✅ **(S)** | ADR-033; rls/0031; `verify-exam-invitation.ts`; portal `/applications/:id/exam-qr` (jsQR round-trip test) |
 | Deferred scheduling retried (no venue yet / venue full) | ✅ **(S)** | application-service re-announce sweep, bounded and outbox-staged; `verify-slot-retry.ts` |
 | Withdraw, erasure request | ✅ | ADR-020, ADR-015 |
-| Real SMS delivery | ❌ known gap | `LogSmsChannel` only (provider not available); the portal is the QR channel meanwhile |
+| Real SMS delivery | 🟡 **S12b**: `TwilioSmsChannel` (E.164, basic auth, timeout, idempotent bounded retries, per-day cost cap, per-number limit, signed callback verifier) behind `createSmsChannel`; identity and notification boot with it in sandbox/production, `LogSmsChannel` is refused there; CI and the sandbox use the Twilio emulator only; the owner-run live SMS test is confirmed (2026-10-28). ❌ the real MTN/Airtel operator (contract); no public status-callback route yet |
 | USSD / kiosk channels | ❌ | channel enum only |
 
 ## 2. Administrative officer dashboard
@@ -71,8 +71,10 @@ Legend: ✅ built and proven by a live selfcheck · 🟡 partial · ❌ missing 
 | BUILD-001 real-PostgreSQL acceptance + trusted-backend review | 🟡 Real-PostgreSQL acceptance is **proven in CI** on every run (`Proofs` job): P5–P17 control plane, the populated upgrade with twice-replayed RLS bootstrap, the live edge boundary and the real IAM → Edge → PostgreSQL flow. Open: the direct first-admin provisioner-auth proof, **skipped** in CI because `FIRST_ADMIN_DATABASE_URL` comes only through an approved secret channel; and the trusted-backend review. The build-001 doc's "remains unverified" section predates CI |
 | Agency ratification of roles and SoD | ❌ `docs/compliance/authorization-ratification.md` |
 | Security sign-off of the anonymous surface (4 → 7) | ❌ `docs/security/anonymous-surface-review.md` |
-| CAPTCHA/WAF in front of onboarding; SMS cost cap | ❌ |
-| Real G2G (NIDA/NESA/HEC/RIB) authorization | ❌ no agreements · 🟡 **production-like sandbox (S12a)**: NIDA and NESA adapters on the captured wire formats behind fenced simulators (ADR-047), NESA results bound to the applicant (ADR-048 §2.1–2.2, rls/0042); `pnpm sandbox` + `pnpm rehearse --sandbox --journey <scenario>`; HEC and RIB still on hash-keyed mocks; clearance and SMS are S12b |
+| CAPTCHA/WAF in front of onboarding | ❌ |
+| SMS cost cap | ✅ **S12b**: `SMS_DAILY_CAP` (required in production; sandbox default 50, shared counter file) and a per-number limit |
+| Real G2G (NIDA/NESA/HEC/RIB) authorization | ❌ no agreements · 🟡 **production-like sandbox (S12a)**: NIDA and NESA adapters on the captured wire formats behind fenced simulators (ADR-047), NESA results bound to the applicant (ADR-048 §2.1–2.2, rls/0042); `pnpm sandbox` + `pnpm rehearse --sandbox --journey <scenario>`; HEC still on a hash-keyed mock |
+| Criminal clearance by Irembo certificate | 🟡 **S12b** (ADR-048 §2.3–2.5, rls/0040): the citizen gives the Irembo application number (`attachMyClearanceCertificate`); ordered checks (authentic, allowed type, 90-day window, identity binding, content) on the real envelope; outages never a verdict; append-only verifications with no name/DOB; checklist `clearance` state and amber-queue reasons (`CLEARANCE_CONTENT_REVIEW`, `IDENTITY_NAME_PARTIAL`); `clearance-matrix` rehearsal. ❌ real Irembo APPLICATION_CODE and G2G transport (owner/RIB), the officer decision on a criminal REVIEW, per-campaign policy (S12c), the frontend |
 | Real biometric matcher or ratified manual-admission policy | 🟡 manual-identity policy built (ADR-037, owner decisions; DPO sign-off pending); on-device matcher B2, thresholds B3 |
 | Backups/PITR, KMS keys, load and failure testing | ❌ |
 | G1 supply chain: signed, scanned images with SBOMs | ✅ (S03, ADR-038 / ADR-FE-014); `v0.1.0-rc1` pre-release cut 2026-10-21 |

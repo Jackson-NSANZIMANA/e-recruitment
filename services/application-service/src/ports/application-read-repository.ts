@@ -50,6 +50,12 @@ export interface AmberQueueEntry {
   /** The stored ForensicsFlags jsonb, verbatim (null for adjudication holds). */
   readonly forensicsFlags: Record<string, unknown> | null;
   readonly queuedAt: string | null;
+  /**
+   * S12b: why a human must look, as closed codes (never a value): the document
+   * hold itself adds none; CLEARANCE_CONTENT_REVIEW and IDENTITY_NAME_PARTIAL
+   * come from the clearance verification and the NESA binding (ADR-048 §3).
+   */
+  readonly reasons: readonly string[];
 }
 
 /** An applicant-facing summary row — the agency joins the non-PII summary. */

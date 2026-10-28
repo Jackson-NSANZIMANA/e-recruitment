@@ -49,6 +49,7 @@ export const OTP_REQUEST_PATH = '/v1/applicants/auth/otp/request';
 export const OTP_VERIFY_PATH = '/v1/applicants/auth/otp/verify';
 export const ME_APPLICATIONS_PATH = '/v1/applicants/me/applications';
 export const ME_WITHDRAW_PATH = '/v1/applicants/me/applications/withdraw';
+export const ME_CLEARANCE_PATH = '/v1/applicants/me/applications/clearance-certificate';
 export const ME_DOCUMENT_CHECKLIST_PATH = '/v1/applicants/me/applications/document-checklist';
 export const ME_EXAM_INVITATION_PATH = '/v1/applicants/me/applications/exam-invitation';
 export const LOGOUT_PATH = '/v1/applicants/auth/logout';
@@ -90,6 +91,11 @@ interface OtpVerifyBody {
 
 interface WithdrawBody {
   readonly applicationId?: unknown;
+}
+
+interface ClearanceBody {
+  readonly applicationId?: unknown;
+  readonly clearanceCertificateNumber?: unknown;
 }
 
 /** Wire shape of the submit-own body — every field validated before use. */
@@ -347,6 +353,44 @@ export function applicantAuthRoutes(
                 currentStatus: result.currentStatus,
               },
             };
+          case 'NOT_FOUND':
+            return { status: 404, body: { status: 'NOT_FOUND' } };
+          default:
+            return assertNever(result);
+        }
+      },
+    },
+    {
+      // ADR-048 §2.3: the citizen gives the number of their Irembo criminal-record
+      // certificate. The applicant is the SESSION's; ownership is enforced upstream.
+      method: 'POST',
+      path: ME_CLEARANCE_PATH,
+      handler: async (ctx): Promise<HttpResult> => {
+        const applicantId = await authenticate(authHeader(ctx.headers['authorization']), service);
+        const body = await ctx.json<ClearanceBody>();
+        const applicationId = body.applicationId;
+        if (typeof applicationId !== 'string' || !UUID_RE.test(applicationId)) {
+          throw new HttpError(400, 'INVALID_REQUEST', 'Field "applicationId" must be a UUID.');
+        }
+        const number = body.clearanceCertificateNumber;
+        if (typeof number !== 'string' || number.length === 0 || number.length > 64) {
+          throw new HttpError(400, 'INVALID_REQUEST', 'Field "clearanceCertificateNumber" must be a string of 1–64 characters.');
+        }
+        let result;
+        try {
+          result = await applications.attachClearanceCertificate(applicantId, applicationId, number);
+        } catch (err) {
+          throw mapDomainError(err);
+        }
+        switch (result.kind) {
+          case 'ACCEPTED':
+            return { status: 202, body: { status: 'ACCEPTED', agency: result.agency } };
+          case 'ALREADY_VERIFIED':
+            return { status: 200, body: { status: 'ALREADY_VERIFIED', agency: result.agency } };
+          case 'NOT_APPLICABLE':
+            return { status: 409, body: { status: 'NOT_APPLICABLE', agency: result.agency, currentStatus: result.currentStatus } };
+          case 'INVALID_NUMBER':
+            return { status: 422, body: { status: 'INVALID_NUMBER' } };
           case 'NOT_FOUND':
             return { status: 404, body: { status: 'NOT_FOUND' } };
           default:

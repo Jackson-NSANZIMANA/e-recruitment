@@ -246,7 +246,14 @@ export interface EdgeAmberQueueEntry {
   readonly forensicsScore: number | null;
   readonly forensicsFlags: Record<string, unknown> | null;
   readonly queuedAt: string | null;
+  /** S12b: why a human must look (closed upper-case codes; document holds add none). */
+  readonly reasons: readonly string[];
   readonly agency: Agency;
+}
+
+/** Closed-vocabulary codes only: anything else an upstream ever adds is dropped. */
+function queueReasonCodes(value: unknown): readonly string[] {
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string' && /^[A-Z][A-Z0-9_]{2,47}$/.test(v)).slice(0, 8) : [];
 }
 
 export function projectAmberQueue(body: unknown, agency: Agency): readonly EdgeAmberQueueEntry[] {
@@ -258,6 +265,7 @@ export function projectAmberQueue(body: unknown, agency: Agency): readonly EdgeA
     forensicsScore: num(field(entry, 'forensicsScore')),
     forensicsFlags: jsonObject(field(entry, 'forensicsFlags')),
     queuedAt: str(field(entry, 'queuedAt')),
+    reasons: queueReasonCodes(field(entry, 'reasons')),
     agency,
   }));
 }

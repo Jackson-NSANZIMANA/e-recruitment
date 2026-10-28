@@ -467,6 +467,8 @@ export interface EligibilityResult {
   readonly eligible: boolean;
   readonly reason: string;
   readonly failureCode?: string;
+  /** S12b: why a PENDING verdict needs a human (closed codes; never a value). */
+  readonly reviewReasons?: readonly string[];
   readonly evaluatedAt: string;
   readonly details: {
     readonly citizenshipCheck: boolean | null;

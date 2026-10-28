@@ -1,7 +1,7 @@
 # ADR-048 — Credential-to-identity binding, and criminal clearance by Irembo certificate
 
-**Status:** §2.1–2.2 Accepted · 2026-10-28 (S12a, backend PR #49); §2.3–2.4 Proposed (S12b) · proposed 2026-10-25
-**Deciders:** platform owner (clearance flow chosen 2026-10-25); DPO and agencies for the defaults marked *owner to confirm*
+**Status:** Accepted · §2.1–2.2 2026-10-28 (S12a, backend PR #49); §2.3–2.5 2026-10-28 (S12b) · proposed 2026-10-25
+**Deciders:** platform owner (clearance flow chosen 2026-10-25); DPO and agencies for the defaults marked *owner to confirm* (S12b took the defaults; the owner confirmed them on 2026-10-28, see §2.5)
 **Relates to:** ADR-007 age, ADR-029 onboarding, ADR-030 campaign-bound submission, ADR-032 document requirements, ADR-047 G2G sandbox
 
 ## 1. Context
@@ -72,6 +72,46 @@ The rule never sees raw registry payloads beyond the fields above. The compared 
 The agency schemas get `clearance_certificate_verifications`, append-only. Each row holds the application, an HMAC of the reference number plus its last 4 characters, the certificate type, `issued_on`, the binding outcome per field, the verification time and the upstream trace id. **No name or DOB is stored.**
 
 Writes go only through a SECURITY DEFINER command function, as in rls/0033 and 0034. Retention follows the application record.
+
+### 2.5 How S12b implemented it (decisions taken)
+
+**Confirmed by the owner, 2026-10-28** (the four defaults S12b took; each is configuration, not code):
+
+| Decision | Default taken | Where it lives |
+|---|---|---|
+| Validity window | **90 days** before the submission reference date (inclusive; a future-dated certificate is outside it) | `CLEARANCE_VALIDITY_DAYS` |
+| Irembo `APPLICATION_CODE` of a criminal-record certificate | A **configurable allowlist**, never defaulted; the sandbox uses clearly named placeholders `SANDBOX_PLACEHOLDER_CRIMINAL_NO_RECORD`, `…_CRIMINAL_RECORD_EXTRACT` and (for the wrong-type case) `…_NESA_EQUIVALENCE`. *Ask RIB/Irembo for the real codes.* | `CLEARANCE_ALLOWED_APPLICATION_CODES` |
+| Distinct "no record" certificate type | **None unless configured**: every allowed type then goes to a human (`CLEARANCE_CONTENT_REVIEW`). The sandbox configures one placeholder to exercise both branches. | `CLEARANCE_NO_RECORD_APPLICATION_CODES` (a subset of the allowlist) |
+| Sandbox SMS cost cap | **50 messages per Kigali day** per shared counter file, plus 5 per number per 15 minutes | `SMS_DAILY_CAP` (REQUIRED, no default, in production), `SMS_CAP_STATE_FILE`, `SMS_PER_NUMBER_*` |
+
+Until policy v2 (S12c, ADR-049) the allowlist, no-record set and window are process configuration standing in for the campaign policy; the domain takes them as a `ClearancePolicy` argument, so S12c passes per-campaign values without touching the checks.
+
+**Where the number goes: a follow-up operation, not the submission.** `attachMyClearanceCertificate` (`POST /edge/v1/me/applications/clearance-certificate`, applicant session, CSRF, not retried by the edge). The certificate usually exists only after the citizen requested it on IremboGov, so the submission would otherwise block on it, and `submitApplication`'s idempotency hash and `APPLICANT_SUBMITTED` stay untouched. The edge checks only the shape (422 `CLEARANCE_NUMBER_MALFORMED`); identity-service authenticates the session and application-service proves ownership and that the application is open (404 bare when absent or not theirs; 409 `APPLICATION_CLOSED`; 200 `ALREADY_VERIFIED`) and stages `CLEARANCE_CERTIFICATE_SUBMITTED` (topic `clearance.submitted`). The number rides in that event so a check can be retried after an outage; it is a public verification reference, never a name or ID, and is stored only as an HMAC plus its last 4 characters. `background-vetting-service` consumes it.
+
+**The ordered checks are one pure function** (`decideClearance`). Security review refinement of the order in §2.3: found, then `bindCredential` on name and date of birth (no NID hint is printed on a certificate, so that field is `NOT_COMPARED`), then authentic (in force), allowed type and validity window, so a citizen who is not the holder learns only "not found" or "not yours" and never the type, validity or age of someone else's certificate; then content (a no-record type is conclusive; any other allowed type is `REVIEW`). A partial name adds `IDENTITY_NAME_PARTIAL`.
+
+**Outcomes and what each emits.**
+
+| Outcome | Examples | Criminal gate | Events | Citizen sees |
+|---|---|---|---|---|
+| `CLEARED` | clean, bound | `CLEARED` | `RIB_VETTING_COMPLETED` (`source: IREMBO_CERTIFICATE`) + audit | VERIFIED |
+| `REVIEW` | record-capable type, partial name | `UNDER_REVIEW` | vetting event with `reviewReasons` + audit | UNDER_OFFICER_REVIEW, never why |
+| `CORRECTION_NEEDED` | not found, withdrawn, wrong type, expired, not bound, malformed | unchanged (`PENDING`) | **audit only**: a correctable failure is not a verdict, and a `PENDING` event could regress an application that is already `CLEARED` | CORRECTION_NEEDED + a closed code |
+| `PENDING` (outage) | 429, 5xx, timeout, truncated body, `status:false` that is not "not found", a sandbox answer in production | unchanged | none; a deduplicated `REGISTRY_UNAVAILABLE` record, then the error propagates so the offset is not committed and the check is retried | VERIFYING |
+
+**Not found is distinguished from failed.** The only `status:false` answer treated as "no such certificate" is `responseCode 3105` with `data: null` (a **sandbox assumption** until a live capture of a missing number exists). Anything else that is not a well-formed found answer is an outage.
+
+**Storage (rls/0040).** `<agency>_ops.clearance_certificate_verifications`, written only through the SECURITY DEFINER `record_clearance_verification`, owner `usrp_clearance_owner` (NOLOGIN, BYPASSRLS, never assumable), EXECUTE for `usrp_vetting_service` alone; the function re-checks the login is `usrp_app` acting as that role and that the application exists in this agency; idempotent for a redelivery. No column can hold a name or date of birth; a trigger rejects any binding key or value other than the four field names and the five per-field results. Reads: the agency officer role and `usrp_system_service` (the citizen's own checklist). `usrp_vetting_service` cannot read it back.
+
+**Reading it.** The document checklist's RIB-verified item (`NON_CONVICTION_CERTIFICATE`) carries `clearance: {state, code, reasons}` with `state` in `NUMBER_REQUIRED | VERIFYING | CORRECTION_NEEDED | UNDER_OFFICER_REVIEW | VERIFIED`. The edge rebuilds it from an allowlist and **drops `reasons` for the citizen**. The amber queue now also lists applications whose criminal gate is `UNDER_REVIEW` or whose NESA binding needs a review (they were invisible to every queue), each with `reasons`, a closed vocabulary: `CLEARANCE_CONTENT_REVIEW`, `IDENTITY_NAME_PARTIAL`, `IDENTITY_HOLDER_UNREADABLE`, `IDENTITY_HINT_NOT_COMPARED`, `NESA_MALPRACTICE`, `NESA_LEVEL_UNKNOWN`, `NESA_DIVISION_NOT_PASS`, `CRIMINAL_RECORD_REVIEW` (the RIB-by-hash path, which records no reasons), `NESA_RECORD_REVIEW`.
+
+**Modes.** `CLEARANCE_MODE=RIB_HASH` (default) keeps the original, database-free RIB-by-hash gate on `applicant.submitted`; `IREMBO_CERTIFICATE` starts the new consumer instead (the number arrives after submitting, so nothing runs on `applicant.submitted`). The RIB-by-hash path stays behind its own `RibGateway` port rather than the certificate port: it has no certificate to verify, and a structured `CLEAR / HAS_RECORDS / UNDER_INVESTIGATION` RIB answer will arrive through a future adapter of the same use case. The sandbox runs `IREMBO_CERTIFICATE`.
+
+**Transport.** `IremboCertificateTransport` (HTTP, `applicationnumber` header, a sandbox G2G client bearer: never a citizen's token) is separate from the pure `mapIremboCertificate`; production changes the transport module, not the checks.
+
+**Residual risks accepted (security review, S12b):** (a) every service shares the `usrp_app` login, so a compromised service could `SET ROLE usrp_vetting_service` and write a forged verification row for an application of the named applicant; the same boundary as every service role in rls/0001, and it affects the checklist display and the amber queue only (gates move on events); a dedicated login is the longer-term fix. (b) the certificate number travels in plaintext on `clearance.submitted` and stays in Kafka retention and dead-letter parking: operations should give the topic a short retention and the dead-letter topic restricted access. (c) the per-process `PerNumberLimiter` is per service and restarts clear it; the daily cost cap is shared through the required `SMS_CAP_STATE_FILE`, with an overshoot bounded by concurrency. (d) `verifyStatusCallback` has no caller yet: whoever adds the endpoint must build the signed URL from configuration, never from Host or X-Forwarded headers. (e) "not found" still tells a signed-in citizen that a number does not exist (anyone can already verify it on Irembo); the attempts are throttled per session.
+
+**Known gaps, deferred:** (1) an officer *decision* on a criminal `UNDER_REVIEW` application (clear or reject after confirming the certificate PDF) has no operation yet: today's `adjudicate` acts on `ADJUDICATION_REVIEW` and `DOCUMENT_REVIEW_AMBER`; the queue shows the reason, the resolution needs its own contract; (2) the certificate PDF upload for content review uses the existing document door unchanged; (3) per-campaign policy values wait for S12c; (4) the Twilio status-callback verifier (`verifyStatusCallback`) is implemented and proven but no public route receives callbacks yet (the edge exposes none).
 
 ## 3. Consequences
 

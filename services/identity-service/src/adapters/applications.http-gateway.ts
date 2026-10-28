@@ -19,6 +19,7 @@ import type {
   DocumentChecklistView,
   ExamInvitationResult,
   ExamInvitationView,
+  AttachClearanceResult,
   WithdrawApplicationResult,
 } from '../ports/applications-gateway.js';
 
@@ -118,7 +119,14 @@ export class HttpApplicationsGateway implements ApplicationsGateway {
       if (typeof documentType !== 'string' || typeof satisfaction !== 'string') {
         throw new UpstreamUnavailableError('application-service checklist item malformed');
       }
-      projected.push({ documentType, satisfaction, registry: typeof registry === 'string' ? registry : null });
+      // S12b: the clearance state travels (state + closed code); the officer-only
+      // reasons are dropped here, so a citizen path cannot carry them.
+      const c = i['clearance'];
+      const cr = c !== null && typeof c === 'object' ? (c as Record<string, unknown>) : null;
+      const clearance = cr !== null && typeof cr['state'] === 'string'
+        ? { clearance: { state: cr['state'], code: typeof cr['code'] === 'string' ? cr['code'] : null } }
+        : {};
+      projected.push({ documentType, satisfaction, registry: typeof registry === 'string' ? registry : null, ...clearance });
     }
     return {
       kind: 'OK',
@@ -229,6 +237,37 @@ export class HttpApplicationsGateway implements ApplicationsGateway {
       return { kind: 'NOT_APPLICABLE', agency: body.agency, currentStatus: body.currentStatus };
     }
     throw new UpstreamUnavailableError(`application-service withdraw-own responded ${String(res.status)}`);
+  }
+
+  async attachClearanceCertificate(
+    applicantId: string,
+    applicationId: string,
+    clearanceCertificateNumber: string,
+  ): Promise<AttachClearanceResult> {
+    const token = await this.#systemToken();
+    let res: Response;
+    try {
+      res = await this.#fetch(`${this.#opts.applicationBaseUrl}/v1/applications/clearance-certificate-own`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ applicantId, applicationId, clearanceCertificateNumber }),
+        signal: AbortSignal.timeout(this.#timeoutMs),
+      });
+    } catch (cause) {
+      throw new UpstreamUnavailableError('application-service unreachable', { cause });
+    }
+    if (res.status === 401) {
+      this.#cached = null; // same expiry-race posture as the read path
+    }
+    if (res.status === 404) return { kind: 'NOT_FOUND' };
+    if (res.status === 422) return { kind: 'INVALID_NUMBER' };
+    const body = (await res.json().catch(() => ({}))) as { status?: string; agency?: string; currentStatus?: string };
+    if (res.status === 202 && body.status === 'ACCEPTED' && body.agency) return { kind: 'ACCEPTED', agency: body.agency };
+    if (res.status === 200 && body.status === 'ALREADY_VERIFIED' && body.agency) return { kind: 'ALREADY_VERIFIED', agency: body.agency };
+    if (res.status === 409 && body.status === 'NOT_APPLICABLE' && body.agency && body.currentStatus) {
+      return { kind: 'NOT_APPLICABLE', agency: body.agency, currentStatus: body.currentStatus };
+    }
+    throw new UpstreamUnavailableError(`application-service clearance-certificate-own responded ${String(res.status)}`);
   }
 
   /**

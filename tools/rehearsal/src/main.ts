@@ -38,7 +38,7 @@ const REPO_ROOT = resolve(PACKAGE_ROOT, '..', '..');
 const DEFAULT_DATABASE_URL = 'postgresql://usrp_admin:usrp_dev_password@localhost:5432/usrp_db';
 const SANDBOX_EDGE_URL = 'http://localhost:4921';
 const SANDBOX_ORIGIN = 'http://localhost:4930';
-const SANDBOX_DATABASE_URL = 'postgresql://usrp_admin:usrp_dev_password@localhost:5432/usrp_sandbox';
+const SANDBOX_DATABASE_URL = `postgresql://usrp_admin:usrp_dev_password@localhost:5432/${/^[a-z][a-z0-9_]{0,40}$/.test(process.env['SANDBOX_DB'] ?? '') ? (process.env['SANDBOX_DB'] as string) : 'usrp_sandbox'}`;
 /** DEV-ONLY, documented like seed-dev-officers' DevOfficer#2026. */
 const DEFAULT_ADMIN_PASSWORD = 'RehearsalAdmin#2026';
 const DEV_OFFICER_PASSWORD = 'DevOfficer#2026';
@@ -257,7 +257,7 @@ async function journey(argv: readonly string[], where: { readonly edgeBaseUrl: s
   for (const p of scenario.personas) {
     if (p.sandboxPersona === undefined || p.expect === undefined || p.category === undefined) continue;
     const c = population.persona(p.sandboxPersona);
-    subjects.push({ label: `${p.id}/${p.sandboxPersona}`, nationalId: c.nid, dateOfBirth: c.dateOfBirth, phone: c.phone, nesaIndexNumber: c.nesa?.studentIndexNumber ?? null, category: p.category, expect: p.expect });
+    subjects.push({ label: `${p.id}/${p.sandboxPersona}`, nationalId: c.nid, dateOfBirth: c.dateOfBirth, phone: c.phone, nesaIndexNumber: c.nesa?.studentIndexNumber ?? null, clearanceNumber: p.clearanceNumber ?? c.certificates[0]?.applicationNumber ?? null, category: p.category, expect: p.expect });
   }
   if (argv.includes('--private')) {
     const persona = loadPrivatePersona(process.env['SANDBOX_PRIVATE_PERSONA_DIR']);
@@ -282,7 +282,7 @@ async function journey(argv: readonly string[], where: { readonly edgeBaseUrl: s
     const steps = await runJourney(subject, config);
     const passed = steps.length > 0 && steps.every((s) => s.ok);
     ok &&= passed;
-    out(`${passed ? '✓' : '✗'} ${subject.label} → expected ${subject.expect.outcome}${'gate' in subject.expect ? ` (${subject.expect.gate})` : ''}${'failureCode' in subject.expect ? ` (${subject.expect.failureCode})` : ''}`);
+    out(`${passed ? '✓' : '✗'} ${subject.label} → expected ${subject.expect.outcome}${'gate' in subject.expect ? ` (${subject.expect.gate})` : ''}${'failureCode' in subject.expect ? ` (${subject.expect.failureCode})` : ''}${'clearance' in subject.expect ? ` (${subject.expect.clearance}${subject.expect.code === undefined ? '' : `/${subject.expect.code}`})` : ''}`);
     // The private run reports pass/fail only, never step details.
     if (subject.label !== 'PRIVATE') for (const s of steps) out(`    ${s.ok ? '✓' : '✗'} ${s.step}${s.detail === '' ? '' : `: ${s.detail}`}`);
   }

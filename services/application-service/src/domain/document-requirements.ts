@@ -101,11 +101,59 @@ export interface ResolvedRequirements {
   readonly types: readonly DocumentType[];
 }
 
+/**
+ * The latest Irembo clearance-certificate verification of the application
+ * (rls/0040), as closed codes only. Null/absent: no number has been given.
+ */
+export interface ClearanceVerificationFacts {
+  readonly outcome: 'CLEARED' | 'REVIEW' | 'CORRECTION_NEEDED' | 'PENDING';
+  readonly failureCode: string | null;
+  readonly reviewReasons: readonly string[];
+}
+
 /** The slice of an application row the checklist needs. All real gate verdicts. */
 export interface GateVerdicts {
   readonly identityVerified: boolean;
   readonly academicStatus: AcademicEligibilityStatus;
   readonly criminalStatus: CriminalClearanceStatus;
+  /** S12b: only meaningful in the Irembo certificate flow. */
+  readonly clearance?: ClearanceVerificationFacts | null;
+}
+
+/**
+ * Where the applicant's criminal-clearance certificate stands (ADR-048 §2.3):
+ *   NUMBER_REQUIRED       nothing given yet
+ *   VERIFYING             given; the registry has not answered (an outage is retried)
+ *   CORRECTION_NEEDED     the number can be corrected (`code` says why; never an eligibility verdict)
+ *   UNDER_OFFICER_REVIEW  an officer must look (`reasons` for officers only)
+ *   VERIFIED              the criminal gate is CLEARED
+ */
+export type ClearanceState = 'NUMBER_REQUIRED' | 'VERIFYING' | 'CORRECTION_NEEDED' | 'UNDER_OFFICER_REVIEW' | 'VERIFIED';
+
+export interface ClearanceChecklistState {
+  readonly state: ClearanceState;
+  readonly code: string | null;
+  readonly reasons: readonly string[];
+}
+
+/** Pure: the clearance state from the gate verdict and the latest verification. */
+export function clearanceStateOf(gates: GateVerdicts): ClearanceChecklistState {
+  if (gates.criminalStatus === 'CLEARED') return { state: 'VERIFIED', code: null, reasons: [] };
+  if (gates.criminalStatus === 'UNDER_REVIEW') {
+    return { state: 'UNDER_OFFICER_REVIEW', code: null, reasons: gates.clearance?.outcome === 'REVIEW' ? gates.clearance.reviewReasons : [] };
+  }
+  const latest = gates.clearance ?? null;
+  if (latest === null) return { state: 'NUMBER_REQUIRED', code: null, reasons: [] };
+  switch (latest.outcome) {
+    case 'CORRECTION_NEEDED':
+      return { state: 'CORRECTION_NEEDED', code: latest.failureCode, reasons: [] };
+    case 'PENDING':
+      return { state: 'VERIFYING', code: null, reasons: [] };
+    case 'REVIEW':
+      return { state: 'UNDER_OFFICER_REVIEW', code: null, reasons: latest.reviewReasons };
+    case 'CLEARED':
+      return { state: 'VERIFYING', code: null, reasons: [] };
+  }
 }
 
 /** The slice of a stored document row the checklist needs. */
@@ -124,6 +172,8 @@ export interface ChecklistItem {
   readonly satisfaction: DocumentSatisfaction;
   /** The registry that would verify it, when one exists (even if not yet done). */
   readonly registry: VerifyingAuthority | null;
+  /** S12b: the criminal-clearance certificate's state, on the RIB-verified item only. */
+  readonly clearance?: ClearanceChecklistState;
 }
 
 export interface DocumentChecklist {
@@ -218,11 +268,12 @@ export function evaluateDocumentChecklist(
       };
     }
     const registry = REGISTRY_FOR_DOCUMENT[documentType];
+    const clearance = registry === 'RIB' ? { clearance: clearanceStateOf(gates) } : {};
     // A successful automated verification waives the paper (owner decision).
     if (registry !== null && registryConfirmed(registry, category, gates)) {
-      return { documentType, satisfaction: 'API_VERIFIED', registry };
+      return { documentType, satisfaction: 'API_VERIFIED', registry, ...clearance };
     }
-    return { documentType, satisfaction: satisfactionOf(stored, true), registry };
+    return { documentType, satisfaction: satisfactionOf(stored, true), registry, ...clearance };
   });
   return {
     source: requirements.source,

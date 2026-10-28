@@ -31,6 +31,19 @@ export type WithdrawApplicationResult =
   | { readonly kind: 'NOT_FOUND' };
 
 /**
+ * Upstream outcome of giving the number of an Irembo criminal-record
+ * certificate (ADR-048 §2.3): a passthrough of application-service's
+ * clearance-certificate-own contract, PII-free by construction (the number is
+ * never echoed).
+ */
+export type AttachClearanceResult =
+  | { readonly kind: 'ACCEPTED'; readonly agency: string }
+  | { readonly kind: 'ALREADY_VERIFIED'; readonly agency: string }
+  | { readonly kind: 'NOT_APPLICABLE'; readonly agency: string; readonly currentStatus: string }
+  | { readonly kind: 'INVALID_NUMBER' }
+  | { readonly kind: 'NOT_FOUND' };
+
+/**
  * The citizen's own submission (ADR-027 browser front door): category plus
  * the academic credential the category requires. The applicantId and the
  * `channel: 'WEB'` are NOT inputs — the route derives the subject from the
@@ -81,6 +94,8 @@ export interface DocumentChecklistView {
     readonly documentType: string;
     readonly satisfaction: string;
     readonly registry: string | null;
+    /** S12b: the clearance certificate state (never the officer-only reasons). */
+    readonly clearance?: { readonly state: string; readonly code: string | null };
   }[];
 }
 
@@ -123,6 +138,8 @@ export interface ApplicationsGateway {
   listForApplicant(applicantId: string): Promise<readonly ApplicantApplication[]>;
   /** Withdraw the citizen's OWN application (ADR-020) — ownership enforced upstream. */
   withdrawApplication(applicantId: string, applicationId: string): Promise<WithdrawApplicationResult>;
+  /** Give the number of the citizen's OWN Irembo clearance certificate (ADR-048); ownership enforced upstream. */
+  attachClearanceCertificate(applicantId: string, applicationId: string, clearanceCertificateNumber: string): Promise<AttachClearanceResult>;
   /**
    * Submit a NEW application for the citizen (ADR-027). The subject travels
    * server-derived; `idempotencyKey` is the caller's validated UUID retry

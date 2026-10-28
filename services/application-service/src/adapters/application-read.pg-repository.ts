@@ -83,6 +83,12 @@ export class PgApplicationReadRepository implements ApplicationReadRepository {
         // row was already stamped (defensive — the queue must never lose apps).
         const rows = await tx<AmberQueueRow[]>`
           SELECT a.id, a.processing_code, a.status,
+                 a.criminal_clearance_status::text AS criminal_status,
+                 a.academic_status::text AS academic_status,
+                 a.academic_eligibility_detail AS academic_detail,
+                 (SELECT v.review_reasons FROM ${schema}.clearance_certificate_verifications v
+                   WHERE v.application_id = a.id AND v.outcome = 'REVIEW'
+                   ORDER BY v.verified_at DESC, v.id DESC LIMIT 1) AS clearance_reasons,
                  d.document_type, d.forensics_score, d.forensics_flags, d.forensics_completed_at
           FROM ${schema}.applications a
           LEFT JOIN ${schema}.document_records d
@@ -91,6 +97,12 @@ export class PgApplicationReadRepository implements ApplicationReadRepository {
            AND d.human_reviewed_by_id IS NULL
           WHERE a.status IN ('DOCUMENT_REVIEW_AMBER'::${schema}.application_status,
                              'ADJUDICATION_REVIEW'::${schema}.application_status)
+             -- S12b: a criminal-clearance REVIEW (content, partial name) and a NESA
+             -- review are human holds too; they were invisible to every queue.
+             OR (a.status::text NOT IN ('REJECTED', 'WITHDRAWN', 'ACCEPTED', 'WALK_IN_REJECTED')
+                 AND (a.criminal_clearance_status::text = 'UNDER_REVIEW'
+                      OR (a.academic_status::text = 'PENDING'
+                          AND a.academic_eligibility_detail ->> 'failureCode' = 'NESA_REVIEW_REQUIRED')))
           ORDER BY d.forensics_completed_at ASC NULLS LAST, a.updated_at ASC
           LIMIT ${input.limit}
         `;
@@ -233,6 +245,10 @@ interface AmberQueueRow {
   readonly forensics_flags: Record<string, unknown> | null;
   /** timestamptz — the shared client may surface it as Date or ISO string. */
   readonly forensics_completed_at: Date | string | null;
+  readonly criminal_status: string;
+  readonly academic_status: string;
+  readonly academic_detail: Record<string, unknown> | null;
+  readonly clearance_reasons: readonly string[] | null;
 }
 
 /** The three-schema-portable detail columns. No applicant_id, no QR code. */
@@ -297,7 +313,36 @@ function toQueueEntry(row: AmberQueueRow): AmberQueueEntry {
       row.forensics_completed_at === null
         ? null
         : new Date(row.forensics_completed_at).toISOString(),
+    reasons: queueReasons(row),
   };
+}
+
+/** NESA review codes (eligibility-service) → the queue's closed vocabulary. */
+const NESA_REASON_TO_QUEUE: Readonly<Record<string, string>> = {
+  NAME_PARTIAL: 'IDENTITY_NAME_PARTIAL',
+  HOLDER_FIELD_UNREADABLE: 'IDENTITY_HOLDER_UNREADABLE',
+  NID_HINT_NOT_COMPARED: 'IDENTITY_HINT_NOT_COMPARED',
+  MALPRACTICE: 'NESA_MALPRACTICE',
+  UNKNOWN_LEVEL_TYPE: 'NESA_LEVEL_UNKNOWN',
+  DIVISION_NOT_PASS: 'NESA_DIVISION_NOT_PASS',
+};
+const CLEARANCE_QUEUE_REASONS: ReadonlySet<string> = new Set(['CLEARANCE_CONTENT_REVIEW', 'IDENTITY_NAME_PARTIAL', 'IDENTITY_HOLDER_UNREADABLE']);
+
+/** Why an application is in the queue beyond a document hold: closed codes only. */
+export function queueReasons(row: Pick<AmberQueueRow, 'criminal_status' | 'academic_status' | 'academic_detail' | 'clearance_reasons'>): readonly string[] {
+  const reasons = new Set<string>();
+  if (row.criminal_status === 'UNDER_REVIEW') {
+    const known = (row.clearance_reasons ?? []).filter((r) => CLEARANCE_QUEUE_REASONS.has(r));
+    // The RIB-by-hash path records no reasons: the generic hold still says WHY it is here.
+    for (const r of known.length > 0 ? known : ['CRIMINAL_RECORD_REVIEW']) reasons.add(r);
+  }
+  const detail = row.academic_detail;
+  if (row.academic_status === 'PENDING' && detail !== null && detail['failureCode'] === 'NESA_REVIEW_REQUIRED') {
+    const codes = Array.isArray(detail['reviewReasons']) ? (detail['reviewReasons'] as unknown[]) : [];
+    const mapped = codes.map((c) => (typeof c === 'string' ? NESA_REASON_TO_QUEUE[c] : undefined)).filter((c): c is string => c !== undefined);
+    for (const r of mapped.length > 0 ? mapped : ['NESA_RECORD_REVIEW']) reasons.add(r);
+  }
+  return [...reasons].sort();
 }
 
 function toSummary(row: ApplicationSummaryRow): ApplicationSummary {

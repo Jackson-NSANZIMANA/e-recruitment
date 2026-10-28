@@ -1083,6 +1083,50 @@ paths:
         '404':
           description: Not found
 
+  /edge/v1/me/applications/clearance-certificate:
+    post:
+      operationId: attachMyClearanceCertificate
+      summary: |
+        Give the application number of my Irembo criminal-record certificate
+        (ADR-048 section 2.3). The subject is the applicant session. The edge
+        checks the shape only (a letter, 12 digits, 4 letters); verification is
+        asynchronous and its state appears on the document checklist. The number
+        is never echoed. Not retried by this tier.
+      tags: [citizen]
+      x-usrp-session: applicant
+      x-usrp-csrf: true
+      x-usrp-retry-on-g2g: false
+      x-usrp-outcomes: { 409: [APPLICATION_CLOSED], 422: [CLEARANCE_NUMBER_MALFORMED] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [applicationId, clearanceCertificateNumber]
+              additionalProperties: false
+              properties:
+                applicationId:
+                  type: string
+                  format: uuid
+                clearanceCertificateNumber:
+                  type: string
+                  maxLength: 64
+                  description: A letter, 12 digits and 4 letters; spaces and hyphens are ignored.
+      responses:
+        '202':
+          description: Accepted; verification is under way
+        '200':
+          description: Already verified
+        '401':
+          description: Unauthorized
+        '404':
+          description: Not found
+        '409':
+          description: The application is closed
+        '422':
+          description: The number is not in the observed shape
+
   /edge/v1/me/erasure-request:
     get:
       operationId: getMyErasureRequest

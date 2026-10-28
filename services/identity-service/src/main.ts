@@ -15,7 +15,6 @@
 import { sql } from '@usrp/shared-database';
 import { InMemoryEventBus, KafkaEventBus, type EventBus } from '@usrp/shared-events';
 import {
-  assertDevAdapterAllowed,
   assertProductionSecrets,
   loadKafkaConfig,
   resolveEventTransport,
@@ -35,7 +34,7 @@ import { verifyIdentityRoute } from './adapters/http/verify-identity.controller.
 import { erasureRoute } from './adapters/http/erasure.controller.js';
 import { applicantAuthRoutes } from './adapters/http/applicant-auth.controller.js';
 import { erasureRequestRoutes } from './adapters/http/erasure-request.controller.js';
-import { LogSmsChannel } from '@usrp/shared-sms';
+import { createSmsChannel } from '@usrp/shared-sms';
 import { HttpApplicationsGateway } from './adapters/applications.http-gateway.js';
 import { HttpGateAdmissionGateway } from './adapters/gate-admission.http-gateway.js';
 import { gateAdmissionRoutes } from './adapters/http/gate-admission.controller.js';
@@ -91,17 +90,17 @@ async function main(): Promise<void> {
   // ONE channel instance serves OTP delivery AND the erasure decision
   // notices (ADR-022) — the real telecom adapter lands exactly once.
   //
-  // FAIL CLOSED: LogSmsChannel delivers nothing. In production that means no
-  // citizen ever receives an OTP (so none can authenticate) and erasure
-  // decisions are never communicated — all behind green healthchecks. The
-  // guard refuses to boot rather than run that way.
-  assertDevAdapterAllowed(
-    'LogSmsChannel',
-    'applicant OTPs and erasure-decision notices would be written to a log instead of delivered, so no citizen could authenticate',
-  );
-  // Dev inbox (opt-in, set by scripts/dev.sh): the only way to read an OTP
-  // in a local browser session. Reachable only past the guard above.
-  const smsChannel = new LogSmsChannel({ inboxFile: process.env['DEV_SMS_INBOX_FILE'] });
+  // FAIL CLOSED: LogSmsChannel delivers nothing. In production and in the
+  // sandbox that means no citizen ever receives an OTP (so none can
+  // authenticate) and erasure decisions are never communicated, all behind
+  // green healthchecks. createSmsChannel wires the TwilioSmsChannel from the
+  // environment (the emulator in the sandbox, ADR-047) and REFUSES to boot
+  // rather than fall back to the log channel there. The dev inbox is
+  // reachable only in development.
+  const smsChannel = createSmsChannel({
+    consequence: 'applicant OTPs and erasure-decision notices would be written to a log instead of delivered, so no citizen could authenticate',
+    devInboxFile: process.env['DEV_SMS_INBOX_FILE'],
+  });
   const applicantAuth = createApplicantAuthService(config, bus, smsChannel);
   const applicationsGateway = new HttpApplicationsGateway({
     iamBaseUrl: portal.iamBaseUrl,

@@ -84,12 +84,12 @@ const SIMULATOR_HOST_PATTERN = /(^|\.)(usrp-)?g2g-sandbox(\.|$)|\.sandbox\.usrp\
 
 /** The real registries (ADR-047 §1) and the registry zones around them. */
 const REAL_REGISTRY_HOST_PATTERN =
-  /(^|\.)(irembohub\.com|irembo\.gov\.rw|sdms\.gov\.rw|nida\.gov\.rw|nesa\.gov\.rw|rib\.gov\.rw|hec\.gov\.rw)$/i;
+  /(^|\.)(irembohub\.com|irembo\.gov\.rw|sdms\.gov\.rw|twilio\.com|nida\.gov\.rw|nesa\.gov\.rw|rib\.gov\.rw|hec\.gov\.rw)$/i;
 
 /** Development adapters a sandbox may still wire, each with the session that retires it. */
-const SANDBOX_PERMITTED_DEV_ADAPTERS: ReadonlySet<string> = new Set([
-  // Retired by S12b (Twilio-compatible emulator behind SmsChannel).
-  'LogSmsChannel',
+const SANDBOX_PERMITTED_DEV_ADAPTERS: ReadonlySet<string> = new Set<string>([
+  // Empty since S12b: LogSmsChannel was retired by the Twilio emulator behind
+  // SmsChannel, so a sandbox that wires it again is refused at boot.
 ]);
 
 const present = (raw: string | undefined): raw is string => raw !== undefined && raw.trim() !== '';
@@ -181,7 +181,10 @@ export function sandboxFenceIssues(source: EnvSource = process.env): string[] {
     if (env === 'production' && isSimulatorHost(host)) {
       issues.push(`${key} points at a G2G SIMULATOR host. A production process never talks to the sandbox simulators.`);
     }
-    if (env === 'sandbox' && isRealRegistryHost(host)) {
+    // The one sanctioned real-world send: the owner's opt-in SANDBOX_SMS=twilio
+    // may name Twilio's own API host, nothing else (ADR-047 §2.4, S12b).
+    const optedInTwilio = key === 'TWILIO_BASE_URL' && host === 'api.twilio.com' && (source['SANDBOX_SMS'] ?? '').trim().toLowerCase() === 'twilio';
+    if (env === 'sandbox' && isRealRegistryHost(host) && !optedInTwilio) {
       issues.push(
         `${key} points at a REAL registry host. The sandbox talks only to the fenced simulators; ` +
           'the one live exception (NESA passthrough, ADR-047 §3.6) is configured on the simulator, not here.',
