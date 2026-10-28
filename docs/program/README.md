@@ -101,7 +101,7 @@ Parallel sessions must not pick "the next number". These are reserved; use only 
 | S14 Operator relocation | ready (M2) | | kit written 2026-10-21; owner: relocation authority and fairness rules |
 | P1 Pilot continuity kit | ready (M2; after S06 + S09) | | kit written 2026-10-21; owner: paper procedure, assisted-desk operation; DPO: NID on paper |
 | S12a G2G sandbox: platform, NIDA, NESA | in review (M3) | BE [#49](https://github.com/Jackson-NSANZIMANA/e-recruitment/pull/49) | ADR-047 Accepted; ADR-048 §2.1–2.2 Accepted; rls/0042; six announcement scenarios; 14 sandbox personas proven end to end (rdf-2026 4/4, rnp-basic 6/6, rcs-officer-4y 3/3, rcs-junior 1/1) |
-| S12b Irembo clearance + SMS | ready after S12a's harness (Twilio half can start now) | | kit written 2026-10-25; owner: clearance validity window, Irembo certificate type code |
+| S12b Irembo clearance + SMS | in review (M3) | BE [PR pending, draft] | ADR-048 Accepted; rls/0040; `attachMyClearanceCertificate`; irembo-certificates + Twilio emulators; `TwilioSmsChannel`; `clearance-matrix` rehearsal; defaults taken, owner to confirm: 90 days, placeholder APPLICATION_CODE allowlist, human content review, sandbox SMS cap 50/day; owner: live `SANDBOX_SMS=twilio` check, real Irembo codes; stacked on S12a #49 |
 | S12c Full-stack sandbox (six real campaigns, three apps, one command) | waiting on S12a, S12b | | kit written 2026-10-25; owner: RCS walk-in on exam day |
 | B2 Biometric capture | waiting on S08 (M5) | | owner: model licence |
 | B3 Biometric evaluation | waiting on B2 (M5) | | owner: evaluation dataset |
