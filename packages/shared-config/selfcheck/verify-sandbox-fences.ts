@@ -17,6 +17,7 @@ import {
   assertSimulatorAllowed,
   isForbiddenSandboxResponse,
   resolveUsrpEnvironment,
+  SANDBOX_NETWORK_ENDPOINT_KEYS,
   type EnvSource,
 } from '../src/index.js';
 
@@ -94,6 +95,25 @@ check('RED: production NESA_BASE_URL on usrp-g2g-sandbox', refused(() => { asser
 check('RED: production on the .sandbox.usrp.internal zone', refused(() => { assertProductionSecrets({ ...PROD_ENV, NESA_BASE_URL: 'https://nesa.sandbox.usrp.internal' }); }, /SIMULATOR/));
 check('RED: production on a loopback simulator (endpoint rule)', refused(() => { assertProductionSecrets({ ...PROD_ENV, NIDA_BASE_URL: 'http://localhost:4900' }); }, /loopback/));
 check('GREEN: a lookalike host is not a simulator host', issuesOf(() => { assertProductionSecrets({ ...PROD_ENV, NIDA_BASE_URL: 'https://g2gsandbox-registry.gov.example' }); }) === null);
+
+console.log('\n── sandbox: all service endpoints reject external hosts');
+for (const key of SANDBOX_NETWORK_ENDPOINT_KEYS) {
+  const external = key === 'DATABASE_URL'
+    ? 'postgresql://usrp_app:synthetic-test-only@outside.example:5432/usrp_sandbox'
+    : key === 'KAFKA_BROKERS' ? 'outside.example:9092'
+      : key === 'CLAMAV_HOST' ? 'outside.example:3310'
+        : 'https://outside.example:9000';
+  check(`RED: sandbox ${key} rejects an external host`, refused(() => {
+    assertProductionSecrets({ ...SANDBOX_ENV, [key]: external });
+  }, /external hosts are refused/));
+}
+check('GREEN: sandbox accepts loopback and its named simulator', issuesOf(() => { assertProductionSecrets(SANDBOX_ENV); }) === null);
+check('GREEN: sandbox accepts compose service names (a private network)', issuesOf(() => {
+  assertProductionSecrets({ ...SANDBOX_ENV, DATABASE_URL: 'postgresql://usrp_app:synthetic-test-only@postgres:5432/usrp_sandbox', KAFKA_BROKERS: 'sandbox-kafka:9092', IAM_BASE_URL: 'http://iam-service:4011' });
+}) === null);
+check('RED: sandbox refuses a non-loopback IP address', refused(() => {
+  assertProductionSecrets({ ...SANDBOX_ENV, IAM_BASE_URL: 'http://10.0.0.5:4011' });
+}, /external hosts are refused/));
 
 console.log('\n── fence 2: production refuses a response that carries x-usrp-sandbox');
 const stamped = new Headers({ 'x-usrp-sandbox': '1' });

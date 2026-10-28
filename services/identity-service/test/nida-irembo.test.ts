@@ -92,12 +92,16 @@ test('a truncated body and a malformed NID are handled before any verdict', asyn
   await assert.rejects(gateway.lookupCitizen('not-a-nid'));
 });
 
-test('mapping: unknown status:false is a fault; reshaped records are faults; province must agree', () => {
-  assert.equal(mapIremboIdentity({ status: false, responseCode: 'USER_PROFILE_NOT_FOUND' }, '2026-10-25').kind, 'NOT_FOUND');
-  assert.equal(mapIremboIdentity({ status: false, responseCode: 'INTERNAL_SERVER_ERROR' }, '2026-10-25').kind, 'FAULT');
-  assert.equal(mapIremboIdentity({ data: {} }, '2026-10-25').kind, 'FAULT');
-  const info = { surname: 'KAMANZI', forename: 'Eric', dateOfBirth: '15/03/2003', sex: 'MALE', district: 'Gasabo', province: 'Amajyepfo', nationality: 'RW', citizenStatus: 'NORMAL', dateOfExpiry: '01/01/2030' };
-  assert.equal(mapIremboIdentity({ status: true, data: { identityInfo: info } }, '2026-10-25').kind, 'FAULT');
-  assert.equal(mapIremboIdentity({ status: true, data: { identityInfo: { ...info, province: 'Umujyi wa Kigali' } } }, '2026-10-25').kind, 'FOUND');
-  assert.equal(mapIremboIdentity({ status: true, data: { identityInfo: { ...info, province: 'Kigali City', dateOfBirth: '31/02/2003' } } }, '2026-10-25').kind, 'FAULT');
+test('mapping: returned subject ids must match the request before identity is accepted', () => {
+  const requested = '0000000000000001'; // synthetic-only test value
+  assert.equal(mapIremboIdentity({ status: false, responseCode: 'USER_PROFILE_NOT_FOUND' }, '2026-10-25', requested).kind, 'NOT_FOUND');
+  assert.equal(mapIremboIdentity({ status: false, responseCode: 'INTERNAL_SERVER_ERROR' }, '2026-10-25', requested).kind, 'FAULT');
+  assert.equal(mapIremboIdentity({ data: {} }, '2026-10-25', requested).kind, 'FAULT');
+  const info = { documentNumber: requested, surname: 'KAMANZI', forename: 'Eric', dateOfBirth: '15/03/2003', sex: 'MALE', district: 'Gasabo', province: 'Amajyepfo', nationality: 'RW', citizenStatus: 'NORMAL', dateOfExpiry: '01/01/2030' };
+  const envelope = (identityInfo: Record<string, unknown>, identificationNumber = requested) => ({ status: true, data: { userProfileDto: { identificationNumber }, identityInfo } });
+  assert.equal(mapIremboIdentity(envelope(info), '2026-10-25', requested).kind, 'FAULT');
+  assert.equal(mapIremboIdentity(envelope({ ...info, province: 'Umujyi wa Kigali' }), '2026-10-25', requested).kind, 'FOUND');
+  assert.equal(mapIremboIdentity(envelope({ ...info, province: 'Kigali City', dateOfBirth: '31/02/2003' }), '2026-10-25', requested).kind, 'FAULT');
+  assert.equal(mapIremboIdentity(envelope(info, '0000000000000002'), '2026-10-25', requested).kind, 'FAULT');
+  assert.equal(mapIremboIdentity(envelope({ ...info, documentNumber: '0000000000000002' }), '2026-10-25', requested).kind, 'FAULT');
 });

@@ -77,6 +77,24 @@ test('mapping refuses a record for a different index and malformed marks', () =>
   assert.ok(unknown.kind === 'FOUND' && unknown.results.qualificationLevel === null);
 });
 
+test('a record without gender or a NID hint is mapped, then goes to a human: never a fault retried forever', () => {
+  const record = pop.persona('L-01').nesa;
+  assert.ok(record !== null);
+  const index = record.studentIndexNumber;
+  for (const quirk of [{ gender: undefined }, { studentNationalIdHint: undefined }, { studentNationalIdHint: 'not-a-masked-hint' }]) {
+    const mapped = mapSdmsResults({ ...record, ...quirk }, index);
+    assert.equal(mapped.kind, 'FOUND');
+    assert.ok(mapped.kind === 'FOUND');
+    const gate = decideNesaGate(identityOf('L-01'), mapped.results);
+    assert.ok(gate.kind === 'REVIEW', JSON.stringify(quirk));
+    assert.ok(gate.reasons.length > 0);
+  }
+  const found = mapSdmsResults(record, index);
+  assert.ok(found.kind === 'FOUND');
+  const noSex = decideNesaGate(identityOf('L-01'), { ...found.results, holder: { ...found.results.holder, sex: null } });
+  assert.ok(noSex.kind === 'REVIEW' && noSex.reasons.includes('SEX_NOT_COMPARED'));
+});
+
 function decide(personaId: string, holderOf = personaId) {
   const mapped = mapSdmsResults(pop.persona(holderOf).nesa, pop.persona(holderOf).nesa?.studentIndexNumber ?? '');
   assert.ok(mapped.kind === 'FOUND');
@@ -93,6 +111,13 @@ test('gate: bind first; then unpublished, review, evaluate', () => {
   assert.equal(decide('P-NESA-UNPUBLISHED').kind, 'PENDING_UNPUBLISHED');
   const malpractice = decide('P-NESA-MALPRACTICE');
   assert.ok(malpractice.kind === 'REVIEW' && malpractice.reasons.includes('MALPRACTICE'));
+});
+
+test('gate: missing applicant-side NID hint yields REVIEW for SDMS binding', () => {
+  const base = mapSdmsResults(pop.persona('L-01').nesa, '990301PCM0012024');
+  assert.ok(base.kind === 'FOUND');
+  const missingHint = decideNesaGate({ ...identityOf('L-01'), nationalIdHint: null }, base.results);
+  assert.equal(missingHint.kind, 'REVIEW');
 });
 
 test('gate: an unknown level type or a non-PASS division is REVIEW, never automatic', () => {

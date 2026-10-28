@@ -7,9 +7,10 @@
 //   1. binding (shared-identity-match): NOT_BOUND stops here, as a
 //      CORRECTABLE outcome ("this record does not match your identity"),
 //      never an eligibility verdict; a PARTIAL name or an unreadable holder
-//      field is REVIEW, and so is a binding that could not compare the NID
-//      hint (an identity verified before rls/0042 holds none, and SDMS
-//      carries no date of birth, so name and sex alone would decide);
+//      field is REVIEW, and so is a binding that could not compare the sex
+//      or the NID hint, on either side (bindCredential requiredFields): SDMS
+//      carries no date of birth, so name alone would otherwise decide, and
+//      an identity verified before rls/0042 holds no hint;
 //   2. published:false → PENDING (retried, never ineligible);
 //   3. malpractice, an unrecognised level type, or a non-PASS division →
 //      REVIEW (human), never automatic;
@@ -38,7 +39,7 @@ export const NESA_GATE_CODES = {
 export const NESA_NOT_BOUND_CITIZEN_MESSAGE =
   'This record does not match your identity. Check the examination index number and correct it if needed.';
 
-export type NesaReviewReason = 'NAME_PARTIAL' | 'HOLDER_FIELD_UNREADABLE' | 'NID_HINT_NOT_COMPARED' | 'MALPRACTICE' | 'UNKNOWN_LEVEL_TYPE' | 'DIVISION_NOT_PASS';
+export type NesaReviewReason = 'NAME_PARTIAL' | 'HOLDER_FIELD_UNREADABLE' | 'NID_HINT_NOT_COMPARED' | 'SEX_NOT_COMPARED' | 'MALPRACTICE' | 'UNKNOWN_LEVEL_TYPE' | 'DIVISION_NOT_PASS';
 
 export interface EducationFacts {
   readonly qualificationLevel: QualificationLevel;
@@ -59,13 +60,18 @@ export function decideNesaGate(identity: IdentityFacts, results: NesaResults): N
     holderName: results.holder.name,
     sex: results.holder.sex,
     nationalIdHint: results.holder.nationalIdHint,
-  });
+  }, { requiredFields: ['sex', 'nationalIdHint'] });
   if (binding.outcome === 'NOT_BOUND') return { kind: 'NOT_BOUND', binding };
   if (!results.published) return { kind: 'PENDING_UNPUBLISHED', binding };
 
   const reasons: NesaReviewReason[] = [];
-  if (binding.outcome === 'REVIEW') reasons.push(binding.nameMatch === 'PARTIAL' ? 'NAME_PARTIAL' : 'HOLDER_FIELD_UNREADABLE');
-  else if (binding.fields.nationalIdHint === 'NOT_COMPARED') reasons.push('NID_HINT_NOT_COMPARED');
+  if (binding.outcome === 'REVIEW') {
+    // Every cause is named, so the officer sees why: a binding can be REVIEW for more than one.
+    if (binding.nameMatch === 'PARTIAL') reasons.push('NAME_PARTIAL');
+    if (binding.fields.nationalIdHint === 'NOT_COMPARED') reasons.push('NID_HINT_NOT_COMPARED');
+    if (binding.fields.sex === 'NOT_COMPARED') reasons.push('SEX_NOT_COMPARED');
+    if (Object.values(binding.fields).includes('UNREADABLE')) reasons.push('HOLDER_FIELD_UNREADABLE');
+  }
   if (results.malpractice) reasons.push('MALPRACTICE');
   if (results.qualificationLevel === null) reasons.push('UNKNOWN_LEVEL_TYPE');
   if (!PASSING_DIVISIONS.has(results.division)) reasons.push('DIVISION_NOT_PASS');

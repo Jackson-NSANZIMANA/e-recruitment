@@ -29,13 +29,13 @@ export function captureLog(): { log: SandboxLog; lines: string[] } {
   };
 }
 
-export async function startSandbox(opts: { pop?: Population; overlay?: PrivatePersona | null; live?: LiveNesaPassthrough | null; log?: SandboxLog; timeoutHoldMs?: number; realBudgets?: boolean } = {}) {
+export async function startSandbox(opts: { pop?: Population; overlay?: PrivatePersona | null; live?: LiveNesaPassthrough | null; log?: SandboxLog; timeoutHoldMs?: number; realBudgets?: boolean; host?: string } = {}) {
   const pop = opts.pop ?? population();
   const server = await createSandboxServer({
     world: { population: pop, overlay: opts.overlay ?? null, live: opts.live ?? null, now: () => new Date(), log: opts.log ?? captureLog().log, clientTokens: new Set([TOKEN]) },
     environment: 'development',
     port: 0,
-    host: '127.0.0.1',
+    host: opts.host ?? '127.0.0.1',
     latencyScale: 0,
     profiles: opts.realBudgets === true ? DEFAULT_PROFILES : GENEROUS,
     timeoutHoldMs: opts.timeoutHoldMs ?? 30,
@@ -46,7 +46,7 @@ export async function startSandbox(opts: { pop?: Population; overlay?: PrivatePe
 /** A synthetic Irembo identity capture written to a temp directory OUTSIDE any git tree. */
 export function syntheticOverlayDir(nid: string, index: string | null): string {
   const dir = mkdtempSync(join(tmpdir(), 'usrp-overlay-test-'));
-  writeFileSync(join(dir, 'identity.json'), JSON.stringify({ status: true, data: { userProfileDto: { identificationNumber: nid }, identityInfo: { forename: 'Test', surname: 'OVERLAY', sex: 'MALE', dateOfBirth: '01/01/2003', district: 'Gasabo', province: 'Umujyi wa Kigali', nationality: 'RW', citizenStatus: 'NORMAL', documentNumber: '' } } }));
+  writeFileSync(join(dir, 'identity.json'), JSON.stringify({ status: true, data: { userProfileDto: { identificationNumber: nid }, identityInfo: { forename: 'Test', surname: 'OVERLAY', sex: 'MALE', dateOfBirth: '01/01/2003', district: 'Gasabo', province: 'Umujyi wa Kigali', nationality: 'RW', citizenStatus: 'NORMAL', documentNumber: nid } } }));
   if (index !== null) writeFileSync(join(dir, 'results.json'), JSON.stringify({ studentIndexNumber: index, studentNames: 'OVERLAY Test', rawMark: [] }));
   writeFileSync(join(dir, 'notes.txt'), 'not json');
   return dir;

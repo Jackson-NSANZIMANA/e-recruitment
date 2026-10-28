@@ -158,6 +158,16 @@ test('a missing identity-side hint is NOT_COMPARED and does not block BOUND', ()
   assert.equal(result.fields.nationalIdHint, 'NOT_COMPARED');
 });
 
+test('required identity evidence missing on the applicant yields REVIEW', () => {
+  const result = bindCredential(
+    { fullName: 'KAMANZI Eric', dateOfBirth: '2003-03-15', sex: 'MALE', nationalIdHint: null },
+    { holderName: 'Eric KAMANZI', sex: 'MALE', nationalIdHint: '1200********0100' },
+    { requiredFields: ['sex', 'nationalIdHint'] },
+  );
+  assert.equal(result.fields.nationalIdHint, 'NOT_COMPARED');
+  assert.equal(result.outcome, 'REVIEW');
+});
+
 test('a name mismatch is NOT_BOUND even when everything else matches; the result carries no values', () => {
   const result = bindCredential({ fullName: 'KAMANZI Eric', dateOfBirth: '2003-03-15', sex: 'MALE' }, { holderName: 'UWASE Aline', dateOfBirth: '15/03/2003', sex: 'MALE' });
   assert.equal(result.outcome, 'NOT_BOUND');

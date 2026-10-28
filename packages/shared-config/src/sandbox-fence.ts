@@ -52,6 +52,28 @@ export const G2G_BASE_URL_KEYS: readonly string[] = [
   'TWILIO_BASE_URL',
 ];
 
+/** Every service endpoint whose host must stay local in the single-host sandbox. */
+export const SANDBOX_NETWORK_ENDPOINT_KEYS: readonly string[] = [
+  'DATABASE_URL', 'KAFKA_BROKERS', 'IAM_BASE_URL', 'APPLICATION_SERVICE_BASE_URL',
+  'SCHEDULING_SERVICE_BASE_URL', 'BIOMETRIC_SERVICE_BASE_URL', 'NIDA_BASE_URL',
+  'NESA_BASE_URL', 'RIB_BASE_URL', 'HEC_BASE_URL', 'MINIO_ENDPOINT', 'CLAMAV_HOST',
+];
+
+/**
+ * A sandbox endpoint is local when it is loopback, the Docker host alias, or a
+ * single-label name (a compose service or container name such as `postgres`
+ * or `iam-service`), which resolves only on a private network. A dotted name
+ * or a non-loopback IP address could be anywhere, so it is refused: the
+ * sandbox relaxes broker and object-store TLS, which is safe only on-host.
+ */
+const SANDBOX_LOCAL_HOSTS: ReadonlySet<string> = new Set(['localhost', '::1', 'host.docker.internal']);
+const PRIVATE_SERVICE_NAME = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
+function isLocalSandboxHost(host: string): boolean {
+  if (SANDBOX_LOCAL_HOSTS.has(host) || /^127(?:\.\d{1,3}){3}$/.test(host)) return true;
+  return PRIVATE_SERVICE_NAME.test(host) && !/^\d+$/.test(host);
+}
+
 /**
  * Simulator hosts: the compose service name (`g2g-sandbox`), its container
  * name (`usrp-g2g-sandbox`) and anything under a `g2g-sandbox` DNS label or
@@ -130,6 +152,27 @@ export function sandboxFenceIssues(source: EnvSource = process.env): string[] {
     return error instanceof EnvValidationError ? [...error.issues] : ['USRP_ENVIRONMENT could not be resolved.'];
   }
   const issues: string[] = [];
+  if (env === 'sandbox') {
+    for (const key of SANDBOX_NETWORK_ENDPOINT_KEYS) {
+      const raw = source[key];
+      if (!present(raw)) continue;
+      const entries = key === 'KAFKA_BROKERS' ? raw.split(',').map((part) => part.trim()) : [raw.trim()];
+      for (const entry of entries) {
+        // Parse URL endpoints and host:port endpoints without exposing credentials.
+        const candidate = /^[a-z][a-z0-9+.-]*:\/\//i.test(entry) ? entry : `tcp://${entry}`;
+        let host: string;
+        try {
+          host = new URL(candidate).hostname.replace(/^\[|\]$/g, '').toLowerCase();
+        } catch {
+          issues.push(`${key} is not a parseable local sandbox endpoint.`);
+          continue;
+        }
+        if (!isLocalSandboxHost(host)) {
+          issues.push(`${key} must point to loopback or a private single-label service name; external hosts are refused.`);
+        }
+      }
+    }
+  }
   for (const key of G2G_BASE_URL_KEYS) {
     const raw = source[key];
     if (!present(raw)) continue;

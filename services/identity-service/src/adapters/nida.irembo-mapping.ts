@@ -75,7 +75,7 @@ export function districtOf(label: string): District | null {
 }
 
 /** Map the IremboGov envelope. `today` is an ISO date for the expiry flag. Pure. */
-export function mapIremboIdentity(envelope: unknown, today: string): IremboMapping {
+export function mapIremboIdentity(envelope: unknown, today: string, requestedNationalId: string): IremboMapping {
   if (!isRecord(envelope) || typeof envelope['status'] !== 'boolean') return { kind: 'FAULT', reason: 'not an Irembo envelope' };
   if (!envelope['status']) {
     const code = str(envelope['responseCode']) ?? '';
@@ -83,7 +83,14 @@ export function mapIremboIdentity(envelope: unknown, today: string): IremboMappi
   }
   const data = envelope['data'];
   const info = isRecord(data) ? data['identityInfo'] : undefined;
-  if (!isRecord(info)) return { kind: 'FAULT', reason: 'identityInfo missing' };
+  const profile = isRecord(data) ? data['userProfileDto'] : undefined;
+  if (!isRecord(info) || !isRecord(profile)) return { kind: 'FAULT', reason: 'identity record missing' };
+  const requestedDigits = requestedNationalId.replace(/\s+/g, '');
+  const profileDigits = str(profile['identificationNumber'])?.replace(/\s+/g, '') ?? '';
+  const documentDigits = str(info['documentNumber'])?.replace(/\s+/g, '') ?? '';
+  if (!/^\d{16}$/.test(requestedDigits) || profileDigits !== requestedDigits || documentDigits !== requestedDigits) {
+    return { kind: 'FAULT', reason: 'identity record does not match the requested subject' };
+  }
 
   const surname = str(info['surname']);
   const forename = str(info['forename']);

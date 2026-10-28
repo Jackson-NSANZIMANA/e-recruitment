@@ -40,7 +40,7 @@ services:
     volumes:
       - sandbox-kafka-data:/var/lib/kafka/data
     ports:
-      - "4992:4992"
+      - "127.0.0.1:4992:4992"
     healthcheck:
       test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
       interval: 10s

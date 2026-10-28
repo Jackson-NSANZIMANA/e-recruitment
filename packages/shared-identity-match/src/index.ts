@@ -62,6 +62,12 @@ export interface CredentialClaim {
   readonly nationalIdHint?: string | null;
 }
 
+export type ComparableClaimField = 'dateOfBirth' | 'sex' | 'nationalIdHint';
+export interface BindingOptions {
+  /** Missing identity-side evidence for these fields yields REVIEW, not BOUND. */
+  readonly requiredFields?: readonly ComparableClaimField[];
+}
+
 export interface BindingFields {
   readonly name: FieldResult;
   readonly dateOfBirth: FieldResult;
@@ -240,7 +246,7 @@ function compareField(
 const NAME_FIELD: Readonly<Record<NameMatch, FieldResult>> = { EXACT: 'MATCH', PARTIAL: 'PARTIAL', MISMATCH: 'MISMATCH' };
 
 /** Bind a credential claim to the applicant's identity. PURE and TOTAL. */
-export function bindCredential(identity: IdentityFacts, claim: CredentialClaim): BindingResult {
+export function bindCredential(identity: IdentityFacts, claim: CredentialClaim, options: BindingOptions = {}): BindingResult {
   const nameMatch = compareNames(identity.fullName, claim.holderName);
   const fields: BindingFields = {
     name: NAME_FIELD[nameMatch],
@@ -249,9 +255,10 @@ export function bindCredential(identity: IdentityFacts, claim: CredentialClaim):
     nationalIdHint: compareField(identity.nationalIdHint, claim.nationalIdHint, parseNationalIdHint),
   };
   const all = Object.values(fields) as FieldResult[];
+  const requiredMissing = (options.requiredFields ?? []).some((field) => fields[field] === 'NOT_COMPARED');
   const outcome: BindingOutcome = all.includes('MISMATCH')
     ? 'NOT_BOUND'
-    : all.includes('PARTIAL') || all.includes('UNREADABLE')
+    : all.includes('PARTIAL') || all.includes('UNREADABLE') || requiredMissing
       ? 'REVIEW'
       : 'BOUND';
   return { outcome, nameMatch, fields };

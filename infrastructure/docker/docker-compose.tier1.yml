@@ -125,8 +125,8 @@ services:
     volumes:
       - ../..:/repo:ro
     ports:
-      - "3100:3100"
-      - "3101:3100"
+      - "127.0.0.1:3100:3100"
+      - "127.0.0.1:3101:3100"
     networks:
       - usrp-internal
     healthcheck:
