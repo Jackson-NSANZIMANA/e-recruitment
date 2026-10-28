@@ -43,7 +43,9 @@ function projectClearance(value: unknown, audience: 'citizen' | 'officer'): Reco
   const reasons = c['reasons'];
   if (typeof state !== 'string' || !CLEARANCE_STATES.has(state)) return null;
   if (code !== null && (typeof code !== 'string' || !CLEARANCE_CODE_RE.test(code))) return null;
-  if (!Array.isArray(reasons) || !reasons.every((r) => typeof r === 'string' && CLEARANCE_REASONS.has(r))) return null;
+  // The citizen path (identity-service) carries no reasons at all; an officer's always does.
+  if (audience === 'officer' && (!Array.isArray(reasons) || !reasons.every((r) => typeof r === 'string' && CLEARANCE_REASONS.has(r)))) return null;
+  if (audience === 'citizen' && reasons !== undefined && !Array.isArray(reasons)) return null;
   // A citizen is told THAT an officer will look, never why (a partial name is not theirs to be told).
   return { state, code, ...(audience === 'officer' ? { reasons } : {}) };
 }

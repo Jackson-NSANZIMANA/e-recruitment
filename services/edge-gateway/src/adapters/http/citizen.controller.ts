@@ -420,6 +420,13 @@ export function attachMyClearanceCertificateHandler(deps: EdgeDeps): RouteHandle
       return { status: 422, body: { error: 'CLEARANCE_NUMBER_MALFORMED' } };
     }
 
+    // Each accepted number is a registry call, so the session is throttled like a submission.
+    await enforceRateLimit(
+      deps.limiter,
+      sessionBucketKey(session.sessionId, 'attachMyClearanceCertificate'),
+      deps.config.rateLimits.applicantSubmitPerMinute,
+    );
+
     const upstream = await deps.upstream.call({
       operation: UPSTREAM.myClearanceCertificate,
       correlationId: ctx.correlationId,

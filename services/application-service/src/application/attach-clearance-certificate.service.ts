@@ -41,12 +41,18 @@ export type AttachClearanceOutcome =
   | { readonly kind: 'NOT_APPLICABLE'; readonly agency: Agency; readonly status: ApplicationStatus }
   | { readonly kind: 'NOT_FOUND' }
   | { readonly kind: 'INVALID_NUMBER' }
+  | { readonly kind: 'NOT_ENABLED' }
   | { readonly kind: 'FORBIDDEN' };
 
 export interface AttachClearanceDeps {
   readonly repository: ClearanceAttachRepository;
   readonly eventBus: EventBus;
   readonly clock?: () => Date;
+  /**
+   * The Irembo certificate flow is on (CLEARANCE_MODE=IREMBO_CERTIFICATE). When it is
+   * off nothing consumes clearance.submitted, so accepting a number would be a lie.
+   */
+  readonly enabled?: boolean;
 }
 
 export class AttachClearanceCertificateService {
@@ -54,6 +60,7 @@ export class AttachClearanceCertificateService {
 
   async attach(command: AttachClearanceCommand): Promise<AttachClearanceOutcome> {
     if (command.actor.kind !== 'system') return { kind: 'FORBIDDEN' };
+    if (this.deps.enabled === false) return { kind: 'NOT_ENABLED' };
     const number = parseClearanceNumber(command.clearanceCertificateNumber);
     if (number === null) return { kind: 'INVALID_NUMBER' };
 

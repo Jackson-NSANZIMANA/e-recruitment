@@ -183,7 +183,7 @@ async function main(): Promise<void> {
     const viaFn = async (args: Parameters<typeof call>[0]): Promise<{ outcome?: string }> => sql.begin(async (tx) => {
       await tx`SET LOCAL ROLE usrp_vetting_service`;
       const r = await tx.unsafe(call(args));
-      return (r[0] as { record_clearance_verification: { outcome?: string } }).record_clearance_verification;
+      return (r[0] as unknown as { record_clearance_verification: { outcome?: string } }).record_clearance_verification;
     });
     const first = await viaFn({ hmac: '2'.repeat(64) });
     const second = await viaFn({ hmac: '2'.repeat(64) });

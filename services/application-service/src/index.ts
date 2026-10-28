@@ -102,6 +102,11 @@ export interface ApplicationService {
   readonly campaignPublicRead: CampaignPublicReadService;
 }
 
+/** The Irembo certificate flow is on only when background-vetting-service runs in that mode (ADR-048). */
+function clearanceFlowEnabled(): boolean {
+  return process.env['CLEARANCE_MODE'] === 'IREMBO_CERTIFICATE';
+}
+
 /**
  * Assemble the application aggregate from config + a chosen event transport.
  * Both use cases share ONE PgApplicationRepository — the single writer of the
@@ -166,12 +171,13 @@ export function createApplicationService(
     documentChecklist: new DocumentChecklistService({
       repository: new PgDocumentChecklistRepository(),
       eventBus,
+      clearanceEnabled: clearanceFlowEnabled(),
     }),
     selfWithdrawal: new SelfWithdrawalService({
       repository: new PgSelfWithdrawalRepository(),
       eventBus,
     }),
-    attachClearance: new AttachClearanceCertificateService({ repository: new PgClearanceAttachRepository(), eventBus }),
+    attachClearance: new AttachClearanceCertificateService({ repository: new PgClearanceAttachRepository(), eventBus, enabled: clearanceFlowEnabled() }),
     campaignControl: new CampaignControlService({ repository: new PgCampaignControlRepository() }),
     campaignPublicRead: new CampaignPublicReadService({ repository: new PgCampaignPublicReadRepository() }),
   };

@@ -126,12 +126,13 @@ export class TwilioSmsChannel implements SmsChannel {
       logError('sms_destination_unreadable', { channel: 'TWILIO' });
       return 'FAILED';
     }
-    if (!this.#limiter.take(to)) {
-      logError('sms_number_rate_limited', { channel: 'TWILIO', destinationMasked: maskDestination(to) });
-      return 'FAILED';
-    }
+    // The cap first: a send refused by the cap must not burn the number's slot.
     if (!this.#cap.allows()) {
       logError('sms_cost_cap_reached', { channel: 'TWILIO', limit: this.#cap.limit });
+      return 'FAILED';
+    }
+    if (!this.#limiter.take(to)) {
+      logError('sms_number_rate_limited', { channel: 'TWILIO', destinationMasked: maskDestination(to) });
       return 'FAILED';
     }
 

@@ -59,3 +59,10 @@ test('attach: stages one event with the normalised number; refuses officers, clo
   assert.equal((await none.attach(cmd('S990000000001ABCD'))).kind, 'NOT_FOUND');
   assert.equal(bus.published.length, 1);
 });
+
+test('attach: with the Irembo flow off nothing is accepted (no one would consume the event)', async () => {
+  const bus = new InMemoryEventBus();
+  const off = new AttachClearanceCertificateService({ repository: own(), eventBus: bus, enabled: false });
+  assert.equal((await off.attach(cmd('S990000000001ABCD'))).kind, 'NOT_ENABLED');
+  assert.equal(bus.published.length, 0);
+});

@@ -11,7 +11,7 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { createHash } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 /** The Kigali (UTC+2, no DST) calendar day of `now`, YYYY-MM-DD. */
@@ -41,10 +41,9 @@ export class DailyCostCap {
     }
     if (!existsSync(this.stateFile)) return 0;
     const lines = readFileSync(this.stateFile, 'utf8').split('\n').filter((l) => l !== '');
-    const todays = lines.filter((l) => l === today).length;
-    // Drop yesterday's lines once a new day starts (best effort).
-    if (todays === 0 && lines.length > 0) writeFileSync(this.stateFile, '', { mode: 0o600 });
-    return todays;
+    // Only today's lines count. Old lines are never rewritten: a rewrite could wipe a line
+    // another process just appended, and the file grows by at most `limit` lines a day.
+    return lines.filter((l) => l === today).length;
   }
 
   allows(): boolean {

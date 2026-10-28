@@ -64,6 +64,8 @@ function mapOutcome(outcome: AttachClearanceOutcome): HttpResult {
       return { status: 404, body: { status: 'NOT_FOUND' } };
     case 'INVALID_NUMBER':
       return { status: 422, body: { status: 'INVALID_NUMBER' } };
+    case 'NOT_ENABLED':
+      return { status: 501, body: { status: 'NOT_ENABLED' } };
     case 'FORBIDDEN':
       return { status: 403, body: { error: 'FORBIDDEN' } };
     default:

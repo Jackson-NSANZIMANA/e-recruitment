@@ -31,3 +31,10 @@ test('the amber queue carries closed reason codes only', () => {
   assert.deepEqual(rows[0]?.reasons, ['CLEARANCE_CONTENT_REVIEW']);
   assert.deepEqual(rows[1]?.reasons, []);
 });
+
+test('the citizen path (identity-service strips reasons) projects without them; the officer path still requires them', () => {
+  const noReasons = checklist({ state: 'NUMBER_REQUIRED', code: null });
+  const citizen = projectChecklist(noReasons, 'citizen') as { items: { clearance: Record<string, unknown> }[] } | null;
+  assert.deepEqual(citizen?.items[0]?.clearance, { state: 'NUMBER_REQUIRED', code: null });
+  assert.equal(projectChecklist(noReasons, 'officer'), null);
+});

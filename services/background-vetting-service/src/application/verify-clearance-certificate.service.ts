@@ -88,7 +88,9 @@ export class VerifyClearanceCertificateService {
   async verify(command: VerifyClearanceCertificateCommand): Promise<VerifyClearanceCertificateOutcome> {
     const context = command.context ?? newCorrelationContext();
     const number = parseClearanceNumber(command.clearanceCertificateNumber);
-    const referenceKey = number ?? command.clearanceCertificateNumber.trim().toUpperCase().slice(0, 64);
+    // A malformed number is still held only as an HMAC and a last-4 the table accepts:
+    // sanitised, so a bad producer cannot make a poison message the partition re-reads forever.
+    const referenceKey = number ?? command.clearanceCertificateNumber.trim().toUpperCase().replace(/[^A-Z0-9]/g, '*').slice(0, 64);
     const base = {
       agency: command.agency,
       applicationId: command.applicationId,

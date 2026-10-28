@@ -42,15 +42,20 @@ export type VenueVerificationOutcome =
 export interface DocumentChecklistDeps {
   readonly repository: DocumentChecklistRepository;
   readonly eventBus: EventBus;
+  /** Show the clearance-certificate state (the Irembo flow is on). Default off. */
+  readonly clearanceEnabled?: boolean;
 }
 
-function checklistOf(facts: ChecklistFacts): DocumentChecklist {
-  return evaluateDocumentChecklist(
+function checklistOf(facts: ChecklistFacts, clearanceEnabled: boolean): DocumentChecklist {
+  const checklist = evaluateDocumentChecklist(
     facts.category,
     resolveRequiredDocuments(facts.category, facts.policyRequired),
     facts.gates,
     facts.documents,
   );
+  if (clearanceEnabled) return checklist;
+  // Flow off: nobody would ever answer a number, so the state is not offered.
+  return { ...checklist, items: checklist.items.map(({ clearance: _omitted, ...item }) => item) };
 }
 
 export class DocumentChecklistService {
@@ -63,13 +68,13 @@ export class DocumentChecklistService {
       { agency: actor.agency, dbRole: dbRoleForPrincipal(actor) },
       applicationId,
     );
-    return facts === null ? { kind: 'NOT_FOUND' } : { kind: 'OK', agency: facts.agency, checklist: checklistOf(facts) };
+    return facts === null ? { kind: 'NOT_FOUND' } : { kind: 'OK', agency: facts.agency, checklist: checklistOf(facts, this.deps.clearanceEnabled === true) };
   }
 
   /** The citizen's view — only an application the session subject owns. */
   async forApplicant(applicantId: string, applicationId: string): Promise<ChecklistOutcome> {
     const facts = await this.deps.repository.loadForApplicant(applicantId, applicationId);
-    return facts === null ? { kind: 'NOT_FOUND' } : { kind: 'OK', agency: facts.agency, checklist: checklistOf(facts) };
+    return facts === null ? { kind: 'NOT_FOUND' } : { kind: 'OK', agency: facts.agency, checklist: checklistOf(facts, this.deps.clearanceEnabled === true) };
   }
 
   /**
@@ -112,6 +117,6 @@ export class DocumentChecklistService {
       await this.deps.eventBus.publish(audit);
     }
     const after = await this.deps.repository.loadForOfficer(scope, applicationId);
-    return { kind: write, checklist: checklistOf(after ?? facts) };
+    return { kind: write, checklist: checklistOf(after ?? facts, this.deps.clearanceEnabled === true) };
   }
 }

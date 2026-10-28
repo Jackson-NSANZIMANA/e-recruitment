@@ -107,7 +107,16 @@ test('the cost cap is shared through a state file, survives a restart, and rolls
   now = new Date('2026-10-28T22:30:00Z'); // 00:30 next day in Kigali
   assert.equal(first.allows(), true);
   assert.equal(first.used(), 0);
-  assert.equal(readFileSync(file, 'utf8'), '', 'yesterday dropped');
+  assert.match(readFileSync(file, 'utf8'), /2026-10-28/, 'yesterday is kept, never rewritten');
+});
+
+test('a send refused by the cap does not burn the number slot', async () => {
+  const cap = new DailyCostCap(1);
+  const limiter = new PerNumberLimiter(1, 60_000);
+  const { ch } = channel({ costCap: cap, perNumber: limiter });
+  assert.equal(await ch.send({ destination: '0788333333', body: '1' }), 'ACCEPTED');
+  assert.equal(await ch.send({ destination: '0788444444', body: '2' }), 'FAILED'); // cap
+  assert.equal(limiter.take('+250788444444'), true, 'the refused number kept its slot');
 });
 
 test('the per-number limit holds per destination within its window only', async () => {
