@@ -108,6 +108,12 @@ for (const key of SANDBOX_NETWORK_ENDPOINT_KEYS) {
   }, /external hosts are refused/));
 }
 check('GREEN: sandbox accepts loopback and its named simulator', issuesOf(() => { assertProductionSecrets(SANDBOX_ENV); }) === null);
+check('GREEN: sandbox accepts compose service names (a private network)', issuesOf(() => {
+  assertProductionSecrets({ ...SANDBOX_ENV, DATABASE_URL: 'postgresql://usrp_app:synthetic-test-only@postgres:5432/usrp_sandbox', KAFKA_BROKERS: 'sandbox-kafka:9092', IAM_BASE_URL: 'http://iam-service:4011' });
+}) === null);
+check('RED: sandbox refuses a non-loopback IP address', refused(() => {
+  assertProductionSecrets({ ...SANDBOX_ENV, IAM_BASE_URL: 'http://10.0.0.5:4011' });
+}, /external hosts are refused/));
 
 console.log('\n── fence 2: production refuses a response that carries x-usrp-sandbox');
 const stamped = new Headers({ 'x-usrp-sandbox': '1' });

@@ -59,10 +59,20 @@ export const SANDBOX_NETWORK_ENDPOINT_KEYS: readonly string[] = [
   'NESA_BASE_URL', 'RIB_BASE_URL', 'HEC_BASE_URL', 'MINIO_ENDPOINT', 'CLAMAV_HOST',
 ];
 
-const SANDBOX_LOCAL_HOSTS: ReadonlySet<string> = new Set([
-  'localhost', '127.0.0.1', '::1', 'host.docker.internal',
-  'g2g-sandbox', 'usrp-g2g-sandbox', 'sandbox-kafka', 'usrp-sandbox-kafka',
-]);
+/**
+ * A sandbox endpoint is local when it is loopback, the Docker host alias, or a
+ * single-label name (a compose service or container name such as `postgres`
+ * or `iam-service`), which resolves only on a private network. A dotted name
+ * or a non-loopback IP address could be anywhere, so it is refused: the
+ * sandbox relaxes broker and object-store TLS, which is safe only on-host.
+ */
+const SANDBOX_LOCAL_HOSTS: ReadonlySet<string> = new Set(['localhost', '::1', 'host.docker.internal']);
+const PRIVATE_SERVICE_NAME = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
+function isLocalSandboxHost(host: string): boolean {
+  if (SANDBOX_LOCAL_HOSTS.has(host) || /^127(?:\.\d{1,3}){3}$/.test(host)) return true;
+  return PRIVATE_SERVICE_NAME.test(host) && !/^\d+$/.test(host);
+}
 
 /**
  * Simulator hosts: the compose service name (`g2g-sandbox`), its container
@@ -157,9 +167,8 @@ export function sandboxFenceIssues(source: EnvSource = process.env): string[] {
           issues.push(`${key} is not a parseable local sandbox endpoint.`);
           continue;
         }
-        const loopback = host === 'localhost' || host === '::1' || /^127(?:\.\d{1,3}){3}$/.test(host);
-        if (!loopback && !SANDBOX_LOCAL_HOSTS.has(host)) {
-          issues.push(`${key} must point to loopback or an approved local sandbox service; external hosts are refused.`);
+        if (!isLocalSandboxHost(host)) {
+          issues.push(`${key} must point to loopback or a private single-label service name; external hosts are refused.`);
         }
       }
     }

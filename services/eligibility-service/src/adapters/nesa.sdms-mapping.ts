@@ -29,7 +29,6 @@
 // ══════════════════════════════════════════════════════════════════
 
 import type { QualificationLevel } from '@usrp/shared-types';
-import { parseNationalIdHint } from '@usrp/shared-identity-match';
 import type { NesaResults, NesaSubjectMark } from '../domain/nesa.types.js';
 
 export type SdmsMapping =
@@ -59,12 +58,6 @@ export function mapSdmsResults(body: unknown, askedIndex: string): SdmsMapping {
   }
   if (index !== askedIndex) return { kind: 'FAULT', reason: 'answered a different index number' };
   const gender = str(body['gender'])?.toUpperCase() ?? null;
-  const nationalIdHint = str(body['studentNationalIdHint']);
-  // Captured SDMS results include gender and a masked National ID hint, but no
-  // date of birth. Require only the holder identity fields the real response supplies.
-  if ((gender !== 'MALE' && gender !== 'FEMALE') || nationalIdHint === null || parseNationalIdHint(nationalIdHint) === null) {
-    return { kind: 'FAULT', reason: 'results record missing required holder identity fields' };
-  }
   const levelType = (str(body['combinationLevelType']) ?? '').toUpperCase();
   const year = /^\d{4}\/(\d{4})$/.exec(str(body['academicYear']) ?? '');
   const subjects: NesaSubjectMark[] = [];
@@ -79,7 +72,7 @@ export function mapSdmsResults(body: unknown, askedIndex: string): SdmsMapping {
     kind: 'FOUND',
     results: {
       indexNumber: index,
-      holder: { name, sex: gender, nationalIdHint },
+      holder: { name, sex: gender === 'MALE' || gender === 'FEMALE' ? gender : null, nationalIdHint: str(body['studentNationalIdHint']) },
       published: body['published'],
       malpractice: body['malpractice'],
       levelType,

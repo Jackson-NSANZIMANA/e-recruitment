@@ -77,14 +77,22 @@ test('mapping refuses a record for a different index and malformed marks', () =>
   assert.ok(unknown.kind === 'FOUND' && unknown.results.qualificationLevel === null);
 });
 
-test('mapping refuses missing or malformed SDMS holder identity fields', () => {
+test('a record without gender or a NID hint is mapped, then goes to a human: never a fault retried forever', () => {
   const record = pop.persona('L-01').nesa;
   assert.ok(record !== null);
   const index = record.studentIndexNumber;
-  assert.equal(mapSdmsResults({ ...record, gender: undefined }, index).kind, 'FAULT');
-  assert.equal(mapSdmsResults({ ...record, studentNationalIdHint: undefined }, index).kind, 'FAULT');
-  assert.equal(mapSdmsResults({ ...record, studentNationalIdHint: 'not-a-masked-hint' }, index).kind, 'FAULT');
-  assert.equal(mapSdmsResults(record, index).kind, 'FOUND'); // no DOB field in SDMS contract
+  for (const quirk of [{ gender: undefined }, { studentNationalIdHint: undefined }, { studentNationalIdHint: 'not-a-masked-hint' }]) {
+    const mapped = mapSdmsResults({ ...record, ...quirk }, index);
+    assert.equal(mapped.kind, 'FOUND');
+    assert.ok(mapped.kind === 'FOUND');
+    const gate = decideNesaGate(identityOf('L-01'), mapped.results);
+    assert.ok(gate.kind === 'REVIEW', JSON.stringify(quirk));
+    assert.ok(gate.reasons.length > 0);
+  }
+  const found = mapSdmsResults(record, index);
+  assert.ok(found.kind === 'FOUND');
+  const noSex = decideNesaGate(identityOf('L-01'), { ...found.results, holder: { ...found.results.holder, sex: null } });
+  assert.ok(noSex.kind === 'REVIEW' && noSex.reasons.includes('SEX_NOT_COMPARED'));
 });
 
 function decide(personaId: string, holderOf = personaId) {
