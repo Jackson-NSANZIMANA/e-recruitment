@@ -38,7 +38,7 @@ export const LEGACY_FIXTURE_NOTES: Readonly<Record<string, string>> = {
   'L-07': 'HEC degree holder; NESA RW2024/1002 → 990601HEG0022024',
 };
 
-export const PERSONAS: readonly PersonaEntry[] = [
+const CATALOGUE: readonly PersonaEntry[] = [
   // ── Legacy fixtures (fixed dates: existing proofs assert them) ──────
   persona({ personaId: 'L-01', nidSerial: 1, phoneSerial: 1, covers: 'eligible A2 citizen (legacy persona A)', identity: { surname: 'UWIMANA', forename: 'Jean Pierre', sex: 'MALE', dateOfBirth: '2003-03-15', district: 'GASABO' }, nesa: { combination: 'PCM', examYear: 2024, weightedPercent: 72, indexNumber: '990301PCM0012024' } }),
   persona({ personaId: 'L-02', nidSerial: 2, phoneSerial: 2, covers: 'criminal record on the RIB mock', identity: { surname: 'UWAMARIYA', forename: 'Divine', sex: 'FEMALE', dateOfBirth: '2002-09-30', district: 'RUBAVU' }, nesa: { combination: 'HEG', examYear: 2024 } }),
@@ -117,5 +117,15 @@ export const PERSONAS: readonly PersonaEntry[] = [
   persona({ personaId: 'A-RCS-OFFICER-4Y-NYAGATARE-ELIGIBLE', nidSerial: 235, phoneSerial: 235, covers: 'RCS officer 2026, 4-year: science 76%, age 20, Nyagatare (Kayonza venue) → admitted', identity: { district: 'NYAGATARE', dateOfBirth: { years: 20, days: 60 } }, nesa: { combination: 'PCB', weightedPercent: 76 } }),
   persona({ personaId: 'A-RCS-OFFICER-4Y-ELIGIBLE', nidSerial: 222, phoneSerial: 222, covers: 'RCS officer 2026 §5, 4-year track: A2 science ≥ 70%, age 20', identity: { district: 'HUYE', dateOfBirth: { years: 20, days: 20 } }, nesa: { combination: 'PCB', weightedPercent: 76 } }),
 ];
+
+/**
+ * The announcement-aligned personas (A-*) apply for real categories, and the sandbox runs the
+ * Irembo certificate flow (ADR-048 §2.3): each also holds a clean "no record" certificate, so
+ * a full journey can give its number and reach the gate. Added here, not per line, so the
+ * catalogue entries above stay about eligibility.
+ */
+export const PERSONAS: readonly PersonaEntry[] = CATALOGUE.map((p) =>
+  p.personaId.startsWith('A-') && p.certificates === undefined ? { ...p, certificates: [{ kind: 'NO_RECORD' as const, issuedDaysAgo: 10 }] } : p,
+);
 
 export const PERSONA_IDS: readonly string[] = PERSONAS.map((p) => p.personaId);

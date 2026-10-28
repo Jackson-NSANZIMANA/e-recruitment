@@ -125,6 +125,13 @@ export async function runJourney(subject: JourneySubject, config: JourneyConfig)
   const applicationId = typeof app?.['applicationId'] === 'string' ? app['applicationId'] : null;
   if (!note('application listed', applicationId !== null)) return steps;
 
+  // The sandbox runs the Irembo certificate flow (ADR-048): a persona that holds a certificate
+  // gives its number so the criminal gate can clear and the journey can reach the gate.
+  if (subject.expect.outcome !== 'CLEARANCE' && subject.clearanceNumber !== null && subject.clearanceNumber !== undefined && applicationId !== null) {
+    const given = await citizen.post('/edge/v1/me/applications/clearance-certificate', { applicationId, clearanceCertificateNumber: subject.clearanceNumber });
+    if (!note('clearance certificate number given (or the application is already closed)', given.status === 200 || given.status === 202 || given.status === 409, statusOf(given))) return steps;
+  }
+
   const reader = new EdgeSession(config.edgeBaseUrl, config.origin);
   if (!note('reviewer signed in', await reader.signIn(config.reader.loginHandle, config.reader.password))) return steps;
   const detail = async (): Promise<Record<string, unknown>> => {
