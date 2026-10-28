@@ -8,6 +8,7 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { DISTRICTS, type District } from '@usrp/shared-types';
+import { createHash } from 'node:crypto';
 import type { Rng } from '../prng.js';
 import { districtLabel, syntheticAddress } from './geography.js';
 import { FORENAMES_FEMALE, FORENAMES_MALE, SURNAMES } from './names.js';
@@ -17,7 +18,10 @@ import {
   type Authority,
   type BehaviourName,
   type CombinationLevelType,
+  CERTIFICATE_APPLICATION_CODES,
+  type CertificateKind,
   type RawMark,
+  type SandboxCertificate,
   type SdmsResultsRecord,
   type Sex,
   type SyntheticCitizen,
@@ -128,6 +132,50 @@ export interface IdentitySpec {
   readonly expiresInDays?: number;
 }
 
+export interface CertificateSpec {
+  readonly kind: CertificateKind;
+  /** Days before the reference date the certificate was issued. */
+  readonly issuedDaysAgo: number;
+  /** Printed name, when it must differ from the identity's. */
+  readonly printedName?: string;
+  /** Printed date of birth (ISO), when it must differ. */
+  readonly printedDateOfBirth?: string;
+  /** STATUS flag; default true. */
+  readonly status?: boolean;
+}
+
+/** SANDBOX-ONLY application number in the observed shape: `S` + `99` block + 10 digits + 4 letters. */
+export function syntheticCertificateNumber(key: string, serial: number): string {
+  const h = createHash('sha256').update(`irembo-cert:${key}:${String(serial)}`).digest();
+  let digits = '';
+  for (let i = 0; i < 10; i += 1) digits += String((h[i] ?? 0) % 10);
+  let letters = '';
+  for (let i = 10; i < 14; i += 1) letters += String.fromCharCode(65 + ((h[i] ?? 0) % 26));
+  return `S99${digits}${letters}`;
+}
+
+function addDays(reference: Date, days: number): string {
+  const d = new Date(Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth(), reference.getUTCDate()));
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+export function buildCertificates(key: string, citizen: Pick<SyntheticCitizen, 'surname' | 'forename' | 'dateOfBirth'>, specs: readonly CertificateSpec[], reference: Date): SandboxCertificate[] {
+  return specs.map((spec, serial): SandboxCertificate => {
+    const applicationNumber = syntheticCertificateNumber(key, serial);
+    return {
+      applicationNumber,
+      kind: spec.kind,
+      applicationCode: CERTIFICATE_APPLICATION_CODES[spec.kind],
+      issuedOn: addDays(reference, -spec.issuedDaysAgo),
+      status: spec.status ?? true,
+      signedBy: 'SANDBOX SYNTHETIC REGISTRAR',
+      name: spec.printedName ?? `${citizen.surname} ${citizen.forename}`,
+      dateOfBirth: spec.printedDateOfBirth ?? citizen.dateOfBirth,
+    };
+  });
+}
+
 export interface CitizenSpec {
   readonly key: string;
   readonly personaId: string | null;
@@ -135,6 +183,7 @@ export interface CitizenSpec {
   readonly phoneSerial: number;
   readonly identity: IdentitySpec;
   readonly nesa: NesaSpec | null;
+  readonly certificates?: readonly CertificateSpec[];
   readonly behaviour?: Partial<Readonly<Record<Authority, BehaviourName>>>;
 }
 
@@ -188,6 +237,7 @@ export function buildCitizen(rng: Rng, spec: CitizenSpec, reference: Date): Synt
     phone: syntheticPhone(spec.phoneSerial),
     behaviour: spec.behaviour ?? {},
     nesa: spec.nesa === null ? null : buildNesaRecord(rng, base, spec.nesa),
+    certificates: buildCertificates(spec.key, { surname, forename, dateOfBirth: dob }, spec.certificates ?? [], reference),
   };
 }
 

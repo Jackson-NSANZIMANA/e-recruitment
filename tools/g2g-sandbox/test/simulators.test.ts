@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { validateContract } from '../src/contracts.js';
 import { NIDA_IDENTITY_PATH } from '../src/modules/nida-irembo.js';
 import { SDMS_RESULTS_PATH } from '../src/modules/nesa-sdms.js';
-import { IREMBO_CERTIFICATE_PATH } from '../src/modules/empty-mounts.js';
+import { IREMBO_CERTIFICATE_PATH } from '../src/modules/irembo-certificates.js';
 import { captureLog, population, startSandbox, TOKEN } from './helpers.js';
 
 const nida = (base: string, nid: string, extra: Record<string, string> = {}) =>
@@ -102,13 +102,13 @@ test('the per-client token bucket answers 429, never a negative verdict', async 
   }
 });
 
-test('empty mounts answer 501 until S12b; unknown paths 404; all stamped', async () => {
+test('unauthenticated mounts are refused in their own style; unknown paths 404; all stamped', async () => {
   const { server } = await startSandbox();
   try {
     const cert = await fetch(`${server.url}${IREMBO_CERTIFICATE_PATH}`);
-    assert.equal(cert.status, 501);
+    assert.equal(cert.status, 401);
     const sms = await fetch(`${server.url}/2010-04-01/Accounts/AC123/Messages.json`, { method: 'POST' });
-    assert.equal(sms.status, 501);
+    assert.equal(sms.status, 401);
     const none = await fetch(`${server.url}/nowhere`);
     assert.equal(none.status, 404);
     for (const r of [cert, sms, none, await fetch(`${server.url}/health`)]) assert.equal(r.headers.get('x-usrp-sandbox'), '1');

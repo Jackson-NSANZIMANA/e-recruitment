@@ -57,6 +57,37 @@ export interface SdmsResultsRecord {
   readonly rawMark: readonly RawMark[];
 }
 
+/**
+ * Certificate kinds the sandbox issues (ADR-048 §2.3). The `APPLICATION_CODE`
+ * values are PLACEHOLDERS, clearly named: the real Irembo codes are to be
+ * confirmed with RIB/Irembo (owner decision, default taken).
+ */
+export const CERTIFICATE_APPLICATION_CODES = {
+  /** A criminal-record certificate of the distinct "no record" type (content conclusive). */
+  NO_RECORD: 'SANDBOX_PLACEHOLDER_CRIMINAL_NO_RECORD',
+  /** A criminal-record certificate type that can carry a conviction (content needs a human). */
+  RECORD_EXTRACT: 'SANDBOX_PLACEHOLDER_CRIMINAL_RECORD_EXTRACT',
+  /** A NESA equivalence certificate: the wrong type for a clearance. */
+  EQUIVALENCE: 'SANDBOX_PLACEHOLDER_NESA_EQUIVALENCE',
+} as const;
+export type CertificateKind = keyof typeof CERTIFICATE_APPLICATION_CODES;
+
+/** One Irembo certificate as the sandbox holds it (ISO dates; the module prints DD/MM/YYYY). */
+export interface SandboxCertificate {
+  /** The citizen-held application number: letter, 12 digits, 4 letters. The certificate's REFERENCE_NUMBER is the same value (the captured schema gives both the one shape). */
+  readonly applicationNumber: string;
+  readonly kind: CertificateKind;
+  readonly applicationCode: string;
+  readonly issuedOn: string;
+  /** STATUS: false = withdrawn. */
+  readonly status: boolean;
+  readonly signedBy: string;
+  /** NAME as printed (may differ from the identity: partial and mismatch personas). */
+  readonly name: string;
+  /** DATE_OF_BIRTH as printed, ISO. */
+  readonly dateOfBirth: string;
+}
+
 export interface SyntheticCitizen {
   /** Persona id (catalogue) or `GEN-<n>` (generated). */
   readonly key: string;
@@ -84,6 +115,7 @@ export interface SyntheticCitizen {
   readonly phone: string;
   readonly behaviour: Partial<Readonly<Record<Authority, BehaviourName>>>;
   readonly nesa: SdmsResultsRecord | null;
+  readonly certificates: readonly SandboxCertificate[];
 }
 
 /** The synthetic mobile range: 0788000000–0788009999 (E.164 +25078800xxxx). */

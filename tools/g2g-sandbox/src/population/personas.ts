@@ -13,8 +13,8 @@
 //   A-*   personas aligned to the real announcements
 //         (docs/product/recruitment-announcements-2025-2026.md).
 //
-// Clearance personas (P-CLEARANCE-*) are identities only here; S12b gives them
-// their Irembo certificates.
+// Clearance personas (P-CLEARANCE-*) carry their Irembo certificates (S12b);
+// the application numbers are derived, see syntheticCertificateNumber.
 // ══════════════════════════════════════════════════════════════════
 
 import type { CitizenSpec } from './records.js';
@@ -87,13 +87,17 @@ export const PERSONAS: readonly PersonaEntry[] = [
   persona({ personaId: 'P-NESA-TRUNCATED', nidSerial: 155, phoneSerial: 155, covers: 'SDMS truncated body', identity: { district: 'KICUKIRO', dateOfBirth: { years: 21, days: 8 } }, nesa: { combination: 'HEG' }, behaviour: { nesa: 'truncated' } }),
   persona({ personaId: 'P-NESA-TIMEOUT', nidSerial: 156, phoneSerial: 156, covers: 'SDMS never answers in time', identity: { district: 'KICUKIRO', dateOfBirth: { years: 21, days: 9 } }, nesa: { combination: 'MEG' }, behaviour: { nesa: 'timeout' } }),
 
-  // ── Clearance (identities now; Irembo certificates in S12b) ─────────
-  persona({ personaId: 'P-CLEARANCE-VALID', nidSerial: 160, phoneSerial: 160, covers: 'S12b: valid criminal-record certificate', identity: { district: 'GASABO', dateOfBirth: { years: 22, days: 11 } }, nesa: { combination: 'PCM', weightedPercent: 70 } }),
-  persona({ personaId: 'P-CLEARANCE-WRONG-TYPE', nidSerial: 161, phoneSerial: 161, covers: 'S12b: an equivalence certificate offered as clearance', identity: { district: 'HUYE', dateOfBirth: { years: 22, days: 12 } }, nesa: { combination: 'HEG', weightedPercent: 66 } }),
-  persona({ personaId: 'P-CLEARANCE-EXPIRED', nidSerial: 162, phoneSerial: 162, covers: 'S12b: clearance issued outside the validity window', identity: { district: 'MUSANZE', dateOfBirth: { years: 22, days: 13 } }, nesa: { combination: 'MEG', weightedPercent: 66 } }),
-  persona({ personaId: 'P-CLEARANCE-CONVICTION', nidSerial: 163, phoneSerial: 163, covers: 'S12b: certificate type that can carry a conviction → officer review', identity: { district: 'RUBAVU', dateOfBirth: { years: 22, days: 14 } }, nesa: { combination: 'PCM', weightedPercent: 70 } }),
-  persona({ personaId: 'P-CLEARANCE-NAME-MISMATCH', nidSerial: 164, phoneSerial: 164, covers: 'S12b: certificate names another person', identity: { district: 'NYAGATARE', dateOfBirth: { years: 22, days: 15 } }, nesa: { combination: 'PCB', weightedPercent: 70 } }),
-  persona({ personaId: 'P-CLEARANCE-DOB-MISMATCH', nidSerial: 165, phoneSerial: 165, covers: 'S12b: certificate DOB contradicts the identity', identity: { district: 'KAYONZA', dateOfBirth: { years: 22, days: 16 } }, nesa: { combination: 'MCB', weightedPercent: 70 } }),
+  // ── Clearance (identities and their Irembo certificates, S12b) ─────────
+  persona({ personaId: 'P-CLEARANCE-VALID', nidSerial: 160, phoneSerial: 160, covers: 'S12b: valid criminal-record certificate', identity: { district: 'GASABO', dateOfBirth: { years: 22, days: 11 } }, nesa: { combination: 'PCM', weightedPercent: 70 } , certificates: [{ kind: 'NO_RECORD', issuedDaysAgo: 10 }] }),
+  persona({ personaId: 'P-CLEARANCE-WRONG-TYPE', nidSerial: 161, phoneSerial: 161, covers: 'S12b: an equivalence certificate offered as clearance', identity: { district: 'HUYE', dateOfBirth: { years: 22, days: 12 } }, nesa: { combination: 'HEG', weightedPercent: 66 } , certificates: [{ kind: 'EQUIVALENCE', issuedDaysAgo: 10 }] }),
+  persona({ personaId: 'P-CLEARANCE-EXPIRED', nidSerial: 162, phoneSerial: 162, covers: 'S12b: clearance issued outside the validity window', identity: { district: 'MUSANZE', dateOfBirth: { years: 22, days: 13 } }, nesa: { combination: 'MEG', weightedPercent: 66 } , certificates: [{ kind: 'NO_RECORD', issuedDaysAgo: 200 }] }),
+  persona({ personaId: 'P-CLEARANCE-CONVICTION', nidSerial: 163, phoneSerial: 163, covers: 'S12b: certificate type that can carry a conviction → officer review', identity: { district: 'RUBAVU', dateOfBirth: { years: 22, days: 14 } }, nesa: { combination: 'PCM', weightedPercent: 70 } , certificates: [{ kind: 'RECORD_EXTRACT', issuedDaysAgo: 10 }] }),
+  persona({ personaId: 'P-CLEARANCE-NAME-MISMATCH', nidSerial: 164, phoneSerial: 164, covers: 'S12b: certificate names another person', identity: { district: 'NYAGATARE', dateOfBirth: { years: 22, days: 15 } }, nesa: { combination: 'PCB', weightedPercent: 70 } , certificates: [{ kind: 'NO_RECORD', issuedDaysAgo: 10, printedName: 'HABIMANA Eric' }] }),
+  persona({ personaId: 'P-CLEARANCE-DOB-MISMATCH', nidSerial: 165, phoneSerial: 165, covers: 'S12b: certificate DOB contradicts the identity', identity: { district: 'KAYONZA', dateOfBirth: { years: 22, days: 16 } }, nesa: { combination: 'MCB', weightedPercent: 70 } , certificates: [{ kind: 'NO_RECORD', issuedDaysAgo: 10, printedDateOfBirth: '1990-01-01' }] }),
+  persona({ personaId: 'P-CLEARANCE-NAME-PARTIAL', nidSerial: 166, phoneSerial: 166, covers: 'S12b: certificate omits a given name → REVIEW (amber), IDENTITY_NAME_PARTIAL', identity: { surname: 'MUNYANEZA', forename: 'Jean Claude', sex: 'MALE', district: 'KICUKIRO', dateOfBirth: { years: 22, days: 17 } }, nesa: { combination: 'PCM', weightedPercent: 70 }, certificates: [{ kind: 'NO_RECORD', issuedDaysAgo: 10, printedName: 'MUNYANEZA Jean' }] }),
+  persona({ personaId: 'P-CLEARANCE-429', nidSerial: 167, phoneSerial: 167, covers: 'S12b: Irembo answers 429 + Retry-After → PENDING, retried, never negative', identity: { district: 'GASABO', dateOfBirth: { years: 22, days: 18 } }, nesa: { combination: 'PCM', weightedPercent: 70 }, behaviour: { 'irembo-certificates': 'rate-limited' }, certificates: [{ kind: 'NO_RECORD', issuedDaysAgo: 10 }] }),
+  persona({ personaId: 'P-CLEARANCE-503', nidSerial: 168, phoneSerial: 168, covers: 'S12b: Irembo maintenance window (503) → PENDING, retried, never negative', identity: { district: 'HUYE', dateOfBirth: { years: 22, days: 19 } }, nesa: { combination: 'HEG', weightedPercent: 66 }, behaviour: { 'irembo-certificates': 'maintenance' }, certificates: [{ kind: 'NO_RECORD', issuedDaysAgo: 10 }] }),
+  persona({ personaId: 'P-CLEARANCE-STATUS-FALSE', nidSerial: 169, phoneSerial: 169, covers: 'S12b: Irembo status:false with HTTP 200 (an error, not "not found") → PENDING, retried', identity: { district: 'MUSANZE', dateOfBirth: { years: 22, days: 20 } }, nesa: { combination: 'MEG', weightedPercent: 66 }, behaviour: { 'irembo-certificates': 'status-false' }, certificates: [{ kind: 'NO_RECORD', issuedDaysAgo: 10 }] }),
 
   // ── Aligned to the real announcements (docs/product/recruitment-announcements-2025-2026.md) ──
   persona({ personaId: 'A-RDF-REGULAR-S3-ELIGIBLE', nidSerial: 200, phoneSerial: 200, covers: 'RDF regular 2026 §1: S3, age 19 → eligible', identity: { district: 'GASABO', dateOfBirth: { years: 19, days: 50 } }, nesa: { combination: 'OLV', weightedPercent: 55 } }),

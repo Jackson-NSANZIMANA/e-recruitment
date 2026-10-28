@@ -13,3 +13,7 @@ export { BEHAVIOUR_HEADER, DEFAULT_PROFILES, type AuthorityProfile } from './beh
 export { NIDA_IDENTITY_PATH, SUBJECT_HEADER } from './modules/nida-irembo.js';
 export { SDMS_RESULTS_PATH } from './modules/nesa-sdms.js';
 export { DEV_G2G_CLIENT_TOKEN } from './dev-token.js';
+export { IREMBO_CERTIFICATE_PATH, APPLICATION_NUMBER_HEADER, APPLICATION_NUMBER_PATTERN, CERT_CODES } from './modules/irembo-certificates.js';
+export { createSmsTwilioModule, twilioSignature, DEV_TWILIO_ACCOUNT_SID, DEV_TWILIO_AUTH_TOKEN, TWILIO_IDEMPOTENCY_HEADER, MAGIC_UNDELIVERED, MAGIC_OPTED_OUT, type SmsTwilioModule, type SmsTwilioOptions } from './modules/sms-twilio.js';
+export { buildModules } from './modules/index.js';
+export { CERTIFICATE_APPLICATION_CODES, type CertificateKind, type SandboxCertificate } from './population/model.js';
