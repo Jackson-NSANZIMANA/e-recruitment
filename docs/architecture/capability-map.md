@@ -72,7 +72,7 @@ Legend: ✅ built and proven by a live selfcheck · 🟡 partial · ❌ missing 
 | Agency ratification of roles and SoD | ❌ `docs/compliance/authorization-ratification.md` |
 | Security sign-off of the anonymous surface (4 → 7) | ❌ `docs/security/anonymous-surface-review.md` |
 | CAPTCHA/WAF in front of onboarding; SMS cost cap | ❌ |
-| Real G2G (NIDA/NESA/HEC/RIB) authorization | ❌ mocks only |
+| Real G2G (NIDA/NESA/HEC/RIB) authorization | ❌ no agreements · 🟡 **production-like sandbox (S12a)**: NIDA and NESA adapters on the captured wire formats behind fenced simulators (ADR-047), NESA results bound to the applicant (ADR-048 §2.1–2.2, rls/0042); `pnpm sandbox` + `pnpm rehearse --sandbox --journey <scenario>`; HEC and RIB still on hash-keyed mocks; clearance and SMS are S12b |
 | Real biometric matcher or ratified manual-admission policy | 🟡 manual-identity policy built (ADR-037, owner decisions; DPO sign-off pending); on-device matcher B2, thresholds B3 |
 | Backups/PITR, KMS keys, load and failure testing | ❌ |
 | G1 supply chain: signed, scanned images with SBOMs | ✅ (S03, ADR-038 / ADR-FE-014); `v0.1.0-rc1` pre-release cut 2026-10-21 |
