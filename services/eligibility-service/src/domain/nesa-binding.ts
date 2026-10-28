@@ -59,7 +59,7 @@ export function decideNesaGate(identity: IdentityFacts, results: NesaResults): N
     holderName: results.holder.name,
     sex: results.holder.sex,
     nationalIdHint: results.holder.nationalIdHint,
-  });
+  }, { requiredFields: ['sex', 'nationalIdHint'] });
   if (binding.outcome === 'NOT_BOUND') return { kind: 'NOT_BOUND', binding };
   if (!results.published) return { kind: 'PENDING_UNPUBLISHED', binding };
 

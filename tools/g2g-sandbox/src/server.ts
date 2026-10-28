@@ -69,6 +69,11 @@ export function createSandboxServer(options: SandboxServerOptions): Promise<Http
   const random = options.random ?? Math.random;
   const scale = options.latencyScale ?? 1;
   const world = options.world;
+  // NESA's public response shape can serve a private owner persona. Never expose
+  // it beyond loopback, even when a caller asks this server to bind wildcard.
+  const bindHost = world.overlay !== null || options.environment === 'sandbox'
+    ? '127.0.0.1'
+    : options.host;
 
   async function dispatch(ctx: RequestContext): Promise<HttpResult | null> {
     const module = modules.find((m) => m.matches(ctx.method.toUpperCase(), ctx.path));
@@ -124,7 +129,7 @@ export function createSandboxServer(options: SandboxServerOptions): Promise<Http
   return startHttpServer({
     serviceName: 'g2g-sandbox',
     port: options.port,
-    ...(options.host === undefined ? {} : { host: options.host }),
+    ...(bindHost === undefined ? {} : { host: bindHost }),
     routes: [],
     fallback: dispatch,
     responseHeaders: { [SANDBOX_RESPONSE_HEADER]: '1' },

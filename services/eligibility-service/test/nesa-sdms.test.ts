@@ -77,6 +77,16 @@ test('mapping refuses a record for a different index and malformed marks', () =>
   assert.ok(unknown.kind === 'FOUND' && unknown.results.qualificationLevel === null);
 });
 
+test('mapping refuses missing or malformed SDMS holder identity fields', () => {
+  const record = pop.persona('L-01').nesa;
+  assert.ok(record !== null);
+  const index = record.studentIndexNumber;
+  assert.equal(mapSdmsResults({ ...record, gender: undefined }, index).kind, 'FAULT');
+  assert.equal(mapSdmsResults({ ...record, studentNationalIdHint: undefined }, index).kind, 'FAULT');
+  assert.equal(mapSdmsResults({ ...record, studentNationalIdHint: 'not-a-masked-hint' }, index).kind, 'FAULT');
+  assert.equal(mapSdmsResults(record, index).kind, 'FOUND'); // no DOB field in SDMS contract
+});
+
 function decide(personaId: string, holderOf = personaId) {
   const mapped = mapSdmsResults(pop.persona(holderOf).nesa, pop.persona(holderOf).nesa?.studentIndexNumber ?? '');
   assert.ok(mapped.kind === 'FOUND');
@@ -93,6 +103,13 @@ test('gate: bind first; then unpublished, review, evaluate', () => {
   assert.equal(decide('P-NESA-UNPUBLISHED').kind, 'PENDING_UNPUBLISHED');
   const malpractice = decide('P-NESA-MALPRACTICE');
   assert.ok(malpractice.kind === 'REVIEW' && malpractice.reasons.includes('MALPRACTICE'));
+});
+
+test('gate: missing applicant-side NID hint yields REVIEW for SDMS binding', () => {
+  const base = mapSdmsResults(pop.persona('L-01').nesa, '990301PCM0012024');
+  assert.ok(base.kind === 'FOUND');
+  const missingHint = decideNesaGate({ ...identityOf('L-01'), nationalIdHint: null }, base.results);
+  assert.equal(missingHint.kind, 'REVIEW');
 });
 
 test('gate: an unknown level type or a non-PASS division is REVIEW, never automatic', () => {

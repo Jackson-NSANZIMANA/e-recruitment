@@ -52,7 +52,7 @@ export class NidaIremboGateway implements NidaGateway {
       throw new NidaUnavailableError('NIDA returned a non-JSON or truncated body', requestId);
     }
     const today = (this.options.now ?? ((): Date => new Date()))().toISOString().slice(0, 10);
-    const mapped = mapIremboIdentity(envelope, today);
+    const mapped = mapIremboIdentity(envelope, today, rawNationalId.trim());
     switch (mapped.kind) {
       case 'NOT_FOUND':
         return { status: 'NOT_FOUND', nidaRequestId: requestId };

@@ -24,8 +24,9 @@ test('overlay: recognised by shape; answered by the simulators; labelled PRIVATE
   assert.ok(persona !== null);
   assert.equal(persona.nid, OVERLAY_NID);
   const capture = captureLog();
-  const { server } = await startSandbox({ overlay: persona, log: capture.log });
+  const { server } = await startSandbox({ overlay: persona, log: capture.log, host: '0.0.0.0' });
   try {
+    assert.match(server.url, /^http:\/\/127\.0\.0\.1:/);
     const r = await fetch(`${server.url}${NIDA_IDENTITY_PATH}`, { headers: { authorization: `Bearer ${TOKEN}`, 'x-usrp-subject': OVERLAY_NID } });
     const body = (await r.json()) as { data: { identityInfo: { surname: string } } };
     assert.equal(body.data.identityInfo.surname, 'OVERLAY');
