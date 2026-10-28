@@ -341,6 +341,8 @@ run_ts "eligibility-service: NESA education gate" services/eligibility-service/s
 run_ts "eligibility-service: HEC degree gate"     services/eligibility-service/selfcheck/verify-degree-eligibility.ts
 run_ts "eligibility-service: event-driven age+academic" services/eligibility-service/selfcheck/verify-event-driven.ts
 run_ts "background-vetting: RIB criminal gate"    services/background-vetting-service/selfcheck/verify-vetting-slice.ts
+# S12b (ADR-048 §2.3-2.4): the Irembo certificate flow on the real identity read and rls/0040 (append-only, command function, no PII, isolation).
+run_ts "background-vetting: Irembo clearance certificate (rls/0040)" services/background-vetting-service/selfcheck/verify-clearance-slice.ts
 run_ts "scheduling-service: slot assignment"      services/scheduling-service/selfcheck/verify-slot-assignment.ts
 # ADR-026: one invitation per application, no venue overbooked. Right after the
 # assignment proof: that one proves the happy path over Kafka, this one proves

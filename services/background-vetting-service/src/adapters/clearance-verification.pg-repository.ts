@@ -41,7 +41,7 @@ export class PgClearanceVerificationRepository implements ClearanceVerificationR
             ${input.outcome},
             ${input.failureCode},
             ${sql.array([...input.reviewReasons])}::text[],
-            ${input.binding === null ? null : JSON.stringify(input.binding)}::jsonb,
+            ${input.binding === null ? null : JSON.stringify(input.binding)}::text::jsonb,
             ${input.requestId},
             ${input.correlationId}
           ) AS result
