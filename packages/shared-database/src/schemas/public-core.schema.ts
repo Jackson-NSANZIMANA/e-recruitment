@@ -88,6 +88,11 @@ export const applicantIdentities = publicCore.table(
     // degree→holder binding). Nullable: pre-existing rows predate it.
     encryptedNidaLookupHash: text('encrypted_nida_lookup_hash'),
 
+    // First 4 + last 4 digits of the NID — the part registries print as a
+    // masked hint (SDMS studentNationalIdHint) — encrypted at rest, for
+    // credential binding (rls/0042, ADR-048 §2.1). Nullable: older rows.
+    encryptedNationalIdHint: text('encrypted_national_id_hint'),
+
     // Non-PII from NIDA — unencrypted for query performance
     gender: genderEnum('gender').notNull(),
 

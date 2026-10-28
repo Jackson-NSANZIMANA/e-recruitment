@@ -2,7 +2,7 @@
 // identity-service — Live vertical-slice self-check
 //
 // Exercises the WHOLE slice against real infrastructure (live PostgreSQL
-// as usrp_app + live usrp-nida-mock + InMemoryEventBus) and asserts every
+// as usrp_app + live the g2g-sandbox nida-irembo simulator + InMemoryEventBus) and asserts every
 // correctness claim end-to-end. Repeatable: cleans its test rows before
 // and after. Exits non-zero on the first failed assertion.
 //
@@ -30,11 +30,11 @@ const ADMIN_URL =
 const admin = postgres(ADMIN_URL, { onnotice: () => {} });
 
 // ── Known seeded test citizen (see infrastructure/docker/mocks/nida) ──
-const CITIZEN_NID = '1200380123456789'; // UWIMANA Jean Pierre — RWANDAN_CITIZEN, GASABO
+const CITIZEN_NID = '1200389990001000'; // UWIMANA Jean Pierre — RWANDAN_CITIZEN, GASABO
 const CITIZEN_NAME = 'UWIMANA Jean Pierre';
 const CITIZEN_DISTRICT = 'GASABO';
 // A syntactically-valid NID that is NOT in the NIDA seed → NOT_FOUND path.
-const UNKNOWN_NID = '1200380123400000';
+const UNKNOWN_NID = '1200389990008000';
 
 let failures = 0;
 function check(label: string, condition: boolean, detail = ''): void {

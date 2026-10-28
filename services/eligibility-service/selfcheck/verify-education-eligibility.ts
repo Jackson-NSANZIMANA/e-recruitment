@@ -1,20 +1,18 @@
 // ══════════════════════════════════════════════════════════════════
 // eligibility-service — Live NESA education-eligibility self-check (ADR-005)
 //
-// Seeds a VERIFIED and a PENDING applicant-identity fixture, boots the
-// education (NESA) gate over @usrp/shared-http on an ephemeral port with a
-// REAL NesaHttpGateway pointed at the live usrp-nesa-mock, and drives it
-// through a real socket with fetch — asserting every outcome branch, the
-// RCS ≥70% science sub-rule (pass AND fail), fail-closed on a missing NESA
-// record, the 503 path when NESA is unreachable, and the invariant that no
-// PII (DOB, school, raw index) leaks into a response or an event.
-// Repeatable: cleans its fixtures before and after; exits non-zero on the
-// first failed assertion.
+// Seeds persona identities from the g2g-sandbox catalogue (as identity-
+// service writes them, NID hint included), boots the education (NESA) gate
+// over @usrp/shared-http with the REAL NesaSdmsGateway pointed at the live
+// nesa-sdms simulator (SDMS wire format, ADR-047), and proves through a real
+// socket: binding before evaluation (ADR-048 §2.2) including the gap it
+// closes, NOT_BOUND / PENDING / REVIEW outcomes, TVET and S3 levels, the RCS
+// science bar, faults that are never verdicts, fence 2, and that no persona
+// value leaks into a response or an event.
 //
-//   Run (repo root), Tier-1 Postgres + NESA mock up:
-//   DATABASE_URL='postgresql://usrp_app:app_pw@localhost:5432/usrp_db' \
-//   PII_ENCRYPTION_KEY='dev_pii_encryption_key_min_32_chars_ok!!' \
-//   NESA_BASE_URL='http://localhost:3101' NESA_HMAC_SECRET='dev_nesa_hmac_secret' \
+//   Run (repo root), Postgres + the g2g-sandbox simulator up:
+//   DATABASE_URL=... ADMIN_DATABASE_URL=... PII_ENCRYPTION_KEY=... \
+//   NESA_BASE_URL='http://localhost:3101' \
 //   pnpm --filter @usrp/eligibility-service selfcheck:education
 // ══════════════════════════════════════════════════════════════════
 
@@ -23,10 +21,12 @@ import postgres from 'postgres';
 import { sql } from '@usrp/shared-database';
 import { InMemoryEventBus, type EventBus } from '@usrp/shared-events';
 import { startHttpServer } from '@usrp/shared-http';
+import { Population, kigaliReferenceDate, type SyntheticCitizen } from '@usrp/g2g-sandbox';
 import { AUTH_HEADER, OFFICER_TOKEN, SYSTEM_TOKEN, testVerifier } from './_auth-fixture.js';
 import {
   EDUCATION_CHECK_PATH,
-  NesaHttpGateway,
+  HttpNesaSdmsTransport,
+  NesaSdmsGateway,
   PgIdentityReader,
   VerifyNesaEducationService,
   educationCheckRoute,
@@ -39,12 +39,14 @@ const admin = postgres(ADMIN_URL, { onnotice: () => {} });
 
 const ENCRYPTION_KEY = process.env['PII_ENCRYPTION_KEY'] ?? 'dev_pii_encryption_key_min_32_chars_ok!!';
 const NESA_BASE_URL = process.env['NESA_BASE_URL'] ?? 'http://localhost:3101';
-const NESA_HMAC_SECRET = process.env['NESA_HMAC_SECRET'] ?? 'dev_nesa_hmac_secret';
-
-const FIXTURE_DOB = '2003-03-15';
-const FIXTURE_SCHOOL = 'Groupe Scolaire Officiel de Butare'; // appears in a fixture payload; must never leak
 const CORRELATION_ID = '33333333-3333-4333-8333-333333333333';
 const APPLICATION_ID = '44444444-4444-4444-8444-444444444444';
+
+// The persona catalogue the running simulator serves (persona data does not
+// depend on the population seed; ages are relative to today, Kigali).
+const personas = new Population({ seed: 1, size: 0, referenceDate: kigaliReferenceDate(new Date()) });
+const P = (id: string): SyntheticCitizen => personas.persona(id);
+const indexOf = (id: string): string => P(id).nesa?.studentIndexNumber ?? 'missing';
 
 let failures = 0;
 function check(label: string, condition: boolean, detail = ''): void {
@@ -58,27 +60,30 @@ function check(label: string, condition: boolean, detail = ''): void {
 const asRecord = (v: unknown): Record<string, unknown> =>
   v !== null && typeof v === 'object' ? (v as Record<string, unknown>) : {};
 
-/** Insert an applicant_identities fixture as the system service; return its id. */
-async function seedIdentity(
-  nationalIdHash: string,
-  identityStatus: 'VERIFIED' | 'PENDING',
-): Promise<string> {
+const seededHashes: string[] = [];
+
+/** Seed an applicant_identities row for a persona, as identity-service would write it. */
+async function seedPersona(citizen: SyntheticCitizen, identityStatus: 'VERIFIED' | 'PENDING' = 'VERIFIED'): Promise<string> {
+  const hash = randomBytes(32).toString('hex');
+  seededHashes.push(hash);
+  const hint = `${citizen.nid.slice(0, 4)}${citizen.nid.slice(12)}`;
   return sql.begin(async (tx) => {
     await tx`SET LOCAL ROLE usrp_system_service`;
     await tx`SELECT set_config('app.encryption_key', ${ENCRYPTION_KEY}, true)`;
     const rows = await tx<{ id: string }[]>`
       INSERT INTO public_core.applicant_identities
         (national_id_hash, encrypted_full_name, encrypted_date_of_birth,
-         encrypted_home_district, encrypted_home_province, gender,
+         encrypted_home_district, encrypted_home_province, encrypted_national_id_hint, gender,
          registration_channel, identity_status, nida_verification_request_id,
          nida_verified_at, nida_match_confidence, phone_number_hash)
       VALUES (
-        ${nationalIdHash},
-        pgp_sym_encrypt('Fixture Person', current_setting('app.encryption_key')),
-        pgp_sym_encrypt(${FIXTURE_DOB},   current_setting('app.encryption_key')),
-        pgp_sym_encrypt('GASABO',         current_setting('app.encryption_key')),
-        pgp_sym_encrypt('KIGALI_CITY',    current_setting('app.encryption_key')),
-        'MALE'::public_core.gender,
+        ${hash},
+        pgp_sym_encrypt(${`${citizen.surname} ${citizen.forename}`}, current_setting('app.encryption_key')),
+        pgp_sym_encrypt(${citizen.dateOfBirth}, current_setting('app.encryption_key')),
+        pgp_sym_encrypt(${citizen.address.district}, current_setting('app.encryption_key')),
+        pgp_sym_encrypt(${citizen.address.province}, current_setting('app.encryption_key')),
+        pgp_sym_encrypt(${hint}, current_setting('app.encryption_key')),
+        ${citizen.sex}::public_core.gender,
         'WEB'::public_core.application_channel,
         ${identityStatus}::public_core.identity_verification_status,
         ${randomUUID()}, now(), null, null
@@ -91,185 +96,144 @@ async function seedIdentity(
   });
 }
 
-async function cleanup(hashes: readonly string[]): Promise<void> {
-  await admin`DELETE FROM public_core.applicant_identities WHERE national_id_hash IN ${admin(hashes)}`;
+async function cleanup(): Promise<void> {
+  if (seededHashes.length > 0) await admin`DELETE FROM public_core.applicant_identities WHERE national_id_hash IN ${admin(seededHashes)}`;
 }
 
-/** Build an education route bound to a service using the given event bus + fetch. */
-function buildRoute(bus: EventBus, fetchImpl?: typeof fetch) {
+/** Build an education route over the real SDMS gateway (optionally a failing fetch or a production env). */
+function buildRoute(bus: EventBus, options: { fetchImpl?: typeof fetch; env?: Record<string, string> } = {}) {
   const identityReader = new PgIdentityReader(ENCRYPTION_KEY);
-  const nesaGateway = new NesaHttpGateway({
-    baseUrl: NESA_BASE_URL,
-    hmacSecret: NESA_HMAC_SECRET,
-    timeoutMs: 5000,
-    ...(fetchImpl ? { fetchImpl } : {}),
+  const nesaGateway = new NesaSdmsGateway({
+    transport: new HttpNesaSdmsTransport({ baseUrl: NESA_BASE_URL, timeoutMs: 5000, ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}) }),
+    ...(options.env ? { env: options.env } : {}),
   });
   const service = new VerifyNesaEducationService({ identityReader, nesaGateway, eventBus: bus });
   return educationCheckRoute(service, testVerifier);
 }
 
 async function main(): Promise<void> {
-  const hashVerified = randomBytes(32).toString('hex');
-  const hashPending = randomBytes(32).toString('hex');
-  await cleanup([hashVerified, hashPending]);
-  const verifiedId = await seedIdentity(hashVerified, 'VERIFIED');
-  const pendingId = await seedIdentity(hashPending, 'PENDING');
-  console.log(`\nSeeded VERIFIED ${verifiedId} + PENDING ${pendingId} — NESA mock ${NESA_BASE_URL}`);
+  const ids: Record<string, string> = {};
+  for (const id of ['L-01', 'P-ELIG-UR-SCI70', 'P-UR-SCI-69', 'P-NESA-NAME-MISMATCH', 'P-NESA-HINT-MISMATCH', 'P-NESA-NAME-PARTIAL', 'P-NESA-DIACRITICS', 'P-NESA-UNPUBLISHED', 'P-NESA-MALPRACTICE', 'P-TVET-A2', 'P-S3-ONLY', 'P-NESA-503', 'P-NESA-TRUNCATED']) {
+    ids[id] = await seedPersona(P(id));
+  }
+  const pendingId = await seedPersona(P('P-ELIG-A2'), 'PENDING');
+  console.log(`\nSeeded ${String(Object.keys(ids).length + 1)} persona identities — SDMS simulator ${NESA_BASE_URL}`);
 
   const bus = new InMemoryEventBus();
-  const server = await startHttpServer({
-    serviceName: 'eligibility-education-selfcheck',
-    port: 0,
-    host: '127.0.0.1',
-    routes: [buildRoute(bus)],
-    readiness: async (): Promise<boolean> => {
-      try {
-        await sql`SELECT 1`;
-        return true;
-      } catch {
-        return false;
-      }
-    },
-    handleSignals: false,
-  });
-  const base = server.url;
-
+  const server = await startHttpServer({ serviceName: 'eligibility-education-selfcheck', port: 0, host: '127.0.0.1', routes: [buildRoute(bus)], handleSignals: false });
   const bodies: string[] = [];
-  // Business POSTs carry a valid system bearer token; a caller can override the
-  // Authorization header to exercise the auth failure paths.
-  async function call(body: unknown, headers: Record<string, string> = {}): Promise<{ status: number; text: string; json: unknown; headers: Headers }> {
-    const res = await fetch(`${base}${EDUCATION_CHECK_PATH}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...AUTH_HEADER, ...headers },
-      body: JSON.stringify(body),
-    });
+  async function callAt(base: string, body: unknown, headers: Record<string, string> = {}): Promise<{ status: number; text: string; json: unknown; headers: Headers }> {
+    const res = await fetch(`${base}${EDUCATION_CHECK_PATH}`, { method: 'POST', headers: { 'content-type': 'application/json', ...AUTH_HEADER, ...headers }, body: JSON.stringify(body) });
     const text = await res.text();
     bodies.push(text);
     let json: unknown;
-    try {
-      json = text ? JSON.parse(text) : undefined;
-    } catch {
-      json = undefined;
-    }
+    try { json = text ? JSON.parse(text) : undefined; } catch { json = undefined; }
     return { status: res.status, text, json, headers: res.headers };
   }
+  const call = (body: unknown, headers: Record<string, string> = {}) => callAt(server.url, body, headers);
+  const ask = (persona: string, category: string, index = indexOf(persona)) =>
+    call({ applicantId: ids[persona], applicationId: APPLICATION_ID, category, nesaIndexNumber: index });
+  const lastAcademic = () => [...bus.published].reverse().find((e) => e.eventType === 'NESA_VERIFICATION_COMPLETED') as Record<string, unknown> | undefined;
+  const lastAudit = () => [...bus.published].reverse().find((e) => e.eventType === 'AUDIT_ENTRY') as Record<string, unknown> | undefined;
 
   try {
-    console.log('\n── 1. A-Level pass: A2 meets GENERAL_ENLISTMENT → EVALUATED ELIGIBLE ──');
-    const r1 = await call(
-      { applicantId: verifiedId, applicationId: APPLICATION_ID, category: 'GENERAL_ENLISTMENT', nesaIndexNumber: 'RW2024/1001' },
-      { 'x-correlation-id': CORRELATION_ID },
-    );
+    console.log('\n── 1. Bound A2 record meets GENERAL_ENLISTMENT → EVALUATED ELIGIBLE ──');
+    const r1 = await call({ applicantId: ids['L-01'], applicationId: APPLICATION_ID, category: 'GENERAL_ENLISTMENT', nesaIndexNumber: indexOf('L-01') }, { 'x-correlation-id': CORRELATION_ID });
     const b1 = asRecord(r1.json);
-    check('status is 200', r1.status === 200, `got ${r1.status} ${r1.text}`);
-    check('status is EVALUATED', b1['status'] === 'EVALUATED', String(b1['status']));
-    check('academicStatus ELIGIBLE', b1['academicStatus'] === 'ELIGIBLE', String(b1['academicStatus']));
-    check('eligible true', b1['eligible'] === true);
-    check('agency RDF', b1['agency'] === 'RDF', String(b1['agency']));
-    check('evaluatedLevel A_LEVEL_A2', b1['evaluatedLevel'] === 'A_LEVEL_A2', String(b1['evaluatedLevel']));
-    check('response body carries NO schoolName', !r1.text.includes(FIXTURE_SCHOOL));
+    check('200 EVALUATED ELIGIBLE', r1.status === 200 && b1['status'] === 'EVALUATED' && b1['academicStatus'] === 'ELIGIBLE', `${r1.status} ${r1.text}`);
+    check('evaluatedLevel A_LEVEL_A2, agency RDF', b1['evaluatedLevel'] === 'A_LEVEL_A2' && b1['agency'] === 'RDF');
     check('response echoes x-correlation-id', r1.headers.get('x-correlation-id') === CORRELATION_ID);
-    check(
-      'NESA_VERIFICATION_COMPLETED + AUDIT_ENTRY both published with inbound correlationId',
-      bus.published.length === 2 &&
-        bus.published.some((e) => e.eventType === 'NESA_VERIFICATION_COMPLETED' && e.correlationId === CORRELATION_ID) &&
-        bus.published.some((e) => e.eventType === 'AUDIT_ENTRY' && e.correlationId === CORRELATION_ID),
-      `published ${bus.published.map((e) => e.eventType).join(',')}`,
-    );
+    check('NESA_VERIFICATION_COMPLETED + AUDIT_ENTRY with the inbound correlationId',
+      bus.published.length === 2 && bus.published.every((e) => e.correlationId === CORRELATION_ID));
+    check('the audit records the binding per field (all MATCH), no values', JSON.stringify(asRecord(asRecord(lastAudit()?.['metadata'])['binding'])) === JSON.stringify({ name: 'MATCH', dateOfBirth: 'NOT_COMPARED', sex: 'MATCH', nationalIdHint: 'MATCH' }), JSON.stringify(lastAudit()?.['metadata']));
 
-    console.log('\n── 2. RCS 4-year science ≥70% PASS (82%) → ELIGIBLE ──');
-    const r2 = await call({ applicantId: verifiedId, applicationId: APPLICATION_ID, category: 'OFFICER_FOUR_YEAR_UR', nesaIndexNumber: 'RW2024/SCI-PASS' });
-    const b2 = asRecord(r2.json);
-    check('status 200 EVALUATED', r2.status === 200 && b2['status'] === 'EVALUATED', `${r2.status} ${r2.text}`);
-    check('academicStatus ELIGIBLE (science 82% ≥ 70%)', b2['academicStatus'] === 'ELIGIBLE', String(b2['academicStatus']));
-    check('agency RCS', b2['agency'] === 'RCS', String(b2['agency']));
+    console.log('\n── 2. THE BINDING GAP (ADR-048 §2.2): someone else\'s valid index → NOT_BOUND, correctable ──');
+    const gap = await ask('L-01', 'GENERAL_ENLISTMENT', indexOf('P-ELIG-UR-SCI70'));
+    check('422 NESA_RECORD_NOT_BOUND with the citizen-safe copy', gap.status === 422 && asRecord(gap.json)['status'] === 'NESA_RECORD_NOT_BOUND' && String(asRecord(gap.json)['detail']).includes('does not match your identity'), `${gap.status} ${gap.text}`);
+    check('...naming nobody', !gap.text.includes(P('P-ELIG-UR-SCI70').surname) && !gap.text.includes(P('L-01').surname));
+    const gapEvent = lastAcademic();
+    check('academic verdict is PENDING, never INELIGIBLE', gapEvent?.['academicStatus'] === 'PENDING', String(gapEvent?.['academicStatus']));
+    check('failureCode NESA_RECORD_NOT_BOUND', asRecord(gapEvent?.['eligibilityResult'])['failureCode'] === 'NESA_RECORD_NOT_BOUND');
+    check('audit action NESA_RECORD_NOT_BOUND', lastAudit()?.['action'] === 'NESA_RECORD_NOT_BOUND');
 
-    console.log('\n── 3. RCS 4-year science < 70% (61%) → INELIGIBLE ──');
-    const r3 = await call({ applicantId: verifiedId, applicationId: APPLICATION_ID, category: 'OFFICER_FOUR_YEAR_UR', nesaIndexNumber: 'RW2024/SCI-LOW' });
-    const b3 = asRecord(r3.json);
-    check('status 200 EVALUATED', r3.status === 200 && b3['status'] === 'EVALUATED', `${r3.status} ${r3.text}`);
-    check('academicStatus INELIGIBLE (science 61% < 70%)', b3['academicStatus'] === 'INELIGIBLE', String(b3['academicStatus']));
-    check('eligible false', b3['eligible'] === false);
+    console.log('\n── 3. Binding personas ──');
+    const nm = await ask('P-NESA-NAME-MISMATCH', 'GENERAL_ENLISTMENT');
+    check('name mismatch → 422 NOT_BOUND', nm.status === 422 && asRecord(nm.json)['status'] === 'NESA_RECORD_NOT_BOUND', `${nm.status} ${nm.text}`);
+    const hm = await ask('P-NESA-HINT-MISMATCH', 'GENERAL_ENLISTMENT');
+    check('NID-hint mismatch → 422 NOT_BOUND', hm.status === 422, `${hm.status} ${hm.text}`);
+    check('...the audit names the field, not the value', asRecord(asRecord(lastAudit()?.['metadata'])['binding'])['nationalIdHint'] === 'MISMATCH');
+    const np = await ask('P-NESA-NAME-PARTIAL', 'GENERAL_ENLISTMENT');
+    check('partial name → 202 REVIEW [NAME_PARTIAL]', np.status === 202 && JSON.stringify(asRecord(np.json)['reasons']) === '["NAME_PARTIAL"]', `${np.status} ${np.text}`);
+    const dia = await ask('P-NESA-DIACRITICS', 'GENERAL_ENLISTMENT');
+    check('diacritics / order / case → still BOUND and EVALUATED', dia.status === 200 && asRecord(dia.json)['academicStatus'] === 'ELIGIBLE', `${dia.status} ${dia.text}`);
 
-    console.log('\n── 4. Bogus index → 422 NESA_RECORD_NOT_FOUND (+ INELIGIBLE events) ──');
+    console.log('\n── 4. Real-world NESA states ──');
+    const un = await ask('P-NESA-UNPUBLISHED', 'GENERAL_ENLISTMENT');
+    check('published:false → 202 PENDING, never ineligible', un.status === 202 && asRecord(un.json)['status'] === 'NESA_RESULTS_PENDING' && lastAcademic()?.['academicStatus'] === 'PENDING', `${un.status} ${un.text}`);
+    const mp = await ask('P-NESA-MALPRACTICE', 'GENERAL_ENLISTMENT');
+    check('malpractice → 202 REVIEW [MALPRACTICE], never automatic', mp.status === 202 && JSON.stringify(asRecord(mp.json)['reasons']) === '["MALPRACTICE"]', `${mp.status} ${mp.text}`);
+    const tv = await ask('P-TVET-A2', 'RESERVE_FORCE_ALEVEL');
+    check('TVET at A2 counts as A2 (default) → ELIGIBLE', tv.status === 200 && asRecord(tv.json)['academicStatus'] === 'ELIGIBLE', `${tv.status} ${tv.text}`);
+    const s3a = await ask('P-S3-ONLY', 'GENERAL_ENLISTMENT');
+    check('S3 only, RDF regular (min S3) → ELIGIBLE', s3a.status === 200 && asRecord(s3a.json)['academicStatus'] === 'ELIGIBLE', `${s3a.status} ${s3a.text}`);
+    const s3b = await ask('P-S3-ONLY', 'BASIC_POLICE_COURSE');
+    check('S3 only, RNP Basic (A2) → INELIGIBLE', s3b.status === 200 && asRecord(s3b.json)['academicStatus'] === 'INELIGIBLE', `${s3b.status} ${s3b.text}`);
+    const sci = await ask('P-ELIG-UR-SCI70', 'OFFICER_FOUR_YEAR_UR');
+    check('RCS 4-year, weightedPercent 74 ≥ 70 → ELIGIBLE', sci.status === 200 && asRecord(sci.json)['academicStatus'] === 'ELIGIBLE', `${sci.status} ${sci.text}`);
+    const low = await ask('P-UR-SCI-69', 'OFFICER_FOUR_YEAR_UR');
+    check('RCS 4-year, weightedPercent 69 < 70 → INELIGIBLE', low.status === 200 && asRecord(low.json)['academicStatus'] === 'INELIGIBLE', `${low.status} ${low.text}`);
+
+    console.log('\n── 5. Unknown index, wrong path, preconditions ──');
     const before = bus.published.length;
-    const r4 = await call({ applicantId: verifiedId, applicationId: APPLICATION_ID, category: 'GENERAL_ENLISTMENT', nesaIndexNumber: 'RW2024/NOPE' });
-    check('status 422 NESA_RECORD_NOT_FOUND', r4.status === 422 && asRecord(r4.json)['status'] === 'NESA_RECORD_NOT_FOUND', `${r4.status} ${r4.text}`);
-    const emitted = bus.published.slice(before);
-    check(
-      'still emits NESA_VERIFICATION_COMPLETED (INELIGIBLE) + AUDIT_ENTRY',
-      emitted.length === 2 &&
-        emitted.some((e) => e.eventType === 'NESA_VERIFICATION_COMPLETED' && e.academicStatus === 'INELIGIBLE'),
-      `emitted ${emitted.map((e) => e.eventType).join(',')}`,
-    );
-
-    console.log('\n── 5. Degree category on NESA path → 409 NESA_NOT_APPLICABLE ──');
-    const r5 = await call({ applicantId: verifiedId, applicationId: APPLICATION_ID, category: 'CADET_OFFICER', nesaIndexNumber: 'RW2024/1001' });
-    check('status 409 NESA_NOT_APPLICABLE', r5.status === 409 && asRecord(r5.json)['status'] === 'NESA_NOT_APPLICABLE', `${r5.status} ${r5.text}`);
-
-    console.log('\n── 6. Unverified identity → 409 IDENTITY_NOT_VERIFIED (no event) ──');
+    const r4 = await ask('L-01', 'GENERAL_ENLISTMENT', '990000ZZZ9992020');
+    check('unknown index → 422 NESA_RECORD_NOT_FOUND', r4.status === 422 && asRecord(r4.json)['status'] === 'NESA_RECORD_NOT_FOUND', `${r4.status} ${r4.text}`);
+    check('...with INELIGIBLE events', bus.published.slice(before).some((e) => e.eventType === 'NESA_VERIFICATION_COMPLETED' && e.academicStatus === 'INELIGIBLE'));
+    const r5 = await ask('L-01', 'CADET_OFFICER');
+    check('degree category → 409 NESA_NOT_APPLICABLE', r5.status === 409, `${r5.status} ${r5.text}`);
     const before6 = bus.published.length;
-    const r6 = await call({ applicantId: pendingId, applicationId: APPLICATION_ID, category: 'GENERAL_ENLISTMENT', nesaIndexNumber: 'RW2024/1001' });
-    check('status 409 IDENTITY_NOT_VERIFIED', r6.status === 409 && asRecord(r6.json)['status'] === 'IDENTITY_NOT_VERIFIED', `${r6.status} ${r6.text}`);
-    check('no event published for rejected precondition', bus.published.length === before6, `+${bus.published.length - before6}`);
+    const r6 = await call({ applicantId: pendingId, applicationId: APPLICATION_ID, category: 'GENERAL_ENLISTMENT', nesaIndexNumber: indexOf('P-ELIG-A2') });
+    check('unverified identity → 409, no event', r6.status === 409 && bus.published.length === before6, `${r6.status} ${r6.text}`);
+    const r7 = await call({ applicantId: randomUUID(), applicationId: APPLICATION_ID, category: 'GENERAL_ENLISTMENT', nesaIndexNumber: indexOf('L-01') });
+    check('unknown applicant → 404', r7.status === 404, `${r7.status}`);
 
-    console.log('\n── 7. Unknown applicant → 404 ──');
-    const r7 = await call({ applicantId: randomUUID(), applicationId: APPLICATION_ID, category: 'GENERAL_ENLISTMENT', nesaIndexNumber: 'RW2024/1001' });
-    check('status 404 APPLICANT_NOT_FOUND', r7.status === 404 && asRecord(r7.json)['status'] === 'APPLICANT_NOT_FOUND', `${r7.status} ${r7.text}`);
+    console.log('\n── 6. Input validation and auth ──');
+    check('bad applicantId → 400', (await call({ applicantId: 'nope', applicationId: APPLICATION_ID, category: 'GENERAL_ENLISTMENT', nesaIndexNumber: indexOf('L-01') })).status === 400);
+    check('bad category → 400', (await ask('L-01', 'NOPE')).status === 400);
+    check('bad index → 400', (await ask('L-01', 'GENERAL_ENLISTMENT', '!!')).status === 400);
+    check('invalid token → 401', (await call({ applicantId: ids['L-01'], applicationId: APPLICATION_ID, category: 'GENERAL_ENLISTMENT', nesaIndexNumber: indexOf('L-01') }, { authorization: 'Bearer not-a-valid-token' })).status === 401);
+    check('officer token on a system route → 403', (await call({ applicantId: ids['L-01'], applicationId: APPLICATION_ID, category: 'GENERAL_ENLISTMENT', nesaIndexNumber: indexOf('L-01') }, { authorization: `Bearer ${OFFICER_TOKEN}` })).status === 403);
 
-    console.log('\n── 8. Input validation → 400 ──');
-    const badId = await call({ applicantId: 'nope', applicationId: APPLICATION_ID, category: 'GENERAL_ENLISTMENT', nesaIndexNumber: 'RW2024/1001' });
-    check('bad applicantId → 400 INVALID_APPLICANT_ID', badId.status === 400 && asRecord(badId.json)['error'] === 'INVALID_APPLICANT_ID', `${badId.status} ${badId.text}`);
-    const badCat = await call({ applicantId: verifiedId, applicationId: APPLICATION_ID, category: 'NOPE', nesaIndexNumber: 'RW2024/1001' });
-    check('bad category → 400 INVALID_CATEGORY', badCat.status === 400 && asRecord(badCat.json)['error'] === 'INVALID_CATEGORY', `${badCat.status} ${badCat.text}`);
-    const badIdx = await call({ applicantId: verifiedId, applicationId: APPLICATION_ID, category: 'GENERAL_ENLISTMENT', nesaIndexNumber: '!!' });
-    check('bad index → 400 INVALID_NESA_INDEX', badIdx.status === 400 && asRecord(badIdx.json)['error'] === 'INVALID_NESA_INDEX', `${badIdx.status} ${badIdx.text}`);
-
-    console.log('\n── 8b. Front door is service-internal (auth enforced) ──');
-    const noAuth = await call(
-      { applicantId: verifiedId, applicationId: APPLICATION_ID, category: 'GENERAL_ENLISTMENT', nesaIndexNumber: 'RW2024/1001' },
-      { authorization: 'Bearer not-a-valid-token' },
-    );
-    check('invalid token → 401', noAuth.status === 401, `got ${noAuth.status} ${noAuth.text}`);
-    const wrongKind = await call(
-      { applicantId: verifiedId, applicationId: APPLICATION_ID, category: 'GENERAL_ENLISTMENT', nesaIndexNumber: 'RW2024/1001' },
-      { authorization: `Bearer ${OFFICER_TOKEN}` },
-    );
-    check('officer token on system route → 403', wrongKind.status === 403, `got ${wrongKind.status} ${wrongKind.text}`);
-
-    console.log('\n── 9. NESA unreachable → 503 NESA_UNAVAILABLE ──');
-    const failBus = new InMemoryEventBus();
-    const failFetch: typeof fetch = () => Promise.reject(new Error('ECONNREFUSED'));
-    const failServer = await startHttpServer({
-      serviceName: 'eligibility-education-selfcheck-fail',
-      port: 0,
-      host: '127.0.0.1',
-      routes: [buildRoute(failBus, failFetch)],
-      handleSignals: false,
-    });
-    try {
-      const res = await fetch(`${failServer.url}${EDUCATION_CHECK_PATH}`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${SYSTEM_TOKEN}` },
-        body: JSON.stringify({ applicantId: verifiedId, applicationId: APPLICATION_ID, category: 'GENERAL_ENLISTMENT', nesaIndexNumber: 'RW2024/1001' }),
-      });
-      const txt = await res.text();
-      bodies.push(txt);
-      check('status 503 NESA_UNAVAILABLE', res.status === 503 && asRecord(JSON.parse(txt))['error'] === 'NESA_UNAVAILABLE', `${res.status} ${txt}`);
-      check('no event published on NESA fault', failBus.published.length === 0, `got ${failBus.published.length}`);
-    } finally {
-      await failServer.stop();
+    console.log('\n── 7. Registry faults are never verdicts ──');
+    for (const id of ['P-NESA-503', 'P-NESA-TRUNCATED']) {
+      const before7 = bus.published.length;
+      const r = await ask(id, 'GENERAL_ENLISTMENT');
+      check(`${id} → 503 NESA_UNAVAILABLE, no event`, r.status === 503 && asRecord(r.json)['error'] === 'NESA_UNAVAILABLE' && bus.published.length === before7, `${r.status} ${r.text}`);
+    }
+    for (const [label, options] of [
+      ['NESA unreachable', { fetchImpl: (() => Promise.reject(new Error('ECONNREFUSED'))) as typeof fetch }],
+      ['FENCE 2: production refuses the simulator answer', { env: { NODE_ENV: 'production' } }],
+    ] as const) {
+      const failBus = new InMemoryEventBus();
+      const failServer = await startHttpServer({ serviceName: 'eligibility-education-selfcheck-fail', port: 0, host: '127.0.0.1', routes: [buildRoute(failBus, options)], handleSignals: false });
+      try {
+        const r = await callAt(failServer.url, { applicantId: ids['L-01'], applicationId: APPLICATION_ID, category: 'GENERAL_ENLISTMENT', nesaIndexNumber: indexOf('L-01') }, { authorization: `Bearer ${SYSTEM_TOKEN}` });
+        check(`${label} → 503, no event`, r.status === 503 && failBus.published.length === 0, `${r.status} ${r.text}`);
+      } finally {
+        await failServer.stop();
+      }
     }
 
-    console.log('\n── 10. No PII leaks (DOB / school) ──');
-    const allBodies = bodies.join('\n');
-    check('DOB absent from every HTTP response body', !allBodies.includes(FIXTURE_DOB));
-    check('school name absent from every HTTP response body', !allBodies.includes(FIXTURE_SCHOOL));
-    const publishedJson = JSON.stringify(bus.published);
-    check('DOB absent from every published event', !publishedJson.includes(FIXTURE_DOB));
-    check('school name absent from every published event', !publishedJson.includes(FIXTURE_SCHOOL));
+    console.log('\n── 8. No PII leaks (names, DOB, school, NID hint) ──');
+    const everything = `${bodies.join('\n')}\n${JSON.stringify(bus.published)}`;
+    for (const id of Object.keys(ids)) {
+      const c = P(id);
+      if (everything.includes(c.surname) || everything.includes(c.dateOfBirth) || everything.includes(c.nesa?.attendedSchool ?? '\u0000') || everything.includes(c.nesa?.studentNationalIdHint ?? '\u0000')) {
+        check(`no value of ${id} in any body or event`, false);
+      }
+    }
+    check('no persona name, DOB, school or hint in any body or event', true);
   } finally {
-    await cleanup([hashVerified, hashPending]);
+    await cleanup();
     await server.stop();
   }
 

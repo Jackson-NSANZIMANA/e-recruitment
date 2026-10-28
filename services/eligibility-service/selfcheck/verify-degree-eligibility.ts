@@ -45,8 +45,8 @@ const HEC_BASE_URL = process.env['HEC_BASE_URL'] ?? 'http://localhost:3103';
 const HEC_HMAC_SECRET = process.env['HEC_HMAC_SECRET'] ?? 'dev_hec_hmac_secret';
 
 // G2G subject hashes from the HEC/NIDA dev seed (HMAC(dev_nida_hmac_secret, NID)).
-const G2G_UWIMANA = '6561ef4517673f33b321cf2004b9d8e31c805c0a927346a4c4b6a71a36b648b0'; // → UR/2023/CS/001 (ENGINEERING, BACHELOR)
-const G2G_MUKAMANA = '64d32ed6e2852caa6f28017cd7dcff3c54dac8a1b31bf29f1105fe2f27cfb795'; // → UR/2022/NURSING/045 (NURSING, BACHELOR)
+const G2G_UWIMANA = '1aaa22e199cb16828ad38270b5567211c921f0a9ccc17988b7d1cb54ce4f87bb'; // → UR/2023/CS/001 (ENGINEERING, BACHELOR)
+const G2G_MUKAMANA = 'a4ca6a6c25f7fdfb7558491334d587c600218c1cac4d7ed11997bb306004f9a3'; // → UR/2022/NURSING/045 (NURSING, BACHELOR)
 
 // Registrations in the live HEC mock (degrees.json).
 const REG_ENG_BACHELOR = 'UR/2023/CS/001'; // holder UWIMANA, ENGINEERING, BACHELOR_A0

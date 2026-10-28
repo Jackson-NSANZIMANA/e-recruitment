@@ -1,11 +1,16 @@
 // ══════════════════════════════════════════════════════════════════
 // eligibility-service — Verify NESA (A-Level) education (use case)
 //
-// Read the applicant's verified identity, look up their NESA A-Level
-// results over the G2G tunnel, evaluate the academic gate for the chosen
-// category, and emit BOTH a domain routing event (NESA_VERIFICATION_
-// COMPLETED, so downstream vetting can proceed) AND an immutable audit
-// entry of the decision. Business outcomes (applicant unknown, identity
+// Read the applicant's verified identity, look up their NESA results
+// (SDMS format, ADR-047), BIND them to the applicant before anything else
+// (ADR-048 §2.2: closes the gap where a valid index belonging to someone
+// else passed), then evaluate the academic gate for the chosen category,
+// and emit BOTH a domain routing event (NESA_VERIFICATION_COMPLETED, so
+// downstream vetting can proceed) AND an immutable audit entry.
+//
+// Not bound, unpublished and review outcomes emit academicStatus PENDING
+// with a failureCode (nesa-binding.ts NESA_GATE_CODES): the application is
+// never rejected for them, and the citizen copy names no other person. Business outcomes (applicant unknown, identity
 // not verified, wrong verification path, no NESA record) are RETURN
 // VALUES; only infrastructure faults (NesaUnavailableError, read faults)
 // throw. No PII (DOB, raw index) ever enters an event, a log, or the
@@ -25,6 +30,13 @@ import {
 import type { IdentityReader } from '../ports/identity-reader.js';
 import type { NesaGateway } from '../ports/nesa.gateway.js';
 import { evaluateNesaEducation, type EducationEligibilityResult } from '../domain/education-rules.js';
+import {
+  decideNesaGate,
+  NESA_GATE_CODES,
+  NESA_NOT_BOUND_CITIZEN_MESSAGE,
+  type NesaReviewReason,
+} from '../domain/nesa-binding.js';
+import type { BindingFields } from '@usrp/shared-identity-match';
 import { agencyForCategory } from '../domain/category-agency.js';
 
 export interface VerifyNesaEducationCommand {
@@ -67,6 +79,27 @@ export type VerifyNesaEducationOutcome =
       readonly kind: 'NESA_RECORD_NOT_FOUND';
       readonly applicantId: string;
       readonly nesaRequestId: string;
+    }
+  | {
+      // The record does not belong to this applicant: CORRECTABLE, not a verdict.
+      readonly kind: 'NESA_NOT_BOUND';
+      readonly applicantId: string;
+      readonly nesaRequestId: string;
+      readonly fields: BindingFields;
+    }
+  | {
+      // published:false — retried later, never ineligible.
+      readonly kind: 'NESA_RESULTS_PENDING';
+      readonly applicantId: string;
+      readonly nesaRequestId: string;
+    }
+  | {
+      // A human decides (amber queue): partial name, malpractice, unknown level...
+      readonly kind: 'NESA_REVIEW_REQUIRED';
+      readonly applicantId: string;
+      readonly nesaRequestId: string;
+      readonly reasons: readonly NesaReviewReason[];
+      readonly fields: BindingFields;
     };
 
 export interface VerifyNesaEducationDeps {
@@ -81,7 +114,7 @@ export class VerifyNesaEducationService {
   constructor(private readonly deps: VerifyNesaEducationDeps) {}
 
   async verify(command: VerifyNesaEducationCommand): Promise<VerifyNesaEducationOutcome> {
-    const applicant = await this.deps.identityReader.findApplicantById(command.applicantId);
+    const applicant = await this.deps.identityReader.findBindingSubjectById(command.applicantId);
     if (applicant === null) {
       return { kind: 'APPLICANT_NOT_FOUND', applicantId: command.applicantId };
     }
@@ -125,8 +158,51 @@ export class VerifyNesaEducationService {
       };
     }
 
-    const education = evaluateNesaEducation(command.category, lookup.payload, asOf);
-    const { event, audit } = this.emit(command, agency, education, lookup.nesaRequestId, context, asOf);
+    // ── Bind BEFORE evaluating (ADR-048 §2.2) ──
+    const decision = decideNesaGate(
+      { fullName: applicant.fullName, dateOfBirth: applicant.dateOfBirth, sex: applicant.sex, nationalIdHint: applicant.nationalIdHint },
+      lookup.results,
+    );
+    const requirement = EDUCATION_REQUIREMENTS[command.category];
+    if (decision.kind !== 'EVALUATE') {
+      const pending: EducationEligibilityResult = {
+        academicStatus: 'PENDING',
+        meetsRequirement: false,
+        reason:
+          decision.kind === 'NOT_BOUND'
+            ? NESA_NOT_BOUND_CITIZEN_MESSAGE
+            : decision.kind === 'PENDING_UNPUBLISHED'
+              ? 'NESA results for this index are not yet published; the check will be repeated.'
+              : 'The NESA record needs a review by an officer before the academic check can complete.',
+        requiredMinLevel: requirement.minLevel,
+        evaluatedLevel: requirement.minLevel,
+        evaluationDate: asOf.toISOString(),
+      };
+      const failureCode =
+        decision.kind === 'NOT_BOUND' ? NESA_GATE_CODES.NOT_BOUND : decision.kind === 'PENDING_UNPUBLISHED' ? NESA_GATE_CODES.UNPUBLISHED : NESA_GATE_CODES.REVIEW;
+      const reviewReasons = decision.kind === 'REVIEW' ? decision.reasons : [];
+      const { event, audit } = this.emit(command, agency, pending, lookup.nesaRequestId, context, asOf, {
+        failureCode,
+        binding: decision.binding.fields,
+        reviewReasons,
+      });
+      await this.deps.eventBus.publish(event);
+      await this.deps.eventBus.publish(audit);
+      if (decision.kind === 'NOT_BOUND') {
+        return { kind: 'NESA_NOT_BOUND', applicantId: command.applicantId, nesaRequestId: lookup.nesaRequestId, fields: decision.binding.fields };
+      }
+      if (decision.kind === 'PENDING_UNPUBLISHED') {
+        return { kind: 'NESA_RESULTS_PENDING', applicantId: command.applicantId, nesaRequestId: lookup.nesaRequestId };
+      }
+      return { kind: 'NESA_REVIEW_REQUIRED', applicantId: command.applicantId, nesaRequestId: lookup.nesaRequestId, reasons: decision.reasons, fields: decision.binding.fields };
+    }
+
+    const education = evaluateNesaEducation(command.category, decision.facts, asOf);
+    const { event, audit } = this.emit(command, agency, education, lookup.nesaRequestId, context, asOf, {
+      failureCode: null,
+      binding: decision.binding.fields,
+      reviewReasons: [],
+    });
     await this.deps.eventBus.publish(event);
     await this.deps.eventBus.publish(audit);
 
@@ -152,16 +228,18 @@ export class VerifyNesaEducationService {
     nesaRequestId: string,
     context: EventContext,
     asOf: Date,
+    gate: { readonly failureCode: string | null; readonly binding: BindingFields | null; readonly reviewReasons: readonly NesaReviewReason[] } = { failureCode: null, binding: null, reviewReasons: [] },
   ): { event: NESAVerificationCompletedEvent; audit: AuditEvent } {
+    const failureCode = gate.failureCode ?? (education.meetsRequirement ? null : 'EDUCATION_REQUIREMENT_NOT_MET');
     const eligibilityResult: EligibilityResult = {
       eligible: education.meetsRequirement,
       reason: education.reason,
-      ...(education.meetsRequirement ? {} : { failureCode: 'EDUCATION_REQUIREMENT_NOT_MET' }),
+      ...(failureCode === null ? {} : { failureCode }),
       evaluatedAt: asOf.toISOString(),
       details: {
         citizenshipCheck: null,
         ageCheck: null,
-        educationCheck: education.meetsRequirement,
+        educationCheck: education.academicStatus === 'PENDING' ? null : education.meetsRequirement,
         criminalCheck: null,
         prosecutionCheck: null,
         dismissalCheck: null,
@@ -189,7 +267,16 @@ export class VerifyNesaEducationService {
       eventType: 'AUDIT_ENTRY',
       entityType: 'APPLICANT',
       entityId: command.applicantId,
-      action: education.meetsRequirement ? 'NESA_EDUCATION_PASSED' : 'NESA_EDUCATION_FAILED',
+      action:
+        gate.failureCode === NESA_GATE_CODES.NOT_BOUND
+          ? 'NESA_RECORD_NOT_BOUND'
+          : gate.failureCode === NESA_GATE_CODES.UNPUBLISHED
+            ? 'NESA_RESULTS_UNPUBLISHED'
+            : gate.failureCode === NESA_GATE_CODES.REVIEW
+              ? 'NESA_REVIEW_REQUIRED'
+              : education.meetsRequirement
+                ? 'NESA_EDUCATION_PASSED'
+                : 'NESA_EDUCATION_FAILED',
       performedBy: 'eligibility-service',
       agency,
       metadata: {
@@ -200,6 +287,10 @@ export class VerifyNesaEducationService {
         meetsRequirement: education.meetsRequirement,
         nesaRequestId,
         reason: education.reason,
+        // Per-field binding results (MATCH / PARTIAL / MISMATCH / NOT_COMPARED /
+        // UNREADABLE) and review reasons: never the compared values.
+        ...(gate.binding === null ? {} : { binding: { ...gate.binding } }),
+        ...(gate.reviewReasons.length === 0 ? {} : { reviewReasons: [...gate.reviewReasons] }),
       },
     };
 

@@ -245,7 +245,7 @@ export function startHttpServer(options: HttpServerOptions): Promise<HttpServer>
       headers['set-cookie'] = cookies.map(serializeSetCookie);
     }
 
-    const payload = result.body === undefined ? '' : JSON.stringify(result.body);
+    const payload = result.rawBody ?? (result.body === undefined ? '' : JSON.stringify(result.body));
     res.writeHead(result.status, headers);
     res.end(payload);
   }
@@ -262,13 +262,16 @@ export function startHttpServer(options: HttpServerOptions): Promise<HttpServer>
     // CORS headers ride on EVERY response once a policy is configured —
     // including error responses, or the browser hides the real status behind
     // an opaque network failure and every 4xx looks like a CORS bug.
-    let corsHeaders: Record<string, string> = {};
+    let corsHeaders: Record<string, string> = { ...(options.responseHeaders ?? {}) };
     if (cors !== undefined) {
-      corsHeaders = isAllowedOrigin(cors, origin)
-        ? corsResponseHeaders(cors, origin as string)
-        : // Vary even on rejection: without it a shared cache can be poisoned
-          // into replaying one origin's ACAO to a different origin.
-          { vary: 'Origin' };
+      corsHeaders = {
+        ...corsHeaders,
+        ...(isAllowedOrigin(cors, origin)
+          ? corsResponseHeaders(cors, origin as string)
+          : // Vary even on rejection: without it a shared cache can be poisoned
+            // into replaying one origin's ACAO to a different origin.
+            { vary: 'Origin' }),
+      };
     }
 
     try {
@@ -316,6 +319,15 @@ export function startHttpServer(options: HttpServerOptions): Promise<HttpServer>
       //    route's byte cap is what actually bounds the body read. ──
       const byMethod = table.get(url.pathname);
       if (byMethod === undefined) {
+        if (options.fallback !== undefined) {
+          const ctx = buildContext(req, url, method, requestId, correlationId, maxBodyBytes);
+          const result = await options.fallback(ctx);
+          if (result !== null) {
+            status = result.status;
+            send(res, result, requestId, correlationId, corsHeaders);
+            return;
+          }
+        }
         throw new HttpError(404, 'NOT_FOUND', `No route for ${method} ${url.pathname}.`);
       }
       const entry = byMethod.get(method);

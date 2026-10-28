@@ -72,7 +72,7 @@ const ADMIN_URL =
 const admin = postgres(ADMIN_URL, { onnotice: () => {} });
 
 // ── Deterministic fixtures (ad200000 — unique to this proof) ──────
-const CITIZEN_NID = '1199980345678901'; // HABIMANA Eric — NIDA mock, registered phone
+const CITIZEN_NID = '1199989990003000'; // HABIMANA Eric — NIDA mock, registered phone
 const MOCK_PHONE_FRAGMENT = '980-X901'; // distinctive tail of that phone
 
 const CTRL_APPLICANT = 'ad200000-0000-4000-8000-000000000002'; // owns the foreign application

@@ -71,6 +71,7 @@ test('scenario: the shipped scenario is valid and every artefact is marked as a 
     ['HUYE', 'SOUTHERN_PROVINCE', '2026-10-16'],
   ]);
   assert.equal(rehearsalCode('RNP', NOW), 'REH-RNP-20261016');
+  assert.equal(rehearsalCode('RNP', NOW, 'CAD25'), 'REH-RNP-CAD25-20261016');
 });
 
 test('scenario: rejects what the control plane would refuse', () => {
@@ -151,7 +152,7 @@ test('roster: minimal rows pass, identifying fields and missing codes fail', () 
   assert.equal(assertGasaboRoster({ candidates: [] }, null), 0);
   assert.throws(() => assertGasaboRoster({ candidates: [row] }, 'PC-9999'), RosterAssertion);
   assert.throws(() => assertGasaboRoster({ candidates: [{ ...row, fullName: 'X' }] }, null), RosterAssertion);
-  assert.throws(() => assertGasaboRoster({ candidates: [{ ...row, processingCode: '1200380123456789' }] }, null), RosterAssertion);
+  assert.throws(() => assertGasaboRoster({ candidates: [{ ...row, processingCode: '1200389990001000' }] }, null), RosterAssertion);
   assert.throws(() => assertGasaboRoster({ nothing: true }, null), RosterAssertion);
 });
 

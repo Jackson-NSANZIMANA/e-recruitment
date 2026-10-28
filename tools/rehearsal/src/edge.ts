@@ -84,10 +84,18 @@ export class EdgeSession {
     return this.send('POST', path, body, idempotencyKey);
   }
 
-  /** Officer sign-in: obtain the CSRF cookie, then the session cookie. True on success. */
+  /**
+   * Officer sign-in: obtain the CSRF cookie, then the session cookie. True on success.
+   * The edge's per-client login limit (429) is waited out, up to 3 attempts 61 s apart:
+   * back-to-back scenarios sign in faster than a person would, and 429 is never a refusal.
+   */
   async signIn(loginHandle: string, password: string): Promise<boolean> {
     await this.get('/edge/v1/session');
-    const login = await this.post('/edge/v1/auth/officer/login', { loginHandle, password });
+    let login = await this.post('/edge/v1/auth/officer/login', { loginHandle, password });
+    for (let attempt = 1; attempt < 3 && login.status === 429; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 61_000));
+      login = await this.post('/edge/v1/auth/officer/login', { loginHandle, password });
+    }
     if (login.status < 200 || login.status >= 300) return false;
     const session = await this.get('/edge/v1/session');
     return session.status === 200;

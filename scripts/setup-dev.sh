@@ -94,8 +94,7 @@ echo -e "${BOLD}═════════════════════�
 services=(
   "usrp-postgres:PostgreSQL:5432"
   "usrp-minio:MinIO:9000"
-  "usrp-nida-mock:NIDA Mock:3100"
-  "usrp-nesa-mock:NESA Mock:3101"
+  "usrp-g2g-sandbox:G2G sandbox (NIDA+NESA):3100"
   "usrp-rib-mock:RIB Mock:3102"
 )
 

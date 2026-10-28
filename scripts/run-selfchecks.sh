@@ -46,6 +46,8 @@ export DATABASE_URL="${DATABASE_URL:-postgresql://usrp_app:app_pw@localhost:5432
 export KAFKA_BROKERS="${KAFKA_BROKERS:-localhost:29092}"
 export NIDA_BASE_URL="${NIDA_BASE_URL:-http://localhost:3100}"
 export NIDA_HMAC_SECRET="${NIDA_HMAC_SECRET:-dev_nida_hmac_secret}"
+# The G2G client credential the nida-irembo simulator accepts (ADR-047).
+export NIDA_CLIENT_TOKEN="${NIDA_CLIENT_TOKEN:-dev_g2g_sandbox_client_token}"
 export NESA_BASE_URL="${NESA_BASE_URL:-http://localhost:3101}"
 export NESA_HMAC_SECRET="${NESA_HMAC_SECRET:-dev_nesa_hmac_secret}"
 export HEC_BASE_URL="${HEC_BASE_URL:-http://localhost:3103}"
@@ -172,6 +174,14 @@ fi
 # outside production. If that inertness ever broke, every proof below would
 # fail at once and the cause would be far from obvious.
 run_ts "shared-config: production boot guard (dev secrets / placeholders / loopback / mocks)" packages/shared-config/selfcheck/verify-production-guard.ts
+
+# ── 0-s. The G2G sandbox fences (ADR-047 §3.1) — zero infrastructure ──
+# Each fence red and green: the sandbox profile runs the production guard in
+# full; production refuses simulator hosts and x-usrp-sandbox answers; the
+# sandbox refuses real registry hosts; the simulator itself (spawned from its
+# build) refuses to start in production.
+run_ts "shared-config: sandbox profile and two-way fences" packages/shared-config/selfcheck/verify-sandbox-fences.ts
+run_ts "g2g-sandbox: the simulator starts only in sandbox/development (fence 1)" tools/g2g-sandbox/selfcheck/verify-simulator-fence.ts
 
 # ── 0a. Deployment hygiene — zero infrastructure, pure file reads ─────
 # Sits beside the production guard because it polices the same thing from the

@@ -126,6 +126,18 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
+  packages/shared-identity-match:
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.2
+      tsx:
+        specifier: ^4.21.0
+        version: 4.23.0
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
   packages/shared-logging:
     devDependencies:
       '@types/node':
@@ -421,6 +433,9 @@ importers:
       '@usrp/shared-http':
         specifier: workspace:*
         version: link:../../packages/shared-http
+      '@usrp/shared-identity-match':
+        specifier: workspace:*
+        version: link:../../packages/shared-identity-match
       '@usrp/shared-logging':
         specifier: workspace:*
         version: link:../../packages/shared-logging
@@ -434,6 +449,9 @@ importers:
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.2
+      '@usrp/g2g-sandbox':
+        specifier: workspace:*
+        version: link:../../tools/g2g-sandbox
       postgres:
         specifier: ^3.4.5
         version: 3.4.9
@@ -541,6 +559,9 @@ importers:
       '@usrp/shared-http':
         specifier: workspace:*
         version: link:../../packages/shared-http
+      '@usrp/shared-identity-match':
+        specifier: workspace:*
+        version: link:../../packages/shared-identity-match
       '@usrp/shared-logging':
         specifier: workspace:*
         version: link:../../packages/shared-logging
@@ -563,6 +584,9 @@ importers:
       '@usrp/document-forensics-service':
         specifier: workspace:*
         version: link:../document-forensics-service
+      '@usrp/g2g-sandbox':
+        specifier: workspace:*
+        version: link:../../tools/g2g-sandbox
       '@usrp/iam-service':
         specifier: workspace:*
         version: link:../iam-service
@@ -662,8 +686,39 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
+  tools/g2g-sandbox:
+    dependencies:
+      '@usrp/shared-config':
+        specifier: workspace:*
+        version: link:../../packages/shared-config
+      '@usrp/shared-http':
+        specifier: workspace:*
+        version: link:../../packages/shared-http
+      '@usrp/shared-types':
+        specifier: workspace:*
+        version: link:../../packages/shared-types
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.2
+      '@usrp/shared-security':
+        specifier: workspace:*
+        version: link:../../packages/shared-security
+      tsx:
+        specifier: ^4.21.0
+        version: 4.23.0
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
   tools/rehearsal:
     dependencies:
+      '@usrp/g2g-sandbox':
+        specifier: workspace:*
+        version: link:../g2g-sandbox
+      '@usrp/shared-identity-match':
+        specifier: workspace:*
+        version: link:../../packages/shared-identity-match
       '@usrp/shared-security':
         specifier: workspace:*
         version: link:../../packages/shared-security

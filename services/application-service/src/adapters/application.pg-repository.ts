@@ -65,6 +65,7 @@ interface ApplicationStateRow {
   readonly age_eligibility_status: AgeEligibilityStatus;
   readonly academic_status: AcademicEligibilityStatus;
   readonly criminal_clearance_status: CriminalClearanceStatus;
+  readonly academic_eligibility_detail: unknown;
   readonly applicant_id: string;
   readonly campaign_id: string;
   readonly category: ApplicationCategory;
@@ -130,7 +131,7 @@ export class PgApplicationRepository implements ApplicationRepository {
         // against rebalance/redelivery races and any second process.
         const rows = await tx<ApplicationStateRow[]>`
           SELECT status, age_eligibility_status, academic_status, criminal_clearance_status,
-                 applicant_id, campaign_id, category
+                 academic_eligibility_detail, applicant_id, campaign_id, category
           FROM ${schema}.applications
           WHERE id = ${result.applicationId}
           FOR UPDATE
@@ -149,11 +150,18 @@ export class PgApplicationRepository implements ApplicationRepository {
         const newCriminal =
           result.dimension === 'CRIMINAL' ? result.criminalStatus : current.criminal_clearance_status;
 
+        // A PENDING academic verdict can still CHANGE MEANING (ADR-048 §2.2):
+        // "record not bound to you" → corrected index → "results unpublished".
+        // Its failureCode is part of the projected state, so a new code is a
+        // change to record, not an idempotent redelivery to skip.
+        const failureCodeOf = (detail: unknown): unknown =>
+          typeof detail === 'object' && detail !== null ? (detail as Record<string, unknown>)['failureCode'] ?? null : null;
         const columnChanged =
           result.dimension === 'AGE'
             ? newAge !== current.age_eligibility_status
             : result.dimension === 'ACADEMIC'
-              ? newAcademic !== current.academic_status
+              ? newAcademic !== current.academic_status ||
+                failureCodeOf(result.detail) !== failureCodeOf(current.academic_eligibility_detail)
               : newCriminal !== current.criminal_clearance_status;
 
         const toStatus = deriveApplicationStatus(current.status, {

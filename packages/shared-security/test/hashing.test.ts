@@ -11,7 +11,7 @@ import {
 
 test('hashNationalId: valid 16-digit Rwandan NID produces 64-char hex', () => {
   const hmacKey = 'dev_national_id_hmac_key_min_32_chars!!';
-  const nid = '1199880012345678';
+  const nid = '1199889990009000';
   const hashed = hashNationalId(nid, hmacKey);
   assert.equal(hashed.length, 64);
   assert.match(hashed, /^[0-9a-f]{64}$/);
@@ -23,7 +23,7 @@ test('hashNationalId: valid 16-digit Rwandan NID produces 64-char hex', () => {
 test('hashNationalId: rejects non-16-digit input', () => {
   const hmacKey = 'dev_national_id_hmac_key_min_32_chars!!';
   assert.throws(() => hashNationalId('123', hmacKey), InvalidNationalIdError);
-  assert.throws(() => hashNationalId('11998800123456789', hmacKey), InvalidNationalIdError);
+  assert.throws(() => hashNationalId('11998899900090009', hmacKey), InvalidNationalIdError);
   assert.throws(() => hashNationalId('119988001234567a', hmacKey), InvalidNationalIdError);
 });
 

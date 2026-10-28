@@ -20,7 +20,7 @@ a citizen. But USRP stored only the **internal** `national_id_hash =
 HMAC(USRP-private key, NID)`, and never the raw NID. The two are different by design
 (the two-hash contract), so the eligibility service — holding only an `applicantId` —
 had no way to produce the hash HEC needs. Proven empirically before building
-(`HMAC(dev_nida_hmac_secret, '1200380123456789')` == the HEC seed's holder hash;
+(`HMAC(dev_nida_hmac_secret, '1200389990001000')` == the HEC seed's holder hash;
 the internal hash does not match).
 
 **Resolution (owner-approved): store the G2G hash, encrypted at rest.**

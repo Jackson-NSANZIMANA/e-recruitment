@@ -20,6 +20,12 @@ export interface CreateVerifiedIdentityInput {
    * `nationalIdHash`. Never logged.
    */
   readonly nidaLookupHash: string;
+  /**
+   * First 4 + last 4 digits of the NID (8 digits), stored ENCRYPTED (rls/0042)
+   * so credential binding can check a registry's masked NID hint (ADR-048
+   * §2.1) without USRP ever storing the raw NID. Null when unavailable.
+   */
+  readonly nationalIdHint: string | null;
   readonly fullName: string;
   readonly dateOfBirth: string; // YYYY-MM-DD
   readonly homeDistrict: string;

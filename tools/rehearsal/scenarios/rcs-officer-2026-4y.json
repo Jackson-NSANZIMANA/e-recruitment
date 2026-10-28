@@ -1,0 +1,293 @@
+{
+  "id": "rcs-officer-2026-4y",
+  "version": 1,
+  "title": "RCS 2026: officer level, four-year track",
+  "purpose": "Encoded from §5 of the Kinyarwanda original (one campaign per track; one rehearsal campaign per agency per day, so run them on different days or sandboxes).",
+  "campaigns": [
+    {
+      "agency": "RCS",
+      "codeTag": "OF4Y",
+      "categories": [
+        "OFFICER_FOUR_YEAR_UR"
+      ],
+      "registration": {
+        "opensOffsetDays": -1,
+        "closesOffsetDays": 2
+      },
+      "examination": {
+        "startOffsetDays": 0,
+        "endOffsetDays": 2
+      },
+      "reportingHour": 9,
+      "allowsWalkIn": false,
+      "targetIntakeCount": 60,
+      "sessions": [
+        {
+          "district": "RWAMAGANA",
+          "examOffsetDays": 0,
+          "reportingHour": 9,
+          "capacity": 100,
+          "venue": "Kayonza district office"
+        },
+        {
+          "district": "KAYONZA",
+          "examOffsetDays": 0,
+          "reportingHour": 9,
+          "capacity": 100,
+          "venue": "Kayonza district office"
+        },
+        {
+          "district": "NGOMA",
+          "examOffsetDays": 0,
+          "reportingHour": 9,
+          "capacity": 100,
+          "venue": "Kayonza district office"
+        },
+        {
+          "district": "KIREHE",
+          "examOffsetDays": 0,
+          "reportingHour": 9,
+          "capacity": 100,
+          "venue": "Kayonza district office"
+        },
+        {
+          "district": "GATSIBO",
+          "examOffsetDays": 0,
+          "reportingHour": 9,
+          "capacity": 100,
+          "venue": "Kayonza district office"
+        },
+        {
+          "district": "NYAGATARE",
+          "examOffsetDays": 0,
+          "reportingHour": 9,
+          "capacity": 100,
+          "venue": "Kayonza district office"
+        }
+      ],
+      "staff": [
+        {
+          "handle": "reh.rcs.gate.kayonza",
+          "posts": [
+            "screening_officer"
+          ]
+        },
+        {
+          "handle": "reh.rcs.reviewer",
+          "posts": [
+            "reviewer"
+          ]
+        }
+      ]
+    }
+  ],
+  "personas": [
+    {
+      "id": "U1",
+      "role": "Science 76%, age 20, Nyagatare",
+      "sandboxPersona": "A-RCS-OFFICER-4Y-NYAGATARE-ELIGIBLE",
+      "category": "OFFICER_FOUR_YEAR_UR",
+      "expect": {
+        "outcome": "ADMITTED"
+      },
+      "rehearses": "The 4-year track passes the 70% bar and is admitted.",
+      "expectedOutcome": "Admitted at the gate."
+    },
+    {
+      "id": "U2",
+      "role": "Science 69%",
+      "sandboxPersona": "P-UR-SCI-69",
+      "category": "OFFICER_FOUR_YEAR_UR",
+      "expect": {
+        "outcome": "REJECTED",
+        "gate": "ACADEMIC"
+      },
+      "rehearses": "69% is below the bar.",
+      "expectedOutcome": "Refused at the academic gate."
+    },
+    {
+      "id": "U3",
+      "role": "Aged 22",
+      "sandboxPersona": "P-UR-AGE-22",
+      "category": "OFFICER_FOUR_YEAR_UR",
+      "expect": {
+        "outcome": "REJECTED",
+        "gate": "AGE"
+      },
+      "rehearses": "The 4-year cap is 21.",
+      "expectedOutcome": "Refused at the age gate."
+    }
+  ],
+  "announcement": {
+    "source": "docs/product/recruitment-announcements-2025-2026.md §5",
+    "agency": "RCS",
+    "title": "Itangazo ku bifuza kwinjira muri RCS ku rwego rwa ofisiye",
+    "signedOn": "2026-06-09",
+    "registration": {
+      "opens": "2026-06-10",
+      "closes": "2026-06-29",
+      "where": "districts; those who miss it register on the exam day"
+    },
+    "walkInOnExamDay": true,
+    "examination": {
+      "start": "2026-06-30",
+      "end": "2026-07-02",
+      "hour": "09:00"
+    },
+    "categories": [
+      {
+        "category": "OFFICER_FOUR_YEAR_UR",
+        "track": "four-year track (imyaka ine), University of Rwanda cadets",
+        "educationAnyOf": [
+          "A_LEVEL_A2"
+        ],
+        "ageCaps": [
+          {
+            "qualification": "A2",
+            "minAge": 18,
+            "maxAge": 21
+          }
+        ],
+        "convictionRule": "NEVER_CONVICTED",
+        "underProsecutionBars": true,
+        "extraConditions": [
+          "in good health",
+          "never convicted",
+          "not under prosecution",
+          "not definitively dismissed, unless rehabilitated",
+          "not on the barred list",
+          "good conduct",
+          "willing",
+          "ready to serve anywhere",
+          "A2 with marks admitting to UR",
+          "ready to study General Medicine, General Nursing, Computer Engineering or Dental Surgery",
+          "at least 70% in secondary science subjects"
+        ]
+      }
+    ],
+    "documents": [
+      "birth certificate",
+      "national ID",
+      "notarised academic certificate",
+      "good-conduct certificate from the sector head",
+      "certificate of no criminal conviction",
+      "certificate of single status",
+      "government-doctor medical certificate"
+    ],
+    "venues": [
+      {
+        "districts": [
+          "GICUMBI",
+          "MUSANZE",
+          "BURERA",
+          "GAKENKE",
+          "RULINDO"
+        ],
+        "dates": [
+          "2026-06-30"
+        ],
+        "venue": "Ubworoherane stadium"
+      },
+      {
+        "districts": [
+          "RUBAVU",
+          "NYABIHU",
+          "NGORORERO",
+          "RUTSIRO"
+        ],
+        "dates": [
+          "2026-06-30"
+        ],
+        "venue": "Rubavu stadium"
+      },
+      {
+        "districts": [
+          "RUSIZI",
+          "NYAMASHEKE",
+          "KARONGI"
+        ],
+        "dates": [
+          "2026-07-02"
+        ],
+        "venue": "Rusizi stadium"
+      },
+      {
+        "districts": [
+          "RWAMAGANA",
+          "KAYONZA",
+          "NGOMA",
+          "KIREHE",
+          "GATSIBO",
+          "NYAGATARE"
+        ],
+        "dates": [
+          "2026-06-30"
+        ],
+        "venue": "Kayonza district office"
+      },
+      {
+        "districts": [
+          "HUYE",
+          "NYAMAGABE",
+          "NYARUGURU",
+          "GISAGARA"
+        ],
+        "dates": [
+          "2026-06-30"
+        ],
+        "venue": "Huye stadium"
+      },
+      {
+        "districts": [
+          "MUHANGA",
+          "NYANZA",
+          "RUHANGO",
+          "KAMONYI"
+        ],
+        "dates": [
+          "2026-07-01"
+        ],
+        "venue": "Muhanga stadium"
+      },
+      {
+        "districts": [
+          "NYARUGENGE",
+          "KICUKIRO",
+          "GASABO",
+          "BUGESERA"
+        ],
+        "dates": [
+          "2026-07-01"
+        ],
+        "venue": "Gasabo district office"
+      }
+    ],
+    "notes": [
+      {
+        "kind": "INCONSISTENCY_IN_ORIGINAL",
+        "section": "§8.3",
+        "text": "Walk-in registration on exam day is announced by RCS officer 2026 as well as RDF; the platform allows walk-in for RDF only (ADR-012). Allowing it for RCS is an owner/agency decision; the play keeps allowsWalkIn false."
+      },
+      {
+        "kind": "REHEARSAL_COMPRESSION",
+        "section": "§5",
+        "text": "Printed: registration 10–29 June, exams 30 June–2 July. Played: registration open now, the Kayonza district office venue (serving Nyagatare) examining today."
+      },
+      {
+        "kind": "POLICY_MODEL_GAP",
+        "section": "§5, §9",
+        "text": "One venue serves several districts; sessions are per district with the same venue name, so venue capacity is not shared."
+      },
+      {
+        "kind": "POLICY_MODEL_GAP",
+        "section": "§5",
+        "text": "\"Not under prosecution\" and the barred list have no check in the platform model."
+      },
+      {
+        "kind": "POLICY_MODEL_GAP",
+        "section": "§5",
+        "text": "The 70% science bar is evaluated on SDMS weightedPercent (default taken, owner to confirm); \"marks admitting to UR\" and the faculty choice are not modelled beyond that."
+      }
+    ]
+  }
+}

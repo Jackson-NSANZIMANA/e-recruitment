@@ -55,8 +55,9 @@ x-env: &env
   FIELD_SYNC_SERVICE_BASE_URL: http://field-sync-service:4009
   BIOMETRIC_SERVICE_BASE_URL: http://biometric-service:4003
   DOCUMENT_FORENSICS_BASE_URL: http://document-forensics-service:4004
-  NIDA_BASE_URL: http://usrp-nida-mock:3100
-  NESA_BASE_URL: http://usrp-nesa-mock:3101
+  NIDA_BASE_URL: http://usrp-g2g-sandbox:3100
+  NIDA_CLIENT_TOKEN: dev_g2g_sandbox_client_token
+  NESA_BASE_URL: http://usrp-g2g-sandbox:3100
   RIB_BASE_URL: http://usrp-rib-mock:3102
   HEC_BASE_URL: http://usrp-hec-mock:3103
   MINIO_ENDPOINT: usrp-minio

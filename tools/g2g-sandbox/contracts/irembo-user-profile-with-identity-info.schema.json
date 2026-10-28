@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "usrp:g2g-sandbox:irembo-user-profile-with-identity-info",
+  "title": "IremboGov identity information — GET /auth/v1/user-profile-with-identity-info (found)",
+  "description": "Shape captured from the live api.irembohub.com citizen endpoint (ADR-047 §1). Values stripped. The sandbox answers this PAYLOAD to a G2G credential, never to a citizen token.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "message", "responseCode", "timestamp", "traceId", "data"],
+  "properties": {
+    "status": { "const": true },
+    "message": { "type": "string" },
+    "responseCode": { "type": "string" },
+    "timestamp": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{1,9}[+-][0-9]{2}:[0-9]{2}$" },
+    "traceId": { "type": "string", "pattern": "^[0-9a-z]{16,64}$" },
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["userProfileDto", "identityInfo"],
+      "properties": {
+        "userProfileDto": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["userId", "identificationType", "identificationNumber", "accountVerified", "notificationPhoneNumber", "notificationEmail", "notificationType", "firstLogin", "verificationMethod", "consularCardNumber", "verificationEmail", "verificationPhoneNumber", "firstName", "lastName", "accountCreatedAt", "lastUpdated"],
+          "properties": {
+            "userId": { "type": "string", "pattern": "^[0-9a-f-]{36}$" },
+            "identificationType": { "type": "string" },
+            "identificationNumber": { "type": "string", "pattern": "^[0-9]{16}$" },
+            "accountVerified": { "type": "boolean" },
+            "notificationPhoneNumber": { "type": ["string", "null"], "pattern": "^0[0-9]{9}$" },
+            "notificationEmail": { "type": ["string", "null"] },
+            "notificationType": { "type": "string" },
+            "firstLogin": { "type": "boolean" },
+            "verificationMethod": { "type": "string" },
+            "consularCardNumber": { "type": ["string", "null"] },
+            "verificationEmail": { "type": ["string", "null"] },
+            "verificationPhoneNumber": { "type": ["string", "null"], "pattern": "^0[0-9]{9}$" },
+            "firstName": { "type": ["string", "null"] },
+            "lastName": { "type": ["string", "null"] },
+            "accountCreatedAt": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z?$" },
+            "lastUpdated": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z?$" }
+          }
+        },
+        "identityInfo": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["documentNumber", "documentType", "issueNumber", "dateOfIssue", "dateOfExpiry", "placeOfIssue", "nin", "forename", "surname", "fatherName", "motherName", "sex", "dateOfBirth", "placeOfBirth", "countryOfBirth", "villageId", "village", "cell", "sector", "district", "province", "civilStatus", "spouse", "photo", "signature", "nationality", "applicantType", "status", "applicationNumber", "birthCountry", "maritalStatus", "timeSubmitted", "email", "countryOfDomicileCode", "countryOfDomicile", "citizenStatus", "message"],
+          "properties": {
+            "documentNumber": { "type": "string", "pattern": "^[0-9] [0-9]{4} [0-9] [0-9]{7} [0-9] [0-9]{2}$" },
+            "documentType": { "type": "string" },
+            "issueNumber": { "type": "string", "pattern": "^[0-9]+$" },
+            "dateOfIssue": { "type": "string", "pattern": "^[0-9]{2}/[0-9]{2}/[0-9]{4}$" },
+            "dateOfExpiry": { "type": "string", "pattern": "^[0-9]{2}/[0-9]{2}/[0-9]{4}$" },
+            "placeOfIssue": { "type": ["string", "null"] },
+            "nin": { "type": ["string", "null"] },
+            "forename": { "type": "string" },
+            "surname": { "type": "string" },
+            "fatherName": { "type": ["string", "null"] },
+            "motherName": { "type": ["string", "null"] },
+            "sex": { "type": "string", "enum": ["MALE", "FEMALE"] },
+            "dateOfBirth": { "type": "string", "pattern": "^[0-9]{2}/[0-9]{2}/[0-9]{4}$" },
+            "placeOfBirth": { "type": ["string", "null"] },
+            "countryOfBirth": { "type": ["string", "null"], "pattern": "^[A-Z]{2}$" },
+            "villageId": { "type": ["string", "null"], "pattern": "^[0-9]{10}$" },
+            "village": { "type": ["string", "null"] },
+            "cell": { "type": ["string", "null"] },
+            "sector": { "type": ["string", "null"] },
+            "district": { "type": "string" },
+            "province": { "type": "string" },
+            "civilStatus": { "type": ["string", "null"] },
+            "spouse": { "type": ["string", "null"] },
+            "photo": { "type": ["string", "null"], "pattern": "^/9j/" },
+            "signature": { "type": ["string", "null"], "pattern": "^/9j/" },
+            "nationality": { "type": "string", "pattern": "^[A-Z]{2}$" },
+            "applicantType": { "type": ["string", "null"] },
+            "status": { "type": ["string", "null"] },
+            "applicationNumber": { "type": ["string", "null"], "pattern": "^[0-9]{8}$" },
+            "birthCountry": { "type": ["string", "null"], "pattern": "^[A-Z]{2}$" },
+            "maritalStatus": { "type": ["string", "null"] },
+            "timeSubmitted": { "type": ["string", "null"] },
+            "email": { "type": ["string", "null"] },
+            "countryOfDomicileCode": { "type": ["string", "null"], "pattern": "^[A-Z]{2}$" },
+            "countryOfDomicile": { "type": ["string", "null"] },
+            "citizenStatus": { "type": "string" },
+            "message": { "type": ["string", "null"] }
+          }
+        }
+      }
+    }
+  }
+}

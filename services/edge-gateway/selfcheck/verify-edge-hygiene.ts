@@ -95,7 +95,7 @@ const sink = (line: string): void => {
   lines.push(line);
 };
 const audit = new StdoutAuditLogger(sink, () => new Date('2026-10-02T00:00:00Z'), sink);
-const nid = '1199880012345678';
+const nid = '1199889990009000';
 audit.log({ action: 'EDGE_SESSION_REJECTED', correlationId: 'c1', detail: { nationalId: nid, note: `x${nid}x` } });
 const pgLike = Object.assign(new Error(`duplicate key value (national_id)=(${nid})`), { name: 'PostgresError', code: '23505' });
 audit.fault({ event: 'EDGE_SESSION_SWEEP_FAILED', detail: { handle: 'secret-handle' } }, pgLike);

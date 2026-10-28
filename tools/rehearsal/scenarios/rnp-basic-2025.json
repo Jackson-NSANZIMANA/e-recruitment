@@ -1,0 +1,380 @@
+{
+  "id": "rnp-basic-2025",
+  "version": 1,
+  "title": "RNP 2025: Basic Police Course (junior police officers)",
+  "purpose": "Encoded from §2 of the Kinyarwanda original. The announcement prints no exam dates or venues; the playable day examines at each district DPU today (rehearsal assumption). The sandbox journey scenario: pnpm rehearse --journey rnp-basic-2025.",
+  "campaigns": [
+    {
+      "agency": "RNP",
+      "codeTag": "BPC25",
+      "categories": [
+        "BASIC_POLICE_COURSE"
+      ],
+      "registration": {
+        "opensOffsetDays": -1,
+        "closesOffsetDays": 2
+      },
+      "examination": {
+        "startOffsetDays": 0,
+        "endOffsetDays": 0
+      },
+      "reportingHour": 8,
+      "allowsWalkIn": false,
+      "targetIntakeCount": 400,
+      "sessions": [
+        {
+          "district": "NYARUGENGE",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 150,
+          "venue": "Nyarugenge DPU"
+        },
+        {
+          "district": "KICUKIRO",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 150,
+          "venue": "Kicukiro DPU"
+        },
+        {
+          "district": "GASABO",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 150,
+          "venue": "Gasabo DPU"
+        },
+        {
+          "district": "GICUMBI",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 150,
+          "venue": "Gicumbi DPU"
+        },
+        {
+          "district": "BURERA",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 150,
+          "venue": "Burera DPU"
+        },
+        {
+          "district": "MUSANZE",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 150,
+          "venue": "Musanze DPU"
+        },
+        {
+          "district": "GAKENKE",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 150,
+          "venue": "Gakenke DPU"
+        },
+        {
+          "district": "RULINDO",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 150,
+          "venue": "Rulindo DPU"
+        },
+        {
+          "district": "NYAMAGABE",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 150,
+          "venue": "Nyamagabe DPU"
+        },
+        {
+          "district": "NYARUGURU",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 150,
+          "venue": "Nyaruguru DPU"
+        },
+        {
+          "district": "GISAGARA",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 150,
+          "venue": "Gisagara DPU"
+        },
+        {
+          "district": "HUYE",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 150,
+          "venue": "Huye DPU"
+        },
+        {
+          "district": "NYANZA",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 150,
+          "venue": "Nyanza DPU"
+        },
+        {
+          "district": "RUHANGO",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 150,
+          "venue": "Ruhango DPU"
+        },
+        {
+          "district": "MUHANGA",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 150,
+          "venue": "Muhanga DPU"
+        },
+        {
+          "district": "KAMONYI",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 150,
+          "venue": "Kamonyi DPU"
+        },
+        {
+          "district": "KIREHE",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 150,
+          "venue": "Kirehe DPU"
+        },
+        {
+          "district": "NGOMA",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 150,
+          "venue": "Ngoma DPU"
+        },
+        {
+          "district": "NYAGATARE",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 150,
+          "venue": "Nyagatare DPU"
+        },
+        {
+          "district": "GATSIBO",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 150,
+          "venue": "Gatsibo DPU"
+        },
+        {
+          "district": "KAYONZA",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 150,
+          "venue": "Kayonza DPU"
+        },
+        {
+          "district": "RWAMAGANA",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 150,
+          "venue": "Rwamagana DPU"
+        },
+        {
+          "district": "BUGESERA",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 150,
+          "venue": "Bugesera DPU"
+        },
+        {
+          "district": "RUSIZI",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 150,
+          "venue": "Rusizi DPU"
+        },
+        {
+          "district": "NYAMASHEKE",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 150,
+          "venue": "Nyamasheke DPU"
+        },
+        {
+          "district": "KARONGI",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 150,
+          "venue": "Karongi DPU"
+        },
+        {
+          "district": "RUTSIRO",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 150,
+          "venue": "Rutsiro DPU"
+        },
+        {
+          "district": "RUBAVU",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 150,
+          "venue": "Rubavu DPU"
+        },
+        {
+          "district": "NYABIHU",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 150,
+          "venue": "Nyabihu DPU"
+        },
+        {
+          "district": "NGORORERO",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 150,
+          "venue": "Ngororero DPU"
+        }
+      ],
+      "staff": [
+        {
+          "handle": "reh.rnp.gate.gasabo",
+          "posts": [
+            "screening_officer"
+          ]
+        },
+        {
+          "handle": "reh.rnp.reviewer",
+          "posts": [
+            "reviewer"
+          ]
+        }
+      ]
+    }
+  ],
+  "personas": [
+    {
+      "id": "B1",
+      "role": "Eligible A2 citizen, Gasabo",
+      "sandboxPersona": "A-RNP-BASIC-ELIGIBLE",
+      "category": "BASIC_POLICE_COURSE",
+      "expect": {
+        "outcome": "ADMITTED"
+      },
+      "rehearses": "Full journey: sign-in, application, NIDA, NESA bound, slot at Gasabo DPU, gate.",
+      "expectedOutcome": "Admitted at Rehearsal Venue — Gasabo DPU."
+    },
+    {
+      "id": "B2",
+      "role": "Over-age by one day",
+      "sandboxPersona": "P-OVER-AGE-1D",
+      "category": "BASIC_POLICE_COURSE",
+      "expect": {
+        "outcome": "REJECTED",
+        "gate": "AGE"
+      },
+      "rehearses": "18–25 refuses a 26-year-old.",
+      "expectedOutcome": "Refused at the age gate."
+    },
+    {
+      "id": "B3",
+      "role": "S3 only",
+      "sandboxPersona": "P-S3-ONLY",
+      "category": "BASIC_POLICE_COURSE",
+      "expect": {
+        "outcome": "REJECTED",
+        "gate": "ACADEMIC"
+      },
+      "rehearses": "A2 required; an S3 record is bound but insufficient.",
+      "expectedOutcome": "Refused at the academic gate."
+    },
+    {
+      "id": "B4",
+      "role": "NESA name mismatch",
+      "sandboxPersona": "P-NESA-NAME-MISMATCH",
+      "category": "BASIC_POLICE_COURSE",
+      "expect": {
+        "outcome": "ACADEMIC_PENDING",
+        "failureCode": "NESA_RECORD_NOT_BOUND"
+      },
+      "rehearses": "Correctable \"record does not match your identity\".",
+      "expectedOutcome": "Academic PENDING, NESA_RECORD_NOT_BOUND."
+    },
+    {
+      "id": "B5",
+      "role": "Results unpublished",
+      "sandboxPersona": "P-NESA-UNPUBLISHED",
+      "category": "BASIC_POLICE_COURSE",
+      "expect": {
+        "outcome": "ACADEMIC_PENDING",
+        "failureCode": "NESA_RESULTS_UNPUBLISHED"
+      },
+      "rehearses": "published:false is PENDING, never ineligible.",
+      "expectedOutcome": "Academic PENDING, NESA_RESULTS_UNPUBLISHED."
+    },
+    {
+      "id": "B6",
+      "role": "Malpractice flagged",
+      "sandboxPersona": "P-NESA-MALPRACTICE",
+      "category": "BASIC_POLICE_COURSE",
+      "expect": {
+        "outcome": "ACADEMIC_PENDING",
+        "failureCode": "NESA_REVIEW_REQUIRED"
+      },
+      "rehearses": "Malpractice goes to a human, never automatic.",
+      "expectedOutcome": "Academic PENDING, NESA_REVIEW_REQUIRED."
+    }
+  ],
+  "announcement": {
+    "source": "docs/product/recruitment-announcements-2025-2026.md §2",
+    "agency": "RNP",
+    "title": "Itangazo rigenewe abifuza kwinjira muri Polisi y'u Rwanda ku rwego rw'abapolisi bato",
+    "signedOn": "2025-10-13",
+    "registration": {
+      "opens": "2025-10-14",
+      "closes": "2025-11-07",
+      "where": "District Police Unit (DPU) of residence, 08:00–17:00 working days"
+    },
+    "walkInOnExamDay": false,
+    "examination": null,
+    "categories": [
+      {
+        "category": "BASIC_POLICE_COURSE",
+        "track": "Basic Police Course",
+        "educationAnyOf": [
+          "A_LEVEL_A2"
+        ],
+        "ageCaps": [
+          {
+            "qualification": "A2",
+            "minAge": 18,
+            "maxAge": 25
+          }
+        ],
+        "convictionRule": "NEVER_SENTENCED_TO_6_MONTHS_OR_MORE",
+        "extraConditions": [
+          "in good health",
+          "good conduct certified by local authorities",
+          "never dismissed from public service",
+          "ready to serve anywhere"
+        ]
+      }
+    ],
+    "documents": [
+      "completed application form with a passport photo (police.gov.rw)",
+      "copy of the national ID",
+      "copy of the certificate",
+      "good-conduct certificate from local authorities"
+    ],
+    "venues": [],
+    "notes": [
+      {
+        "kind": "NOT_IN_ANNOUNCEMENT",
+        "section": "§2",
+        "text": "No exam dates or venues are printed. The playable day examines at every district DPU today: a rehearsal assumption, not a fact."
+      },
+      {
+        "kind": "INCONSISTENCY_IN_ORIGINAL",
+        "section": "§8.2",
+        "text": "The RNP brochure beside Form 111 bars sentences of \"more than six months\"; this announcement says \"six months or more\". The announcement governs (platform: IMPRISONMENT_GTE_6MO)."
+      }
+    ]
+  }
+}

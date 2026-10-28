@@ -1,7 +1,7 @@
 # ══════════════════════════════════════════════════════════════════
 # USRP — TIER 1 INFRASTRUCTURE (Phase 1-2 Development)
 # RAM budget: ~1.5GB
-# Includes: PostgreSQL, MinIO, G2G Mocks (NIDA/NESA/RIB/HEC)
+# Includes: PostgreSQL, MinIO, G2G sandbox simulators (NIDA/NESA, ADR-047), RIB/HEC mocks
 # Redis + Kong REMOVED 2026-07-19: zero consumers in any service, both
 # shipped broken (Kong crashloop, Redis bad healthcheck flag) and Kong
 # blocked the first real CI run. Re-add per-need with a working config.
@@ -105,59 +105,39 @@ services:
         limits:
           memory: 256M
 
-  # ── G2G Mock: NIDA ──────────────────────────────────────────────
-  # Data mounted from host — update citizens.json without rebuilding
-  nida-mock:
-    build:
-      context: ./mocks/nida
-      dockerfile: Dockerfile
-    container_name: usrp-nida-mock
+  # ── G2G sandbox simulators: NIDA (IremboGov format) + NESA (SDMS format) ──
+  # ADR-047. Replaces the retired hash-keyed nida-mock/nesa-mock. ONE process
+  # (tools/g2g-sandbox) mounts every simulator; it speaks the captured wire
+  # formats, refuses to start in production, and stamps x-usrp-sandbox: 1 on
+  # every response. It runs the BUILT workspace (run `pnpm build` first; the
+  # container restarts until dist/ exists). Published on 3100 AND 3101, so the
+  # existing NIDA_BASE_URL / NESA_BASE_URL defaults keep working.
+  g2g-sandbox:
+    image: node:24-bookworm-slim@sha256:a5f4366e834695d5f363b920c104953a535d3a9864d1bdf74566a0ebe01daee5
+    container_name: usrp-g2g-sandbox
     restart: unless-stopped
+    working_dir: /repo
+    command: ["node", "tools/g2g-sandbox/dist/main.js"]
     environment:
-      PORT: 3100
-      MOCK_DATA_FILE: /app/data/citizens.json
-      HMAC_SECRET: ${NIDA_HMAC_SECRET:-dev_nida_hmac_secret}
+      USRP_ENVIRONMENT: development
+      SANDBOX_PORT: 3100
+      SANDBOX_LATENCY_SCALE: "0"
     volumes:
-      - ./mocks/nida/data:/app/data:ro
+      - ../..:/repo:ro
     ports:
       - "3100:3100"
+      - "3101:3100"
     networks:
       - usrp-internal
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3100/health"]
-      interval: 15s
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3100/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 6
     deploy:
       resources:
         limits:
-          memory: 128M
-  # ── G2G Mock: NESA ──────────────────────────────────────────────
-  nesa-mock:
-    build:
-      context: ./mocks/nesa
-      dockerfile: Dockerfile
-    container_name: usrp-nesa-mock
-    restart: unless-stopped
-    environment:
-      PORT: 3101
-      MOCK_DATA_FILE: /app/data/results.json
-      HMAC_SECRET: ${NESA_HMAC_SECRET:-dev_nesa_hmac_secret}
-    volumes:
-      - ./mocks/nesa/data:/app/data:ro
-    ports:
-      - "3101:3101"
-    networks:
-      - usrp-internal
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3101/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-    deploy:
-      resources:
-        limits:
-          memory: 128M
+          memory: 256M
 
   # ── G2G Mock: RIB ───────────────────────────────────────────────
   rib-mock:

@@ -27,7 +27,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -55,6 +55,82 @@ const DENY = [
   { pattern: /terraform\.tfstate(\.backup)?$/, why: 'terraform state (contains resolved secrets)' },
   { pattern: /\.tfvars$/, why: 'terraform variables (commonly secret-bearing)' },
 ];
+
+// ── Personal-data rule (ADR-047 §3.5) ──────────────────────────────────────
+//
+// Both repositories are PUBLIC. The sandbox works from real captures held
+// OUTSIDE git; this rule is what keeps a value from them, or any real
+// person's, from being committed by mistake. It reads tracked CONTENT and
+// reports file:line and the CLASS of finding only, never the value (the CI
+// log is public too).
+//
+//   NID          a 16-digit Rwandan NID shape (1 · 19xx/20xx · 7|8 · 10 digits),
+//                bare or spaced like the card, OUTSIDE the documented sandbox
+//                block (serial starting 999: tools/g2g-sandbox/src/population/nid.ts);
+//   JPEG         a base64 JPEG longer than 1 KiB (a portrait or signature);
+//   PHONE        a Rwandan E.164 mobile number outside the synthetic range
+//                +250 788 00x xxx.
+//
+// An exception needs an entry in PERSONAL_DATA_ALLOWLIST with a reason.
+
+const NID_BARE = /(?<![0-9A-Za-z])1(?:19|20)\d{2}[78]\d{10}(?![0-9A-Za-z])/g;
+const NID_SPACED = /(?<![0-9])1 (?:19|20)\d{2} [78] \d{7} \d \d{2}(?![0-9])/g;
+const SYNTHETIC_NID = /^1\d{4}[78]999\d{7}$/;
+// 1 KiB of JPEG bytes is 1366 base64 characters; "/9j/" is the base64 of FF D8 FF.
+const BASE64_JPEG = /\/9j\/[A-Za-z0-9+/]{1362,}/g;
+const E164_RW_MOBILE = /\+250[\s-]?7(?:[\s-]?\d){8}(?![0-9])/g;
+const SYNTHETIC_MOBILE_DIGITS = /^25078800\d{4}$/;
+
+/** { path, class, reason }: an accepted exception, reviewed like code. */
+export const PERSONAL_DATA_ALLOWLIST = [];
+
+const allowed = (path, kind) => PERSONAL_DATA_ALLOWLIST.some((entry) => entry.path === path && entry.class === kind);
+
+/** Scan one file's text; returns [{ line, class }] with no values. */
+export function scanPersonalData(path, text) {
+  const findings = [];
+  const lines = text.split('\n');
+  lines.forEach((line, i) => {
+    const hit = (kind) => { if (!allowed(path, kind)) findings.push({ path, line: i + 1, class: kind }); };
+    for (const m of line.matchAll(NID_BARE)) if (!SYNTHETIC_NID.test(m[0])) hit('NID');
+    for (const m of line.matchAll(NID_SPACED)) if (!SYNTHETIC_NID.test(m[0].replace(/ /g, ''))) hit('NID');
+    if (line.match(BASE64_JPEG) !== null) hit('JPEG');
+    for (const m of line.matchAll(E164_RW_MOBILE)) if (!SYNTHETIC_MOBILE_DIGITS.test(m[0].replace(/\D/g, ''))) hit('PHONE');
+  });
+  return findings;
+}
+
+function personalDataViolations(cwd, paths) {
+  const findings = [];
+  for (const path of paths) {
+    if (path === 'pnpm-lock.yaml') continue;
+    let buffer;
+    try {
+      buffer = readFileSync(join(cwd, path));
+    } catch {
+      continue; // deleted in the work tree but still in the index
+    }
+    if (buffer.subarray(0, 8192).includes(0)) continue; // binary
+    findings.push(...scanPersonalData(path, buffer.toString('utf8')));
+  }
+  return findings;
+}
+
+function reportPersonalData(findings) {
+  if (findings.length === 0) {
+    console.log('check-tracked-secrets: OK — no personal data (NID / JPEG / phone) outside the synthetic ranges.');
+    return 0;
+  }
+  console.error(`\ncheck-tracked-secrets: ${findings.length} personal-data finding(s) (values withheld):\n`);
+  for (const f of findings) console.error(`  ✗ ${f.path}:${f.line}  ${f.class}`);
+  console.error(`
+  Replace the value with a synthetic one (NIDs: serial block 999…, phones:
+  +250 788 00x xxx, images: generated placeholders), or add a reviewed entry to
+  PERSONAL_DATA_ALLOWLIST. If a real person's value was ever committed, treat
+  it as disclosed: tell the DPO, and plan a history rewrite.
+`);
+  return 1;
+}
 
 function trackedFiles(cwd) {
   const out = execFileSync('git', ['ls-files', '-z'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
@@ -139,6 +215,32 @@ function selftest() {
     git('add', '-f', '.env');
     assert('a tracked .env is RED', findViolations(trackedFiles(dir)).length, 1);
 
+    // ── Personal-data rule: RED on each class, GREEN on synthetic values ──
+    // Values are ASSEMBLED at runtime, so this script never holds one.
+    git('rm', '-q', '--cached', '.env');
+    const realShape = ['1', '1990', '8', '0000000', '0', '00'].join('');
+    const synthetic = ['1', '2003', '8', '9990001', '0', '00'].join('');
+    const jpeg = '/9j/' + 'A'.repeat(1400);
+    writeFileSync(join(dir, 'clean.json'), JSON.stringify({ nid: synthetic, phone: '+250788000111', photo: '/9j/' + 'A'.repeat(200) }));
+    git('add', 'clean.json');
+    assert('synthetic NID, synthetic phone, small image: GREEN', personalDataViolations(dir, trackedFiles(dir)).length, 0);
+    writeFileSync(join(dir, 'leak.json'), JSON.stringify({ nid: realShape }));
+    git('add', 'leak.json');
+    const nid = personalDataViolations(dir, trackedFiles(dir));
+    assert('a real-shaped NID outside the block is RED', nid.length, 1);
+    assert('  and the finding names the class, not the value', JSON.stringify(nid).includes(realShape), false);
+    writeFileSync(join(dir, 'leak.json'), `{"doc": "${realShape.replace(/^(.)(.{4})(.)(.{7})(.)(.{2})$/, '$1 $2 $3 $4 $5 $6')}"}`);
+    git('add', 'leak.json');
+    assert('the spaced card form is RED', personalDataViolations(dir, trackedFiles(dir)).length, 1);
+    writeFileSync(join(dir, 'leak.json'), JSON.stringify({ photo: jpeg }));
+    git('add', 'leak.json');
+    assert('a base64 JPEG over 1 KiB is RED', personalDataViolations(dir, trackedFiles(dir)).length, 1);
+    writeFileSync(join(dir, 'leak.json'), JSON.stringify({ phone: '+250 72' + '0 000 000' }));
+    git('add', 'leak.json');
+    assert('an E.164 mobile outside the synthetic range is RED', personalDataViolations(dir, trackedFiles(dir)).length, 1);
+    git('rm', '-q', '--cached', 'leak.json');
+    assert('GREEN again once untracked', personalDataViolations(dir, trackedFiles(dir)).length, 0);
+
     console.log(failures === 0 ? '\nselftest: all assertions passed.' : `\nselftest: ${failures} FAILED.`);
     return failures === 0 ? 0 : 1;
   } finally {
@@ -150,7 +252,12 @@ function selftest() {
 
 const isSelftest = process.argv.includes('--selftest');
 try {
-  process.exit(isSelftest ? selftest() : report(findViolations(trackedFiles(process.cwd()))));
+  if (isSelftest) process.exit(selftest());
+  const cwd = process.cwd();
+  const paths = trackedFiles(cwd);
+  const fileStatus = report(findViolations(paths));
+  const dataStatus = reportPersonalData(personalDataViolations(cwd, paths));
+  process.exit(fileStatus === 0 && dataStatus === 0 ? 0 : 1);
 } catch (error) {
   // Fail closed. "We could not check" must never read as "there is nothing here".
   console.error(`check-tracked-secrets: could not inspect the git index — ${error.message}`);

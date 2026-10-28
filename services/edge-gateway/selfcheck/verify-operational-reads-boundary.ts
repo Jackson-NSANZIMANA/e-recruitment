@@ -39,7 +39,7 @@ function check(label: string, condition: boolean, detail?: string): void {
   else { fail += 1; failures.push(label); console.error(`  ✗ ${label}${detail === undefined ? '' : ` — ${detail}`}`); }
 }
 
-const HOSTILE = { applicantId: APPLICANT_ID, nationalId: '1200380123456789', nationalIdHash: NID_LEAK, fullName: 'LEAK NAME', qrInvitationCode: 'QR-LEAK', phone: '0788000000', id: randomUUID(), policyDocument: { private: true } };
+const HOSTILE = { applicantId: APPLICANT_ID, nationalId: '1200389990001000', nationalIdHash: NID_LEAK, fullName: 'LEAK NAME', qrInvitationCode: 'QR-LEAK', phone: '0788000000', id: randomUUID(), policyDocument: { private: true } };
 
 const campaignRow = {
   publicCode: 'RDF-2030', campaignLabel: 'Label', status: 'DRAFT', targetCategories: ['GENERAL_ENLISTMENT'], targetDistricts: ['GASABO'],
@@ -141,7 +141,7 @@ async function main(): Promise<void> {
     const search = await get('/edge/v1/applications/search?status=submitted,slot_assigned&category=general_enlistment&campaign=rdf-2030&district=gasabo&submittedFrom=2030-01-01&submittedTo=2030-01-31&limit=25&cursor=abc_-123');
     check('reviewer searches → 200 with total and cursor', search.status === 200 && search.json['total'] === 41 && search.json['nextCursor'] === 'abc_-123', search.text);
     check('row has exactly the allowlisted keys', Object.keys((search.json['applications'] as Record<string, unknown>[])[0] ?? {}).sort().join() === 'applicationId,category,processingCode,status,submittedAt');
-    check('no applicant id, NID, name, token or phone', !/LEAK|1200380123456789|0788000000/.test(search.text) && !search.text.includes(APPLICANT_ID));
+    check('no applicant id, NID, name, token or phone', !/LEAK|1200389990001000|0788000000/.test(search.text) && !search.text.includes(APPLICANT_ID));
     check('upstream query rebuilt from validated values', JSON.stringify(calls[n]?.query) === JSON.stringify({ status: 'SUBMITTED,SLOT_ASSIGNED', category: 'GENERAL_ENLISTMENT', campaign: 'RDF-2030', district: 'GASABO', submittedFrom: '2030-01-01', submittedTo: '2030-01-31', limit: '25', cursor: 'abc_-123' }), JSON.stringify(calls[n]?.query));
     n = before();
     check('bad date / limit / status never reach upstream', (await get('/edge/v1/applications/search?submittedFrom=yesterday')).status === 400 && (await get('/edge/v1/applications/search?limit=9999')).status === 400 && (await get('/edge/v1/applications/search?status=a;b')).status === 400 && calls.length === n);
@@ -162,7 +162,7 @@ async function main(): Promise<void> {
       check(`${role} → 200 (admission.gate OR field.score.sync)`, res.status === 200, res.text);
       if (role === 'screening_officer') {
         check('roster candidate keys are exactly the allowlist', Object.keys((res.json['candidates'] as Record<string, unknown>[])[0] ?? {}).sort().join() === 'admission,category,processingCode,requiredPaperItems,status');
-        check('roster never carries a name, NID, hash, applicant id, token or phone', !/LEAK|1200380123456789|0788000000/.test(res.text) && !res.text.includes(APPLICANT_ID) && !res.text.includes(NID_LEAK));
+        check('roster never carries a name, NID, hash, applicant id, token or phone', !/LEAK|1200389990001000|0788000000/.test(res.text) && !res.text.includes(APPLICANT_ID) && !res.text.includes(NID_LEAK));
       }
     }
     asRoles('reviewer');

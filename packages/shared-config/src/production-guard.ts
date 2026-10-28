@@ -27,6 +27,7 @@
 import { createHash } from 'node:crypto';
 
 import { EnvValidationError, type EnvSource } from './env.js';
+import { isSandboxPermittedDevAdapter, resolveUsrpEnvironment, sandboxFenceIssues } from './sandbox-fence.js';
 
 // ── Rule 1: the committed dev secrets, as digests ──────────────────
 //
@@ -56,6 +57,7 @@ const COMMITTED_DEV_SECRET_DIGESTS: ReadonlySet<string> = new Set([
   'ae26ad99c36887a173e7ec3e34db294e68a64f8cdfbaa7ae0817e47e0addeae6', // NIDA_HMAC_SECRET
   '6516de28c9824c741876f2d491409aefb9dc807137d26f76b7b6c85f81a15d28', // NESA_HMAC_SECRET
   '23720aa976419b1519215a41a1999473fd711e6e0dadcbb40a19b61c76df4510', // RIB_HMAC_SECRET
+  '74728b3071410558e5413166696b7fa729973d056f5ca2eeb1ce41244cb9b871', // NIDA_CLIENT_TOKEN (the g2g-sandbox dev token, ADR-047)
   'abd260d3f2a95a2a51aa9f8706f685bc1ee337dea4cc64657a99b5af574e7cae', // HEC_HMAC_SECRET
   '71fa84b5054fffe642a9387ca35fc47e619168b10ad0eff874c01f2e7908469a', // POSTGRES_PASSWORD
   '106c7f317376e17c9786d5768793f20a00d3c939c227a8047d3944a2ff5dfa79', // MINIO_ROOT_PASSWORD
@@ -86,6 +88,7 @@ const SECRET_KEYS: readonly string[] = [
   'EDGE_SESSION_HMAC_KEY',
   'POSTGRES_PASSWORD',
   'NIDA_HMAC_SECRET',
+  'NIDA_CLIENT_TOKEN',
   'NESA_HMAC_SECRET',
   'RIB_HMAC_SECRET',
   'HEC_HMAC_SECRET',
@@ -144,6 +147,11 @@ interface ForbiddenToggle {
   readonly key: string;
   readonly forbidden: 'true' | 'false';
   readonly why: string;
+  /**
+   * True for transport-TLS toggles a SINGLE-HOST sandbox may relax (ADR-047
+   * §3.1; default taken, owner to confirm). Mock toggles are never relaxed.
+   */
+  readonly sandboxSingleHostMayRelax?: true;
 }
 
 const FORBIDDEN_TOGGLES: readonly ForbiddenToggle[] = [
@@ -171,11 +179,13 @@ const FORBIDDEN_TOGGLES: readonly ForbiddenToggle[] = [
     key: 'KAFKA_SSL',
     forbidden: 'false',
     why: 'the event backbone carries applicant PII between services',
+    sandboxSingleHostMayRelax: true,
   },
   {
     key: 'MINIO_USE_SSL',
     forbidden: 'false',
     why: 'scanned identity documents would cross the network in the clear',
+    sandboxSingleHostMayRelax: true,
   },
   {
     key: 'EDGE_COOKIE_SECURE',
@@ -216,6 +226,17 @@ export function assertProductionSecrets(source: EnvSource = process.env): void {
 
   const issues: string[] = [];
 
+  // The runtime profile and its fences (ADR-047 §3.1). A sandbox runs every
+  // rule below EXCEPT the two single-host relaxations, which are documented
+  // in sandbox-fence.ts and proven by selfcheck/verify-sandbox-fences.ts.
+  issues.push(...sandboxFenceIssues(source));
+  let sandbox = false;
+  try {
+    sandbox = resolveUsrpEnvironment(source) === 'sandbox';
+  } catch {
+    sandbox = false; // already reported by sandboxFenceIssues; apply every rule
+  }
+
   // Rule 1 + 2 — secret-bearing variables.
   for (const key of SECRET_KEYS) {
     const raw = source[key];
@@ -237,8 +258,8 @@ export function assertProductionSecrets(source: EnvSource = process.env): void {
     }
   }
 
-  // Rule 3 — endpoints.
-  for (const key of NETWORK_ENDPOINT_KEYS) {
+  // Rule 3 — endpoints. A sandbox is allowed to be single-host.
+  for (const key of sandbox ? [] : NETWORK_ENDPOINT_KEYS) {
     const raw = source[key];
     if (!present(raw)) continue;
     if (LOOPBACK_PATTERN.test(raw)) {
@@ -251,6 +272,7 @@ export function assertProductionSecrets(source: EnvSource = process.env): void {
 
   // Rule 4 — toggles.
   for (const toggle of FORBIDDEN_TOGGLES) {
+    if (sandbox && toggle.sandboxSingleHostMayRelax === true) continue;
     const raw = source[toggle.key];
     if (!present(raw)) continue;
     const normalized = raw.trim().toLowerCase();
@@ -344,6 +366,8 @@ export function assertDevAdapterAllowed(
   source: EnvSource = process.env,
 ): void {
   if (!isProduction(source)) return;
+  // A sandbox may keep a named dev adapter until its emulator lands (S12b).
+  if (isSandboxPermittedDevAdapter(adapter, source)) return;
   throw new EnvValidationError([
     `${adapter} is a DEVELOPMENT adapter and is forbidden in production — ${consequence}. ` +
       `Wire the production adapter behind the same port before deploying this service.`,

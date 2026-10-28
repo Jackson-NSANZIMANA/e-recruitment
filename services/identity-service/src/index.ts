@@ -9,7 +9,8 @@
 // ══════════════════════════════════════════════════════════════════
 
 import type { EventBus } from '@usrp/shared-events';
-import { NidaHttpGateway } from './adapters/nida.http-gateway.js';
+import { NidaIremboGateway } from './adapters/nida.irembo-gateway.js';
+import { HttpNidaIremboTransport } from './adapters/nida.irembo-transport.js';
 import { PgIdentityRepository } from './adapters/identity.pg-repository.js';
 import { PgErasureRepository } from './adapters/erasure.pg-repository.js';
 import { PgApplicantAuthRepository } from './adapters/applicant-auth.pg-repository.js';
@@ -30,16 +31,24 @@ import {
   type IdentityServiceConfig,
 } from './config.js';
 
+/** The NIDA port on the IremboGov format: swappable transport + pure mapping (ADR-047). */
+export function createNidaGateway(config: IdentityServiceConfig): NidaIremboGateway {
+  return new NidaIremboGateway({
+    transport: new HttpNidaIremboTransport({
+      baseUrl: config.nida.baseUrl,
+      clientToken: config.nida.clientToken,
+      timeoutMs: config.nida.timeoutMs,
+    }),
+    subjectHmacSecret: config.nida.subjectHmacSecret,
+  });
+}
+
 /** Assemble the identity use-case from config + a chosen event transport. */
 export function createIdentityService(
   config: IdentityServiceConfig,
   eventBus: EventBus,
 ): VerifyIdentityService {
-  const nida = new NidaHttpGateway({
-    baseUrl: config.nida.baseUrl,
-    hmacSecret: config.nida.hmacSecret,
-    timeoutMs: config.nida.timeoutMs,
-  });
+  const nida = createNidaGateway(config);
   const repository = new PgIdentityRepository(config.security.encryptionKey);
 
   return new VerifyIdentityService({
@@ -77,11 +86,7 @@ export function createApplicantAuthService(
 ): ApplicantAuthService {
   return new ApplicantAuthService({
     repository: new PgApplicantAuthRepository(config.security.encryptionKey),
-    nida: new NidaHttpGateway({
-      baseUrl: config.nida.baseUrl,
-      hmacSecret: config.nida.hmacSecret,
-      timeoutMs: config.nida.timeoutMs,
-    }),
+    nida: createNidaGateway(config),
     identity: createIdentityService(config, eventBus),
     sms,
     eventBus,
@@ -224,8 +229,11 @@ export type {
   VerifyIdentityDeps,
   VerifyIdentityOutcome,
 } from './application/verify-identity.service.js';
-export { NidaHttpGateway } from './adapters/nida.http-gateway.js';
-export type { NidaHttpGatewayOptions } from './adapters/nida.http-gateway.js';
+export { NidaIremboGateway } from './adapters/nida.irembo-gateway.js';
+export type { NidaIremboGatewayOptions } from './adapters/nida.irembo-gateway.js';
+export { HttpNidaIremboTransport, NIDA_IDENTITY_PATH, NIDA_SUBJECT_HEADER } from './adapters/nida.irembo-transport.js';
+export type { NidaIremboTransport, NidaTransportResponse } from './adapters/nida.irembo-transport.js';
+export { mapIremboIdentity, districtOf } from './adapters/nida.irembo-mapping.js';
 export { PgIdentityRepository } from './adapters/identity.pg-repository.js';
 export { PgErasureRepository } from './adapters/erasure.pg-repository.js';
 export { EraseIdentityService } from './application/erase-identity.service.js';

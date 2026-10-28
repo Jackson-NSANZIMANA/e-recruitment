@@ -94,8 +94,8 @@ class Jar {
 
 const OFFICER_ID = randomUUID();
 const APPLICATION_ID = randomUUID();
-const NID_A = "1199012345678901";
-const NID_B = "1199087654321098";
+const NID_A = "1199089990011000";
+const NID_B = "1199089990010000";
 const PHONE_A = "0788000111";
 const PHONE_B = "0799000222";
 

@@ -1,6 +1,6 @@
 # ADR-048 — Credential-to-identity binding, and criminal clearance by Irembo certificate
 
-**Status:** Proposed (design) · 2026-10-25 · NESA binding implemented by S12a; clearance flow by S12b
+**Status:** §2.1–2.2 Accepted · 2026-10-28 (S12a, backend PR #49); §2.3–2.4 Proposed (S12b) · proposed 2026-10-25
 **Deciders:** platform owner (clearance flow chosen 2026-10-25); DPO and agencies for the defaults marked *owner to confirm*
 **Relates to:** ADR-007 age, ADR-029 onboarding, ADR-030 campaign-bound submission, ADR-032 document requirements, ADR-047 G2G sandbox
 

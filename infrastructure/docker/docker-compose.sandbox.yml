@@ -1,0 +1,73 @@
+# ══════════════════════════════════════════════════════════════════
+# USRP — G2G SANDBOX broker (ADR-047 §3.1), started by `pnpm sandbox`
+#
+# Its own compose PROJECT (usrp-sandbox), its own network, its own Kafka on
+# host port 4992, so a sandbox never joins the developer's consumer groups on
+# the shared broker. Postgres is the shared server with its own database
+# (usrp_sandbox); everything else runs as host processes on 49xx.
+# `pnpm sandbox:reset` removes this project's containers and volume.
+# ══════════════════════════════════════════════════════════════════
+
+name: usrp-sandbox
+
+volumes:
+  sandbox-kafka-data:
+    driver: local
+
+services:
+  sandbox-kafka:
+    image: confluentinc/cp-kafka:7.7.0
+    container_name: usrp-sandbox-kafka
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@sandbox-kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,EXTERNAL://0.0.0.0:4992
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://sandbox-kafka:9092,EXTERNAL://localhost:4992
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_HEAP_OPTS: "-Xmx384M -Xms192M"
+      CLUSTER_ID: "U2FuZGJveFVTUlBLYWZrYQ"
+    volumes:
+      - sandbox-kafka-data:/var/lib/kafka/data
+    ports:
+      - "4992:4992"
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # The same topic set as docker-compose.tier2.yml's kafka-init (keep in step).
+  sandbox-kafka-init:
+    image: confluentinc/cp-kafka:7.7.0
+    container_name: usrp-sandbox-kafka-init
+    depends_on:
+      sandbox-kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+        for spec in applicant.submitted:12 vetting.nida:6 vetting.nesa:6 vetting.hec:6 vetting.rib:6 vetting.age:6 application.cleared:6 application.accepted:6 application.withdrawn:6 biometric.result:6 slot.assigned:6 field.score.captured:6 notification.delivered:6 document.forensics:6 campaign.lifecycle:6; do
+          topic=$${spec%%:*}; parts=$${spec##*:}
+          kafka-topics --create --if-not-exists --topic $$topic --partitions $$parts --replication-factor 1 --bootstrap-server sandbox-kafka:9092
+        done
+        kafka-topics --create --if-not-exists --topic audit.immutable --partitions 3 --replication-factor 1 --config retention.ms=-1 --bootstrap-server sandbox-kafka:9092
+        kafka-topics --create --if-not-exists --topic events.dead-letter --partitions 3 --replication-factor 1 --bootstrap-server sandbox-kafka:9092
+        echo 'sandbox topics ready'
+    restart: "no"

@@ -26,6 +26,7 @@ import { generateKeyPairSync } from 'node:crypto';
 // Env BEFORE the dynamic imports so every config loads with dev defaults.
 process.env['DATABASE_URL'] ??= 'postgresql://usrp_app:app_pw@localhost:5432/usrp_db';
 process.env['NIDA_BASE_URL'] ??= 'http://localhost:3100';
+process.env['NIDA_CLIENT_TOKEN'] ??= 'dev_g2g_sandbox_client_token';
 process.env['NIDA_HMAC_SECRET'] ??= 'dev_nida_hmac_secret_min_32_chars_ok!';
 process.env['NATIONAL_ID_HMAC_KEY'] ??= 'dev_national_id_hmac_key_min_32_chars!';
 process.env['PII_ENCRYPTION_KEY'] ??= 'dev_pii_encryption_key_min_32_chars_ok!!';
@@ -56,7 +57,7 @@ const ADMIN_URL =
 const admin = postgres(ADMIN_URL, { onnotice: () => {} });
 
 // ── Fixtures (ad210000) ─────────────────────────────────────────────
-const CITIZEN_NID = '1200380123456789'; // UWIMANA Jean Pierre — NIDA mock
+const CITIZEN_NID = '1200389990001000'; // UWIMANA Jean Pierre — NIDA mock
 const CITIZEN_DOB = '2003-03-15'; // the NIDA record's date of birth (the onboarding second factor)
 const STATED_PHONE = '0788380789'; // the number the citizen TYPES — NIDA holds none (ADR-029)
 const MOCK_PHONE_FRAGMENT = '788380789'; // distinctive tail of that number

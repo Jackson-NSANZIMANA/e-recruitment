@@ -4,7 +4,7 @@
 // Boots the real service over @usrp/shared-http on an ephemeral port and
 // drives it through an actual TCP socket with fetch — proving the ingress
 // end-to-end against live infrastructure (PostgreSQL as usrp_app + live
-// usrp-nida-mock; InMemoryEventBus so we can inspect emitted events and
+// the g2g-sandbox nida-irembo simulator; InMemoryEventBus so we can inspect emitted events and
 // correlation propagation). Repeatable: cleans its rows before and after.
 // Exits non-zero on the first failed assertion.
 //
@@ -49,8 +49,8 @@ const ADMIN_URL =
   'postgresql://usrp_admin:usrp_dev_password@localhost:5432/usrp_db';
 const admin = postgres(ADMIN_URL, { onnotice: () => {} });
 
-const CITIZEN_NID = '1200380123456789'; // seeded RWANDAN_CITIZEN
-const UNKNOWN_NID = '1200380123400000'; // valid shape, absent from NIDA seed
+const CITIZEN_NID = '1200389990001000'; // seeded RWANDAN_CITIZEN
+const UNKNOWN_NID = '1200389990008000'; // valid shape, absent from NIDA seed
 const VERIFY_PATH = '/v1/identities/verify';
 // Deterministic correlation id we expect to flow request → response → event.
 const CORRELATION_ID = '11111111-1111-4111-8111-111111111111';

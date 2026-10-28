@@ -1,6 +1,6 @@
 # ADR-047 — G2G production sandbox: real wire contracts, simulated registries
 
-**Status:** Proposed (design) · 2026-10-25 · implemented by S12a, extended by S12b
+**Status:** Accepted · 2026-10-28 (proposed 2026-10-25) · implemented by S12a (backend PR #49), extended by S12b
 **Deciders:** platform owner (decisions recorded in §2)
 **Relates to:** ADR-028 edge tier, ADR-029 onboarding, ADR-035 rehearsal, ADR-038 release, ADR-048 identity binding and Irembo clearance, ROADMAP M3 (S12)
 

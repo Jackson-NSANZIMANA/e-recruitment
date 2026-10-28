@@ -1,0 +1,562 @@
+{
+  "id": "rdf-2026",
+  "version": 1,
+  "title": "RDF 2026: regular personnel and Reserve Force (pilot: Nyagatare)",
+  "purpose": "The pilot agency and district (owner, 2026-10-25). Encoded from §1 of the Kinyarwanda original. The playable day stages the pilot district only: Nyagatare stadium examines today, registration open; every printed venue and date is kept in announcement.venues and validated by the preflight.",
+  "campaigns": [
+    {
+      "agency": "RDF",
+      "codeTag": "RDF26",
+      "categories": [
+        "GENERAL_ENLISTMENT",
+        "RESERVE_FORCE_ALEVEL",
+        "RESERVE_FORCE_UNIVERSITY",
+        "RESERVE_FORCE_SPECIALIST"
+      ],
+      "registration": {
+        "opensOffsetDays": -1,
+        "closesOffsetDays": 2
+      },
+      "examination": {
+        "startOffsetDays": 0,
+        "endOffsetDays": 1
+      },
+      "reportingHour": 8,
+      "allowsWalkIn": true,
+      "biometricMode": "SHADOW",
+      "targetIntakeCount": 300,
+      "sessions": [
+        {
+          "district": "NYAGATARE",
+          "examOffsetDays": 0,
+          "reportingHour": 8,
+          "capacity": 400,
+          "venue": "Nyagatare stadium"
+        }
+      ],
+      "staff": [
+        {
+          "handle": "reh.rdf.gate.nyagatare",
+          "posts": [
+            "screening_officer"
+          ]
+        },
+        {
+          "handle": "reh.rdf.reviewer",
+          "posts": [
+            "reviewer"
+          ]
+        },
+        {
+          "handle": "reh.rdf.supervisor",
+          "posts": [
+            "field_supervisor"
+          ]
+        }
+      ]
+    }
+  ],
+  "personas": [
+    {
+      "id": "R1",
+      "role": "Eligible S3 citizen, Nyagatare (RDF regular)",
+      "sandboxPersona": "A-RDF-PILOT-S3-ELIGIBLE",
+      "category": "GENERAL_ENLISTMENT",
+      "expect": {
+        "outcome": "ADMITTED"
+      },
+      "rehearses": "Sign in, apply online to RDF regular personnel, NIDA lookup, NESA bound (S3), RIB clear, slot at Nyagatare stadium, admitted at the gate today.",
+      "expectedOutcome": "Admitted at Rehearsal Venue — Nyagatare stadium."
+    },
+    {
+      "id": "R2",
+      "role": "Eligible A-Level citizen, Nyagatare (RDF Reserve A-Level)",
+      "sandboxPersona": "A-RDF-PILOT-ALEVEL-ELIGIBLE",
+      "category": "RESERVE_FORCE_ALEVEL",
+      "expect": {
+        "outcome": "ADMITTED"
+      },
+      "rehearses": "The Reserve A-Level track end to end at the pilot venue.",
+      "expectedOutcome": "Admitted at the gate."
+    },
+    {
+      "id": "R3",
+      "role": "Over-age by one day (26th birthday yesterday), Nyagatare",
+      "sandboxPersona": "A-RDF-PILOT-OVER-AGE-1D",
+      "category": "GENERAL_ENLISTMENT",
+      "expect": {
+        "outcome": "REJECTED",
+        "gate": "AGE"
+      },
+      "rehearses": "Age band 18–25 refuses a 26-year-old.",
+      "expectedOutcome": "Refused at the age gate."
+    },
+    {
+      "id": "R4",
+      "role": "NESA record names another person, Nyagatare",
+      "sandboxPersona": "A-RDF-PILOT-NESA-MISMATCH",
+      "category": "RESERVE_FORCE_ALEVEL",
+      "expect": {
+        "outcome": "ACADEMIC_PENDING",
+        "failureCode": "NESA_RECORD_NOT_BOUND"
+      },
+      "rehearses": "Binding refuses a valid index that is not the applicant’s; correctable, not a rejection.",
+      "expectedOutcome": "Academic PENDING with NESA_RECORD_NOT_BOUND; no slot, not rejected."
+    }
+  ],
+  "announcement": {
+    "source": "docs/product/recruitment-announcements-2025-2026.md §1",
+    "agency": "RDF",
+    "title": "Itangazo ku bifuza kwinjira mu Ngabo z'u Rwanda (regular personnel and Reserve Force)",
+    "signedOn": "2026-05-15",
+    "registration": {
+      "opens": "2026-05-23",
+      "closes": "2026-06-01",
+      "where": "district and sector level"
+    },
+    "walkInOnExamDay": true,
+    "examination": {
+      "start": "2026-06-02",
+      "end": "2026-06-17",
+      "hour": "08:00"
+    },
+    "categories": [
+      {
+        "category": "GENERAL_ENLISTMENT",
+        "track": "regular personnel (abasirikare bato), men and women",
+        "educationAnyOf": [
+          "O_LEVEL_S3"
+        ],
+        "ageCaps": [
+          {
+            "qualification": "any",
+            "minAge": 18,
+            "maxAge": 25
+          }
+        ],
+        "convictionRule": "NEVER_CONVICTED",
+        "extraConditions": [
+          "in good health",
+          "not on the list of persons dismissed from public service",
+          "of good conduct",
+          "willing to join",
+          "passes the exams"
+        ]
+      },
+      {
+        "category": "RESERVE_FORCE_ALEVEL",
+        "track": "Reserve Force (Inkeragutabara), A-Level",
+        "educationAnyOf": [
+          "A_LEVEL_A2"
+        ],
+        "ageCaps": [
+          {
+            "qualification": "A-Level",
+            "minAge": 18,
+            "maxAge": 25
+          }
+        ],
+        "convictionRule": "NEVER_CONVICTED"
+      },
+      {
+        "category": "RESERVE_FORCE_UNIVERSITY",
+        "track": "Reserve Force, A0 degree or IPRC",
+        "educationAnyOf": [
+          "BACHELOR_A0",
+          "A1_IPRC"
+        ],
+        "ageCaps": [
+          {
+            "qualification": "A0 or IPRC",
+            "maxAge": 26
+          }
+        ],
+        "convictionRule": "NEVER_CONVICTED"
+      },
+      {
+        "category": "RESERVE_FORCE_SPECIALIST",
+        "track": "Reserve Force, Medicine/Engineering/Law specialists",
+        "educationAnyOf": [
+          "BACHELOR_A0"
+        ],
+        "ageCaps": [
+          {
+            "qualification": "Medicine, Engineering or Law",
+            "maxAge": 27
+          }
+        ],
+        "convictionRule": "NEVER_CONVICTED"
+      }
+    ],
+    "documents": [
+      "national ID",
+      "A-Level certificate",
+      "certificate of good conduct from the sector (umurenge) authority",
+      "certificate of no criminal conviction"
+    ],
+    "venues": [
+      {
+        "province": "KIGALI_CITY",
+        "districts": [
+          "KICUKIRO"
+        ],
+        "dates": [
+          "2026-06-02",
+          "2026-06-03"
+        ],
+        "venue": "IPRC Kicukiro stadium"
+      },
+      {
+        "province": "KIGALI_CITY",
+        "districts": [
+          "GASABO"
+        ],
+        "dates": [
+          "2026-06-04",
+          "2026-06-05"
+        ],
+        "venue": "ULK stadium"
+      },
+      {
+        "province": "KIGALI_CITY",
+        "districts": [
+          "NYARUGENGE"
+        ],
+        "dates": [
+          "2026-06-06",
+          "2026-06-07"
+        ],
+        "venue": "Kigali Pelé Stadium, Nyamirambo"
+      },
+      {
+        "province": "NORTHERN_PROVINCE",
+        "districts": [
+          "GICUMBI"
+        ],
+        "dates": [
+          "2026-06-02",
+          "2026-06-03"
+        ],
+        "venue": "Gicumbi stadium"
+      },
+      {
+        "province": "NORTHERN_PROVINCE",
+        "districts": [
+          "BURERA"
+        ],
+        "dates": [
+          "2026-06-04",
+          "2026-06-05"
+        ],
+        "venue": "District office"
+      },
+      {
+        "province": "NORTHERN_PROVINCE",
+        "districts": [
+          "MUSANZE"
+        ],
+        "dates": [
+          "2026-06-06",
+          "2026-06-07"
+        ],
+        "venue": "Ubworoherane stadium"
+      },
+      {
+        "province": "NORTHERN_PROVINCE",
+        "districts": [
+          "GAKENKE"
+        ],
+        "dates": [
+          "2026-06-08",
+          "2026-06-09"
+        ],
+        "venue": "Ngando football ground"
+      },
+      {
+        "province": "NORTHERN_PROVINCE",
+        "districts": [
+          "RULINDO"
+        ],
+        "dates": [
+          "2026-06-10",
+          "2026-06-11"
+        ],
+        "venue": "Gasiza ground"
+      },
+      {
+        "province": "SOUTHERN_PROVINCE",
+        "districts": [
+          "NYAMAGABE"
+        ],
+        "dates": [
+          "2026-06-02",
+          "2026-06-03"
+        ],
+        "venue": "Nyamagabe stadium"
+      },
+      {
+        "province": "SOUTHERN_PROVINCE",
+        "districts": [
+          "NYARUGURU"
+        ],
+        "dates": [
+          "2026-06-04",
+          "2026-06-05"
+        ],
+        "venue": "Ndago football ground"
+      },
+      {
+        "province": "SOUTHERN_PROVINCE",
+        "districts": [
+          "GISAGARA"
+        ],
+        "dates": [
+          "2026-06-06",
+          "2026-06-07"
+        ],
+        "venue": "District office"
+      },
+      {
+        "province": "SOUTHERN_PROVINCE",
+        "districts": [
+          "HUYE"
+        ],
+        "dates": [
+          "2026-06-08",
+          "2026-06-09"
+        ],
+        "venue": "Huye stadium"
+      },
+      {
+        "province": "SOUTHERN_PROVINCE",
+        "districts": [
+          "NYANZA"
+        ],
+        "dates": [
+          "2026-06-10",
+          "2026-06-11"
+        ],
+        "venue": "Nyanza stadium"
+      },
+      {
+        "province": "SOUTHERN_PROVINCE",
+        "districts": [
+          "RUHANGO"
+        ],
+        "dates": [
+          "2026-06-12",
+          "2026-06-13"
+        ],
+        "venue": "District office"
+      },
+      {
+        "province": "SOUTHERN_PROVINCE",
+        "districts": [
+          "MUHANGA"
+        ],
+        "dates": [
+          "2026-06-14",
+          "2026-06-15"
+        ],
+        "venue": "Muhanga stadium"
+      },
+      {
+        "province": "SOUTHERN_PROVINCE",
+        "districts": [
+          "KAMONYI"
+        ],
+        "dates": [
+          "2026-06-16",
+          "2026-06-17"
+        ],
+        "venue": "District office"
+      },
+      {
+        "province": "EASTERN_PROVINCE",
+        "districts": [
+          "KIREHE"
+        ],
+        "dates": [
+          "2026-06-02",
+          "2026-06-03"
+        ],
+        "venue": "District office"
+      },
+      {
+        "province": "EASTERN_PROVINCE",
+        "districts": [
+          "NGOMA"
+        ],
+        "dates": [
+          "2026-06-04",
+          "2026-06-05"
+        ],
+        "venue": "Ngoma football ground"
+      },
+      {
+        "province": "EASTERN_PROVINCE",
+        "districts": [
+          "NYAGATARE"
+        ],
+        "dates": [
+          "2026-06-06",
+          "2026-06-07"
+        ],
+        "venue": "Nyagatare stadium"
+      },
+      {
+        "province": "EASTERN_PROVINCE",
+        "districts": [
+          "GATSIBO"
+        ],
+        "dates": [
+          "2026-06-08",
+          "2026-06-09"
+        ],
+        "venue": "District office"
+      },
+      {
+        "province": "EASTERN_PROVINCE",
+        "districts": [
+          "KAYONZA"
+        ],
+        "dates": [
+          "2026-06-10",
+          "2026-06-11"
+        ],
+        "venue": "District office"
+      },
+      {
+        "province": "EASTERN_PROVINCE",
+        "districts": [
+          "RWAMAGANA"
+        ],
+        "dates": [
+          "2026-06-12",
+          "2026-06-13"
+        ],
+        "venue": "District office"
+      },
+      {
+        "province": "EASTERN_PROVINCE",
+        "districts": [
+          "BUGESERA"
+        ],
+        "dates": [
+          "2026-06-14",
+          "2026-06-15"
+        ],
+        "venue": "Bugesera stadium"
+      },
+      {
+        "province": "WESTERN_PROVINCE",
+        "districts": [
+          "RUSIZI"
+        ],
+        "dates": [
+          "2026-06-02",
+          "2026-06-03"
+        ],
+        "venue": "Rusizi stadium"
+      },
+      {
+        "province": "WESTERN_PROVINCE",
+        "districts": [
+          "NYAMASHEKE"
+        ],
+        "dates": [
+          "2026-06-04",
+          "2026-06-05"
+        ],
+        "venue": "District office"
+      },
+      {
+        "province": "WESTERN_PROVINCE",
+        "districts": [
+          "KARONGI"
+        ],
+        "dates": [
+          "2026-06-06",
+          "2026-06-07"
+        ],
+        "venue": "Mbonwa ground"
+      },
+      {
+        "province": "WESTERN_PROVINCE",
+        "districts": [
+          "RUTSIRO"
+        ],
+        "dates": [
+          "2026-06-08",
+          "2026-06-09"
+        ],
+        "venue": "Rutsiro stadium"
+      },
+      {
+        "province": "WESTERN_PROVINCE",
+        "districts": [
+          "RUBAVU"
+        ],
+        "dates": [
+          "2026-06-10",
+          "2026-06-11"
+        ],
+        "venue": "Rubavu stadium"
+      },
+      {
+        "province": "WESTERN_PROVINCE",
+        "districts": [
+          "NYABIHU"
+        ],
+        "dates": [
+          "2026-06-12",
+          "2026-06-13"
+        ],
+        "venue": "Mukamira military camp"
+      },
+      {
+        "province": "WESTERN_PROVINCE",
+        "districts": [
+          "NGORORERO"
+        ],
+        "dates": [
+          "2026-06-14",
+          "2026-06-15"
+        ],
+        "venue": "Ngororero stadium"
+      }
+    ],
+    "notes": [
+      {
+        "kind": "OWNER_DECISION",
+        "section": "—",
+        "text": "RDF is the pilot agency and the sandbox target; Nyagatare is the pilot district (owner, 2026-10-25). The playable day stages Nyagatare stadium only."
+      },
+      {
+        "kind": "REHEARSAL_COMPRESSION",
+        "section": "§1",
+        "text": "Printed: registration 23 May–1 June, Nyagatare sits 6–7 June. Played: registration open now and Nyagatare examining today, so one session can rehearse apply → gate (gate admission is valid only on the exam day, Kigali time)."
+      },
+      {
+        "kind": "POLICY_MODEL_GAP",
+        "section": "§1, §9",
+        "text": "Each district sits on TWO consecutive days; a session has one exam date, so only day 1 is staged."
+      },
+      {
+        "kind": "POLICY_MODEL_GAP",
+        "section": "§1, §9",
+        "text": "Reserve age caps are set by qualification; the platform expresses them as three categories chosen by the applicant (18–25 / ≤26 / ≤27). The minimum age for A0/IPRC and specialists is not printed; the platform applies 18."
+      },
+      {
+        "kind": "POLICY_MODEL_GAP",
+        "section": "§1",
+        "text": "\"Not on the list of persons dismissed from public service\" and \"good conduct\" have no registry check; they rest on documents and officers."
+      },
+      {
+        "kind": "POLICY_MODEL_GAP",
+        "section": "§1",
+        "text": "The documents list asks for an A-Level certificate for everyone, though regular personnel need only S3; the platform document door derives the certificate from the category."
+      }
+    ]
+  }
+}

@@ -21,6 +21,12 @@ export interface NidaCitizen {
   // No phone: NIDA does not hold SIM-registration numbers (ADR-029). The
   // citizen states a phone and proves control of it with an OTP.
   readonly citizenshipStatus: string;
+  /**
+   * The ID CARD's expiry is past (dateOfExpiry). The identity itself is
+   * still NIDA's; this flag does not block onboarding (default taken, owner
+   * to confirm, ADR-047). Not stored.
+   */
+  readonly idDocumentExpired?: boolean;
 }
 
 /**

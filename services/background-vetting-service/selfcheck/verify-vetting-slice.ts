@@ -55,8 +55,8 @@ import {
 const BROKERS = (process.env['KAFKA_BROKERS'] ?? 'localhost:29092').split(',');
 
 // From infrastructure/docker/mocks/rib/data/records.json — the mock's fixtures.
-const FLAGGED_HASH = '6709cb62a5872432d0126af9f6abc92922d1e5fc0e8de58168a8ecb58159c2b5';
-const UNDER_INVESTIGATION_HASH = '9f15bc15a8765bf059d71626d80fc1a879d55e193793db0e2ad94d331c87a291';
+const FLAGGED_HASH = 'fc8baa477592d81c59aa0ac9310ae07de2e1d8ad67eaa5dd9e8e763c94d88cf7';
+const UNDER_INVESTIGATION_HASH = 'c16628decaa1749fa7db763f9776203888e5ddb62e262f3111f350dee4b01cef';
 
 let failures = 0;
 function check(label: string, condition: boolean, detail = ''): void {

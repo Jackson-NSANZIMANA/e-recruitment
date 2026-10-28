@@ -136,7 +136,7 @@ async function main(): Promise<void> {
   const bus = new InMemoryEventBus();
   const channel = new LogSmsChannel();
   const deliver = new DeliverInvitationService({
-    resolver: new StaticContactResolver({ channel: 'SMS', destination: '+250780000000' }),
+    resolver: new StaticContactResolver({ channel: 'SMS', destination: '+250788000000' }),
     channel,
     eventBus: bus,
   });
@@ -157,7 +157,7 @@ async function main(): Promise<void> {
   check('event.deliveryStatus DELIVERED', asRecord(delivered)['deliveryStatus'] === 'DELIVERED');
   check('event.correlationId preserved', asRecord(delivered)['correlationId'] === CORRELATION_ID);
   check('AUDIT_ENTRY emitted', audit !== undefined);
-  check('no destination (PII) on the event', !JSON.stringify(delivered).includes('+250780000000'));
+  check('no destination (PII) on the event', !JSON.stringify(delivered).includes('+250788000000'));
   check('no QR token on the outcome event', !JSON.stringify(delivered).includes(QR_TOKEN));
 
   console.log('\n── 2. Production resolver (no stored contact) → PENDING ──────');

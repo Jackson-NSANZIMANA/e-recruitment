@@ -31,7 +31,24 @@ export interface ApplicantG2GSubjectRecord {
   readonly nidaLookupHash: string | null;
 }
 
+/**
+ * The holder facts credential binding needs (ADR-048 §2.1): decrypted name,
+ * DOB and NID hint, plus sex. TRANSIENT PII: compared, then discarded; never
+ * stored, logged or emitted by this service.
+ */
+export interface ApplicantBindingSubject {
+  readonly identityStatus: IdentityVerificationStatus;
+  readonly fullName: string;
+  readonly dateOfBirth: string;
+  readonly sex: 'MALE' | 'FEMALE';
+  /** 8 digits (first 4 + last 4 of the NID); null for identities verified before rls/0042. */
+  readonly nationalIdHint: string | null;
+}
+
 export interface IdentityReader {
+  /** Read the binding subject; null if absent or soft-deleted. */
+  findBindingSubjectById(applicantId: string): Promise<ApplicantBindingSubject | null>;
+
   /** Read an applicant identity by id; null if absent or soft-deleted. */
   findApplicantById(applicantId: string): Promise<ApplicantIdentityRecord | null>;
 

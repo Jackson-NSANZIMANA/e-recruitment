@@ -41,8 +41,8 @@ const ONBOARDING_BEGIN_PER_NID_PER_MINUTE = 5;
 
 /**
  * The rate-limit identity of a phone number: its last nine digits (the
- * Rwandan subscriber number), so `0788 123 456`, `0788123456` and
- * `+250788123456` share ONE bucket. Keying on the typed string let a caller
+ * Rwandan subscriber number), so `0788 000 456`, `0788000456` and
+ * `+250788000456` share ONE bucket. Keying on the typed string let a caller
  * flood one handset by varying spaces or the country prefix. This is only a
  * bucket key — deliverability is identity-service's decision.
  */

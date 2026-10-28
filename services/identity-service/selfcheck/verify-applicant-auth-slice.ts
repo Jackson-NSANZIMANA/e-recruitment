@@ -76,11 +76,11 @@ const ADMIN_URL =
 const admin = postgres(ADMIN_URL, { onnotice: () => {} });
 
 // ── Deterministic fixtures (ad180000 — unique to this proof) ──────
-const CITIZEN_NID = '1200380123456789'; // UWIMANA Jean Pierre — in the NIDA mock
-const UNKNOWN_NID = '1200380123400000'; // valid shape, absent from the NIDA seed AND from USRP
+const CITIZEN_NID = '1200389990001000'; // UWIMANA Jean Pierre — in the NIDA mock
+const UNKNOWN_NID = '1200389990008000'; // valid shape, absent from the NIDA seed AND from USRP
 const CITIZEN_DOB = '2003-03-15'; // the NIDA mock's date of birth for CITIZEN_NID
-const STATED_PHONE = '0788123456'; // what the citizen TYPES — NIDA holds no phone
-const MOCK_PHONE_FRAGMENT = '788123456'; // distinctive tail of the stated number
+const STATED_PHONE = '0788000456'; // what the citizen TYPES — NIDA holds no phone
+const MOCK_PHONE_FRAGMENT = '788000456'; // distinctive tail of the stated number
 
 const CTRL_APPLICANT = 'ad180000-0000-4000-8000-000000000002'; // another citizen — must stay invisible
 const CTRL_NID_HASH = 'ad18ad18'.repeat(8);
@@ -335,7 +335,7 @@ async function main(): Promise<void> {
     check('an undeliverable number → 400 and nothing sent', badPhone.status === 400 && sms.sent.length === 0, `got ${badPhone.status}`);
     const req = await post('/v1/applicants/auth/otp/request', { onboardingToken, phoneNumber: STATED_PHONE, channel: 'WEB' });
     check('OTP request → 202 CHALLENGED', req.status === 202, `got ${req.status} ${req.text}`);
-    check('one SMS captured, to the number the citizen STATED', sms.sent.length === 1 && sms.sent[0]?.destination === '+250788123456', sms.sent[0]?.destination);
+    check('one SMS captured, to the number the citizen STATED', sms.sent.length === 1 && sms.sent[0]?.destination === '+250788000456', sms.sent[0]?.destination);
     check('the SMS carries a 6-digit code', lastOtp().length === 6);
     check('202 response carries NO phone and NO code', !req.text.includes(MOCK_PHONE_FRAGMENT) && !req.text.includes(lastOtp()));
 
