@@ -10,8 +10,10 @@
 // USRP_ENVIRONMENT=sandbox, so the production boot guard runs in full with
 // freshly minted secrets (no committed dev value boots). The documented
 // sandbox differences: single-host (loopback infrastructure, no broker TLS),
-// G2G base URLs on the simulator (port 4900), and the dev SMS inbox in place
-// of the Twilio emulator until S12b.
+// G2G and SMS base URLs on the simulators (port 4900): the services send SMS
+// through TwilioSmsChannel to the Twilio emulator, whose inbox file is
+// .sandbox/sms/inbox.jsonl (LogSmsChannel is refused in the sandbox). Real SMS
+// only with the owner's opt-in, see below.
 //
 // Isolation from the developer's own stack:
 //   • database usrp_sandbox on the shared Postgres server (never usrp_db);
@@ -26,7 +28,13 @@
 // guard refuses). The applicant document door answers 503 in the sandbox.
 // The RIB and HEC mocks (hash-keyed, unchanged) are reused from tier1.
 //
-// Optional: SANDBOX_PRIVATE_PERSONA_DIR, SANDBOX_NESA_LIVE=1 +
+// Real SMS (owner only, locally): SANDBOX_SMS=twilio + SANDBOX_TWILIO_ENV_FILE=<path
+// OUTSIDE every git work tree> holding TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN and
+// TWILIO_FROM (or TWILIO_MESSAGING_SERVICE_SID). The file is read in memory and
+// handed to the services' environment; nothing it holds is written or printed.
+// The daily cost cap (SMS_DAILY_CAP, default 50) and the per-number limit apply.
+//
+// Optional: SANDBOX_DB (default usrp_sandbox), SANDBOX_PRIVATE_PERSONA_DIR, SANDBOX_NESA_LIVE=1 +
 // SANDBOX_NESA_LIVE_INDEX are passed to the simulator only. Nothing they hold
 // is written by this script.
 // ══════════════════════════════════════════════════════════════════
@@ -37,12 +45,14 @@ import { chmodSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, write
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hashPassword } from '@usrp/shared-security';
+import { enclosingGitWorkTree } from '../src/overlay.js';
+import { CERTIFICATE_APPLICATION_CODES } from '../src/population/model.js';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const STATE = join(REPO, '.sandbox');
 const PG_CONTAINER = process.env['PG_CONTAINER'] ?? 'usrp-postgres';
 const PG_ADMIN = process.env['PG_ADMIN_USER'] ?? 'usrp_admin';
-const DB = 'usrp_sandbox';
+const DB = /^[a-z][a-z0-9_]{0,40}$/.test(process.env['SANDBOX_DB'] ?? '') ? (process.env['SANDBOX_DB'] as string) : 'usrp_sandbox';
 const COMPOSE = ['compose', '-p', 'usrp-sandbox', '-f', join(REPO, 'infrastructure/docker/docker-compose.sandbox.yml')];
 const SIMULATOR_PORT = 4900;
 const EDGE_PORT = 4921;
@@ -111,7 +121,18 @@ interface Secrets {
 /** Mint (or reuse) the sandbox's own secrets. Mode 0600, never printed. */
 function secrets(): Secrets {
   const file = join(STATE, 'secrets.json');
-  if (existsSync(file)) return JSON.parse(readFileSync(file, 'utf8')) as Secrets;
+  if (existsSync(file)) {
+    const existing = JSON.parse(readFileSync(file, 'utf8')) as Record<string, string>;
+    // Secrets added by later sessions are minted into an existing file.
+    const added: Record<string, string> = {};
+    if (existing['TWILIO_ACCOUNT_SID'] === undefined) added['TWILIO_ACCOUNT_SID'] = `AC${randomBytes(16).toString('hex')}`;
+    if (existing['TWILIO_AUTH_TOKEN'] === undefined) added['TWILIO_AUTH_TOKEN'] = freshSecret();
+    if (existing['CLEARANCE_REFERENCE_HMAC_KEY'] === undefined) added['CLEARANCE_REFERENCE_HMAC_KEY'] = freshSecret();
+    if (Object.keys(added).length === 0) return existing;
+    const merged = { ...existing, ...added };
+    writeFileSync(file, JSON.stringify(merged), { mode: 0o600 });
+    return merged;
+  }
   const auth = generateKeyPairSync('ed25519');
   const qr = generateKeyPairSync('ed25519');
   const minted: Secrets = {
@@ -131,6 +152,9 @@ function secrets(): Secrets {
     HEC_HMAC_SECRET: freshSecret(),
     MINIO_ENCRYPTION_KEY: freshSecret(),
     MINIO_ROOT_PASSWORD: freshSecret(),
+    TWILIO_ACCOUNT_SID: `AC${randomBytes(16).toString('hex')}`,
+    TWILIO_AUTH_TOKEN: freshSecret(),
+    CLEARANCE_REFERENCE_HMAC_KEY: freshSecret(),
   };
   writeFileSync(file, JSON.stringify(minted), { mode: 0o600 });
   return minted;
@@ -163,15 +187,52 @@ function serviceEnv(s: Secrets): Record<string, string> {
     BIOMETRIC_SERVICE_BASE_URL: local(4903),
     NIDA_BASE_URL: local(SIMULATOR_PORT),
     NESA_BASE_URL: local(SIMULATOR_PORT),
+    // Criminal clearance by Irembo certificate (ADR-048 §2.3). The placeholders are
+    // clearly named; the real APPLICATION_CODE values are owner/RIB to confirm.
+    CLEARANCE_MODE: 'IREMBO_CERTIFICATE',
+    IREMBO_CERTIFICATES_BASE_URL: local(SIMULATOR_PORT),
+    IREMBO_CERTIFICATES_CLIENT_TOKEN: s['NIDA_CLIENT_TOKEN'] ?? '',
+    CLEARANCE_ALLOWED_APPLICATION_CODES: `${CERTIFICATE_APPLICATION_CODES.NO_RECORD},${CERTIFICATE_APPLICATION_CODES.RECORD_EXTRACT}`,
+    CLEARANCE_NO_RECORD_APPLICATION_CODES: CERTIFICATE_APPLICATION_CODES.NO_RECORD,
+    CLEARANCE_REFERENCE_HMAC_KEY: s['CLEARANCE_REFERENCE_HMAC_KEY'] ?? '',
     BIOMETRIC_MODE_RDF: 'SHADOW',
-    DEV_SMS_INBOX_FILE: join(STATE, 'sms', 'inbox.jsonl'),
+    SMS_CAP_STATE_FILE: join(STATE, 'sms', 'daily-cap.log'),
     CORS_ORIGINS: 'http://localhost:4930,http://localhost:4931,http://localhost:4932',
   });
   delete env['DOCUMENT_FORENSICS_BASE_URL'];
+  Object.assign(env, smsEnv(s, local));
   for (const [svc, port] of Object.entries(SERVICE_PORTS)) {
     env[`PORT_${svc.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}`] = String(port);
   }
   return env;
+}
+
+/** TwilioSmsChannel's environment: the emulator by default, the owner's real account only on opt-in. */
+function smsEnv(s: Secrets, local: (port: number) => string): Record<string, string> {
+  if ((process.env['SANDBOX_SMS'] ?? '').trim().toLowerCase() !== 'twilio') {
+    return {
+      TWILIO_ACCOUNT_SID: s['TWILIO_ACCOUNT_SID'] ?? '',
+      TWILIO_AUTH_TOKEN: s['TWILIO_AUTH_TOKEN'] ?? '',
+      TWILIO_FROM: '+15005550006',
+      TWILIO_BASE_URL: local(SIMULATOR_PORT),
+    };
+  }
+  const path = (process.env['SANDBOX_TWILIO_ENV_FILE'] ?? '').trim();
+  if (path === '' || !existsSync(path)) return fail('SANDBOX_SMS=twilio needs SANDBOX_TWILIO_ENV_FILE (an untracked file outside every git work tree).');
+  if (enclosingGitWorkTree(path) !== null) return fail('SANDBOX_TWILIO_ENV_FILE is inside a git work tree; keep the owner credentials outside every repository.');
+  const wanted = new Set(['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_FROM', 'TWILIO_MESSAGING_SERVICE_SID']);
+  const real: Record<string, string> = { SANDBOX_SMS: 'twilio' };
+  for (const raw of readFileSync(path, 'utf8').split('\n')) {
+    const line = raw.trim();
+    const eq = line.indexOf('=');
+    if (line === '' || line.startsWith('#') || eq <= 0) continue;
+    const key = line.slice(0, eq).trim();
+    if (!wanted.has(key)) continue;
+    real[key] = line.slice(eq + 1).trim().replace(/^(['"])(.*)\1$/, '$2');
+  }
+  if ((real['TWILIO_ACCOUNT_SID'] ?? '') === '' || (real['TWILIO_AUTH_TOKEN'] ?? '') === '') return fail('SANDBOX_TWILIO_ENV_FILE must define TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN.');
+  if ((real['TWILIO_FROM'] ?? '') === '' && (real['TWILIO_MESSAGING_SERVICE_SID'] ?? '') === '') return fail('SANDBOX_TWILIO_ENV_FILE must define TWILIO_FROM or TWILIO_MESSAGING_SERVICE_SID.');
+  return real;
 }
 
 function startDetached(name: string, args: readonly string[], env: Record<string, string>): number {
@@ -247,6 +308,9 @@ async function up(): Promise<void> {
     SANDBOX_PORT: String(SIMULATOR_PORT),
     SANDBOX_G2G_CLIENT_TOKENS: s['NIDA_CLIENT_TOKEN'] ?? '',
     SANDBOX_LATENCY_SCALE: process.env['SANDBOX_LATENCY_SCALE'] ?? '1',
+    SANDBOX_TWILIO_ACCOUNT_SID: s['TWILIO_ACCOUNT_SID'] ?? '',
+    SANDBOX_TWILIO_AUTH_TOKEN: s['TWILIO_AUTH_TOKEN'] ?? '',
+    SANDBOX_SMS_INBOX_FILE: join(STATE, 'sms', 'inbox.jsonl'),
   };
   for (const key of ['SANDBOX_PRIVATE_PERSONA_DIR', 'SANDBOX_PRIVATE_PERSONA_DISTRICT', 'SANDBOX_NESA_LIVE', 'SANDBOX_NESA_LIVE_INDEX', 'SANDBOX_SEED', 'SANDBOX_POPULATION_SIZE']) {
     const value = process.env[key];
@@ -263,7 +327,7 @@ async function up(): Promise<void> {
   for (const [svc, port] of Object.entries(SERVICE_PORTS)) await waitReady(svc, port, '/ready');
   out('');
   out(`✓ sandbox up · edge http://localhost:${String(EDGE_PORT)} · simulators :${String(SIMULATOR_PORT)} · database ${DB} · broker :4992`);
-  out('  SMS inbox: .sandbox/sms/inbox.jsonl · logs: .sandbox/logs/ · rehearse: pnpm rehearse --sandbox <scenario>');
+  out(`  SMS: ${(process.env['SANDBOX_SMS'] ?? '').toLowerCase() === 'twilio' ? 'REAL Twilio (owner opt-in)' : 'Twilio emulator'} · inbox .sandbox/sms/inbox.jsonl · logs: .sandbox/logs/ · rehearse: pnpm rehearse --sandbox <scenario>`);
 }
 
 function down(): void {

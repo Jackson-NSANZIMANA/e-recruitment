@@ -135,6 +135,14 @@ for (const [key, url] of [
 }
 check('GREEN: production may name the real registry (cutover)', issuesOf(() => { assertProductionSecrets({ ...PROD_ENV, NESA_BASE_URL: 'https://rne.sdms.gov.rw' }); }) === null);
 
+console.log('\n── Twilio (S12b): the emulator by default, the real API only on the owner opt-in');
+check('RED: sandbox TWILIO_BASE_URL → api.twilio.com without the opt-in', refused(() => { assertProductionSecrets({ ...SANDBOX_ENV, TWILIO_BASE_URL: 'https://api.twilio.com' }); }, /REAL registry/));
+check('GREEN: sandbox TWILIO_BASE_URL → api.twilio.com WITH SANDBOX_SMS=twilio', issuesOf(() => { assertProductionSecrets({ ...SANDBOX_ENV, TWILIO_BASE_URL: 'https://api.twilio.com', SANDBOX_SMS: 'twilio' }); }) === null);
+check('RED: the opt-in does not unlock another real host', refused(() => { assertProductionSecrets({ ...SANDBOX_ENV, SANDBOX_SMS: 'twilio', NIDA_BASE_URL: 'https://api.irembohub.com' }); }, /REAL registry/));
+check('GREEN: sandbox TWILIO_BASE_URL → the emulator', issuesOf(() => { assertProductionSecrets({ ...SANDBOX_ENV, TWILIO_BASE_URL: 'http://localhost:4900' }); }) === null);
+check('RED: production TWILIO_BASE_URL → a simulator host', refused(() => { assertProductionSecrets({ ...PROD_ENV, TWILIO_BASE_URL: 'https://g2g-sandbox.sandbox.usrp.internal' }); }, /SIMULATOR/));
+check('RED: production TWILIO_AUTH_TOKEN placeholder', refused(() => { assertProductionSecrets({ ...PROD_ENV, TWILIO_AUTH_TOKEN: 'CHANGE_ME_twilio_auth_token_value' }); }, /placeholder/));
+
 console.log('\n── the production guard runs IN FULL in the sandbox');
 check('RED: sandbox with a committed dev secret', refused(() => { assertProductionSecrets({ ...SANDBOX_ENV, NIDA_HMAC_SECRET: 'dev_nida_hmac_secret' }); }, /DEVELOPMENT value/));
 check('RED: sandbox with the published g2g dev client token', refused(() => { assertProductionSecrets({ ...SANDBOX_ENV, NIDA_CLIENT_TOKEN: 'dev_g2g_sandbox_client_token' }); }, /DEVELOPMENT value/));
@@ -144,7 +152,7 @@ check('RED: sandbox with insecure cookies', refused(() => { assertProductionSecr
 check('RED: production still refuses KAFKA_SSL=false', refused(() => { assertProductionSecrets({ ...PROD_ENV, KAFKA_SSL: 'false' }); }, /KAFKA_SSL/));
 
 console.log('\n── dev adapters: only the named stand-in, only in the sandbox');
-check('GREEN: sandbox may keep LogSmsChannel until S12b', issuesOf(() => { assertDevAdapterAllowed('LogSmsChannel', 'x', SANDBOX_ENV); }) === null);
+check('RED: sandbox refuses LogSmsChannel (retired by the Twilio emulator, S12b)', refused(() => { assertDevAdapterAllowed('LogSmsChannel', 'x', SANDBOX_ENV); }));
 check('RED: sandbox refuses MockBiometricMatcher', refused(() => { assertDevAdapterAllowed('MockBiometricMatcher', 'x', SANDBOX_ENV); }));
 check('RED: production refuses LogSmsChannel', refused(() => { assertDevAdapterAllowed('LogSmsChannel', 'x', PROD_ENV); }));
 

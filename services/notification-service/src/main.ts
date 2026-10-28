@@ -27,14 +27,13 @@ import {
   type EventBus,
 } from '@usrp/shared-events';
 import {
-  assertDevAdapterAllowed,
   assertProductionSecrets,
   loadKafkaConfig,
   resolveEventTransport,
   type EventTransport,
 } from '@usrp/shared-config';
 import { startHttpServer } from '@usrp/shared-http';
-import { LogSmsChannel } from '@usrp/shared-sms';
+import { createSmsChannel } from '@usrp/shared-sms';
 import { createNotificationService } from './index.js';
 import { PgContactResolver } from './adapters/contact.pg-resolver.js';
 import { loadNotificationConfig } from './config.js';
@@ -78,15 +77,15 @@ async function main(): Promise<void> {
   // FAIL CLOSED: LogSmsChannel delivers nothing, yet the lifecycle still
   // advances SLOT_ASSIGNED → PHYSICAL_TEST_SCHEDULED on the delivery event. In
   // production that schedules citizens for an exam no one told them about.
+  // createSmsChannel wires the TwilioSmsChannel from the environment (the
+  // emulator in the sandbox) and refuses the log channel there.
   logStartupPhase(SERVICE_NAME, 'asserting_sms_adapter');
-  assertDevAdapterAllowed(
-    'LogSmsChannel',
-    'exam invitations and withdrawal notices would be written to a log instead of delivered, while applications still advance to PHYSICAL_TEST_SCHEDULED',
-  );
   const service = createNotificationService(config, bus, {
     resolver: new PgContactResolver(config.security.encryptionKey),
-    // Dev inbox (opt-in, set by scripts/dev.sh); reachable only past the guard above.
-    sms: new LogSmsChannel({ inboxFile: process.env['DEV_SMS_INBOX_FILE'] }),
+    sms: createSmsChannel({
+      consequence: 'exam invitations and withdrawal notices would be written to a log instead of delivered, while applications still advance to PHYSICAL_TEST_SCHEDULED',
+      devInboxFile: process.env['DEV_SMS_INBOX_FILE'],
+    }),
   });
 
   // Subscribe BEFORE serving so a "ready" signal implies we are consuming.

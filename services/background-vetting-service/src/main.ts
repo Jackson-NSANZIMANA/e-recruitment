@@ -24,9 +24,10 @@ import {
   type EventTransport,
 } from '@usrp/shared-config';
 import { startHttpServer } from '@usrp/shared-http';
-import { createBackgroundVettingService } from './index.js';
-import { loadBackgroundVettingConfig } from './config.js';
+import { createBackgroundVettingService, createClearanceCertificateService } from './index.js';
+import { loadBackgroundVettingConfig, loadClearanceCertificateConfig } from './config.js';
 import { startApplicantSubmittedConsumer } from './adapters/events/applicant-submitted.consumer.js';
+import { startClearanceCertificateConsumer } from './adapters/events/clearance-certificate-submitted.consumer.js';
 
 function createEventBus(serviceName: string, transport: EventTransport): EventBus {
   if (transport.kind === 'kafka') {
@@ -52,13 +53,27 @@ async function main(): Promise<void> {
   const bus = createEventBus(config.runtime.serviceName, transport);
   await bus.connect();
 
-  const service = createBackgroundVettingService(config, bus);
-
   // The gate's ingress: subscribe BEFORE serving so a "ready" signal implies
   // we are actually consuming. Only meaningful with a real broker.
-  if (transport.kind === 'kafka') {
-    await startApplicantSubmittedConsumer(bus, service.criminalClearance);
-    console.log(JSON.stringify({ msg: 'event_consumer_started', topic: 'applicant.submitted' }));
+  //   RIB_HASH            applicant.submitted → RIB by nationalIdHash (DB-free)
+  //   IREMBO_CERTIFICATE  clearance.submitted → the Irembo certificate flow
+  //                       (ADR-048 §2.3). The applicant gives the number after
+  //                       submitting, so nothing runs on applicant.submitted.
+  let consuming = 'none (in-memory bus)';
+  if (config.mode === 'IREMBO_CERTIFICATE') {
+    const clearance = createClearanceCertificateService(loadClearanceCertificateConfig(), bus);
+    if (transport.kind === 'kafka') {
+      await startClearanceCertificateConsumer(bus, clearance);
+      consuming = 'clearance.submitted';
+      console.log(JSON.stringify({ msg: 'event_consumer_started', topic: 'clearance.submitted', mode: config.mode }));
+    }
+  } else {
+    const service = createBackgroundVettingService(config, bus);
+    if (transport.kind === 'kafka') {
+      await startApplicantSubmittedConsumer(bus, service.criminalClearance);
+      consuming = 'applicant.submitted';
+      console.log(JSON.stringify({ msg: 'event_consumer_started', topic: 'applicant.submitted', mode: config.mode }));
+    }
   }
 
   const server = await startHttpServer({
@@ -85,7 +100,8 @@ async function main(): Promise<void> {
       service: config.runtime.serviceName,
       url: server.url,
       env: config.runtime.nodeEnv,
-      consuming: transport.kind === 'kafka' ? 'applicant.submitted' : 'none (in-memory bus)',
+      mode: config.mode,
+      consuming,
     }),
   );
 }

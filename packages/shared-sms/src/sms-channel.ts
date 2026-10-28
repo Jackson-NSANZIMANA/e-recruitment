@@ -26,6 +26,13 @@ export interface OutboundSms {
   /** Raw destination phone — PII; never logged, never persisted. */
   readonly destination: string;
   readonly body: string;
+  /**
+   * Optional idempotency key for THIS logical message. A channel that retries
+   * (the Twilio adapter) sends the same key on every attempt so the provider
+   * deduplicates; one is generated per send when absent. Never derived from
+   * the destination or the body.
+   */
+  readonly messageKey?: string;
 }
 
 export interface SmsChannel {

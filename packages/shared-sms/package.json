@@ -2,7 +2,7 @@
   "name": "@usrp/shared-sms",
   "version": "1.0.0",
   "private": true,
-  "description": "Zero-dependency SMS channel port shared by identity-service (OTP) and notification-service (invitations): OutboundSms, SmsChannel, and the dev LogSmsChannel adapter",
+  "description": "Zero-dependency SMS channel port shared by identity-service (OTP) and notification-service (invitations): OutboundSms, SmsChannel, the dev LogSmsChannel and the production-grade TwilioSmsChannel (E.164, idempotent retries, cost cap, signed callbacks)",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -19,6 +19,7 @@
     "test": "tsc && node --test test/*.test.mjs"
   },
   "dependencies": {
+    "@usrp/shared-config": "workspace:*",
     "@usrp/shared-logging": "workspace:*"
   },
   "devDependencies": {

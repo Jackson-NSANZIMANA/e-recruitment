@@ -106,6 +106,40 @@ export interface RIBVettingCompletedEvent extends BaseEvent {
   readonly clearanceStatus: CriminalClearanceStatus;
   // The applied threshold — critical for audit (different per agency/category)
   readonly appliedThreshold: 'ANY_CONVICTION' | 'IMPRISONMENT_GT_6MO' | 'IMPRISONMENT_GTE_6MO';
+  /**
+   * S12b (ADR-048 §2.3): where the verdict came from. Absent on events from
+   * before the Irembo certificate flow, which means RIB_HASH.
+   */
+  readonly source?: ClearanceSource;
+  /**
+   * S12b: a PENDING verdict that the applicant can correct (wrong type,
+   * expired, not found, not bound...) names its reason here. Never a name,
+   * date or value from the certificate.
+   */
+  readonly failureCode?: string;
+  /** S12b: why an UNDER_REVIEW verdict needs a human (CLEARANCE_CONTENT_REVIEW, IDENTITY_NAME_PARTIAL). */
+  readonly reviewReasons?: readonly string[];
+}
+
+export type ClearanceSource = 'RIB_HASH' | 'IREMBO_CERTIFICATE';
+
+// ── Topic: clearance.submitted ────────────────────────────────────
+// S12b (ADR-048 §2.3): the applicant gave the Irembo application number of
+// their criminal-record certificate. application-service verifies ownership
+// and category, then stages this event; background-vetting-service verifies
+// the certificate. The number is a public verification reference (anyone can
+// verify it on Irembo); it travels so the check can be retried after an
+// outage, and is stored only as an HMAC plus its last 4 characters.
+
+export interface ClearanceCertificateSubmittedEvent extends BaseEvent {
+  readonly eventType: 'CLEARANCE_CERTIFICATE_SUBMITTED';
+  readonly applicantId: string;
+  readonly applicationId: string;
+  readonly agency: Agency;
+  readonly category: ApplicationCategory;
+  readonly clearanceCertificateNumber: string;
+  /** The calendar date (YYYY-MM-DD, Africa/Kigali) the validity window is measured against. */
+  readonly referenceDate: string;
 }
 
 // ── Topic: vetting.age ────────────────────────────────────────────
@@ -406,6 +440,7 @@ export type USRPEvent =
   | NESAVerificationCompletedEvent
   | HECVerificationCompletedEvent
   | RIBVettingCompletedEvent
+  | ClearanceCertificateSubmittedEvent
   | AgeEligibilityCompletedEvent
   | ApplicationEligibilityClearedEvent
   | ApplicationAcceptedEvent
@@ -432,6 +467,7 @@ export const KAFKA_TOPICS = {
   VETTING_NESA: 'vetting.nesa',
   VETTING_HEC: 'vetting.hec',           // NEW — degree verification
   VETTING_RIB: 'vetting.rib',
+  CLEARANCE_SUBMITTED: 'clearance.submitted', // S12b — Irembo certificate number given → verification
   VETTING_AGE: 'vetting.age',           // NEW — age gate result (positive-terminal composition)
   APPLICATION_CLEARED: 'application.cleared', // NEW — eligibility passed → triggers scheduling
   APPLICATION_ACCEPTED: 'application.accepted', // NEW — officer accept landed → auto-withdrawal (ADR-017)
