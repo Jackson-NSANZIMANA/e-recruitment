@@ -1,8 +1,8 @@
 // ══════════════════════════════════════════════════════════════════
 // shared-sms — E.164 normalisation for Rwandan numbers
 //
-// Applicants type "0788123456" (or paste "+250 788 123 456"); the operator
-// wants "+250788123456". Anything that cannot be read unambiguously yields
+// Applicants type "0788000123" (or paste "+250 788 000 123"); the operator
+// wants "+250788000123". Anything that cannot be read unambiguously yields
 // null, and the channel then reports FAILED rather than guess.
 //
 //   07XXXXXXXX        → +2507XXXXXXXX  (10 digits, national format)

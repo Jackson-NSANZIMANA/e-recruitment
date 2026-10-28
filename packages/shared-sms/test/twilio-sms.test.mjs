@@ -32,19 +32,19 @@ function channel(overrides = {}, responses = []) {
 
 test('E.164: national, international, spaced and bad inputs', () => {
   const cases = [
-    ['0788123456', '+250788123456'], ['0722123456', '+250722123456'], ['250788123456', '+250788123456'],
-    ['+250788123456', '+250788123456'], ['+250 788 123 456', '+250788123456'], ['00250788123456', '+250788123456'],
+    ['0788000123', '+250788000123'], ['0788000722', '+250788000722'], ['250788000123', '+250788000123'],
+    ['+250788000123', '+250788000123'], ['+250 788 000 123', '+250788000123'], ['00250788000123', '+250788000123'],
     ['+14155550100', '+14155550100'],
   ];
   for (const [input, expected] of cases) assert.equal(normaliseToE164(input), expected, input);
-  for (const bad of ['', '   ', '788123456', '0188123456', '07881234', '+250188123456', 'abcdefghij', '+0123456789', '078812345678']) {
+  for (const bad of ['', '   ', '788000123', '0188123456', '07881234', '+250188123456', 'abcdefghij', '+0123456789', '078800012378']) {
     assert.equal(normaliseToE164(bad), null, bad);
   }
 });
 
 test('sends a form with basic auth, E.164, the sender, and an idempotency token', async () => {
   const { ch, calls } = channel();
-  assert.equal(await ch.send({ destination: '0788123456', body: 'code 123456', messageKey: 'key-1' }), 'ACCEPTED');
+  assert.equal(await ch.send({ destination: '0788000123', body: 'code 123456', messageKey: 'key-1' }), 'ACCEPTED');
   assert.equal(calls.length, 1);
   const { url, init } = calls[0];
   assert.equal(url, `http://127.0.0.1:1/2010-04-01/Accounts/${SID}/Messages.json`);
@@ -52,7 +52,7 @@ test('sends a form with basic auth, E.164, the sender, and an idempotency token'
   assert.equal(init.headers.authorization, `Basic ${Buffer.from(`${SID}:${TOKEN}`).toString('base64')}`);
   assert.equal(init.headers['I-Twilio-Idempotency-Token'], 'key-1');
   const form = new URLSearchParams(init.body);
-  assert.equal(form.get('To'), '+250788123456');
+  assert.equal(form.get('To'), '+250788000123');
   assert.equal(form.get('From'), '+15005550006');
   assert.equal(form.get('Body'), 'code 123456');
   assert.ok(init.signal instanceof AbortSignal, 'every attempt has a timeout');
@@ -66,21 +66,21 @@ test('an unreadable destination is FAILED without calling the provider', async (
 
 test('retries network faults, 429 and 5xx under the SAME key, bounded; a 4xx is final', async () => {
   const a = channel({ maxAttempts: 3 }, [new Error('socket hang up'), { status: 503 }, { status: 201, body: { sid: MSG_SID } }]);
-  assert.equal(await a.ch.send({ destination: '0788123456', body: 'x' }), 'ACCEPTED');
+  assert.equal(await a.ch.send({ destination: '0788000123', body: 'x' }), 'ACCEPTED');
   assert.equal(a.calls.length, 3);
   const keys = new Set(a.calls.map((c) => c.init.headers['I-Twilio-Idempotency-Token']));
   assert.equal(keys.size, 1, 'one token for every attempt');
 
   const b = channel({ maxAttempts: 2 }, [{ status: 500 }, { status: 500 }, { status: 201 }]);
-  assert.equal(await b.ch.send({ destination: '0788123456', body: 'x' }), 'FAILED');
+  assert.equal(await b.ch.send({ destination: '0788000123', body: 'x' }), 'FAILED');
   assert.equal(b.calls.length, 2, 'bounded');
 
   const c = channel({ maxAttempts: 3 }, [{ status: 400, body: { code: 21211 } }, { status: 201 }]);
-  assert.equal(await c.ch.send({ destination: '0788123456', body: 'x' }), 'FAILED');
+  assert.equal(await c.ch.send({ destination: '0788000123', body: 'x' }), 'FAILED');
   assert.equal(c.calls.length, 1, 'a 4xx is never retried');
 
   const d = channel({ maxAttempts: 2 }, [{ status: 429 }, { status: 201, body: { sid: MSG_SID } }]);
-  assert.equal(await d.ch.send({ destination: '0788123456', body: 'x' }), 'ACCEPTED');
+  assert.equal(await d.ch.send({ destination: '0788000123', body: 'x' }), 'ACCEPTED');
 });
 
 test('the daily cost cap stops sending at the limit, and only ACCEPTED sends count', async () => {
@@ -114,27 +114,27 @@ test('a send refused by the cap does not burn the number slot', async () => {
   const cap = new DailyCostCap(1);
   const limiter = new PerNumberLimiter(1, 60_000);
   const { ch } = channel({ costCap: cap, perNumber: limiter });
-  assert.equal(await ch.send({ destination: '0788333333', body: '1' }), 'ACCEPTED');
-  assert.equal(await ch.send({ destination: '0788444444', body: '2' }), 'FAILED'); // cap
-  assert.equal(limiter.take('+250788444444'), true, 'the refused number kept its slot');
+  assert.equal(await ch.send({ destination: '0788003333', body: '1' }), 'ACCEPTED');
+  assert.equal(await ch.send({ destination: '0788004444', body: '2' }), 'FAILED'); // cap
+  assert.equal(limiter.take('+250788004444'), true, 'the refused number kept its slot');
 });
 
 test('the per-number limit holds per destination within its window only', async () => {
   let t = 0;
   const limiter = new PerNumberLimiter(2, 60_000, () => t);
   const { ch, calls } = channel({ perNumber: limiter });
-  assert.equal(await ch.send({ destination: '0788111111', body: '1' }), 'ACCEPTED');
-  assert.equal(await ch.send({ destination: '+250788111111', body: '2' }), 'ACCEPTED'); // same number, other spelling
-  assert.equal(await ch.send({ destination: '0788111111', body: '3' }), 'FAILED');
-  assert.equal(await ch.send({ destination: '0788222222', body: '4' }), 'ACCEPTED');
+  assert.equal(await ch.send({ destination: '0788001111', body: '1' }), 'ACCEPTED');
+  assert.equal(await ch.send({ destination: '+250788001111', body: '2' }), 'ACCEPTED'); // same number, other spelling
+  assert.equal(await ch.send({ destination: '0788001111', body: '3' }), 'FAILED');
+  assert.equal(await ch.send({ destination: '0788002222', body: '4' }), 'ACCEPTED');
   t = 61_000;
-  assert.equal(await ch.send({ destination: '0788111111', body: '5' }), 'ACCEPTED');
+  assert.equal(await ch.send({ destination: '0788001111', body: '5' }), 'ACCEPTED');
   assert.equal(calls.length, 4);
 });
 
 test('status callbacks: a good signature verifies, anything else does not (constant time, no throw)', () => {
   const url = 'https://notify.example.test/v1/sms/status';
-  const params = { MessageSid: MSG_SID, MessageStatus: 'delivered', To: '+250788123456' };
+  const params = { MessageSid: MSG_SID, MessageStatus: 'delivered', To: '+250788000123' };
   const sig = twilioSignature(TOKEN, url, params);
   const { ch } = channel();
   assert.equal(ch.verifyStatusCallback(url, params, sig), true);
@@ -156,12 +156,12 @@ test('the auth token and numbers never appear in logs, JSON, inspect or errors',
   process.stderr.write = (c) => { lines.push(String(c)); return true; };
   try {
     const ok = channel();
-    await ok.ch.send({ destination: '0788123456', body: 'secret body 999999' });
+    await ok.ch.send({ destination: '0788000123', body: 'secret body 999999' });
     const bad = channel({}, [{ status: 400, body: { code: 21211, message: `bad ${TOKEN}` } }]);
-    await bad.ch.send({ destination: '0788654321', body: 'x' });
+    await bad.ch.send({ destination: '0788006543', body: 'x' });
     const text = lines.join('');
     assert.ok(text.includes('sms_sent') && text.includes('sms_send_failed'));
-    for (const secret of [TOKEN, '788123456', '788654321', 'secret body', '999999']) assert.equal(text.includes(secret), false, `leaked ${secret.slice(0, 4)}`);
+    for (const secret of [TOKEN, '788000123', '788006543', 'secret body', '999999']) assert.equal(text.includes(secret), false, `leaked ${secret.slice(0, 4)}`);
     for (const view of [JSON.stringify(ok.ch), inspect(ok.ch, { showHidden: true, depth: 5 }), String(ok.ch)]) assert.equal(view.includes(TOKEN), false);
   } finally {
     process.stdout.write = outWrite;
