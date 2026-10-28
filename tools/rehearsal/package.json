@@ -13,6 +13,7 @@
   "dependencies": {
     "@usrp/g2g-sandbox": "workspace:*",
     "@usrp/shared-identity-match": "workspace:*",
+    "@usrp/shared-campaign-policy": "workspace:*",
     "@usrp/shared-security": "workspace:*",
     "@usrp/shared-types": "workspace:*",
     "postgres": "^3.4.5"

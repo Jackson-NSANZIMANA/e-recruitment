@@ -51,6 +51,18 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
+  packages/shared-campaign-policy:
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.2
+      tsx:
+        specifier: ^4.21.0
+        version: 4.23.0
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
   packages/shared-config:
     devDependencies:
       '@types/node':
@@ -190,6 +202,9 @@ importers:
       '@usrp/shared-auth':
         specifier: workspace:*
         version: link:../../packages/shared-auth
+      '@usrp/shared-campaign-policy':
+        specifier: workspace:*
+        version: link:../../packages/shared-campaign-policy
       '@usrp/shared-config':
         specifier: workspace:*
         version: link:../../packages/shared-config
@@ -396,6 +411,9 @@ importers:
       '@usrp/shared-auth':
         specifier: workspace:*
         version: link:../../packages/shared-auth
+      '@usrp/shared-campaign-policy':
+        specifier: workspace:*
+        version: link:../../packages/shared-campaign-policy
       '@usrp/shared-config':
         specifier: workspace:*
         version: link:../../packages/shared-config
@@ -436,6 +454,9 @@ importers:
       '@usrp/shared-auth':
         specifier: workspace:*
         version: link:../../packages/shared-auth
+      '@usrp/shared-campaign-policy':
+        specifier: workspace:*
+        version: link:../../packages/shared-campaign-policy
       '@usrp/shared-config':
         specifier: workspace:*
         version: link:../../packages/shared-config
@@ -731,6 +752,9 @@ importers:
       '@usrp/g2g-sandbox':
         specifier: workspace:*
         version: link:../g2g-sandbox
+      '@usrp/shared-campaign-policy':
+        specifier: workspace:*
+        version: link:../../packages/shared-campaign-policy
       '@usrp/shared-identity-match':
         specifier: workspace:*
         version: link:../../packages/shared-identity-match

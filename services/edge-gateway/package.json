@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "@usrp/shared-logging": "workspace:*",
+    "@usrp/shared-campaign-policy": "workspace:*",
     "@usrp/shared-auth": "workspace:*",
     "@usrp/shared-config": "workspace:*",
     "@usrp/shared-database": "workspace:*",

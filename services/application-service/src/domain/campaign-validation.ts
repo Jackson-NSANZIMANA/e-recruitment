@@ -21,6 +21,7 @@ import {
   type Province,
   AGENCY_DOCUMENT_TYPES,
 } from '@usrp/shared-types';
+import { PolicyV2Error, checkEnvelope, normalizePolicyV2, type PolicyV2 } from '@usrp/shared-campaign-policy';
 
 const DOCUMENT_TYPES: ReadonlySet<string> = new Set([
   'NATIONAL_ID',
@@ -257,7 +258,7 @@ function asPolicy(value: unknown, category: string): CampaignCategoryPolicy {
   exactKeys(
     policy,
     ['age', 'education', 'criminalThreshold', 'requiredDocumentTypes', 'medicalMode', 'legalBasis'],
-    [],
+    ['v2'],
     `policyDocument.${category}`,
   );
 
@@ -296,7 +297,7 @@ function asPolicy(value: unknown, category: string): CampaignCategoryPolicy {
   const legalBasis = record(policy.legalBasis, `policyDocument.${category}.legalBasis`);
   exactKeys(legalBasis, ['code', 'reference'], [], `policyDocument.${category}.legalBasis`);
 
-  return {
+  const normalized: CampaignCategoryPolicy = {
     age: {
       minimumAge,
       maximumAge,
@@ -311,6 +312,21 @@ function asPolicy(value: unknown, category: string): CampaignCategoryPolicy {
       reference: requiredString(legalBasis.reference, `${category}.legalBasis.reference`, 256),
     },
   };
+  if (policy.v2 === undefined) return normalized;
+  // ADR-049: the additive v2 block. It must be well formed AND agree with the v1 envelope above,
+  // so a v1 reader (Campaign Studio, the checklist) and a v2 reader can never disagree.
+  let v2: PolicyV2;
+  try {
+    v2 = normalizePolicyV2(policy.v2, `policyDocument.${category}.v2`);
+  } catch (error) {
+    if (error instanceof PolicyV2Error) return fail(error.code, error.message);
+    throw error;
+  }
+  const disagreement = checkEnvelope(v2, normalized);
+  if (disagreement !== null) fail('POLICY_V2_ENVELOPE_MISMATCH', `Category "${category}": ${disagreement}`);
+  const foreignV2 = owner === undefined ? [] : v2.documents.filter((d) => !AGENCY_DOCUMENT_TYPES[owner].has(d.type as DocumentType));
+  if (foreignV2.length > 0) fail('INVALID_POLICY', `Category "${category}" v2 lists document type(s) its agency does not accept.`);
+  return { ...normalized, v2 };
 }
 
 export function normalizeCampaignPolicy(
