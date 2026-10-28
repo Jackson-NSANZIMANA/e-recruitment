@@ -446,3 +446,33 @@ export const rdfGateManualIdentityConfirmations = rdfOps.table(
     index('idx_rdf_gate_manual_identity_application').on(t.applicationId),
   ],
 );
+
+// ── Irembo clearance-certificate verifications (rls/0040, ADR-048 §2.3-2.4) ──
+// Append-only by trigger and written only through the SECURITY DEFINER
+// record_clearance_verification. NO name and NO date of birth: the reference
+// is an HMAC plus its last 4 characters. The CHECK constraints (closed
+// vocabularies, outcome/code consistency) live in the SQL, the system of record.
+export const rdfClearanceCertificateVerifications = rdfOps.table(
+  'clearance_certificate_verifications',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    applicationId: uuid('application_id')
+      .references(() => rdfApplications.id)
+      .notNull(),
+    referenceHmac: char('reference_hmac', { length: 64 }).notNull(),
+    referenceLast4: char('reference_last4', { length: 4 }).notNull(),
+    certificateType: varchar('certificate_type', { length: 64 }),
+    issuedOn: date('issued_on'),
+    outcome: varchar('outcome', { length: 24 }).notNull(),
+    failureCode: varchar('failure_code', { length: 48 }),
+    reviewReasons: text('review_reasons').array().default(sql`ARRAY[]::text[]`).notNull(),
+    binding: jsonb('binding'),
+    source: varchar('source', { length: 24 }).default('IREMBO_CERTIFICATE').notNull(),
+    upstreamTraceId: varchar('upstream_trace_id', { length: 64 }),
+    verifiedAt: timestamp('verified_at', { withTimezone: true }).defaultNow().notNull(),
+    correlationId: varchar('correlation_id', { length: 128 }),
+  },
+  (t) => [
+    index('idx_rdf_clearance_verif_application').on(t.applicationId, t.verifiedAt.desc()),
+  ],
+);
