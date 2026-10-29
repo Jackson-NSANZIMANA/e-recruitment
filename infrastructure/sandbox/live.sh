@@ -33,7 +33,15 @@ start() { # app port
   ( cd "$UI/apps/$1" && VITE_EDGE_URL="$EDGE" VITE_USRP_SANDBOX=1 setsid pnpm exec vite --port "$2" --strictPort > "$LOGS/live-$1.out" 2>&1 & echo $! > "$LOGS/live-$1.pid" )
   pids+=("$(cat "$LOGS/live-$1.pid")")
 }
-stop() { for pid in "${pids[@]}"; do kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true; done; }
+stop() {
+  for pid in "${pids[@]}"; do kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true; done
+  # Whatever still listens on our three ports AND runs from the frontend checkout we started it in is ours: stop its process group.
+  for port in 4930 4931 4932; do
+    for p in $(ss -H -ltnp "sport = :$port" 2>/dev/null | grep -o 'pid=[0-9]*' | cut -d= -f2); do
+      case "$(readlink "/proc/$p/cwd" 2>/dev/null)" in "$UI"/*) kill -TERM -- "-$(ps -o pgid= -p "$p" | tr -d ' ')" 2>/dev/null || true;; esac
+    done
+  done
+}
 trap stop EXIT
 
 start applicant-portal 4930; start officer-console 4931; start field-station 4932
