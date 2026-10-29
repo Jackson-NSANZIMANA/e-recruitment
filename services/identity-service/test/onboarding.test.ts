@@ -34,6 +34,7 @@ function citizen(over: Partial<{ dateOfBirth: string; citizenshipStatus: string 
 function harness(
   nidaResult: Awaited<ReturnType<NidaGateway['lookupCitizen']>>,
   verifiedApplicant: string | null = APPLICANT,
+  smsDelayMs = 0,
 ) {
   const sent: OutboundSms[] = [];
   const challenges: (OtpChallengeRecord & { consumed: boolean })[] = [];
@@ -77,7 +78,9 @@ function harness(
     terminateSession: () => Promise.resolve(),
     stampPhoneVerified: (applicantId, phoneHash, phone) => { stamped.push({ applicantId, phoneHash, phone }); return Promise.resolve(); },
   };
-  const sms: SmsChannel = { send: (m) => { sent.push(m); return Promise.resolve({ status: 'SENT' } as never); } };
+  const sms: SmsChannel = {
+    send: (m) => new Promise((resolve) => { setTimeout(() => { sent.push(m); resolve('ACCEPTED'); }, smsDelayMs); }),
+  };
   const service = new ApplicantAuthService({
     repository,
     nida: { lookupCitizen: () => { nidaCalls += 1; return Promise.resolve(nidaResult); } },
@@ -85,7 +88,7 @@ function harness(
     sms,
     eventBus: new InMemoryEventBus(),
     nationalIdHmacKey: KEY,
-    config: { otpTtlSeconds: 300, otpMaxAttempts: 5, sessionTtlSeconds: 1800, onboardingMaxFailures: 5, onboardingFailureWindowSeconds: 3600, onboardingLockSeconds: 3600 },
+    config: { otpTtlSeconds: 300, otpMaxAttempts: 5, sessionTtlSeconds: 1800, onboardingMaxFailures: 5, onboardingFailureWindowSeconds: 3600, onboardingLockSeconds: 3600, otpSendWaitMs: 100 },
     now: () => clock,
   });
   return { service, sent, stamped, sessions, nidaCalls: (): number => nidaCalls, lockedUntil: (): Date | null => lock, tick: (ms: number) => { clock = new Date(clock.getTime() + ms); } };
@@ -205,4 +208,17 @@ test('an existing identity that is not VERIFIED is never issued a token', async 
   const h = harness(citizen(), null); // the row exists (ALREADY_EXISTS) but is PENDING/FAILED/EXPIRED
   const r = await h.service.beginOnboarding({ rawNationalId: NID, dateOfBirth: DOB, channel: 'WEB' });
   assert.deepEqual(r, { kind: 'NOT_CONFIRMED' });
+});
+
+test('a slow SMS provider never holds the OTP request past its wait budget; the code still goes out', async () => {
+  const h = harness(citizen(), APPLICANT, 1_000);
+  const begun = await h.service.beginOnboarding({ rawNationalId: NID, dateOfBirth: DOB, channel: 'WEB' });
+  if (begun.kind !== 'READY') return assert.fail(begun.kind);
+  const started = Date.now();
+  const req = await h.service.requestOtp({ onboardingToken: begun.onboardingToken, rawPhoneNumber: '0791 234 567', channel: 'WEB' });
+  assert.deepEqual(req, { kind: 'CHALLENGED' });
+  assert.ok(Date.now() - started < 600, `answered after ${String(Date.now() - started)} ms`);
+  assert.equal(h.sent.length, 0);
+  await new Promise((resolve) => setTimeout(resolve, 1_100));
+  assert.equal(h.sent[0]?.destination, '+250791234567');
 });
