@@ -16,7 +16,8 @@ const RWANDA_MOBILE = /^7[2389][0-9]{7}$/;
 const E164 = /^\+[1-9][0-9]{7,14}$/;
 
 export function normaliseToE164(raw: string): string | null {
-  const compact = raw.trim().replace(/[\s().-]/g, '');
+  // The trunk 0 kept after the country code (+250 078…) is the same number as +250 78….
+  const compact = raw.trim().replace(/[\s().-]/g, '').replace(/^(\+|00)?2500(?=\d{9}$)/, '$1250');
   if (compact === '') return null;
   if (compact.startsWith('+')) {
     if (!E164.test(compact)) return null;

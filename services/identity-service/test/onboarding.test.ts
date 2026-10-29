@@ -94,10 +94,11 @@ function harness(
 const codeOf = (sms: OutboundSms | undefined): string => /code: (\d{6})/.exec(sms?.body ?? '')?.[1] ?? '';
 
 test('phone normalisation accepts MTN/Airtel spellings and rejects the rest', () => {
-  for (const ok of ['0781234567', '250781234567', '+250 788 001 234', '079-123-4567', '0721234567', '0731234567']) {
+  for (const ok of ['0781234567', '250781234567', '+250 788 001 234', '079-123-4567', '0721234567', '0731234567',
+    '0791234567', '0791 234 567', '+250 791 234 567', '+250 0791234567', '+250 (0)79 123 4567', '00250791234567', '0791.234.567', '(0791) 234567']) {
     assert.match(normalizeRwandanMsisdn(ok) ?? '', /^\+250(72|73|78|79)\d{7}$/, ok);
   }
-  for (const bad of ['0711234567', '078123456', '+254712345678', 'abc', '', '07812345678']) {
+  for (const bad of ['0711234567', '078123456', '+254712345678', 'abc', '', '07812345678', '+250 0711234567', '2500079123456', '+25007912345678']) {
     assert.equal(normalizeRwandanMsisdn(bad), null, bad);
   }
 });
