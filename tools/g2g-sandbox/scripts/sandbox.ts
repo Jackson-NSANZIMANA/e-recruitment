@@ -237,7 +237,7 @@ function smsEnv(s: Secrets, local: (port: number) => string): Record<string, str
   const path = (process.env['SANDBOX_TWILIO_ENV_FILE'] ?? '').trim();
   if (path === '' || !existsSync(path)) return fail('SANDBOX_SMS=twilio needs SANDBOX_TWILIO_ENV_FILE (an untracked file outside every git work tree).');
   if (enclosingGitWorkTree(path) !== null) return fail('SANDBOX_TWILIO_ENV_FILE is inside a git work tree; keep the owner credentials outside every repository.');
-  const wanted = new Set(['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_FROM', 'TWILIO_MESSAGING_SERVICE_SID']);
+  const wanted = new Set(['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_FROM', 'TWILIO_MESSAGING_SERVICE_SID', 'TWILIO_TO']);
   if ((statSync(path).mode & 0o077) !== 0) return fail('SANDBOX_TWILIO_ENV_FILE must be readable by its owner only (chmod 600).');
   const real: Record<string, string> = { SANDBOX_SMS: 'twilio' };
   for (const raw of readFileSync(path, 'utf8').split('\n')) {
@@ -250,6 +250,10 @@ function smsEnv(s: Secrets, local: (port: number) => string): Record<string, str
   }
   if ((real['TWILIO_ACCOUNT_SID'] ?? '') === '' || (real['TWILIO_AUTH_TOKEN'] ?? '') === '') return fail('SANDBOX_TWILIO_ENV_FILE must define TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN.');
   if ((real['TWILIO_FROM'] ?? '') === '' && (real['TWILIO_MESSAGING_SERVICE_SID'] ?? '') === '') return fail('SANDBOX_TWILIO_ENV_FILE must define TWILIO_FROM or TWILIO_MESSAGING_SERVICE_SID.');
+  // TWILIO_TO: the owner's verified number(s), comma-separated. The only destinations a real send may reach.
+  if ((real['TWILIO_TO'] ?? '') === '') return fail('SANDBOX_TWILIO_ENV_FILE must define TWILIO_TO (the verified number(s) a real send may reach).');
+  real['SANDBOX_SMS_ALLOWED_TO'] = real['TWILIO_TO'] ?? '';
+  delete real['TWILIO_TO'];
   return real;
 }
 
@@ -257,7 +261,7 @@ function smsEnv(s: Secrets, local: (port: number) => string): Record<string, str
 const SMS_SERVICES: ReadonlySet<string> = new Set(['identity-service', 'notification-service']);
 function withoutSmsCredentials(env: Record<string, string>): Record<string, string> {
   const copy = { ...env };
-  for (const key of ['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_FROM', 'TWILIO_MESSAGING_SERVICE_SID']) delete copy[key];
+  for (const key of ['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_FROM', 'TWILIO_MESSAGING_SERVICE_SID', 'SANDBOX_SMS_ALLOWED_TO']) delete copy[key];
   return copy;
 }
 

@@ -11,4 +11,4 @@ export {
   type TwilioDeliveryStatus,
   type TwilioSmsChannelOptions,
 } from './twilio-sms.channel.js';
-export { DEFAULT_SANDBOX_DAILY_SMS_CAP, createSmsChannel, type CreateSmsChannelOptions } from './create-sms-channel.js';
+export { AllowlistSmsChannel, DEFAULT_SANDBOX_DAILY_SMS_CAP, createSmsChannel, type CreateSmsChannelOptions } from './create-sms-channel.js';

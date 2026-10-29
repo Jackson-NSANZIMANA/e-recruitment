@@ -1,7 +1,7 @@
 // Boot guard: which SMS channel each runtime profile may wire (ADR-047 §3.1, S12b).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { LogSmsChannel, TwilioSmsChannel, createSmsChannel } from '../dist/index.js';
+import { LogSmsChannel, AllowlistSmsChannel, TwilioSmsChannel, createSmsChannel } from '../dist/index.js';
 
 const BASE = { consequence: 'no citizen could authenticate' };
 const CAP = { SMS_CAP_STATE_FILE: '/tmp/usrp-test-cap.log' };
@@ -30,7 +30,10 @@ test('the sandbox cannot reach the real API by accident', () => {
   throwsWith(() => createSmsChannel({ ...BASE, source: { ...SANDBOX, ...TWILIO, TWILIO_BASE_URL: 'https://api.twilio.com' } }), /emulator/);
   throwsWith(() => createSmsChannel({ ...BASE, source: { ...SANDBOX, ...TWILIO, TWILIO_BASE_URL: 'https://example.org' } }), /emulator/);
   // The owner's opt-in permits Twilio's own host, and only that.
-  assert.ok(createSmsChannel({ ...BASE, source: { ...SANDBOX, ...TWILIO, ...CAP, SANDBOX_SMS: 'twilio' } }) instanceof TwilioSmsChannel);
+  assert.ok(createSmsChannel({ ...BASE, source: { ...SANDBOX, ...TWILIO, ...CAP, SANDBOX_SMS: 'twilio', SANDBOX_SMS_ALLOWED_TO: '+250788000001' } }) instanceof AllowlistSmsChannel);
+  // A real sandbox send without the owner's allowlist, or with a malformed entry, never boots.
+  throwsWith(() => createSmsChannel({ ...BASE, source: { ...SANDBOX, ...TWILIO, ...CAP, SANDBOX_SMS: 'twilio' } }), /SANDBOX_SMS_ALLOWED_TO/);
+  throwsWith(() => createSmsChannel({ ...BASE, source: { ...SANDBOX, ...TWILIO, ...CAP, SANDBOX_SMS: 'twilio', SANDBOX_SMS_ALLOWED_TO: '+250788000001,12' } }), /SANDBOX_SMS_ALLOWED_TO/);
   throwsWith(() => createSmsChannel({ ...BASE, source: { ...SANDBOX, ...TWILIO, SANDBOX_SMS: 'twilio', TWILIO_BASE_URL: 'http://localhost:4900' } }), /api\.twilio\.com/);
 });
 
@@ -45,4 +48,14 @@ test('a sender is required, the token is a secret, and production demands an exp
 test('outside development the cap state file is required, so a restart cannot reset the cap', () => {
   throwsWith(() => createSmsChannel({ ...BASE, source: { ...SANDBOX, ...TWILIO, TWILIO_BASE_URL: 'http://localhost:4900' } }), /SMS_CAP_STATE_FILE/);
   throwsWith(() => createSmsChannel({ ...BASE, source: { NODE_ENV: 'production', ...TWILIO, SMS_DAILY_CAP: '500' } }), /SMS_CAP_STATE_FILE/);
+});
+
+test('AllowlistSmsChannel: only allowlisted destinations reach the provider, in any accepted spelling', async () => {
+  const sent = [];
+  const inner = { send: async (m) => { sent.push(m.destination); return 'ACCEPTED'; } };
+  const channel = new AllowlistSmsChannel(inner, new Set(['+250788000001']));
+  assert.equal(await channel.send({ destination: '0788000001', body: 'x' }), 'ACCEPTED');
+  assert.equal(await channel.send({ destination: '+250788000002', body: 'x' }), 'FAILED');
+  assert.equal(await channel.send({ destination: 'not a number', body: 'x' }), 'FAILED');
+  assert.deepEqual(sent, ['0788000001']);
 });
