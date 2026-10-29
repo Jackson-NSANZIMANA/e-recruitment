@@ -8,6 +8,7 @@ import type {
 import type {
   CampaignPublicReadRepository,
   PublicCampaign,
+  PublicCategoryEligibility,
 } from '../ports/campaign-public-read.repository.js';
 import { CampaignReadError } from '../domain/campaign-control.errors.js';
 
@@ -72,6 +73,35 @@ function project(row: PublicCampaignRow): PublicCampaign {
   };
 }
 
+/** The allowlist of the public eligibility summary; anything that does not fit is dropped, never passed on. */
+export function readEligibility(value: unknown): Readonly<Record<string, PublicCategoryEligibility>> {
+  const out: Record<string, PublicCategoryEligibility> = {};
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return out;
+  for (const [category, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (raw === null || typeof raw !== 'object') continue;
+    const r = raw as Record<string, unknown>;
+    const bands = r['ageBands'];
+    const alternatives = r['educationAlternatives'];
+    if (!Array.isArray(bands) || !Array.isArray(alternatives)) continue;
+    const ageBands = bands.flatMap((b: unknown) => {
+      const band = b as Record<string, unknown> | null;
+      const q = band?.['qualifications'];
+      return band !== null && typeof band === 'object' && Array.isArray(q) && q.every((x) => typeof x === 'string') &&
+        typeof band['minimumAge'] === 'number' && typeof band['maximumAge'] === 'number'
+        ? [{ qualifications: q as string[], minimumAge: band['minimumAge'], maximumAge: band['maximumAge'] }]
+        : [];
+    });
+    const educationAlternatives = alternatives.flatMap((a: unknown) => {
+      const level = (a as Record<string, unknown> | null)?.['level'];
+      return typeof level === 'string' ? [{ level }] : [];
+    });
+    const science = r['minimumSciencePercent'];
+    if (ageBands.length === 0) continue;
+    out[category] = { ageBands, educationAlternatives, minimumSciencePercent: typeof science === 'number' ? science : null };
+  }
+  return out;
+}
+
 export class PgCampaignPublicReadRepository implements CampaignPublicReadRepository {
   async listOpen(): Promise<readonly PublicCampaign[]> {
     try {
@@ -110,7 +140,9 @@ export class PgCampaignPublicReadRepository implements CampaignPublicReadReposit
           LIMIT 1
         `;
         const row = rows[0];
-        return row === undefined ? null : project(row);
+        if (row === undefined) return null;
+        const summary = await tx<{ eligibility: unknown }[]>`SELECT public_core.public_campaign_eligibility(${publicCode}) AS eligibility`;
+        return { ...project(row), eligibility: readEligibility(summary[0]?.eligibility) };
       });
     } catch (cause) {
       if (cause instanceof CampaignReadError) throw cause;

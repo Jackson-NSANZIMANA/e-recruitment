@@ -427,7 +427,7 @@ paths:
           required: true
           schema: { type: string, minLength: 3, maxLength: 64 }
       responses:
-        '200': { description: Public projection only; internal UUIDs, policies, coverage, capacity, registrations, and audit facts are omitted. }
+        '200': { description: "Public projection only; internal UUIDs, policies, coverage, capacity, registrations, and audit facts are omitted. ADR-049 adds eligibility: per category { ageBands [{qualifications, minimumAge, maximumAge}], educationAlternatives [{level}], minimumSciencePercent } for a campaign published with policy v2, else an empty object (additive; the v1 fields are unchanged)." }
         '400': { description: Invalid or missing publicCode. }
         '404': { description: Campaign is not externally published or does not exist. }
         '503': { description: Public campaign read unavailable. }

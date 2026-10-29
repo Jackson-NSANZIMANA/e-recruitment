@@ -46,4 +46,37 @@ ALTER TABLE public_core.campaign_policy_versions
   ADD CONSTRAINT campaign_policy_v2_wellformed
   CHECK (public_core.policy_document_v2_wellformed(policy_document));
 
+-- ── The public eligibility summary (what the category picker shows) ──────────
+-- A citizen choosing a category must see the age limits and accepted levels that govern it, per
+-- qualification, BEFORE applying. Only the rules a citizen is entitled to read leave: the age
+-- bands, the accepted education levels and the science bar of the policy version the campaign was
+-- PUBLISHED with. Never the document list, the clearance values, the legal basis or the conviction
+-- rule. Anonymous callers reach it only as usrp_campaign_public_reader, and only for a published code.
+CREATE OR REPLACE FUNCTION public_core.public_campaign_eligibility(p_public_code text)
+RETURNS jsonb
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $$
+  SELECT COALESCE(
+    (SELECT jsonb_object_agg(
+              category.name,
+              jsonb_build_object(
+                'ageBands',              category.policy -> 'v2' -> 'ageBands',
+                'educationAlternatives', category.policy -> 'v2' -> 'educationAlternatives',
+                'minimumSciencePercent', category.policy -> 'v2' -> 'minimumSciencePercent'
+              ))
+       FROM public_core.campaign_publications AS p
+       JOIN public_core.campaign_policy_versions AS pv ON pv.id = p.policy_version_id
+       CROSS JOIN LATERAL jsonb_each(pv.policy_document) AS category(name, policy)
+       WHERE p.public_code = p_public_code
+         AND jsonb_typeof(category.policy) = 'object'
+         AND category.policy ? 'v2'),
+    '{}'::jsonb);
+$$;
+
+REVOKE ALL ON FUNCTION public_core.public_campaign_eligibility(text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public_core.public_campaign_eligibility(text) TO usrp_campaign_public_reader;
+
 COMMIT;

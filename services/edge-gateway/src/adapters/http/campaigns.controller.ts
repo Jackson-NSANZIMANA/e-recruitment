@@ -113,7 +113,33 @@ function publicCampaign(value: unknown, listOnly: boolean): Record<string, unkno
     (projection['contactPhoneNumbers'] !== null && !Array.isArray(projection['contactPhoneNumbers'])) ||
     (projection['contactWebsite'] !== null && typeof projection['contactWebsite'] !== 'string')
   ) return null;
+  // ADR-049: the detail read also carries the per-category rules a citizen may read; rebuilt from an allowlist.
+  if (!listOnly) projection['eligibility'] = projectEligibility(value['eligibility']);
   return projection;
+}
+
+const QUALIFICATION_RE = /^(FIELD:)?[A-Z][A-Z0-9_]{1,40}$/;
+
+/** PURE. Per category: age bands, accepted levels and the science bar; anything else is dropped. */
+export function projectEligibility(value: unknown): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (!isRecord(value)) return out;
+  for (const [category, raw] of Object.entries(value)) {
+    if (!/^[A-Z][A-Z0-9_]{2,40}$/.test(category) || !isRecord(raw)) continue;
+    const bands = raw['ageBands'];
+    const alternatives = raw['educationAlternatives'];
+    if (!Array.isArray(bands) || !Array.isArray(alternatives)) continue;
+    const ageBands = bands.flatMap((b: unknown) =>
+      isRecord(b) && Array.isArray(b['qualifications']) && b['qualifications'].every((q) => typeof q === 'string' && QUALIFICATION_RE.test(q)) &&
+      Number.isInteger(b['minimumAge']) && Number.isInteger(b['maximumAge'])
+        ? [{ qualifications: b['qualifications'], minimumAge: b['minimumAge'], maximumAge: b['maximumAge'] }]
+        : []);
+    if (ageBands.length === 0) continue;
+    const educationAlternatives = alternatives.flatMap((a: unknown) => (isRecord(a) && typeof a['level'] === 'string' && QUALIFICATION_RE.test(a['level']) ? [{ level: a['level'] }] : []));
+    const science = raw['minimumSciencePercent'];
+    out[category] = { ageBands, educationAlternatives, minimumSciencePercent: Number.isInteger(science) ? science : null };
+  }
+  return out;
 }
 
 function publicReadBody(value: unknown, listOnly: boolean): unknown {
