@@ -10,6 +10,7 @@
 
 import type { EventBus } from '@usrp/shared-events';
 import { PgIdentityReader } from './adapters/identity.pg-reader.js';
+import { PgCampaignPolicyReader } from './adapters/campaign-policy.pg-reader.js';
 import { NesaSdmsGateway } from './adapters/nesa.sdms-gateway.js';
 import { HttpNesaSdmsTransport } from './adapters/nesa.sdms-transport.js';
 import { HecHttpGateway } from './adapters/hec.http-gateway.js';
@@ -31,6 +32,7 @@ export function createEligibilityService(
   eventBus: EventBus,
 ): EligibilityServices {
   const identityReader = new PgIdentityReader(config.security.encryptionKey);
+  const policyReader = new PgCampaignPolicyReader();
   const nesaGateway = new NesaSdmsGateway({
     transport: new HttpNesaSdmsTransport({ baseUrl: config.nesa.baseUrl, timeoutMs: config.nesa.timeoutMs }),
   });
@@ -40,9 +42,9 @@ export function createEligibilityService(
     timeoutMs: config.hec.timeoutMs,
   });
   return {
-    age: new EvaluateAgeEligibilityService({ identityReader, eventBus }),
-    education: new VerifyNesaEducationService({ identityReader, nesaGateway, eventBus }),
-    degree: new VerifyHecEducationService({ identityReader, hecGateway, eventBus }),
+    age: new EvaluateAgeEligibilityService({ identityReader, eventBus, policyReader }),
+    education: new VerifyNesaEducationService({ identityReader, nesaGateway, eventBus, policyReader }),
+    degree: new VerifyHecEducationService({ identityReader, hecGateway, eventBus, policyReader }),
   };
 }
 

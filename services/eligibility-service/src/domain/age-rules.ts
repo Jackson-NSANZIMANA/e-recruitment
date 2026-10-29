@@ -43,8 +43,10 @@ export function evaluateAgeEligibility(
   category: ApplicationCategory,
   dateOfBirth: string,
   asOf: Date,
+  /** ADR-049: the campaign's own printed window, replacing the engine constant when supplied. */
+  window?: { readonly minAge: number; readonly maxAge: number },
 ): AgeEligibilityResult {
-  const criteria = AGE_CRITERIA[category];
+  const criteria = window ?? AGE_CRITERIA[category];
   const age = ageInYears(dateOfBirth, asOf);
   const appliedMaxAge = criteria.maxAge; // base cap; exceptions handled in the education slice
   const eligible = age >= criteria.minAge && age <= appliedMaxAge;

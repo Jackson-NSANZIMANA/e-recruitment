@@ -38,6 +38,8 @@ import {
 } from '../domain/nesa-binding.js';
 import type { BindingFields } from '@usrp/shared-identity-match';
 import { agencyForCategory } from '../domain/category-agency.js';
+import { applyPolicyV2Education } from '../domain/policy-v2-gates.js';
+import type { CampaignPolicyReader } from '../ports/campaign-policy.reader.js';
 
 export interface VerifyNesaEducationCommand {
   readonly applicantId: string;
@@ -106,6 +108,8 @@ export interface VerifyNesaEducationDeps {
   readonly identityReader: IdentityReader;
   readonly nesaGateway: NesaGateway;
   readonly eventBus: EventBus;
+  /** ADR-049: the application's pinned policy; absent, the engine constants govern. */
+  readonly policyReader?: CampaignPolicyReader;
   /** Injectable clock for deterministic tests; defaults to real time. */
   readonly clock?: () => Date;
 }
@@ -197,7 +201,14 @@ export class VerifyNesaEducationService {
       return { kind: 'NESA_REVIEW_REQUIRED', applicantId: command.applicantId, nesaRequestId: lookup.nesaRequestId, reasons: decision.reasons, fields: decision.binding.fields };
     }
 
-    const education = evaluateNesaEducation(command.category, decision.facts, asOf);
+    const evaluated = evaluateNesaEducation(command.category, decision.facts, asOf);
+    const pinned = this.deps.policyReader === undefined ? null : await this.deps.policyReader.findPinnedPolicy(command.applicationId, command.category);
+    const education = applyPolicyV2Education(evaluated, pinned, {
+      level: evaluated.evaluatedLevel,
+      field: null,
+      sciencePercent: decision.facts.percentageScore,
+      dateOfBirth: applicant.dateOfBirth,
+    });
     const { event, audit } = this.emit(command, agency, education, lookup.nesaRequestId, context, asOf, {
       failureCode: null,
       binding: decision.binding.fields,
