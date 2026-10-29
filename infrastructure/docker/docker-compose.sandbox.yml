@@ -85,7 +85,7 @@ services:
     command: server /data
     environment:
       MINIO_ROOT_USER: usrp_sandbox_minio
-      MINIO_ROOT_PASSWORD: ${SANDBOX_MINIO_ROOT_PASSWORD:?minted by pnpm sandbox}
+      MINIO_ROOT_PASSWORD: ${SANDBOX_MINIO_ROOT_PASSWORD:-}  # minted by pnpm sandbox; empty never boots MinIO
     volumes:
       - sandbox-minio-data:/data
     ports:
