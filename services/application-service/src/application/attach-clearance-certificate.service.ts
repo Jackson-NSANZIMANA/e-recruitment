@@ -69,6 +69,7 @@ export class AttachClearanceCertificateService {
     if (CLOSED.has(own.status)) return { kind: 'NOT_APPLICABLE', agency: own.agency, status: own.status };
     if (own.criminalStatus === 'CLEARED') return { kind: 'ALREADY_VERIFIED', agency: own.agency };
 
+    const clearancePolicy = own.clearancePolicy;
     const event: ClearanceCertificateSubmittedEvent = {
       ...newEnvelope(command.context),
       eventType: 'CLEARANCE_CERTIFICATE_SUBMITTED',
@@ -78,6 +79,7 @@ export class AttachClearanceCertificateService {
       category: own.category,
       clearanceCertificateNumber: number,
       referenceDate: kigaliDate((this.deps.clock ?? ((): Date => new Date()))()),
+      ...(clearancePolicy === null ? {} : { clearancePolicy }),
     };
     await this.deps.eventBus.publish(event);
     return { kind: 'ACCEPTED', agency: own.agency };
