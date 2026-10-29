@@ -53,6 +53,7 @@ test('education alternatives: A0 OR A1 IPRC, and S3 as a minimum below A2', () =
   assert.equal(educationSatisfied(p, 'A_LEVEL_A2'), false);
   const s3 = normalizePolicyV2({ ...reserve, educationAlternatives: [{ level: 'O_LEVEL_S3' }] });
   assert.equal(educationSatisfied(s3, 'O_LEVEL_S3'), true);
+  assert.equal(educationSatisfied(s3, 'A_LEVEL_A2'), true);
 });
 
 test('science bar: 70% passes, 69% does not, absent fails closed', () => {

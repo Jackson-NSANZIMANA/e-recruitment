@@ -267,9 +267,14 @@ export function evaluateAgeForQualification(policy: PolicyV2, facts: Qualificati
   return { eligible: true, code: 'WITHIN_BAND', age, cap: band.maximumAge, minimum: band.minimumAge };
 }
 
-/** ANY ONE alternative satisfies the education requirement (A0 OR A1 IPRC). */
+/**
+ * ANY ONE alternative satisfies the education requirement (A0 OR A1 IPRC). An
+ * alternative names a level AT OR ABOVE which the requirement is met on the
+ * ladder, so "completed S3" is the alternative O_LEVEL_S3 and A2 satisfies it.
+ */
 export function educationSatisfied(policy: PolicyV2, level: QualificationLevel): boolean {
-  return policy.educationAlternatives.some((a) => a.level === level);
+  const held = QUALIFICATION_LEVELS.indexOf(level);
+  return policy.educationAlternatives.some((a) => held >= QUALIFICATION_LEVELS.indexOf(a.level));
 }
 
 export function scienceSatisfied(policy: PolicyV2, sciencePercent: number | undefined): boolean {
