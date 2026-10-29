@@ -232,7 +232,8 @@ async function clearanceSteps(subject: JourneySubject, expect: ClearanceExpectat
   if (subject.clearanceNumber === null || subject.clearanceNumber === undefined) { note('a clearance number to give', false, 'the persona has no certificate'); return steps; }
 
   const before = rec(clearanceItem((await citizen.get(`/edge/v1/me/applications/document-checklist?applicationId=${applicationId}`)).body));
-  note('clearance outstanding before a number is given', before['state'] === 'NUMBER_REQUIRED' || before['state'] === 'VERIFIED', txt(before['state']));
+  // A same-day re-run finds the state a first run left behind; only an unknown state is a fault.
+  note('clearance outstanding before a number is given (or the state a first run left)', ['NUMBER_REQUIRED', 'VERIFYING', 'CORRECTION_NEEDED', 'UNDER_OFFICER_REVIEW', 'VERIFIED'].includes(txt(before['state'])), txt(before['state']));
 
   const malformed = await citizen.post('/edge/v1/me/applications/clearance-certificate', { applicationId, clearanceCertificateNumber: 'not-a-number' });
   note('a malformed number is refused where it can be corrected', malformed.status === 422 && rec(malformed.body)['error'] === 'CLEARANCE_NUMBER_MALFORMED', statusOf(malformed));
