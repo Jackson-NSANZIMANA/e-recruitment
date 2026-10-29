@@ -267,7 +267,7 @@ function withoutSmsCredentials(env: Record<string, string>): Record<string, stri
 
 function startDetached(name: string, args: readonly string[], env: Record<string, string>): number {
   const log = openSync(join(STATE, 'logs', `${name}.log`), 'a');
-  const child = spawn(process.execPath, args, { cwd: REPO, env: { PATH: process.env['PATH'] ?? '', ...env }, detached: true, stdio: ['ignore', log, log] });
+  const child = spawn(process.execPath, args.map((a, i) => (i === 0 ? join(REPO, a) : a)), { cwd: REPO, env: { PATH: process.env['PATH'] ?? '', ...env }, detached: true, stdio: ['ignore', log, log] });
   child.unref();
   if (child.pid === undefined) fail(`${name} did not start`);
   writeFileSync(join(STATE, 'pids', name), String(child.pid));
@@ -288,15 +288,28 @@ async function waitReady(name: string, port: number, path: string, timeoutMs = 9
   fail(`${name} was not ready on :${String(port)} within ${String(timeoutMs / 1000)} s — see .sandbox/logs/${name}.log`);
 }
 
+/** True while `pid` is alive and its command line runs from this repository. */
+function ownedProcess(pid: number): boolean {
+  try {
+    return execFileSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' }).includes(REPO);
+  } catch {
+    return false; // ps exits non-zero when the process is gone
+  }
+}
+
 function stopProcesses(): void {
   const dir = join(STATE, 'pids');
   if (!existsSync(dir)) return;
   for (const name of execFileSync('ls', [dir], { encoding: 'utf8' }).split('\n').filter(Boolean)) {
     const pid = Number(readFileSync(join(dir, name), 'utf8'));
-    try {
-      process.kill(-pid, 'SIGTERM'); // the detached child leads its own process group
-    } catch {
-      // already gone
+    // A recorded PID outlives its process (a reboot, a crash) and can be reused by anyone's
+    // program: stop it only while it still runs from THIS repository.
+    if (Number.isInteger(pid) && pid > 1 && ownedProcess(pid)) {
+      try {
+        process.kill(-pid, 'SIGTERM'); // the detached child leads its own process group
+      } catch {
+        // already gone
+      }
     }
     rmSync(join(dir, name), { force: true });
   }
