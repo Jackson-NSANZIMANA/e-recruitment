@@ -24,9 +24,13 @@ export class PgCampaignPolicyReader implements CampaignPolicyReader {
           LIMIT 1
         `;
         const row = rows[0];
-        if (row === undefined || row.block === null || row.reference_date === null) return null;
+        // No application, or a v1 category (no v2 block): the engine constants govern, as before.
+        if (row === undefined || row.block === null) return null;
+        // A v2 block that cannot be read is a FAULT, not a v1 policy: judging the applicant by constants the
+        // campaign did not print would be wrong in silence. The event is retried.
         const v2 = readPolicyV2(row.block);
-        return v2 === null ? null : { v2, referenceDate: row.reference_date };
+        if (v2 === null || row.reference_date === null) throw new Error('the pinned v2 policy is unreadable');
+        return { v2, referenceDate: row.reference_date };
       });
     } catch (cause) {
       throw new EligibilityReadError('Failed to read the pinned campaign policy', { cause });

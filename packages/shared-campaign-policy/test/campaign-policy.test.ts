@@ -76,6 +76,16 @@ test('the four conviction rules from the announcements', () => {
   assert.equal(convictionVerdict(rule('NEVER_CONVICTED', false), { ...clean, underProsecution: true }).eligible, true);
 });
 
+test('a MASTERS holder is not refused because the bands name A0; an unknown sentence fails closed; registry codes keep their case', () => {
+  const p = normalizePolicyV2({ ...reserve, ageBands: [{ qualifications: ['BACHELOR_A0', 'A1_IPRC'], minimumAge: 18, maximumAge: 26 }] });
+  assert.equal(evaluateAgeForQualification(p, { level: 'MASTERS', field: null }, 26).eligible, true);
+  assert.equal(evaluateAgeForQualification(p, { level: 'A_LEVEL_A2', field: null }, 20).code, 'NO_BAND_FOR_QUALIFICATION');
+  const six = normalizePolicyV2({ ...reserve, conviction: { rule: 'NO_SENTENCE_6M_OR_MORE', notUnderProsecution: false } });
+  assert.equal(convictionVerdict(six, { convicted: true, longestSentenceMonths: null, underProsecution: false }).code, 'SENTENCE_UNKNOWN');
+  const mixed = normalizePolicyV2({ ...reserve, clearance: { allowedCertificateCodes: ['Criminal.Record_v2'], noRecordCertificateCodes: [], validityDays: 90 } });
+  assert.deepEqual(mixed.clearance?.allowedCertificateCodes, ['Criminal.Record_v2']);
+});
+
 test('malformed authored input is refused with a closed code', () => {
   const bad = (patch: Record<string, unknown>) => assert.throws(() => normalizePolicyV2({ ...reserve, ...patch }), PolicyV2Error);
   bad({ schemaVersion: 1 });

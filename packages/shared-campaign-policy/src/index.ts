@@ -128,6 +128,8 @@ function array(value: unknown, field: string, min: number, max: number): readonl
 }
 
 const CODE_TOKEN = /^[A-Z0-9][A-Z0-9_:-]{0,63}$/;
+/** A registry's certificate type code is matched exactly, so it keeps the registry's own case and may carry a dot. */
+const REGISTRY_CODE = /^[A-Za-z0-9][A-Za-z0-9_:.-]{0,63}$/;
 
 function qualification(value: unknown, field: string): QualificationCode {
   if (typeof value === 'string' && value.startsWith('FIELD:')) {
@@ -139,7 +141,7 @@ function qualification(value: unknown, field: string): QualificationCode {
 function codeSet(value: unknown, field: string, min: number): readonly string[] {
   const out: string[] = [];
   for (const [i, entry] of array(value, field, min, 20).entries()) {
-    if (typeof entry !== 'string' || !CODE_TOKEN.test(entry)) fail('INVALID_POLICY_V2', `${field}[${String(i)}] must be a stable code token.`);
+    if (typeof entry !== 'string' || !REGISTRY_CODE.test(entry)) fail('INVALID_POLICY_V2', `${field}[${String(i)}] must be a stable code token.`);
     if (out.includes(entry)) fail('INVALID_POLICY_V2', `${field} must not contain duplicates.`);
     out.push(entry);
   }
@@ -238,12 +240,16 @@ export interface QualificationFacts {
  * degree gets the specialist cap, not the degree cap. No match: null.
  */
 export function ageBandFor(policy: PolicyV2, facts: QualificationFacts): AgeBand | null {
-  const held = new Set<string>();
-  if (facts.level !== null) held.add(facts.level);
-  if (facts.field !== null) held.add(`FIELD:${facts.field}`);
+  // A level matches a band that names it OR a lower level (the ladder, as educationSatisfied reads it): a
+  // MASTERS holder is not refused because the band names A0. A specialist field matches exactly.
+  const heldIndex = facts.level === null ? -1 : QUALIFICATION_LEVELS.indexOf(facts.level);
+  const matches = (q: QualificationCode): boolean => {
+    if (q.startsWith('FIELD:')) return facts.field !== null && q === `FIELD:${facts.field}`;
+    return heldIndex >= 0 && heldIndex >= QUALIFICATION_LEVELS.indexOf(q as QualificationLevel);
+  };
   let best: AgeBand | null = null;
   for (const band of policy.ageBands) {
-    if (band.qualifications.some((q) => held.has(q)) && (best === null || band.maximumAge > best.maximumAge)) best = band;
+    if (band.qualifications.some(matches) && (best === null || band.maximumAge > best.maximumAge)) best = band;
   }
   return best;
 }
@@ -289,7 +295,7 @@ export interface ConvictionFacts {
   readonly underProsecution: boolean;
 }
 
-export type ConvictionVerdictCode = 'CLEAR' | 'CONVICTED' | 'SENTENCE_BARS' | 'UNDER_PROSECUTION';
+export type ConvictionVerdictCode = 'CLEAR' | 'CONVICTED' | 'SENTENCE_BARS' | 'SENTENCE_UNKNOWN' | 'UNDER_PROSECUTION';
 
 /** The conviction rule applied to a record's content (ADR-048's REVIEW step asks this of the officer's reading). */
 export function convictionVerdict(policy: PolicyV2, facts: ConvictionFacts): { readonly eligible: boolean; readonly code: ConvictionVerdictCode } {
@@ -298,8 +304,11 @@ export function convictionVerdict(policy: PolicyV2, facts: ConvictionFacts): { r
     case 'NEVER_CONVICTED':
       return facts.convicted ? { eligible: false, code: 'CONVICTED' } : { eligible: true, code: 'CLEAR' };
     case 'NO_SENTENCE_6M_OR_MORE':
+      // A conviction whose sentence length is unknown cannot be shown to be under the bar: fail closed.
+      if (facts.convicted && facts.longestSentenceMonths === null) return { eligible: false, code: 'SENTENCE_UNKNOWN' };
       return facts.longestSentenceMonths !== null && facts.longestSentenceMonths >= 6 ? { eligible: false, code: 'SENTENCE_BARS' } : { eligible: true, code: 'CLEAR' };
     case 'NO_SENTENCE_OVER_6M':
+      if (facts.convicted && facts.longestSentenceMonths === null) return { eligible: false, code: 'SENTENCE_UNKNOWN' };
       return facts.longestSentenceMonths !== null && facts.longestSentenceMonths > 6 ? { eligible: false, code: 'SENTENCE_BARS' } : { eligible: true, code: 'CLEAR' };
   }
 }
