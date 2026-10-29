@@ -41,6 +41,9 @@ for port in 4930 4931 4932; do
   for _ in $(seq 1 60); do [ "$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:$port/")" = 200 ] && break; sleep 2; done
 done
 
+echo "▶ warming the dev servers"
+node "$REPO/infrastructure/sandbox/warm.mjs" "$UI" http://localhost:4930 http://localhost:4931 http://localhost:4932 || { echo "✗ a dev server did not come up" >&2; exit 1; }
+
 rc=0
 export USRP_PORTAL_URL=http://localhost:4930 USRP_OFFICER_URL=http://localhost:4931 USRP_FIELD_URL=http://localhost:4932
 echo "▶ applicant portal (and the field-station gate)"
