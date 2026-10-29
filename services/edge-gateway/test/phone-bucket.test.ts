@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { phoneBucketTarget } from '../src/adapters/http/applicant-auth.controller.js';
 
 test('every spelling of one handset shares ONE rate-limit bucket', () => {
-  const spellings = ['0788000456', '0788 000 456', '078-800-0456', '+250788000456', '250 788 000 456', '+250 78 800 0456'];
+  const spellings = ['0788000456', '0788 000 456', '078-800-0456', '+250788000456', '250 788 000 456', '+250 78 800 0456', '+250 (0)78 800 0456', '00250 0788000456', '0788.000.456'];
   assert.equal(new Set(spellings.map(phoneBucketTarget)).size, 1);
   assert.equal(phoneBucketTarget('0788000456'), '788000456');
 });

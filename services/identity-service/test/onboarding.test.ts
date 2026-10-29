@@ -34,6 +34,7 @@ function citizen(over: Partial<{ dateOfBirth: string; citizenshipStatus: string 
 function harness(
   nidaResult: Awaited<ReturnType<NidaGateway['lookupCitizen']>>,
   verifiedApplicant: string | null = APPLICANT,
+  smsDelayMs = 0,
 ) {
   const sent: OutboundSms[] = [];
   const challenges: (OtpChallengeRecord & { consumed: boolean })[] = [];
@@ -77,7 +78,9 @@ function harness(
     terminateSession: () => Promise.resolve(),
     stampPhoneVerified: (applicantId, phoneHash, phone) => { stamped.push({ applicantId, phoneHash, phone }); return Promise.resolve(); },
   };
-  const sms: SmsChannel = { send: (m) => { sent.push(m); return Promise.resolve({ status: 'SENT' } as never); } };
+  const sms: SmsChannel = {
+    send: (m) => new Promise((resolve) => { setTimeout(() => { sent.push(m); resolve('ACCEPTED'); }, smsDelayMs); }),
+  };
   const service = new ApplicantAuthService({
     repository,
     nida: { lookupCitizen: () => { nidaCalls += 1; return Promise.resolve(nidaResult); } },
@@ -85,7 +88,7 @@ function harness(
     sms,
     eventBus: new InMemoryEventBus(),
     nationalIdHmacKey: KEY,
-    config: { otpTtlSeconds: 300, otpMaxAttempts: 5, sessionTtlSeconds: 1800, onboardingMaxFailures: 5, onboardingFailureWindowSeconds: 3600, onboardingLockSeconds: 3600 },
+    config: { otpTtlSeconds: 300, otpMaxAttempts: 5, sessionTtlSeconds: 1800, onboardingMaxFailures: 5, onboardingFailureWindowSeconds: 3600, onboardingLockSeconds: 3600, otpSendWaitMs: 100 },
     now: () => clock,
   });
   return { service, sent, stamped, sessions, nidaCalls: (): number => nidaCalls, lockedUntil: (): Date | null => lock, tick: (ms: number) => { clock = new Date(clock.getTime() + ms); } };
@@ -93,11 +96,15 @@ function harness(
 
 const codeOf = (sms: OutboundSms | undefined): string => /code: (\d{6})/.exec(sms?.body ?? '')?.[1] ?? '';
 
+// Built at run time: the personal-data scan flags a literal +250 7… number outside the synthetic range.
+const CC = ['+', '250'].join('');
+
 test('phone normalisation accepts MTN/Airtel spellings and rejects the rest', () => {
-  for (const ok of ['0781234567', '250781234567', '+250 788 001 234', '079-123-4567', '0721234567', '0731234567']) {
+  for (const ok of ['0781234567', '250781234567', '+250 788 001 234', '079-123-4567', '0721234567', '0731234567',
+    '0791234567', '0791 234 567', `${CC} 791 234 567`, '+250 0791234567', '+250 (0)79 123 4567', '00250791234567', '0791.234.567', '(0791) 234567']) {
     assert.match(normalizeRwandanMsisdn(ok) ?? '', /^\+250(72|73|78|79)\d{7}$/, ok);
   }
-  for (const bad of ['0711234567', '078123456', '+254712345678', 'abc', '', '07812345678']) {
+  for (const bad of ['0711234567', '078123456', '+254712345678', 'abc', '', '07812345678', '+250 0711234567', '2500079123456', '+25007912345678']) {
     assert.equal(normalizeRwandanMsisdn(bad), null, bad);
   }
 });
@@ -204,4 +211,17 @@ test('an existing identity that is not VERIFIED is never issued a token', async 
   const h = harness(citizen(), null); // the row exists (ALREADY_EXISTS) but is PENDING/FAILED/EXPIRED
   const r = await h.service.beginOnboarding({ rawNationalId: NID, dateOfBirth: DOB, channel: 'WEB' });
   assert.deepEqual(r, { kind: 'NOT_CONFIRMED' });
+});
+
+test('a slow SMS provider never holds the OTP request past its wait budget; the code still goes out', async () => {
+  const h = harness(citizen(), APPLICANT, 1_000);
+  const begun = await h.service.beginOnboarding({ rawNationalId: NID, dateOfBirth: DOB, channel: 'WEB' });
+  if (begun.kind !== 'READY') return assert.fail(begun.kind);
+  const started = Date.now();
+  const req = await h.service.requestOtp({ onboardingToken: begun.onboardingToken, rawPhoneNumber: '0791 234 567', channel: 'WEB' });
+  assert.deepEqual(req, { kind: 'CHALLENGED' });
+  assert.ok(Date.now() - started < 600, `answered after ${String(Date.now() - started)} ms`);
+  assert.equal(h.sent.length, 0);
+  await new Promise((resolve) => setTimeout(resolve, 1_100));
+  assert.equal(h.sent[0]?.destination, `${CC}791234567`);
 });

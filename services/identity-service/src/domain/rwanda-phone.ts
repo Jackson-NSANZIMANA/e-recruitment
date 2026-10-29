@@ -8,8 +8,9 @@
 // number looks like.
 //
 // Canonical form: E.164, `+2507XXXXXXXX` (12 characters).
-// Accepted spellings: `07XXXXXXXX`, `2507XXXXXXXX`, `+2507XXXXXXXX`, with
-// spaces or hyphens.
+// Accepted spellings: `07XXXXXXXX`, `2507XXXXXXXX`, `+2507XXXXXXXX`,
+// `002507XXXXXXXX`, and the country code followed by the trunk 0 that citizens
+// often keep (`+250 07…`, `+250 (0)7…`), with spaces, hyphens, dots or brackets.
 //
 // Only the operator prefixes USRP has agreed to deliver to are accepted
 // (MTN Rwanda 078/079, Airtel Rwanda 072/073). Widening this list is a policy
@@ -27,7 +28,10 @@ const E164_RE = /^\+250(\d{2})(\d{7})$/;
  * outcome, and the caller decides how uniformly to answer it.
  */
 export function normalizeRwandanMsisdn(raw: string): string | null {
-  const compact = raw.replace(/[\s-]/g, '');
+  let compact = raw.replace(/[\s().-]/g, '');
+  if (compact.startsWith('00')) compact = `+${compact.slice(2)}`;
+  // The trunk 0 kept after the country code: +250 078… is +250 78….
+  compact = compact.replace(/^(\+?250)0(?=\d{9}$)/, '$1');
   let national: string;
   if (/^\+250\d{9}$/.test(compact)) national = compact.slice(4);
   else if (/^250\d{9}$/.test(compact)) national = compact.slice(3);

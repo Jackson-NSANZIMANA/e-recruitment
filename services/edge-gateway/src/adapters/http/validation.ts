@@ -140,8 +140,11 @@ export function requireDateOfBirth(value: unknown): string {
  * which owns the SMS decision; the edge only refuses obvious junk.
  */
 export function requirePhoneNumberShape(value: unknown): string {
-  if (typeof value !== 'string' || !/^\+?[0-9][0-9 -]{7,18}$/.test(value.trim())) {
-    throw new HttpError(400, 'INVALID_REQUEST', 'A phone number is required.');
+  // A coarse shape only (identity-service decides what is deliverable): digits with the
+  // separators citizens type, `+250 (0)79 123 4567` and `0791.234.567` included. A wrong
+  // shape is the same INVALID_PHONE_NUMBER the citizen sees for an unsupported number.
+  if (typeof value !== 'string' || !/^\+?\(?[0-9][0-9 ().-]{7,22}$/.test(value.trim())) {
+    throw new HttpError(400, 'INVALID_PHONE_NUMBER', 'A Rwandan MTN or Airtel mobile number is required.');
   }
   return value.trim();
 }
