@@ -10,6 +10,8 @@ JOURNEYS=(rdf-2026 rnp-basic-2025 rcs-junior-2025 rcs-officer-2026-4y clearance-
 failed=0
 for scenario in "${JOURNEYS[@]}"; do
   echo "== $scenario"
+  # Staging is idempotent; it also covers a journey scenario sandbox:up does not stage (clearance-matrix).
+  pnpm --silent rehearse --sandbox "$scenario" > /dev/null 2>&1 || true
   out="$(pnpm --silent rehearse --sandbox "$scenario" --journey 2>&1)"
   printf '%s\n' "$out" | grep -E '^(✓|✗)|^SANDBOX|    ✗' || true
   printf '%s\n' "$out" | grep -q 'SANDBOX JOURNEY PASSED' || failed=1

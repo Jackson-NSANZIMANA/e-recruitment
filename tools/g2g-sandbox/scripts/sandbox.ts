@@ -201,6 +201,8 @@ function serviceEnv(s: Secrets): Record<string, string> {
   });
   delete env['DOCUMENT_FORENSICS_BASE_URL'];
   Object.assign(env, smsEnv(s, local));
+  // The emulator costs nothing, and a full journey set sends ~25 codes per pass: the 50/day cost cap exists for real SMS only.
+  if (process.env['SANDBOX_SMS'] !== 'twilio') env['SMS_DAILY_CAP'] = '2000';
   for (const [svc, port] of Object.entries(SERVICE_PORTS)) {
     env[`PORT_${svc.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}`] = String(port);
   }
