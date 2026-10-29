@@ -68,7 +68,11 @@ const SERVICE_PORTS: Readonly<Record<string, number>> = {
   'audit-service': 4910,
   'iam-service': 4911,
   'edge-gateway': EDGE_PORT,
+  // Opt-in, see FORENSICS below: without its object store and scanner it is not started.
+  ...(process.env['SANDBOX_FORENSICS'] === '1' ? { 'document-forensics-service': 4904 } : {}),
 };
+/** SANDBOX_FORENSICS=1: start the document door with its own MinIO (:4993) and ClamAV (:4995). */
+const FORENSICS = process.env['SANDBOX_FORENSICS'] === '1';
 const SANDBOX_CLIENT_ID = 'sandbox.identity-portal';
 const SANDBOX_CLIENT_SERVICE_ID = '66666666-6666-4666-8666-666666666666';
 
@@ -199,7 +203,18 @@ function serviceEnv(s: Secrets): Record<string, string> {
     SMS_CAP_STATE_FILE: join(STATE, 'sms', 'daily-cap.log'),
     CORS_ORIGINS: 'http://localhost:4930,http://localhost:4931,http://localhost:4932',
   });
-  delete env['DOCUMENT_FORENSICS_BASE_URL'];
+  if (FORENSICS) {
+    Object.assign(env, {
+      DOCUMENT_FORENSICS_BASE_URL: local(4904),
+      MINIO_ENDPOINT: 'localhost',
+      MINIO_PORT: '4993',
+      MINIO_ROOT_USER: 'usrp_sandbox_minio',
+      CLAMAV_HOST: 'localhost',
+      CLAMAV_PORT: '4995',
+    });
+  } else {
+    delete env['DOCUMENT_FORENSICS_BASE_URL'];
+  }
   Object.assign(env, smsEnv(s, local));
   // The emulator costs nothing, and a full journey set sends ~25 codes per pass: the 50/day cost cap exists for real SMS only.
   if (process.env['SANDBOX_SMS'] !== 'twilio') env['SMS_DAILY_CAP'] = '2000';
@@ -222,7 +237,7 @@ function smsEnv(s: Secrets, local: (port: number) => string): Record<string, str
   const path = (process.env['SANDBOX_TWILIO_ENV_FILE'] ?? '').trim();
   if (path === '' || !existsSync(path)) return fail('SANDBOX_SMS=twilio needs SANDBOX_TWILIO_ENV_FILE (an untracked file outside every git work tree).');
   if (enclosingGitWorkTree(path) !== null) return fail('SANDBOX_TWILIO_ENV_FILE is inside a git work tree; keep the owner credentials outside every repository.');
-  const wanted = new Set(['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_FROM', 'TWILIO_MESSAGING_SERVICE_SID']);
+  const wanted = new Set(['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_FROM', 'TWILIO_MESSAGING_SERVICE_SID', 'TWILIO_TO']);
   if ((statSync(path).mode & 0o077) !== 0) return fail('SANDBOX_TWILIO_ENV_FILE must be readable by its owner only (chmod 600).');
   const real: Record<string, string> = { SANDBOX_SMS: 'twilio' };
   for (const raw of readFileSync(path, 'utf8').split('\n')) {
@@ -235,6 +250,10 @@ function smsEnv(s: Secrets, local: (port: number) => string): Record<string, str
   }
   if ((real['TWILIO_ACCOUNT_SID'] ?? '') === '' || (real['TWILIO_AUTH_TOKEN'] ?? '') === '') return fail('SANDBOX_TWILIO_ENV_FILE must define TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN.');
   if ((real['TWILIO_FROM'] ?? '') === '' && (real['TWILIO_MESSAGING_SERVICE_SID'] ?? '') === '') return fail('SANDBOX_TWILIO_ENV_FILE must define TWILIO_FROM or TWILIO_MESSAGING_SERVICE_SID.');
+  // TWILIO_TO: the owner's verified number(s), comma-separated. The only destinations a real send may reach.
+  if ((real['TWILIO_TO'] ?? '') === '') return fail('SANDBOX_TWILIO_ENV_FILE must define TWILIO_TO (the verified number(s) a real send may reach).');
+  real['SANDBOX_SMS_ALLOWED_TO'] = real['TWILIO_TO'] ?? '';
+  delete real['TWILIO_TO'];
   return real;
 }
 
@@ -242,13 +261,13 @@ function smsEnv(s: Secrets, local: (port: number) => string): Record<string, str
 const SMS_SERVICES: ReadonlySet<string> = new Set(['identity-service', 'notification-service']);
 function withoutSmsCredentials(env: Record<string, string>): Record<string, string> {
   const copy = { ...env };
-  for (const key of ['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_FROM', 'TWILIO_MESSAGING_SERVICE_SID']) delete copy[key];
+  for (const key of ['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_FROM', 'TWILIO_MESSAGING_SERVICE_SID', 'SANDBOX_SMS_ALLOWED_TO']) delete copy[key];
   return copy;
 }
 
 function startDetached(name: string, args: readonly string[], env: Record<string, string>): number {
   const log = openSync(join(STATE, 'logs', `${name}.log`), 'a');
-  const child = spawn(process.execPath, args, { cwd: REPO, env: { PATH: process.env['PATH'] ?? '', ...env }, detached: true, stdio: ['ignore', log, log] });
+  const child = spawn(process.execPath, args.map((a, i) => (i === 0 ? join(REPO, a) : a)), { cwd: REPO, env: { PATH: process.env['PATH'] ?? '', ...env }, detached: true, stdio: ['ignore', log, log] });
   child.unref();
   if (child.pid === undefined) fail(`${name} did not start`);
   writeFileSync(join(STATE, 'pids', name), String(child.pid));
@@ -269,15 +288,28 @@ async function waitReady(name: string, port: number, path: string, timeoutMs = 9
   fail(`${name} was not ready on :${String(port)} within ${String(timeoutMs / 1000)} s — see .sandbox/logs/${name}.log`);
 }
 
+/** True while `pid` is alive and its command line runs from this repository. */
+function ownedProcess(pid: number): boolean {
+  try {
+    return execFileSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' }).includes(REPO);
+  } catch {
+    return false; // ps exits non-zero when the process is gone
+  }
+}
+
 function stopProcesses(): void {
   const dir = join(STATE, 'pids');
   if (!existsSync(dir)) return;
   for (const name of execFileSync('ls', [dir], { encoding: 'utf8' }).split('\n').filter(Boolean)) {
     const pid = Number(readFileSync(join(dir, name), 'utf8'));
-    try {
-      process.kill(-pid, 'SIGTERM'); // the detached child leads its own process group
-    } catch {
-      // already gone
+    // A recorded PID outlives its process (a reboot, a crash) and can be reused by anyone's
+    // program: stop it only while it still runs from THIS repository.
+    if (Number.isInteger(pid) && pid > 1 && ownedProcess(pid)) {
+      try {
+        process.kill(-pid, 'SIGTERM'); // the detached child leads its own process group
+      } catch {
+        // already gone
+      }
     }
     rmSync(join(dir, name), { force: true });
   }
@@ -296,6 +328,14 @@ async function up(): Promise<void> {
   out('▶ broker: own Kafka (compose project usrp-sandbox, :4992)');
   sh('docker', [...COMPOSE, 'up', '-d', '--wait', 'sandbox-kafka']);
   sh('docker', [...COMPOSE, 'up', '--exit-code-from', 'sandbox-kafka-init', 'sandbox-kafka-init']);
+  if (FORENSICS) {
+    out('▶ document door: own MinIO (:4993) and ClamAV (:4995)');
+    const composeEnv = { ...process.env, SANDBOX_MINIO_ROOT_PASSWORD: s['MINIO_ROOT_PASSWORD'] ?? '' };
+    execFileSync('docker', [...COMPOSE, 'up', '-d', '--wait', 'sandbox-minio', 'sandbox-clamav'], { env: composeEnv, stdio: ['ignore', 'pipe', 'pipe'] });
+    const bucket = (templateEnv()['MINIO_BUCKET_DOCUMENTS'] ?? '').trim() || 'usrp-documents';
+    execFileSync('docker', ['exec', '-e', `P=${s['MINIO_ROOT_PASSWORD'] ?? ''}`, 'usrp-sandbox-minio', 'sh', '-c',
+      `mc alias set local http://127.0.0.1:9000 usrp_sandbox_minio "$P" >/dev/null && mc mb --ignore-existing local/${bucket} >/dev/null`], { stdio: ['ignore', 'pipe', 'pipe'] });
+  }
 
   out(`▶ database: ${DB} (shared Postgres server, own database)`);
   if (psqlAdmin('postgres', `SELECT 1 FROM pg_database WHERE datname = '${DB}'`) !== '1') {
