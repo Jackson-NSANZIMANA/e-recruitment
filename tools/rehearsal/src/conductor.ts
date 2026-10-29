@@ -10,7 +10,7 @@
 // ══════════════════════════════════════════════════════════════════
 
 import type { Agency } from '@usrp/shared-types';
-import { kigaliDate } from './clock.js';
+import { kigaliDate, kigaliStamp } from './clock.js';
 import { EdgeSession } from './edge.js';
 import { deterministicKey } from './idempotency.js';
 import { policyFromAnnouncement, syntheticPolicy } from './policy.js';
@@ -175,6 +175,8 @@ async function playCampaign(scenario: Scenario, staged: StagedCampaign, config: 
     : [];
   for (const code of openCodes) {
     if (!code.startsWith(`${REHEARSAL_CODE_PREFIX}${agency}-`) || code === draft.publicCode) continue;
+    // The sandbox (REHEARSAL_COEXIST=1) keeps all six real campaigns open at once: only earlier days retire.
+    if (process.env['REHEARSAL_COEXIST'] === '1' && code.endsWith(`-${kigaliStamp(config.now)}`)) continue;
     const closed = await edge.post('/edge/v1/campaigns/registration-close', { publicCode: code }, deterministicKey(scenario.id, code, 'retire'));
     steps.push(classify(`retire ${code}`, closed.status, closed.replayed, closed.body));
   }
