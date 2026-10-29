@@ -42,7 +42,7 @@ export class PgClearanceAttachRepository implements ClearanceAttachRepository {
 function readClearanceValues(block: unknown): OwnApplicationForClearance['clearancePolicy'] {
   if (block === null || typeof block !== 'object') return null;
   const b = block as Record<string, unknown>;
-  const strings = (v: unknown): string[] | null => (Array.isArray(v) && v.every((x) => typeof x === 'string') ? (v as string[]) : null);
+  const strings = (v: unknown): string[] | null => (Array.isArray(v) && v.every((x) => typeof x === 'string') ? (v) : null);
   const allowed = strings(b['allowedCertificateCodes']);
   const noRecord = strings(b['noRecordCertificateCodes']);
   const days = b['validityDays'];
