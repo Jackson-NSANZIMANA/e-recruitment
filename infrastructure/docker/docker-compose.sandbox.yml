@@ -13,6 +13,11 @@ name: usrp-sandbox
 volumes:
   sandbox-kafka-data:
     driver: local
+  sandbox-minio-data:
+    driver: local
+  # The tier2 signature database, reused read-mostly so a sandbox boot does not re-download ~300 MB.
+  usrp-tier2_clamav-data:
+    external: true
 
 services:
   sandbox-kafka:
@@ -71,3 +76,44 @@ services:
         kafka-topics --create --if-not-exists --topic events.dead-letter --partitions 3 --replication-factor 1 --bootstrap-server sandbox-kafka:9092
         echo 'sandbox topics ready'
     restart: "no"
+
+  # Opt-in (SANDBOX_FORENSICS=1): the document door. Its own object store with the
+  # freshly minted sandbox password (never the committed dev one) and a real ClamAV.
+  sandbox-minio:
+    image: ghcr.io/jackson-nsanzimana/usrp-minio@sha256:52dfd5c0bbd38d3219f2058c7af216d9f9a27a994b7b5baad09bbd38866015ff
+    container_name: usrp-sandbox-minio
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: usrp_sandbox_minio
+      MINIO_ROOT_PASSWORD: ${SANDBOX_MINIO_ROOT_PASSWORD:?minted by pnpm sandbox}
+    volumes:
+      - sandbox-minio-data:/data
+    ports:
+      - "127.0.0.1:4993:9000"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  sandbox-clamav:
+    image: clamav/clamav:stable
+    container_name: usrp-sandbox-clamav
+    volumes:
+      - usrp-tier2_clamav-data:/var/lib/clamav
+    ports:
+      - "127.0.0.1:4995:3310"
+    healthcheck:
+      test: ["CMD-SHELL", "printf 'zPING\\0' | nc -w 5 127.0.0.1 3310 | grep -q PONG"]
+      interval: 10s
+      timeout: 10s
+      retries: 60
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 2G

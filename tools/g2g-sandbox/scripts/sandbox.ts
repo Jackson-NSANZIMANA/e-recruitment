@@ -68,7 +68,11 @@ const SERVICE_PORTS: Readonly<Record<string, number>> = {
   'audit-service': 4910,
   'iam-service': 4911,
   'edge-gateway': EDGE_PORT,
+  // Opt-in, see FORENSICS below: without its object store and scanner it is not started.
+  ...(process.env['SANDBOX_FORENSICS'] === '1' ? { 'document-forensics-service': 4904 } : {}),
 };
+/** SANDBOX_FORENSICS=1: start the document door with its own MinIO (:4993) and ClamAV (:4995). */
+const FORENSICS = process.env['SANDBOX_FORENSICS'] === '1';
 const SANDBOX_CLIENT_ID = 'sandbox.identity-portal';
 const SANDBOX_CLIENT_SERVICE_ID = '66666666-6666-4666-8666-666666666666';
 
@@ -199,7 +203,18 @@ function serviceEnv(s: Secrets): Record<string, string> {
     SMS_CAP_STATE_FILE: join(STATE, 'sms', 'daily-cap.log'),
     CORS_ORIGINS: 'http://localhost:4930,http://localhost:4931,http://localhost:4932',
   });
-  delete env['DOCUMENT_FORENSICS_BASE_URL'];
+  if (FORENSICS) {
+    Object.assign(env, {
+      DOCUMENT_FORENSICS_BASE_URL: local(4904),
+      MINIO_ENDPOINT: 'localhost',
+      MINIO_PORT: '4993',
+      MINIO_ROOT_USER: 'usrp_sandbox_minio',
+      CLAMAV_HOST: 'localhost',
+      CLAMAV_PORT: '4995',
+    });
+  } else {
+    delete env['DOCUMENT_FORENSICS_BASE_URL'];
+  }
   Object.assign(env, smsEnv(s, local));
   // The emulator costs nothing, and a full journey set sends ~25 codes per pass: the 50/day cost cap exists for real SMS only.
   if (process.env['SANDBOX_SMS'] !== 'twilio') env['SMS_DAILY_CAP'] = '2000';
@@ -296,6 +311,14 @@ async function up(): Promise<void> {
   out('▶ broker: own Kafka (compose project usrp-sandbox, :4992)');
   sh('docker', [...COMPOSE, 'up', '-d', '--wait', 'sandbox-kafka']);
   sh('docker', [...COMPOSE, 'up', '--exit-code-from', 'sandbox-kafka-init', 'sandbox-kafka-init']);
+  if (FORENSICS) {
+    out('▶ document door: own MinIO (:4993) and ClamAV (:4995)');
+    const composeEnv = { ...process.env, SANDBOX_MINIO_ROOT_PASSWORD: s['MINIO_ROOT_PASSWORD'] ?? '' };
+    execFileSync('docker', [...COMPOSE, 'up', '-d', '--wait', 'sandbox-minio', 'sandbox-clamav'], { env: composeEnv, stdio: ['ignore', 'pipe', 'pipe'] });
+    const bucket = (templateEnv()['MINIO_BUCKET_DOCUMENTS'] ?? '').trim() || 'usrp-documents';
+    execFileSync('docker', ['exec', '-e', `P=${s['MINIO_ROOT_PASSWORD'] ?? ''}`, 'usrp-sandbox-minio', 'sh', '-c',
+      `mc alias set local http://127.0.0.1:9000 usrp_sandbox_minio "$P" >/dev/null && mc mb --ignore-existing local/${bucket} >/dev/null`], { stdio: ['ignore', 'pipe', 'pipe'] });
+  }
 
   out(`▶ database: ${DB} (shared Postgres server, own database)`);
   if (psqlAdmin('postgres', `SELECT 1 FROM pg_database WHERE datname = '${DB}'`) !== '1') {
