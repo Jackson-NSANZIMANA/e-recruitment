@@ -19,6 +19,7 @@
     "sandbox": "pnpm --filter @usrp/g2g-sandbox sandbox up",
     "sandbox:up": "bash infrastructure/sandbox/up.sh",
     "sandbox:journeys": "bash infrastructure/sandbox/journeys.sh",
+    "sandbox:live": "bash infrastructure/sandbox/live.sh",
     "sandbox:down": "pnpm --filter @usrp/g2g-sandbox sandbox down",
     "sandbox:reset": "pnpm --filter @usrp/g2g-sandbox sandbox reset",
     "test": "turbo run test",
