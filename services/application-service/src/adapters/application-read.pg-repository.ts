@@ -17,7 +17,7 @@
 
 import { sql } from '@usrp/shared-database';
 import type { ApplicationCategory, ApplicationStatus } from '@usrp/shared-types';
-import { AGENCIES, type Agency } from '@usrp/shared-types';
+import { AGENCIES, CLEARANCE_REVIEW_REASON_SET, type Agency } from '@usrp/shared-types';
 import type {
   AmberQueueEntry,
   ApplicantApplicationSummary,
@@ -326,7 +326,13 @@ const NESA_REASON_TO_QUEUE: Readonly<Record<string, string>> = {
   UNKNOWN_LEVEL_TYPE: 'NESA_LEVEL_UNKNOWN',
   DIVISION_NOT_PASS: 'NESA_DIVISION_NOT_PASS',
 };
-const CLEARANCE_QUEUE_REASONS: ReadonlySet<string> = new Set(['CLEARANCE_CONTENT_REVIEW', 'IDENTITY_NAME_PARTIAL', 'IDENTITY_HOLDER_UNREADABLE']);
+/**
+ * The clearance reasons the queue may show. The vocabulary is NOT re-declared
+ * here (evaluation D2): it lives in @usrp/shared-types, because the writer, this
+ * queue and the edge's officer checklist each used to hold a copy — and a copy
+ * that falls behind does not degrade, it REJECTS the whole payload.
+ */
+const CLEARANCE_QUEUE_REASONS: ReadonlySet<string> = CLEARANCE_REVIEW_REASON_SET;
 
 /** Why an application is in the queue beyond a document hold: closed codes only. */
 export function queueReasons(row: Pick<AmberQueueRow, 'criminal_status' | 'academic_status' | 'academic_detail' | 'clearance_reasons'>): readonly string[] {

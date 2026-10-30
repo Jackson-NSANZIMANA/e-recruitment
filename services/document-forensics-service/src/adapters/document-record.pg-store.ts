@@ -48,8 +48,8 @@ export class PgDocumentRecordStore implements DocumentRecordStore {
 
         // One row per (application, object key); FOR UPDATE so a concurrent
         // re-analysis of the same object serializes instead of racing.
-        const existing = await tx<{ id: string }[]>`
-          SELECT id FROM ${schema}.document_records
+        const existing = await tx<{ id: string; reviewed: boolean }[]>`
+          SELECT id, human_reviewed_by_id IS NOT NULL AS reviewed FROM ${schema}.document_records
           WHERE application_id = ${input.applicationId}
             AND minio_object_key = ${input.objectKey}
           FOR UPDATE
@@ -57,6 +57,26 @@ export class PgDocumentRecordStore implements DocumentRecordStore {
 
         const existingRow = existing[0];
         if (existingRow) {
+          // A REPLACEMENT WITHDRAWS THE HUMAN DECISION (evaluation D14).
+          //
+          // The object key and this row are stable by design: a corrected
+          // re-upload overwrites the same object, so the citizen keeps one
+          // document per type and no superseded copy of a national ID is left
+          // at rest under a key no row points at (domain/object-key.ts).
+          //
+          // What must NOT survive that overwrite is the review. A human verdict
+          // is evidence about specific bytes; once the bytes are replaced, the
+          // stamps say a reviewer approved content they never saw — and the
+          // amber queue's join requires `human_reviewed_by_id IS NULL`, so the
+          // new, unreviewed document disappears from the reviewer's queue.
+          // Clearing them returns the row to the queue it belongs in.
+          //
+          // analyze/ re-scores the SAME object and never sets objectReplaced,
+          // so a repeat scan cannot withdraw a decision either.
+          const clearReview =
+            input.objectReplaced === true
+              ? sql`, human_reviewed_by_id = NULL, human_reviewed_at = NULL, human_review_decision = NULL`
+              : sql``;
           await tx`
             UPDATE ${schema}.document_records SET
               document_type = ${input.documentType}::${schema}.document_type,
@@ -67,10 +87,14 @@ export class PgDocumentRecordStore implements DocumentRecordStore {
               forensics_score = ${verdict.score},
               forensics_lane = ${verdict.lane}::${schema}.document_lane,
               forensics_flags = ${tx.json(asJsonb(verdict.flags))},
-              forensics_completed_at = now()
+              forensics_completed_at = now()${clearReview}
             WHERE id = ${existingRow.id}
           `;
-          return { kind: "RECORDED", documentId: existingRow.id };
+          return {
+            kind: "RECORDED",
+            documentId: existingRow.id,
+            reviewCleared: input.objectReplaced === true && existingRow.reviewed,
+          };
         }
 
         const inserted = await tx<{ id: string }[]>`

@@ -73,11 +73,13 @@ export { loadBackgroundVettingConfig, loadClearanceCertificateConfig, loadCleara
 export type { BackgroundVettingServiceConfig, ClearanceCertificateConfig, ClearanceMode } from './config.js';
 export { VerifyClearanceCertificateService } from './application/verify-clearance-certificate.service.js';
 export type {
+  EscalateUnverifiedClearanceCommand,
   VerifyClearanceCertificateCommand,
   VerifyClearanceCertificateDeps,
   VerifyClearanceCertificateOutcome,
 } from './application/verify-clearance-certificate.service.js';
 export { CLEARANCE_CONSUMER_GROUP, startClearanceCertificateConsumer } from './adapters/events/clearance-certificate-submitted.consumer.js';
+export { clearanceDeadLetterObserver } from './adapters/events/clearance-dead-letter.observer.js';
 export { decideClearance, daysBetween } from './domain/clearance-rules.js';
 export type { ClearanceDecision } from './domain/clearance-rules.js';
 export { CLEARANCE_NUMBER_PATTERN, normaliseClearanceNumber, parseClearanceNumber } from './domain/clearance-number.js';

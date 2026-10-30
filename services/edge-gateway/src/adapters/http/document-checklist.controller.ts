@@ -12,6 +12,7 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { HttpError, type HttpResult, type RouteHandler } from '@usrp/shared-http';
+import { CLEARANCE_REVIEW_REASON_SET } from '@usrp/shared-types';
 import { UPSTREAM } from '../../domain/upstream-operations.js';
 import { NOT_FOUND } from './outcomes.js';
 import { withApplicantSession, withOfficerSession, type EdgeDeps } from './guards.js';
@@ -30,8 +31,13 @@ const SATISFACTIONS = new Set([
 const REGISTRIES = new Set(['NIDA', 'NESA', 'HEC', 'RIB']);
 const CLEARANCE_STATES = new Set(['NUMBER_REQUIRED', 'VERIFYING', 'CORRECTION_NEEDED', 'UNDER_OFFICER_REVIEW', 'VERIFIED']);
 const CLEARANCE_CODE_RE = /^[A-Z][A-Z0-9_]{2,47}$/;
-/** The amber-queue reasons an OFFICER may see; a citizen never does. */
-const CLEARANCE_REASONS = new Set(['CLEARANCE_CONTENT_REVIEW', 'IDENTITY_NAME_PARTIAL', 'IDENTITY_HOLDER_UNREADABLE']);
+/**
+ * The clearance reasons an OFFICER may see; a citizen never does. Shared with
+ * the writer and the amber queue (@usrp/shared-types) — a local copy here is a
+ * trap, because `projectClearance` fails the WHOLE checklist on one unknown
+ * reason, so a reason the writer learned to emit would 502 the officer's view.
+ */
+const CLEARANCE_REASONS: ReadonlySet<string> = CLEARANCE_REVIEW_REASON_SET;
 
 /** The clearance state of the RIB item, rebuilt from an allowlist; null when malformed. */
 function projectClearance(value: unknown, audience: 'citizen' | 'officer'): Record<string, unknown> | null | undefined {

@@ -47,6 +47,8 @@ export {
   backoffMs,
   describeError,
   resolveDeadLetterPolicy,
+  type DeadLetterInfo,
+  type DeadLetterObserver,
   type DeadLetterPolicy,
   type DeadLetterReason,
 } from './dead-letter.js';

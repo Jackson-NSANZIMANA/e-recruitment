@@ -16,7 +16,7 @@
 // applicant is ever criminal-record checked while the service reports healthy.
 // ══════════════════════════════════════════════════════════════════
 
-import { InMemoryEventBus, KafkaEventBus, type EventBus } from '@usrp/shared-events';
+import { InMemoryEventBus, KafkaEventBus, type DeadLetterObserver, type EventBus } from '@usrp/shared-events';
 import {
   assertProductionSecrets,
   loadKafkaConfig,
@@ -28,11 +28,34 @@ import { createBackgroundVettingService, createClearanceCertificateService } fro
 import { loadBackgroundVettingConfig, loadClearanceCertificateConfig } from './config.js';
 import { startApplicantSubmittedConsumer } from './adapters/events/applicant-submitted.consumer.js';
 import { startClearanceCertificateConsumer } from './adapters/events/clearance-certificate-submitted.consumer.js';
+import { clearanceDeadLetterObserver } from './adapters/events/clearance-dead-letter.observer.js';
 
-function createEventBus(serviceName: string, transport: EventTransport): EventBus {
+/**
+ * `resolveObserver` is lazy on purpose: the dead-letter observer needs the
+ * clearance use case, and the use case needs the bus. Nothing can be dead-
+ * lettered before the first message is consumed, which happens after main() has
+ * wired both, so resolving at the first dead letter is safe and keeps the
+ * dependency one-directional.
+ */
+function createEventBus(
+  serviceName: string,
+  transport: EventTransport,
+  resolveObserver: () => DeadLetterObserver | null,
+): EventBus {
   if (transport.kind === 'kafka') {
     const kafka = loadKafkaConfig(serviceName);
-    return new KafkaEventBus({ brokers: kafka.brokers, clientId: kafka.clientId, ssl: kafka.ssl });
+    return new KafkaEventBus({
+      brokers: kafka.brokers,
+      clientId: kafka.clientId,
+      ssl: kafka.ssl,
+      // What a permanent failure MEANS is the consumer's call, not the bus's:
+      // see dead-letter.ts and clearance-dead-letter.observer.ts.
+      onDeadLetter: async (event, info): Promise<void> => {
+        const observer = resolveObserver();
+        if (observer === null) return;
+        await observer(event, info);
+      },
+    });
   }
   console.warn(
     JSON.stringify({
@@ -50,7 +73,8 @@ async function main(): Promise<void> {
 
   const config = loadBackgroundVettingConfig();
   const transport = resolveEventTransport();
-  const bus = createEventBus(config.runtime.serviceName, transport);
+  let deadLetterObserver: DeadLetterObserver | null = null;
+  const bus = createEventBus(config.runtime.serviceName, transport, () => deadLetterObserver);
   await bus.connect();
 
   // The gate's ingress: subscribe BEFORE serving so a "ready" signal implies
@@ -62,6 +86,9 @@ async function main(): Promise<void> {
   let consuming = 'none (in-memory bus)';
   if (config.mode === 'IREMBO_CERTIFICATE') {
     const clearance = createClearanceCertificateService(loadClearanceCertificateConfig(), bus);
+    // A registry outage longer than the retry budget ends in a HUMAN, not in a
+    // PENDING row nobody looks at (evaluation D2).
+    deadLetterObserver = clearanceDeadLetterObserver(clearance);
     if (transport.kind === 'kafka') {
       await startClearanceCertificateConsumer(bus, clearance);
       consuming = 'clearance.submitted';

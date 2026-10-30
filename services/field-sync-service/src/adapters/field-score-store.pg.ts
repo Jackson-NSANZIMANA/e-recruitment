@@ -31,6 +31,7 @@
 
 import { timingSafeEqual } from 'node:crypto';
 import { sql, asJsonb } from '@usrp/shared-database';
+import type { Agency } from '@usrp/shared-types';
 import { decideMerge } from '../domain/merge.js';
 import type { VectorClock } from '../domain/vector-clock.js';
 import { OPS_SCHEMA } from '../domain/agency-schema.js';
@@ -70,6 +71,17 @@ function ticketMatches(issued: string | null, presented: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+/**
+ * The walk-in lane exists only in rdf_ops (ADR-012), so is_walk_in is an
+ * RDF-only column while this store is agency-agnostic. Naming it for RNP/RCS is
+ * a 42703 that fails EVERY score upload for two of the three agencies — and it
+ * fails silently in review, because the pilot (RDF) is the agency every proof
+ * drives (evaluation D12). A schema without the lane answers `false`: it holds
+ * no walk-in rows by construction. rls/0044 keeps this honest.
+ */
+const walkInFlag: (agency: Agency) => ReturnType<typeof sql> = (agency) =>
+  agency === 'RDF' ? sql`is_walk_in` : sql`false AS is_walk_in`;
+
 export class PgFieldScoreStore implements FieldScoreStore {
   async sync(input: SyncRecordInput): Promise<SyncOutcome> {
     const schema = sql(OPS_SCHEMA[input.agency]);
@@ -80,7 +92,7 @@ export class PgFieldScoreStore implements FieldScoreStore {
         // Lock the application → serialise concurrent syncs; also the
         // cross-agency guard (0 rows ⇒ not in THIS agency's schema).
         const appRows = await tx<SyncAppRow[]>`
-          SELECT campaign_id, is_walk_in, qr_invitation_code
+          SELECT campaign_id, ${walkInFlag(input.agency)}, qr_invitation_code
           FROM ${schema}.applications
           WHERE id = ${input.applicationId}
           FOR UPDATE
@@ -184,7 +196,7 @@ export class PgFieldScoreStore implements FieldScoreStore {
         await tx`SET LOCAL ROLE ${sql(SYSTEM_ROLE)}`;
 
         const appRows = await tx<AppRow[]>`
-          SELECT campaign_id, is_walk_in
+          SELECT campaign_id, ${walkInFlag(input.agency)}
           FROM ${schema}.applications
           WHERE id = ${input.applicationId}
           FOR UPDATE

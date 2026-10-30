@@ -38,3 +38,38 @@ export interface AmberLaneQueueItem {
   readonly forensicsScore: number;
   readonly queuedAt: string;
 }
+
+// ── Criminal-clearance review reasons (ADR-048 §2.3-2.4) ──────────
+//
+// The closed vocabulary of "why a human must look" at a criminal-clearance
+// certificate. It is declared HERE, once, because four artefacts enforce it and
+// three of them used to hold their own copy:
+//
+//   • rls/0044             the `clearance_verif_shape_check` CHECK constraint
+//   • background-vetting   what a verdict may carry (the writer)
+//   • application-service  `CLEARANCE_QUEUE_REASONS` — what the amber queue may show
+//   • edge-gateway         `CLEARANCE_REASONS` — what an officer's checklist may carry
+//
+// A reason added to the writer but not to a reader is not a cosmetic gap: the
+// reader REJECTS the payload, so the officer's checklist answered 502 for the
+// whole application and the case disappeared from the queue. One tuple, one set.
+export const CLEARANCE_REVIEW_REASONS = [
+  /** The certificate's content needs a decision only a human can make. */
+  'CLEARANCE_CONTENT_REVIEW',
+  /** The name on the certificate is only partly the applicant's. */
+  'IDENTITY_NAME_PARTIAL',
+  /** The holder field could not be read at all. */
+  'IDENTITY_HOLDER_UNREADABLE',
+  /**
+   * We could not verify it — the registry never answered within the retry
+   * budget, so the certificate went to a human unverified instead of sitting at
+   * PENDING for ever. Deliberately cause-neutral: the same landing place for an
+   * Irembo outage, a network partition or an unreadable registry response.
+   */
+  'CLEARANCE_UNVERIFIED',
+] as const;
+
+export type ClearanceReviewReason = (typeof CLEARANCE_REVIEW_REASONS)[number];
+
+/** Membership test for the readers that rebuild a payload field by field. */
+export const CLEARANCE_REVIEW_REASON_SET: ReadonlySet<string> = new Set(CLEARANCE_REVIEW_REASONS);

@@ -16,6 +16,13 @@
 // ══════════════════════════════════════════════════════════════════
 
 export { startHttpServer } from './server.js';
+export {
+  BIND_HOST_ENV,
+  DEFAULT_BIND_HOST,
+  isLoopbackHost,
+  resolveBindHost,
+  type ResolveBindHostOptions,
+} from './bind-host.js';
 export { HttpError } from './errors.js';
 export {
   HOST_COOKIE_PREFIX,

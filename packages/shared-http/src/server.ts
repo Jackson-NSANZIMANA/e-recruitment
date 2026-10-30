@@ -31,6 +31,7 @@ import { randomUUID } from 'node:crypto';
 import { HttpError } from './errors.js';
 import { parseCookieHeader, serializeSetCookie } from './cookies.js';
 import { corsPreflightHeaders, corsResponseHeaders, isAllowedOrigin } from './cors.js';
+import { resolveBindHost } from './bind-host.js';
 import { versionBody } from './version.js';
 import type {
   AccessLogRecord,
@@ -131,7 +132,10 @@ export function startHttpServer(options: HttpServerOptions): Promise<HttpServer>
     serviceName,
     port,
     routes,
-    host = '0.0.0.0',
+    // USRP_HTTP_BIND_HOST, default 0.0.0.0 (see bind-host.ts): the sandbox sets
+    // it to loopback so eleven credential-bearing services and the edge stop
+    // listening on every interface of a developer's machine.
+    host = resolveBindHost(),
     maxBodyBytes = DEFAULT_MAX_BODY_BYTES,
     shutdownTimeoutMs = DEFAULT_SHUTDOWN_TIMEOUT_MS,
     handleSignals = true,

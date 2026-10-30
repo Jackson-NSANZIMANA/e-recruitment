@@ -31,7 +31,7 @@ export class PgClearanceVerificationRepository implements ClearanceVerificationR
     try {
       return await sql.begin(async (tx): Promise<RecordVerificationResult> => {
         await tx`SET LOCAL ROLE ${sql(SERVICE_ROLE)}`;
-        const rows = await tx<{ result: { outcome?: string } }[]>`
+        const rows = await tx<{ result: { outcome?: string; reason?: string } }[]>`
           SELECT ${schema}.record_clearance_verification(
             ${input.applicationId}::uuid,
             ${input.applicantId}::uuid,
@@ -49,7 +49,13 @@ export class PgClearanceVerificationRepository implements ClearanceVerificationR
         `;
         const outcome = rows[0]?.result.outcome;
         if (outcome === 'RECORDED' || outcome === 'ALREADY_RECORDED') return outcome;
-        throw new VerificationPersistenceError(`record_clearance_verification refused (${outcome ?? 'no answer'})`);
+        // The reason is the function's own closed code (UNKNOWN_APPLICATION,
+        // SUPERSEDES_VERDICT — rls/0044) and belongs in the error: it is the
+        // difference between a bug and a late escalation being refused.
+        const reason = rows[0]?.result.reason;
+        throw new VerificationPersistenceError(
+          `record_clearance_verification refused (${outcome ?? 'no answer'}${reason === undefined ? '' : `: ${reason}`})`,
+        );
       });
     } catch (cause) {
       if (cause instanceof VerificationPersistenceError) throw cause;

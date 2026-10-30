@@ -182,6 +182,14 @@ function serviceEnv(s: Secrets): Record<string, string> {
     KAFKA_SSL: 'false',
     MINIO_USE_SSL: 'false',
     EDGE_COOKIE_SECURE: 'true',
+    // Loopback only (evaluation D9). These twelve processes carry live session
+    // credentials — the edge holds an upstream credential for every officer
+    // session — and the sandbox's own containers were ALWAYS loopback-bound
+    // (127.0.0.1:4992/4993/4995). Only the Node services listened on every
+    // interface of the developer's machine. The scripts keep their `localhost`
+    // URLs: Node connects localhost with family auto-selection (default since
+    // Node 20), so a 127.0.0.1 bind is reachable as either family.
+    USRP_HTTP_BIND_HOST: '127.0.0.1',
     IDENTITY_CLIENT_ID: SANDBOX_CLIENT_ID,
     IAM_BASE_URL: local(4911),
     APPLICATION_SERVICE_BASE_URL: local(4906),

@@ -266,6 +266,20 @@ apply_sql "${RLS_DIR}/0040_clearance_certificates.sql" "rls/0040 (clearance cert
 # S12c (ADR-049): database-level guard on the additive campaign policy v2 block.
 apply_sql "${RLS_DIR}/0041_campaign_policy_v2.sql" "rls/0041 (campaign policy v2 guard)"
 
+# Phase-0 parity (evaluation D1/D12): the two PLATFORM-WIDE columns that rdf_ops
+# alone had while shared, agency-agnostic adapters wrote and read them — an RNP or
+# RCS invitation could be sent and never advance, and an RNP/RCS score conflict
+# could never be resolved. The divergence set is then pinned by
+# selfcheck/verify-cross-agency-column-parity.ts, so the next one cannot appear
+# unnoticed.
+apply_sql "${RLS_DIR}/0043_cross_agency_column_parity.sql" "rls/0043 (cross-agency column parity: D1/D12)"
+
+# Phase-0 terminal outcome (evaluation D2): a clearance the registry never
+# answered for may end in a HUMAN (REVIEW + CLEARANCE_UNVERIFIED) instead of a
+# PENDING row nobody looks at, and a late escalation may not supersede a verdict.
+# Replaces record_clearance_verification, so it MUST follow rls/0040.
+apply_sql "${RLS_DIR}/0044_clearance_unverified_escalation.sql" "rls/0044 (clearance escalation: D2)"
+
 printf '\n'
 
 ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts + applicant auth + erasure requests + stored contact + edge sessions + event outbox + slot reservations + submission integrity + walk-in outbox grant + shared rate-limit buckets + required extensions + campaign control plane + functions-only command boundary + onboarding lockout + application policy binding + document venue verification + exam invitation + gate admissions + officer lifecycle + biometric identity evidence in place"

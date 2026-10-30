@@ -3558,6 +3558,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "sms_notification_status": {
+          "name": "sms_notification_status",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": false
+        },
         "physical_test_completed_at": {
           "name": "physical_test_completed_at",
           "type": "timestamp with time zone",
@@ -4857,6 +4863,12 @@
           "primaryKey": false,
           "notNull": false,
           "default": false
+        },
+        "sync_conflict_resolution": {
+          "name": "sync_conflict_resolution",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",
@@ -7018,6 +7030,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "sms_notification_status": {
+          "name": "sms_notification_status",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": false
+        },
         "physical_test_completed_at": {
           "name": "physical_test_completed_at",
           "type": "timestamp with time zone",
@@ -8289,6 +8307,12 @@
           "primaryKey": false,
           "notNull": false,
           "default": false
+        },
+        "sync_conflict_resolution": {
+          "name": "sync_conflict_resolution",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",

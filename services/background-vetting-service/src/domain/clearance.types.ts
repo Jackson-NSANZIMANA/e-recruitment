@@ -60,8 +60,16 @@ export type ClearanceFailureCode =
   | 'CERTIFICATE_EXPIRED'
   | 'CERTIFICATE_NOT_BOUND';
 
-/** Why a human must look (the amber queue reasons, ADR-048 §3). */
-export type ClearanceReviewReason = 'CLEARANCE_CONTENT_REVIEW' | 'IDENTITY_NAME_PARTIAL' | 'IDENTITY_HOLDER_UNREADABLE';
+/**
+ * Why a human must look (the amber queue reasons, ADR-048 §3).
+ *
+ * Declared in @usrp/shared-types because four artefacts enforce it — this
+ * writer, the rls/0044 CHECK, application-service's queue allowlist and the
+ * edge-gateway's checklist allowlist. Duplicating the union here is how the
+ * three copies drifted apart in the first place; re-exported so every existing
+ * import keeps working.
+ */
+export type { ClearanceReviewReason } from '@usrp/shared-types';
 
 export const CLEARANCE_FAILURE_CODES: readonly ClearanceFailureCode[] = [
   'CERTIFICATE_NUMBER_MALFORMED',

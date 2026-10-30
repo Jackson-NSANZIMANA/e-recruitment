@@ -252,6 +252,12 @@ fi
 # database must agree. Runs early: every proof below asserts behaviour ON
 # this schema, so a silent divergence here would undermine all of them.
 run_ts "shared-database: schema drift (.ts ↔ snapshot ↔ live DB)" packages/shared-database/selfcheck/verify-schema-drift.ts
+# Cross-agency column parity (evaluation D1/D12). The drift proof above binds
+# .ts ↔ snapshot ↔ live; it says nothing about whether the three AGENCY schemas
+# agree with each other. They did not: a column present in rdf_ops alone, named
+# by an agency-agnostic adapter, is a 42703 that only RNP and RCS ever see — and
+# every proof that drives those paths is an RDF proof, so nothing went red.
+run_ts "shared-database: cross-agency column parity (D1/D12 — declared divergences only)" packages/shared-database/selfcheck/verify-cross-agency-column-parity.ts
 # BUILD-001 migration acceptance: apply the exact pre-feature migrations to a
 # disposable real PostgreSQL database, insert legacy campaign/session rows,
 # apply 0002–0004, then replay every bootstrap RLS SQL file twice and attempt

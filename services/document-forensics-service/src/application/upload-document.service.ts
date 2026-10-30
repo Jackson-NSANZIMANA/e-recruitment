@@ -218,6 +218,12 @@ export class UploadDocumentService {
       fileSizeBytes: command.bytes.length,
       virusScanStatus: 'CLEAN',
       verdict: analysis.verdict,
+      // Ingress REPLACES: the object key is derived from (agency, application,
+      // type), so these bytes take the place of an earlier upload of the same
+      // document. Any human decision about the old bytes is withdrawn with them
+      // (evaluation D14) — the record must not claim a review of content it no
+      // longer holds. analyze/ omits this: it re-scores what is already stored.
+      objectReplaced: true,
     });
     if (recorded.kind === 'APPLICATION_NOT_FOUND') {
       // Defence in depth: the ownership read already proved the row exists in
@@ -248,6 +254,10 @@ export class UploadDocumentService {
         forensicsScore: analysis.verdict.score,
         c2paManifestPresent: signals.hasC2paManifest,
         encryptedAtRest: true,
+        // The legal-process fact, in the trail: the citizen replaced a document,
+        // and whether that also withdrew an officer's decision about the old one.
+        replacedEarlierUpload: true,
+        ...(recorded.reviewCleared === true ? { clearedPriorReview: true } : {}),
       }),
     );
 
