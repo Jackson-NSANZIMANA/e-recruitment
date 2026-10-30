@@ -127,7 +127,11 @@ function mergeVary(a: string | undefined, b: string | undefined): string | undef
  * Routes are matched exactly on method + path; `/health`, `/ready` and
  * `/version` are reserved and served by the transport itself.
  */
-export function startHttpServer(options: HttpServerOptions): Promise<HttpServer> {
+// `async` on purpose: the bind host is resolved here (see bind-host.ts), and a
+// misconfigured USRP_HTTP_BIND_HOST must REJECT this promise rather than throw
+// synchronously — a caller that writes `startHttpServer(o).catch(...)` would
+// otherwise never see it, and the process would die on an uncaught exception.
+export async function startHttpServer(options: HttpServerOptions): Promise<HttpServer> {
   const {
     serviceName,
     port,
