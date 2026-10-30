@@ -102,6 +102,12 @@ export interface ApplicantAuthConfig {
   readonly onboardingMaxFailures: number;
   readonly onboardingFailureWindowSeconds: number;
   readonly onboardingLockSeconds: number;
+  /**
+   * How long the OTP request waits for the SMS hand-off before answering (default 2000 ms).
+   * The send itself carries on: a real provider can take longer than the edge waits
+   * (two 8 s attempts), and the answer never depended on the outcome anyway.
+   */
+  readonly otpSendWaitMs?: number;
 }
 
 export interface ApplicantAuthDeps {
@@ -201,11 +207,21 @@ export class ApplicantAuthService {
       expiresAt,
     });
 
-    // The ONLY component that sees the raw destination is the channel.
-    await this.deps.sms.send({
-      destination: phone,
-      body: `USRP verification code: ${otp}. Valid ${String(Math.round(this.deps.config.otpTtlSeconds / 60))} minutes. Never share this code.`,
-    });
+    // The ONLY component that sees the raw destination is the channel. Its outcome does not
+    // change the answer (CHALLENGED either way, and the channel logs its own result), so the
+    // request waits a bounded moment for the hand-off and the send finishes on its own.
+    const sending = this.deps.sms
+      .send({
+        destination: phone,
+        body: `USRP verification code: ${otp}. Valid ${String(Math.round(this.deps.config.otpTtlSeconds / 60))} minutes. Never share this code.`,
+      })
+      .catch(() => 'FAILED' as const);
+    let budget: NodeJS.Timeout | undefined;
+    await Promise.race([
+      sending,
+      new Promise<void>((resolve) => { budget = setTimeout(resolve, this.deps.config.otpSendWaitMs ?? 2000); }),
+    ]);
+    clearTimeout(budget);
 
     await this.#audit(applicantId, 'APPLICANT_OTP_ISSUED', command.channel, context);
     return { kind: 'CHALLENGED' };
