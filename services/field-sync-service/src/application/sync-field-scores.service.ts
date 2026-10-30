@@ -16,6 +16,14 @@
 // A rejected or stale record does not stop the batch — each record's outcome is
 // reported independently, so a re-upload is safe (stale/duplicate → no-op). Only
 // an infra fault throws (→ the whole request fails, nothing half-committed).
+//
+// ONE AGENCY PER BATCH IS A CONSTRUCTION, NOT A HOPE (evaluation D15). The batch
+// carries no agency of its own: the agency is the caller's (from the verified
+// token) and step 2 refuses any record whose DEVICE belongs elsewhere. So a
+// mixed upload cannot write into two ops schemas — the sibling records come back
+// AGENCY_MISMATCH and are never stored — which is what makes "one infra fault
+// fails the whole request" acceptable: the request it fails can only ever have
+// been touching one agency's rows.
 // ══════════════════════════════════════════════════════════════════
 
 import { verifyFieldScoreRecord, type SignableFieldPayload } from '@usrp/shared-security';

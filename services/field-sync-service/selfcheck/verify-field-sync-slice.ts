@@ -88,12 +88,14 @@ const DEV_A = 'DEV-RDF-A';
 const DEV_B = 'DEV-RDF-B';
 const DEV_UNENROLLED = 'DEV-RDF-GHOST';
 const DEV_REVOKED = 'DEV-RDF-REVOKED';
-const DEVICE_IDS = [DEV_A, DEV_B, DEV_UNENROLLED, DEV_REVOKED];
+const DEV_RNP = 'DEV-RNP-A'; // enrolled under RNP: the cross-agency probe (D15)
+const DEVICE_IDS = [DEV_A, DEV_B, DEV_UNENROLLED, DEV_REVOKED, DEV_RNP];
 const OFFICER_ID = '5f000000-0000-4000-8000-00000000ff01';
 
 const keysA = generateDeviceKeyPair();
 const keysB = generateDeviceKeyPair();
 const keysRevoked = generateDeviceKeyPair();
+const keysRnp = generateDeviceKeyPair();
 
 /**
  * The exam ticket ISSUED to an application (seeded into qr_invitation_code)
@@ -465,6 +467,27 @@ async function main(): Promise<void> {
     // DEV_A is enrolled under RDF; an RNP officer syncing it → agency mismatch.
     const mismatch = await syncOne(makeRecord(APP_ACCEPT, keysA.privateKeyPem, DEV_A, { [DEV_A]: 9 }), token('officer', 'RNP'));
     check('RNP officer + RDF device → REJECTED AGENCY_MISMATCH', mismatch.result['reason'] === 'AGENCY_MISMATCH', JSON.stringify(mismatch.result));
+    // D15: ONE AGENCY PER BATCH, by construction. A batch is the caller's agency
+    // (from the token); a record whose DEVICE belongs to a sibling agency is
+    // refused per-record, so a mixed upload can never write into two ops
+    // schemas. That is what makes "an infra fault fails the whole request"
+    // acceptable — the request can only ever have been touching one agency.
+    const eRnp = await post(ENROLL_DEVICE_PATH, { deviceId: DEV_RNP, publicKeyPem: keysRnp.publicKeyPem }, token('officer', 'RNP'));
+    check('RNP officer enrolls DEV_RNP (fixture for the mixed batch)', eRnp.status === 201, `${eRnp.status} ${eRnp.text}`);
+    const mixed = await post(SYNC_SCORES_PATH, {
+      records: [
+        makeRecord(APP_ACCEPT, keysA.privateKeyPem, DEV_A, { [DEV_A]: 30 }),
+        makeRecord(APP_ACCEPT, keysRnp.privateKeyPem, DEV_RNP, { [DEV_RNP]: 1 }),
+      ],
+    }, token('officer', 'RDF'));
+    const mixedResults = asRecord(mixed.json)['results'];
+    const mixedList = Array.isArray(mixedResults) ? mixedResults.map(asRecord) : [];
+    check('mixed batch: the RDF record is judged', mixedList[0]?.['status'] === 'DUPLICATE' || mixedList[0]?.['status'] === 'ACCEPTED' || mixedList[0]?.['status'] === 'SUPERSEDED', JSON.stringify(mixedList[0]));
+    check('mixed batch: the RNP-device record is refused per-record (AGENCY_MISMATCH)',
+      mixedList[1]?.['status'] === 'REJECTED' && mixedList[1]?.['reason'] === 'AGENCY_MISMATCH', JSON.stringify(mixedList[1]));
+    check('mixed batch: nothing was written into the sibling agency schema',
+      (await admin`SELECT count(*)::int AS n FROM rnp_ops.physical_test_scores WHERE application_id = ${APP_ACCEPT}`)[0]?.['n'] === 0);
+
     // A well-formed record for an application absent from the officer's agency schema.
     const crossApp = makeRecord('5f000000-0000-4000-8000-0000dead0001', keysA.privateKeyPem, DEV_A, { [DEV_A]: 1 });
     check('unknown application in agency schema → NOT_FOUND', (await syncOne(crossApp)).result['status'] === 'NOT_FOUND');
