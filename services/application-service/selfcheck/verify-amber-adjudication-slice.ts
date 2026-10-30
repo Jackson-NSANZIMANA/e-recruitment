@@ -31,6 +31,7 @@
 import { randomUUID } from 'node:crypto';
 import postgres from 'postgres';
 import { InMemoryEventBus } from '@usrp/shared-events';
+import { asJsonb } from '@usrp/shared-database';
 import { startHttpServer } from '@usrp/shared-http';
 import { generateDeviceKeyPair } from '@usrp/shared-security';
 import { makeAuthVerifier, signAuthToken, type AuthTokenClaims } from '@usrp/shared-auth';
@@ -240,7 +241,9 @@ async function seed(): Promise<void> {
               'ELIGIBLE'::rdf_ops.age_eligibility_status,
               ${academicSettled ? 'ELIGIBLE' : 'PENDING'}::rdf_ops.academic_eligibility_status,
               ${criminal}::rdf_ops.criminal_clearance_status,
-              ${id === APP_ACADEMIC_HOLD ? admin.json({ failureCode: 'NESA_REVIEW_REQUIRED', reviewReasons: ['MALPRACTICE'] }) : null})`;
+              ${id === APP_ACADEMIC_HOLD
+                ? admin.json(asJsonb({ failureCode: 'NESA_REVIEW_REQUIRED', reviewReasons: ['MALPRACTICE'] }))
+                : null})`;
   }
   await admin`
     INSERT INTO rnp_ops.applications (id, processing_code, applicant_id, campaign_id, category, status)
@@ -262,7 +265,7 @@ async function seedDocument(appId: string, lane: 'AMBER' | 'RED' | 'GREEN', key:
        virus_scan_status, forensics_score, forensics_lane, forensics_flags, forensics_completed_at)
     VALUES (${appId}, 'OLEVEL_CERTIFICATE'::rdf_ops.document_type, ${key}, 'usrp-documents',
             'CLEAN', ${lane === 'GREEN' ? 100 : lane === 'AMBER' ? 65 : 20},
-            ${lane}::rdf_ops.document_lane, ${admin.json(CLEAN_FLAGS)}, now())
+            ${lane}::rdf_ops.document_lane, ${admin.json(asJsonb(CLEAN_FLAGS))}, now())
     RETURNING id`;
   const id = rows[0]?.id;
   if (!id) throw new Error('document seed failed');
@@ -401,6 +404,13 @@ async function main(): Promise<void> {
       const amberEntry = queue.find((e) => e['processingCode'] === 'RDF-98001');
       check('amber entry carries document signals',
         amberEntry?.['documentType'] === 'OLEVEL_CERTIFICATE' && amberEntry?.['forensicsScore'] === 65);
+      // The flags must arrive as an OBJECT: a jsonb value written through a
+      // pre-stringified parameter holds a JSON *string*, and every reader
+      // downstream (the edge's jsonObject projection included) then sees null.
+      const flags = amberEntry?.['forensicsFlags'] as Record<string, unknown> | null | undefined;
+      check('… and the flags as an object, not a JSON string',
+        flags !== null && typeof flags === 'object' && flags['overallScore'] === 65,
+        JSON.stringify(flags));
       const lateEntry = queue.find((e) => e['processingCode'] === 'RDF-98005');
       check('adjudication hold listed w/o document fields',
         lateEntry !== undefined && lateEntry['status'] === 'ADJUDICATION_REVIEW' && lateEntry['documentType'] === null);
