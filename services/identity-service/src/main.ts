@@ -33,6 +33,8 @@ import { loadApplicantPortalConfig, loadDocumentUploadConfig, loadIdentityConfig
 import { verifyIdentityRoute } from './adapters/http/verify-identity.controller.js';
 import { erasureRoute } from './adapters/http/erasure.controller.js';
 import { applicantAuthRoutes } from './adapters/http/applicant-auth.controller.js';
+import { ownIdentityRoutes } from './adapters/http/own-identity.controller.js';
+import { PgOwnIdentityReader } from './adapters/own-identity.pg-reader.js';
 import { erasureRequestRoutes } from './adapters/http/erasure-request.controller.js';
 import { createSmsChannel } from '@usrp/shared-sms';
 import { HttpApplicationsGateway } from './adapters/applications.http-gateway.js';
@@ -134,6 +136,8 @@ async function main(): Promise<void> {
       ),
       erasureRoute(createEraseIdentityService(config, bus, smsChannel), verify),
       ...applicantAuthRoutes(applicantAuth, applicationsGateway),
+      // ADR-049: the citizen's own verified identity (allowlisted), for the apply-wizard pre-fill.
+      ...ownIdentityRoutes(applicantAuth, new PgOwnIdentityReader(config.security.encryptionKey)),
       // BUILD-002: the citizen's document door (session-authenticated bridge).
       ...applicantDocumentRoutes(applicantAuth, documentGateway, uploadConfig),
       // ADR-020: citizen erasure-request intake + officer/DPO queue routes

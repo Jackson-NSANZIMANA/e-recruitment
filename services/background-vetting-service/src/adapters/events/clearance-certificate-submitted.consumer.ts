@@ -30,6 +30,7 @@ export async function startClearanceCertificateConsumer(
       category: event.category,
       clearanceCertificateNumber: event.clearanceCertificateNumber,
       referenceDate: event.referenceDate,
+      ...(event.clearancePolicy === undefined ? {} : { policy: event.clearancePolicy }),
       context: deriveContext(event),
     });
     logInfo('clearance_certificate_verified', {

@@ -113,6 +113,15 @@ export async function runJourney(subject: JourneySubject, config: JourneyConfig)
   const verify = await postPaced(citizen, '/edge/v1/auth/applicant/otp/verify', { onboardingToken: token, phoneNumber: subject.phone, otp });
   if (!note('signed in', verify.status >= 200 && verify.status < 300, statusOf(verify))) return steps;
 
+  // 2b. The wizard's NIDA pre-fill (ADR-049): exactly the allowlisted fields, nothing the citizen must not see.
+  const who = await citizen.get('/edge/v1/me/identity');
+  const identity = rec(who.body);
+  const ALLOWED = ['dateOfBirth', 'fullName', 'homeDistrict', 'homeProvince', 'nationality', 'placeOfBirth', 'sex'];
+  const keys = Object.keys(identity).sort();
+  if (!note('pre-fill: identity read returns exactly the allowlisted fields', who.status === 200 && keys.join() === ALLOWED.join() && identity['placeOfBirth'] === null && identity['nationality'] === null, `${statusOf(who)}, ${String(keys.length)} fields`)) return steps;
+  const raw = JSON.stringify(who.body);
+  if (!note('pre-fill: no National ID, photo, signature or parents\' names in the body', !raw.includes(subject.nationalId) && !/photo|signature|father|mother/i.test(raw))) return steps;
+
   // 3. Apply.
   const body: Record<string, string> = { campaignCode: config.campaignCode, category: subject.category };
   if (subject.nesaIndexNumber !== null) body['nesaIndexNumber'] = subject.nesaIndexNumber;
@@ -223,7 +232,8 @@ async function clearanceSteps(subject: JourneySubject, expect: ClearanceExpectat
   if (subject.clearanceNumber === null || subject.clearanceNumber === undefined) { note('a clearance number to give', false, 'the persona has no certificate'); return steps; }
 
   const before = rec(clearanceItem((await citizen.get(`/edge/v1/me/applications/document-checklist?applicationId=${applicationId}`)).body));
-  note('clearance outstanding before a number is given', before['state'] === 'NUMBER_REQUIRED' || before['state'] === 'VERIFIED', txt(before['state']));
+  // A same-day re-run finds the state a first run left behind; only an unknown state is a fault.
+  note('clearance outstanding before a number is given (or the state a first run left)', ['NUMBER_REQUIRED', 'VERIFYING', 'CORRECTION_NEEDED', 'UNDER_OFFICER_REVIEW', 'VERIFIED'].includes(txt(before['state'])), txt(before['state']));
 
   const malformed = await citizen.post('/edge/v1/me/applications/clearance-certificate', { applicationId, clearanceCertificateNumber: 'not-a-number' });
   note('a malformed number is refused where it can be corrected', malformed.status === 422 && rec(malformed.body)['error'] === 'CLEARANCE_NUMBER_MALFORMED', statusOf(malformed));

@@ -140,6 +140,15 @@ export interface ClearanceCertificateSubmittedEvent extends BaseEvent {
   readonly clearanceCertificateNumber: string;
   /** The calendar date (YYYY-MM-DD, Africa/Kigali) the validity window is measured against. */
   readonly referenceDate: string;
+  /**
+   * ADR-049: the application's pinned policy v2 clearance values (public configuration, no PII).
+   * Absent for a v1 campaign: the service's configured values govern.
+   */
+  readonly clearancePolicy?: {
+    readonly allowedCertificateCodes: readonly string[];
+    readonly noRecordCertificateCodes: readonly string[];
+    readonly validityDays: number;
+  };
 }
 
 // ── Topic: vetting.age ────────────────────────────────────────────

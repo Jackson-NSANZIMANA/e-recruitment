@@ -276,6 +276,16 @@ async function journey(argv: readonly string[], where: { readonly edgeBaseUrl: s
     gateOfficer: { loginHandle: gate.handle, password: REHEARSAL_STAFF_PASSWORD },
     reader: { loginHandle: reader.handle, password: REHEARSAL_STAFF_PASSWORD },
   };
+  if (argv.includes('--export-personas')) {
+    // For the frontend's live Playwright journeys (S12c): the synthetic facts a browser run needs, written to
+    // .sandbox/ (git-ignored, local). Synthetic values only; never the private persona.
+    const dir = join(REPO_ROOT, '.sandbox', 'personas');
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const file = join(dir, `${scenarioId}.json`);
+    writeFileSync(file, JSON.stringify({ campaignCode: config.campaignCode, gateOfficer: config.gateOfficer, reader: config.reader, personas: subjects.filter((x) => x.label !== 'PRIVATE') }, null, 2), { mode: 0o600 });
+    out(`${scenarioId}: ${String(subjects.length)} synthetic personas written to ${file}`);
+    return 0;
+  }
   out(`USRP SANDBOX JOURNEY · ${scenario.title} · ${config.campaignCode}`);
   let ok = true;
   for (const subject of subjects) {

@@ -10,10 +10,10 @@
 // ══════════════════════════════════════════════════════════════════
 
 import type { Agency } from '@usrp/shared-types';
-import { kigaliDate } from './clock.js';
+import { kigaliDate, kigaliStamp } from './clock.js';
 import { EdgeSession } from './edge.js';
 import { deterministicKey } from './idempotency.js';
-import { syntheticPolicy } from './policy.js';
+import { policyFromAnnouncement, syntheticPolicy } from './policy.js';
 import { ensureAgencyAdmin, ensureSecondAgencyAdmin } from './provision.js';
 import { REHEARSAL_CODE_PREFIX, stageCampaigns, type Scenario, type StagedCampaign } from './scenario.js';
 import { REHEARSAL_STAFF_PASSWORD, provisionStaff } from './staff.js';
@@ -175,6 +175,8 @@ async function playCampaign(scenario: Scenario, staged: StagedCampaign, config: 
     : [];
   for (const code of openCodes) {
     if (!code.startsWith(`${REHEARSAL_CODE_PREFIX}${agency}-`) || code === draft.publicCode) continue;
+    // The sandbox (REHEARSAL_COEXIST=1) keeps all six real campaigns open at once: only earlier days retire.
+    if (process.env['REHEARSAL_COEXIST'] === '1' && code.endsWith(`-${kigaliStamp(config.now)}`)) continue;
     const closed = await edge.post('/edge/v1/campaigns/registration-close', { publicCode: code }, deterministicKey(scenario.id, code, 'retire'));
     steps.push(classify(`retire ${code}`, closed.status, closed.replayed, closed.body));
   }
@@ -194,7 +196,7 @@ async function playCampaign(scenario: Scenario, staged: StagedCampaign, config: 
   steps.push(classify('draft', created.status, created.replayed, created.body));
   if (steps.at(-1)?.outcome === 'FAILED') return report(false);
 
-  const policy = syntheticPolicy({
+  const synthetic = syntheticPolicy({
     publicCode: draft.publicCode,
     agency,
     categories: draft.targetCategories,
@@ -202,6 +204,8 @@ async function playCampaign(scenario: Scenario, staged: StagedCampaign, config: 
     scenarioId: scenario.id,
     scenarioVersion: scenario.version,
   });
+  // ADR-049: a scenario encoded from an announcement publishes policy v2 as PRINTED.
+  const policy = scenario.announcement === undefined ? synthetic : policyFromAnnouncement(synthetic, agency, scenario.announcement.categories);
   const versioned = await edge.post('/edge/v1/campaigns/policy', policy, key('policy'));
   steps.push(classify('policy', versioned.status, versioned.replayed, versioned.body));
   if (steps.at(-1)?.outcome === 'FAILED') return report(false);

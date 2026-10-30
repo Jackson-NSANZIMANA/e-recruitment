@@ -20,13 +20,15 @@ export class PgClearanceAttachRepository implements ClearanceAttachRepository {
         await tx`SET LOCAL ROLE ${sql(SYSTEM_ROLE)}`;
         for (const agency of AGENCIES) {
           const schema = sql(schemaForAgency(agency));
-          const rows = await tx<{ category: ApplicationCategory; status: ApplicationStatus; criminal: CriminalClearanceStatus }[]>`
-            SELECT category::text AS category, status::text AS status, criminal_clearance_status::text AS criminal
-            FROM ${schema}.applications
-            WHERE id = ${applicationId} AND applicant_id = ${applicantId}
+          const rows = await tx<{ category: ApplicationCategory; status: ApplicationStatus; criminal: CriminalClearanceStatus; block: unknown }[]>`
+            SELECT category::text AS category, status::text AS status, criminal_clearance_status::text AS criminal,
+                   (SELECT pv.policy_document -> a.category::text -> 'v2' -> 'clearance'
+                      FROM public_core.campaign_policy_versions pv WHERE pv.id = a.policy_version_id) AS block
+            FROM ${schema}.applications a
+            WHERE a.id = ${applicationId} AND a.applicant_id = ${applicantId}
           `;
           const row = rows[0];
-          if (row !== undefined) return { agency, category: row.category, status: row.status, criminalStatus: row.criminal };
+          if (row !== undefined) return { agency, category: row.category, status: row.status, criminalStatus: row.criminal, clearancePolicy: readClearanceValues(row.block) };
         }
         return null;
       });
@@ -34,4 +36,16 @@ export class PgClearanceAttachRepository implements ClearanceAttachRepository {
       throw new ApplicationReadError('Could not read the application for the clearance certificate.', { cause });
     }
   }
+}
+
+/** The clearance block of a stored v2 category, or null (v1 campaign, or damage). */
+function readClearanceValues(block: unknown): OwnApplicationForClearance['clearancePolicy'] {
+  if (block === null || typeof block !== 'object') return null;
+  const b = block as Record<string, unknown>;
+  const strings = (v: unknown): string[] | null => (Array.isArray(v) && v.every((x) => typeof x === 'string') ? (v) : null);
+  const allowed = strings(b['allowedCertificateCodes']);
+  const noRecord = strings(b['noRecordCertificateCodes']);
+  const days = b['validityDays'];
+  if (allowed === null || noRecord === null || typeof days !== 'number') return null;
+  return { allowedCertificateCodes: allowed, noRecordCertificateCodes: noRecord, validityDays: days };
 }

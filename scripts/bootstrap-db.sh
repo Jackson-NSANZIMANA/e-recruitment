@@ -263,6 +263,9 @@ apply_sql "${RLS_DIR}/0042_national_id_hint.sql" "rls/0042 (encrypted national I
 # owned by the NOLOGIN usrp_clearance_owner (EXECUTE: usrp_vetting_service).
 apply_sql "${RLS_DIR}/0040_clearance_certificates.sql" "rls/0040 (clearance certificate verifications)"
 
+# S12c (ADR-049): database-level guard on the additive campaign policy v2 block.
+apply_sql "${RLS_DIR}/0041_campaign_policy_v2.sql" "rls/0041 (campaign policy v2 guard)"
+
 printf '\n'
 
 ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts + applicant auth + erasure requests + stored contact + edge sessions + event outbox + slot reservations + submission integrity + walk-in outbox grant + shared rate-limit buckets + required extensions + campaign control plane + functions-only command boundary + onboarding lockout + application policy binding + document venue verification + exam invitation + gate admissions + officer lifecycle + biometric identity evidence in place"

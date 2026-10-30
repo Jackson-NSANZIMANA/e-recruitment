@@ -1,0 +1,26 @@
+{
+  "name": "@usrp/shared-campaign-policy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pure, zero-dependency campaign policy v2 (ADR-049): per-qualification age caps, education alternatives, conviction rules, documents, clearance values",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint 'src/**/*.ts'"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.8.3"
+  }
+}

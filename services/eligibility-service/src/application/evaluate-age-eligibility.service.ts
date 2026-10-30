@@ -20,6 +20,8 @@ import type {
 } from '@usrp/shared-types';
 import type { IdentityReader } from '../ports/identity-reader.js';
 import { evaluateAgeEligibility } from '../domain/age-rules.js';
+import type { CampaignPolicyReader } from '../ports/campaign-policy.reader.js';
+import { ageWindowFromPolicy } from '../domain/policy-v2-gates.js';
 import { agencyForCategory } from '../domain/category-agency.js';
 
 export interface EvaluateAgeEligibilityCommand {
@@ -57,6 +59,8 @@ export type EvaluateAgeEligibilityOutcome =
 export interface EvaluateAgeEligibilityDeps {
   readonly identityReader: IdentityReader;
   readonly eventBus: EventBus;
+  /** ADR-049: the application's pinned policy; absent, the engine constants govern. */
+  readonly policyReader?: CampaignPolicyReader;
   /** Injectable clock for deterministic tests; defaults to real time. */
   readonly clock?: () => Date;
 }
@@ -78,10 +82,17 @@ export class EvaluateAgeEligibilityService {
       };
     }
 
-    const asOf = command.referenceDate
-      ? new Date(command.referenceDate)
-      : (this.deps.clock ?? ((): Date => new Date()))();
-    const result = evaluateAgeEligibility(command.category, applicant.dateOfBirth, asOf);
+    const pinned =
+      this.deps.policyReader === undefined || command.applicationId === undefined
+        ? null
+        : await this.deps.policyReader.findPinnedPolicy(command.applicationId, command.category);
+    // One reference date for both gates (ADR-049): a v2 campaign measures age on the date its policy printed.
+    const asOf = pinned !== null
+      ? new Date(`${pinned.referenceDate}T00:00:00Z`)
+      : command.referenceDate
+        ? new Date(command.referenceDate)
+        : (this.deps.clock ?? ((): Date => new Date()))();
+    const result = evaluateAgeEligibility(command.category, applicant.dateOfBirth, asOf, pinned === null ? undefined : ageWindowFromPolicy(pinned));
     const agency = agencyForCategory(command.category);
     const context = command.context ?? newCorrelationContext();
 

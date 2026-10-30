@@ -87,6 +87,12 @@ export interface CampaignCategoryPolicy {
     readonly code: string;
     readonly reference: string;
   };
+  /**
+   * ADR-049: the additive policy v2 block (per-qualification age bands,
+   * education alternatives, conviction rule, documents, clearance values).
+   * Its shape is owned by @usrp/shared-campaign-policy; a v1 reader ignores it.
+   */
+  readonly v2?: unknown;
 }
 
 export type CampaignPolicyDocument = Readonly<

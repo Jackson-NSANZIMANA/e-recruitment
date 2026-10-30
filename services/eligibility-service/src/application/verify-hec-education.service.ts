@@ -13,6 +13,9 @@
 // facts.
 // ══════════════════════════════════════════════════════════════════
 
+import { SPECIALIST_FIELDS, type SpecialistField } from '@usrp/shared-campaign-policy';
+import { applyPolicyV2Education } from '../domain/policy-v2-gates.js';
+import type { CampaignPolicyReader } from '../ports/campaign-policy.reader.js';
 import { newCorrelationContext, newEnvelope, type EventBus, type EventContext } from '@usrp/shared-events';
 import {
   EDUCATION_REQUIREMENTS,
@@ -85,6 +88,8 @@ export interface VerifyHecEducationDeps {
   readonly identityReader: IdentityReader;
   readonly hecGateway: HecGateway;
   readonly eventBus: EventBus;
+  /** ADR-049: the application's pinned policy; absent, the engine constants govern. */
+  readonly policyReader?: CampaignPolicyReader;
   /** Injectable clock for deterministic tests; defaults to real time. */
   readonly clock?: () => Date;
 }
@@ -140,7 +145,16 @@ export class VerifyHecEducationService {
         : { kind: 'DEGREE_NOT_FOUND', applicantId: command.applicantId, hecRequestId: lookup.hecRequestId };
     }
 
-    const education = evaluateHecEducation(command.category, lookup.payload, asOf);
+    const evaluated = evaluateHecEducation(command.category, lookup.payload, asOf);
+    const pinned = this.deps.policyReader === undefined ? null : await this.deps.policyReader.findPinnedPolicy(command.applicationId, command.category);
+    const holder = pinned === null ? null : await this.deps.identityReader.findApplicantById(command.applicantId);
+    const field = (SPECIALIST_FIELDS as readonly string[]).includes(lookup.payload.specialistField ?? '') ? (lookup.payload.specialistField as SpecialistField) : null;
+    // A v2 campaign whose applicant cannot be re-read is not judged by v1 constants: PENDING, retried.
+    const education: HecEducationEligibilityResult = pinned !== null && holder === null
+      ? { ...evaluated, academicStatus: 'PENDING', meetsRequirement: false, reason: 'The applicant record could not be read; the check will be repeated.' }
+      : holder === null
+        ? evaluated
+        : applyPolicyV2Education(evaluated, pinned, { level: evaluated.evaluatedLevel, field, sciencePercent: undefined, dateOfBirth: holder.dateOfBirth });
     const action = education.meetsRequirement ? 'HEC_EDUCATION_PASSED' : 'HEC_EDUCATION_FAILED';
     const { event, audit } = this.emit(command, agency, true, lookup.payload.institutionName, education, lookup.hecRequestId, context, asOf, action, lookup.payload);
     await this.deps.eventBus.publish(event);

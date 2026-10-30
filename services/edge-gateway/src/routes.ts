@@ -60,6 +60,7 @@ import {
 } from './adapters/http/campaigns.controller.js';
 import { verifyIdentityHandler } from './adapters/http/identity.controller.js';
 import { admitAtGateHandler } from './adapters/http/gate-admission.controller.js';
+import { getMyIdentityHandler } from './adapters/http/identity-read.controller.js';
 import { getMyExamInvitationHandler } from './adapters/http/exam-invitation.controller.js';
 import {
   getDocumentChecklistHandler,
@@ -164,6 +165,7 @@ export function edgeHandlers(deps: EdgeDeps): Record<EdgeOperationId, RouteHandl
     submitMyApplication: submitMyApplicationHandler(deps),
     getMyExamInvitation: getMyExamInvitationHandler(deps),
     getMyDocumentChecklist: getMyDocumentChecklistHandler(deps),
+    getMyIdentity: getMyIdentityHandler(deps),
     uploadMyDocument: uploadMyDocumentHandler(deps),
     withdrawMyApplication: withdrawMyApplicationHandler(deps),
     attachMyClearanceCertificate: attachMyClearanceCertificateHandler(deps),

@@ -36,7 +36,8 @@ import {
   type EnvSource,
 } from '@usrp/shared-config';
 import { LogSmsChannel } from './log-sms.channel.js';
-import type { SmsChannel } from './sms-channel.js';
+import { normaliseToE164 } from './phone.js';
+import type { OutboundSms, SmsChannel, SmsDeliveryOutcome } from './sms-channel.js';
 import { DailyCostCap, PerNumberLimiter } from './twilio-guards.js';
 import { TwilioSmsChannel } from './twilio-sms.channel.js';
 
@@ -85,8 +86,16 @@ export function createSmsChannel(options: CreateSmsChannelOptions): SmsChannel {
   if ((env.TWILIO_FROM ?? '') === '' && (env.TWILIO_MESSAGING_SERVICE_SID ?? '') === '') {
     issues.push('TWILIO_FROM or TWILIO_MESSAGING_SERVICE_SID is required.');
   }
+  let allowed: ReadonlySet<string> | null = null;
   if (environment === 'sandbox') {
     const live = (source['SANDBOX_SMS'] ?? '').trim().toLowerCase() === 'twilio';
+    if (live) {
+      // A real send in the sandbox reaches only the owner's verified numbers: the synthetic
+      // population's numbers are well-formed Rwandan numbers that may belong to real people.
+      const list = (source['SANDBOX_SMS_ALLOWED_TO'] ?? '').split(',').map((n) => normaliseToE164(n.trim()));
+      if (list.length === 0 || list.some((n) => n === null)) issues.push('SANDBOX_SMS=twilio needs SANDBOX_SMS_ALLOWED_TO: the owner\'s verified numbers, comma-separated, each a valid phone number.');
+      else allowed = new Set(list as string[]);
+    }
     const base = env.TWILIO_BASE_URL;
     if (live) {
       if (base !== undefined && hostOf(base) !== 'api.twilio.com') issues.push('SANDBOX_SMS=twilio sends through api.twilio.com; TWILIO_BASE_URL must be unset or that host.');
@@ -102,7 +111,7 @@ export function createSmsChannel(options: CreateSmsChannelOptions): SmsChannel {
   if (issues.length > 0) throw new EnvValidationError(issues);
 
   const stateFile = (env.SMS_CAP_STATE_FILE ?? '').trim();
-  return new TwilioSmsChannel({
+  const twilio = new TwilioSmsChannel({
     accountSid: env.TWILIO_ACCOUNT_SID,
     authToken: env.TWILIO_AUTH_TOKEN,
     from: (env.TWILIO_FROM ?? '') === '' ? null : (env.TWILIO_FROM ?? null),
@@ -113,4 +122,25 @@ export function createSmsChannel(options: CreateSmsChannelOptions): SmsChannel {
     costCap: new DailyCostCap(env.SMS_DAILY_CAP, stateFile === '' ? null : stateFile),
     perNumber: new PerNumberLimiter(env.SMS_PER_NUMBER_MAX, env.SMS_PER_NUMBER_WINDOW_SECONDS * 1000),
   });
+  return allowed === null ? twilio : new AllowlistSmsChannel(twilio, allowed);
+}
+
+/**
+ * Refuses, before the provider is called, every destination outside the allowlist.
+ * FAILED is the transport truth for a message that was never handed to the gateway.
+ */
+export class AllowlistSmsChannel implements SmsChannel {
+  readonly #inner: SmsChannel;
+  readonly #allowed: ReadonlySet<string>;
+
+  constructor(inner: SmsChannel, allowed: ReadonlySet<string>) {
+    this.#inner = inner;
+    this.#allowed = allowed;
+  }
+
+  async send(message: OutboundSms): Promise<SmsDeliveryOutcome> {
+    const destination = normaliseToE164(message.destination);
+    if (destination === null || !this.#allowed.has(destination)) return 'FAILED';
+    return this.#inner.send(message);
+  }
 }

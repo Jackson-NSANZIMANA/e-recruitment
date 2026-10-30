@@ -10,13 +10,15 @@
 // never stored by application-service.
 // ══════════════════════════════════════════════════════════════════
 
-import type { Agency, ApplicationCategory, ApplicationStatus, CriminalClearanceStatus } from '@usrp/shared-types';
+import type { Agency, ApplicationCategory, ApplicationStatus, ClearanceCertificateSubmittedEvent, CriminalClearanceStatus } from '@usrp/shared-types';
 
 export interface OwnApplicationForClearance {
   readonly agency: Agency;
   readonly category: ApplicationCategory;
   readonly status: ApplicationStatus;
   readonly criminalStatus: CriminalClearanceStatus;
+  /** ADR-049: the pinned policy's clearance values, or null for a v1 campaign. */
+  readonly clearancePolicy: NonNullable<ClearanceCertificateSubmittedEvent['clearancePolicy']> | null;
 }
 
 export interface ClearanceAttachRepository {

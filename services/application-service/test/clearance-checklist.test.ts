@@ -37,7 +37,7 @@ test('queue reasons: clearance review, NESA review, and the generic fallbacks', 
   assert.deepEqual(queueReasons({ ...base, academic_status: 'PENDING', academic_detail: { failureCode: 'NESA_RECORD_NOT_BOUND' } }), []);
 });
 
-const own = (over: object = {}) => ({ findOwn: () => Promise.resolve({ agency: 'RDF' as const, category: 'RDF_REGULAR' as const, status: 'SUBMITTED' as never, criminalStatus: 'PENDING' as const, ...over }) });
+const own = (over: object = {}) => ({ findOwn: () => Promise.resolve({ agency: 'RDF' as const, category: 'RDF_REGULAR' as const, status: 'SUBMITTED' as never, criminalStatus: 'PENDING' as const, clearancePolicy: null, ...over }) });
 const cmd = (n: string, actor: object = { kind: 'system' }) => ({ actor: actor as never, applicantId: 'a', applicationId: 'b', clearanceCertificateNumber: n, context: { correlationId: 'c', causationId: 'c' } });
 
 test('attach: stages one event with the normalised number; refuses officers, closed and malformed', async () => {
@@ -65,4 +65,18 @@ test('attach: with the Irembo flow off nothing is accepted (no one would consume
   const off = new AttachClearanceCertificateService({ repository: own(), eventBus: bus, enabled: false });
   assert.equal((await off.attach(cmd('S990000000001ABCD'))).kind, 'NOT_ENABLED');
   assert.equal(bus.published.length, 0);
+});
+
+test('ADR-049: the pinned policy clearance values ride on the submitted event, a v1 campaign carries none', async () => {
+  const published: unknown[] = [];
+  const bus = { publish: (e: unknown) => { published.push(e); return Promise.resolve(); } } as never;
+  const values = { allowedCertificateCodes: ['A'], noRecordCertificateCodes: ['A'], validityDays: 60 };
+  const run = async (clearancePolicy: unknown) => {
+    published.length = 0;
+    const service = new AttachClearanceCertificateService({ repository: own({ clearancePolicy }) as never, eventBus: bus });
+    await service.attach({ actor: { kind: 'system' } as never, applicantId: 'a', applicationId: 'b', clearanceCertificateNumber: 'A123456789012ABCD', context: { correlationId: 'c', causationId: 'c' } as never });
+    return published[0] as Record<string, unknown>;
+  };
+  assert.deepEqual((await run(values))['clearancePolicy'], values);
+  assert.equal(Object.hasOwn(await run(null), 'clearancePolicy'), false);
 });

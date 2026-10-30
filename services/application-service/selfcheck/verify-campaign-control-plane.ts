@@ -1308,6 +1308,9 @@ async function main(): Promise<void> {
       'registrationClosesAt', 'examinationStartDate', 'examinationEndDate',
       'targetCategories', 'targetDistricts', 'allowsWalkIn', 'contactPhoneNumbers',
       'contactWebsite',
+      // ADR-049: the per-category eligibility summary on the DETAIL (age bands, accepted qualification levels,
+      // science minimum), the criteria the announcement already prints. The list view does not carry it.
+      'eligibility',
     ].sort();
     const privateNames = [
       'id', 'campaignId', 'policyDocument', 'policyHash', 'coverageHash',

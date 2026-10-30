@@ -427,7 +427,7 @@ paths:
           required: true
           schema: { type: string, minLength: 3, maxLength: 64 }
       responses:
-        '200': { description: Public projection only; internal UUIDs, policies, coverage, capacity, registrations, and audit facts are omitted. }
+        '200': { description: "Public projection only; internal UUIDs, policies, coverage, capacity, registrations, and audit facts are omitted. ADR-049 adds eligibility: per category { ageBands [{qualifications, minimumAge, maximumAge}], educationAlternatives [{level}], minimumSciencePercent } for a campaign published with policy v2, else an empty object (additive; the v1 fields are unchanged)." }
         '400': { description: Invalid or missing publicCode. }
         '404': { description: Campaign is not externally published or does not exist. }
         '503': { description: Public campaign read unavailable. }
@@ -969,6 +969,22 @@ paths:
           description: The applicant-session submission rate limit was exceeded.
         '503':
           description: Dependency failure (fail closed).
+
+  /edge/v1/me/identity:
+    get:
+      operationId: getMyIdentity
+      summary: The citizen's own verified identity, allowlisted, for the apply-wizard pre-fill (ADR-049, ADR-FE-019)
+      tags: [citizen]
+      x-usrp-session: applicant
+      x-usrp-csrf: false
+      x-usrp-retry-on-g2g: true
+      responses:
+        '200':
+          description: "{ fullName, sex (MALE|FEMALE), dateOfBirth (YYYY-MM-DD), homeDistrict, homeProvince, placeOfBirth: null, nationality: null } — placeOfBirth and nationality are not retained by the platform and are asked instead. Never a photo, signature, parents' names or the National ID."
+        '404':
+          description: No verified identity for this session
+        '502':
+          description: UPSTREAM_CONTRACT_MISMATCH
 
   /edge/v1/me/applications/exam-invitation:
     get:

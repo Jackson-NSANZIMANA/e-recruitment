@@ -60,6 +60,8 @@ export interface VerifyClearanceCertificateCommand {
   readonly clearanceCertificateNumber: string;
   /** Calendar date (YYYY-MM-DD, Africa/Kigali) the validity window is measured against. */
   readonly referenceDate: string;
+  /** ADR-049: the application's pinned clearance values; absent, the configured policy governs. */
+  readonly policy?: { readonly allowedCertificateCodes: readonly string[]; readonly noRecordCertificateCodes: readonly string[]; readonly validityDays: number };
   readonly context?: EventContext;
 }
 
@@ -123,7 +125,9 @@ export class VerifyClearanceCertificateService {
     const decision = decideClearance(
       lookup,
       { fullName: applicant.fullName, dateOfBirth: applicant.dateOfBirth, sex: applicant.sex, nationalIdHint: applicant.nationalIdHint },
-      this.deps.policy,
+      command.policy === undefined
+        ? this.deps.policy
+        : { allowedTypes: new Set(command.policy.allowedCertificateCodes), noRecordTypes: new Set(command.policy.noRecordCertificateCodes), validityDays: command.policy.validityDays },
       command.referenceDate,
     );
     return this.conclude(command, context, base, decision, lookup.requestId);
