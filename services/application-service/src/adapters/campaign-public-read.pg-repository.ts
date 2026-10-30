@@ -88,7 +88,7 @@ export function readEligibility(value: unknown): Readonly<Record<string, PublicC
       const q = band?.['qualifications'];
       return band !== null && typeof band === 'object' && Array.isArray(q) && q.every((x) => typeof x === 'string') &&
         typeof band['minimumAge'] === 'number' && typeof band['maximumAge'] === 'number'
-        ? [{ qualifications: q as string[], minimumAge: band['minimumAge'], maximumAge: band['maximumAge'] }]
+        ? [{ qualifications: q, minimumAge: band['minimumAge'], maximumAge: band['maximumAge'] }]
         : [];
     });
     const educationAlternatives = alternatives.flatMap((a: unknown) => {
