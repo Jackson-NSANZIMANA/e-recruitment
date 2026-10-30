@@ -432,3 +432,34 @@ put the new gate first.
   (application-service, field-sync-service, notification-service, document-forensics-service); a defensible
   re-rating would move those four down a little and the overall figure barely at all, because all four sit behind
   the pilot's RDF-only reality. That is a judgement for the owner, not for this document.
+
+---
+
+## 8. Implementation log — what Phase 0 shipped, and what pins it
+
+Every line below was re-proven against a live PostgreSQL 16 cluster (schema from `bootstrap-db.sh`) and, where a
+protocol is involved, over real sockets. The proofs are the ones `scripts/run-selfchecks.sh` runs, plus
+`pnpm test` / `pnpm typecheck` / `pnpm lint` across the workspace.
+
+| # | Outcome | Proof |
+|---|---|---|
+| D1 | `sms_notification_status` added to all three ops schemas (`rls/0043`, registered after `0042`; drizzle migration + snapshot). No statement changes: the column now exists where the agency-agnostic writer already wrote it. | `verify-cross-agency-column-parity` (live), `verify-schema-drift` (761 columns / 29 enums / 124 indexes, no drift) |
+| D2 | The retry budget stays short; the DLQ gets a **terminal outcome**. `DeadLetterObserver` runs once per event AFTER the bytes are parked, and the clearance consumer escalates **only** `ClearanceRegistryUnavailableError` to `REVIEW` / `CLEARANCE_UNVERIFIED` (a human, not a `PENDING` row nobody reads). `rls/0044` refuses a late escalation over a real verdict (`REFUSED` / `SUPERSEDES_VERDICT`). The re-drive half is already satisfied by the bus (offset not committed → redelivery) and by `dlq:replay` for the operator; a timer-based re-drive is impossible by design because the certificate number is deliberately never stored. | `verify-clearance-slice` §3b |
+| D7 | The door's fixable 4xx stops being reported as our outage: identity folds `INVALID_DOCUMENT_TYPE` onto `UNSUPPORTED_DOCUMENT_TYPE` before the edge's closed `SAFE` set sees it. | `verify-edge-contract`, `verify-edge-security` |
+| D8/D14 | A re-upload overwrites the same object key by design, so the row stops claiming a human decision about bytes that no longer exist: `human_reviewed_*` cleared + audited, and the document returns to the amber queue predicate. A re-ANALYSIS of the same object does not withdraw a stamp. | `verify-document-review-replacement` (new, SQL-only, no MinIO/ClamAV) |
+| D9 | `USRP_HTTP_BIND_HOST`, `0.0.0.0` by default; the sandbox launcher binds its twelve processes to loopback; an unrecognised value is a **boot refusal**, and `startHttpServer` is now `async` so that refusal is a rejected promise rather than an uncaught throw. | `packages/shared-http/test/bind-host.test.ts` (new) |
+| D10 | One operation, three lanes — see §6 item 3. The queue names the lane (`heldLanes`), the edge preserves it, and `adjudicate` re-reads the lanes under `FOR UPDATE` before deciding. | `verify-amber-adjudication-slice` §3b |
+| D11 | Non-UUID `capturingOfficerId` is a 400; the session's `subjectId` reaches field-sync, is forwarded to the resolver, and the `resolverIsCapturingOfficer` fact is recorded on the conflict resolution. | `verify-field-sync-slice` §5b |
+| D12 | `is_walk_in` and `sync_conflict_resolution` are platform-wide (`rls/0043`); the field lane projects the walk-in flag per agency instead of assuming `rdf_ops`. | `verify-cross-agency-column-parity`, `verify-field-sync-slice` |
+| D13 | **Open.** The verifier, the parser and the send-side `StatusCallback` form field all exist and are tested, and the application side already projects a delivery result (`applyNotificationDelivery` → `sms_notification_status` + `SLOT_INVITATION_DELIVERED`). What does not exist is the ingress, and it is blocked on a correlation decision, not on code: the callback URL is channel-level, so a callback carries only `MessageSid` and **nothing in the schema maps a sid to an application**. Three candidate fixes, in order of my preference: (a) a small `sms_deliveries` table owned by notification-service (`sid → application_id`, written at send time) — the only one that also answers "did we ever send this, and to which number class", and the only one that does not put a record id in a public URL; (b) a per-message `StatusCallback` URL carrying the application id (port change; Twilio signs the full URL, so verification still works); (c) an `sms_message_sid` column on all three `applications` tables. Any of the three then needs the public, unauthenticated route (edge, `publicAllowlist`) + signature verification inside notification-service, which holds the auth token. |
+| D15 | **Open, small.** A batch is single-agency by accident of the edge's session shape; the invariant should be stated (and enforced with a cheap per-record isolation) rather than assumed. | — |
+
+### The one defect this log added
+
+While fixing D10's proof, a **fixture-only** defect turned out to be a class worth naming: several selfchecks wrote
+jsonb columns through `JSON.stringify(...)::jsonb`. postgres.js serialises a string argument, so the column ended up
+holding a JSON *string* (`jsonb_typeof(col) = 'string'`), and every reader downstream — including the edge's
+`jsonObject` projection — quite correctly returned `null`. Production code already uses `sql.json(asJsonb(...))`
+(and `packages/shared-database/src/client.ts` documents exactly this trap); the fixtures did not. They do now, and
+the amber-queue proof asserts the flags object round-trips, so the fixture cannot drift back. The lesson generalises:
+a proof that writes its own fixtures with a different shape than production proves nothing about production.
