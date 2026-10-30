@@ -323,9 +323,47 @@ function serviceSources(dir: string, out: string[] = []): string[] {
 }
 
 async function main(): Promise<void> {
-  console.log('cross-agency column parity — live schemas, then the code that names them');
+  console.log('cross-agency column parity — the code that names agency-only columns, then the live schemas');
 
-  // ── A. the live database ────────────────────────────────────────────
+  // ── B first ─────────────────────────────────────────────────────────
+  // The tripwire is pure file scanning, so it runs before the database: a
+  // developer without Postgres still gets the answer that matters most — "is a
+  // shared, agency-agnostic adapter naming a column only one agency has?".
+  checkCodeSurface();
+
+  await checkLiveSchemas();
+
+  console.log(`\nCROSS-AGENCY PARITY: ${String(pass)} passed, ${String(fail)} failed`);
+  if (fail > 0) process.exitCode = 1;
+}
+
+function checkCodeSurface(): void {
+  // ── B. the code surface ─────────────────────────────────────────────
+  console.log('\n── B. declared divergences and the code that names them ──');
+
+  const sources = serviceSources(SERVICES_DIR).map((path) => ({
+    relative: path.slice(REPO_ROOT.length + 1),
+    text: readFileSync(path, 'utf8'),
+  }));
+
+  for (const declared of DIVERGENCES) {
+    const pattern = IDENTIFIER_OCCURRENCE(declared.column);
+    const mentionedBy = sources.filter((source) => pattern.test(source.text)).map((source) => source.relative);
+    const undeclared = mentionedBy.filter((file) => !declared.usage.includes(file));
+    check(
+      `${declared.table}.${declared.column} is named only where its divergence is documented`,
+      undeclared.length === 0,
+      undeclared.length === 0
+        ? ''
+        : `new use in ${undeclared.join(', ')}. This column exists in ${declared.presentIn.join(' + ')} only, so ` +
+          'agency-agnostic SQL naming it is a 42703 for the other agencies — guard the use on the agency ' +
+          '(see PgFieldScoreStore.walkInFlag) or add the file to DIVERGENCES with the reason it is safe',
+    );
+  }
+
+}
+
+async function checkLiveSchemas(): Promise<void> {
   console.log('\n── A. rdf_ops / rnp_ops / rcs_ops column sets ──');
 
   const rows = await sql<{ schema: string; table: string; column: string }[]>`
@@ -410,31 +448,6 @@ async function main(): Promise<void> {
     );
   }
 
-  // ── B. the code surface ─────────────────────────────────────────────
-  console.log('\n── B. declared divergences and the code that names them ──');
-
-  const sources = serviceSources(SERVICES_DIR).map((path) => ({
-    relative: path.slice(REPO_ROOT.length + 1),
-    text: readFileSync(path, 'utf8'),
-  }));
-
-  for (const declared of DIVERGENCES) {
-    const pattern = IDENTIFIER_OCCURRENCE(declared.column);
-    const mentionedBy = sources.filter((source) => pattern.test(source.text)).map((source) => source.relative);
-    const undeclared = mentionedBy.filter((file) => !declared.usage.includes(file));
-    check(
-      `${declared.table}.${declared.column} is named only where its divergence is documented`,
-      undeclared.length === 0,
-      undeclared.length === 0
-        ? ''
-        : `new use in ${undeclared.join(', ')}. This column exists in ${declared.presentIn.join(' + ')} only, so ` +
-          'agency-agnostic SQL naming it is a 42703 for the other agencies — guard the use on the agency ' +
-          '(see PgFieldScoreStore.walkInFlag) or add the file to DIVERGENCES with the reason it is safe',
-    );
-  }
-
-  console.log(`\nCROSS-AGENCY PARITY: ${String(pass)} passed, ${String(fail)} failed`);
-  if (fail > 0) process.exitCode = 1;
 }
 
 main()

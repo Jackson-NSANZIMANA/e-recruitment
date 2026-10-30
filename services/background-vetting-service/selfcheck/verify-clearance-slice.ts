@@ -198,6 +198,35 @@ async function main(): Promise<void> {
     await refused('the binding column refuses a value (a name)', () => viaFn({ hmac: '4'.repeat(64), outcome: 'CORRECTION_NEEDED', failure: 'CERTIFICATE_NOT_BOUND', binding: '{"name":"KAMANZI Olivier"}' }), /never values|per-field/);
     await refused('the binding column refuses an unknown key', () => viaFn({ hmac: '5'.repeat(64), outcome: 'CORRECTION_NEEDED', failure: 'CERTIFICATE_NOT_BOUND', binding: '{"holderName":"MATCH"}' }), /never values|per-field/);
 
+    // ── 3b. the terminal outcome (evaluation D2, rls/0044) ──────────
+    // A REVIEW that says "we could not verify it" is the landing place for a
+    // registry outage longer than the retry budget. The engine must accept it
+    // after an unresolved PENDING — and refuse it once a verdict exists, because
+    // the escalation runs from the dead-letter observer and can arrive late.
+    console.log('\n── 3b. the unverified escalation is legal once, and never over a verdict');
+    const reviewRow = (hmac: string, reasons: readonly string[]): string =>
+      `SELECT rdf_ops.record_clearance_verification('${app}'::uuid, '${applicantOf.get('P-CLEARANCE-VALID') ?? ''}'::uuid, '${hmac}', 'ABCD', NULL, NULL, 'REVIEW', NULL, ARRAY[${reasons.map((r) => `'${r}'`).join(',')}]::text[], NULL, NULL, NULL)`;
+    const asReview = async (hmac: string, reasons: readonly string[]): Promise<{ outcome?: string; reason?: string }> =>
+      sql.begin(async (tx) => {
+        await tx`SET LOCAL ROLE usrp_vetting_service`;
+        const r = await tx.unsafe(reviewRow(hmac, reasons));
+        return (r[0] as unknown as { record_clearance_verification: { outcome?: string; reason?: string } }).record_clearance_verification;
+      });
+    // The latest row for this application is still the PENDING one written above.
+    const escalated = await asReview('2'.repeat(64), ['CLEARANCE_UNVERIFIED']);
+    check('CLEARANCE_UNVERIFIED is accepted after an unresolved PENDING', escalated.outcome === 'RECORDED', JSON.stringify(escalated));
+    const escalatedAgain = await asReview('2'.repeat(64), ['CLEARANCE_UNVERIFIED']);
+    check('a repeated escalation is idempotent (ALREADY_RECORDED)', escalatedAgain.outcome === 'ALREADY_RECORDED', JSON.stringify(escalatedAgain));
+    await refused('the reason allowlist stays closed (an unknown reason is refused)', () => asReview('8'.repeat(64), ['NOT_A_REAL_REASON']), /check/i);
+    const verdict = await viaFn({ hmac: '7'.repeat(64), outcome: 'CLEARED', failure: null });
+    check('a real verdict after the escalation is recorded', verdict.outcome === 'RECORDED', JSON.stringify(verdict));
+    const lateEscalation = await asReview('9'.repeat(64), ['CLEARANCE_UNVERIFIED']);
+    check(
+      'a LATE escalation cannot supersede the verdict (REFUSED / SUPERSEDES_VERDICT)',
+      lateEscalation.outcome === 'REFUSED' && lateEscalation.reason === 'SUPERSEDES_VERDICT',
+      JSON.stringify(lateEscalation),
+    );
+
     console.log('\n── 4. isolation: only the owning agency\'s officer (and the system service) can read');
     const asRole = async (role: string): Promise<number> => sql.begin(async (tx) => {
       await tx`SET LOCAL ROLE ${sql(role)}`;

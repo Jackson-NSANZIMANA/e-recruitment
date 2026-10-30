@@ -363,16 +363,48 @@ put the new gate first.
 2. **D2 as a product surface, not a replay tool.** Sweep the durable rows the citizen is waiting on — the
    vocabulary already supports it: `rls/0040`'s `clearance_verif_outcome_check` admits
    `CLEARED | REVIEW | CORRECTION_NEEDED | PENDING`, and the outage path writes `PENDING` with
-   `failure_code = 'REGISTRY_UNAVAILABLE'` (`verify-clearance-certificate.service.ts:144`). Re-drive those with capped
-   exponential backoff, through the same deduplicating command function (`ALREADY_RECORDED`), and give the cap a
-   terminal outcome — "we could not verify; a human will look" — so no row sits at `PENDING` for ever. Modelled on
-   `ReannounceStalledClearancesService`; `replay-dead-letters.ts` stays the operator's alarm responder.
+   `failure_code = 'REGISTRY_UNAVAILABLE'` (`verify-clearance-certificate.service.ts:144`). Give the cap a terminal
+   outcome — "we could not verify; a human will look" — so no row sits at `PENDING` for ever.
+
+   *How the terminal outcome is reached (what the implementation proved).* The re-drive cannot be a timer over the
+   durable row: the certificate number is deliberately never stored (only an HMAC and its last 4), so nothing in the
+   database can reconstruct the registry call, and keeping the number to enable one would trade a citizen's privacy
+   for our convenience. So the escalation hangs off the moment the event is given up on: `KafkaEventBus` takes an
+   `onDeadLetter` observer, called once per event **after** its bytes are parked on `events.dead-letter` (so nothing
+   the observer does — including throwing — can lose the event), and
+   `background-vetting-service/src/adapters/events/clearance-dead-letter.observer.ts` answers for its own consumer
+   group only, for `CLEARANCE_CERTIFICATE_SUBMITTED` only, and **only** when the terminal error is
+   `ClearanceRegistryUnavailableError` — the one path that recorded nothing but `PENDING`. It calls
+   `escalateUnverified()` → `REVIEW` / `CLEARANCE_UNVERIFIED` through the same deduplicating command function
+   (`RECORDED` / `ALREADY_RECORDED`), and `rls/0044`'s function refuses a late escalation over a real verdict
+   (`REFUSED` / `SUPERSEDES_VERDICT`), so a citizen who is already cleared cannot be walked backwards by a stale
+   dead letter. Any other terminal failure is logged (`clearance_dead_letter_not_escalated`) and left to the alarm.
+   Proven in `services/background-vetting-service/selfcheck/verify-clearance-slice.ts` §3b.
+
+   `dlq:replay` / `replay-dead-letters.ts` therefore stays exactly what it was — the operator's path for events
+   that should be re-driven by hand — and is no longer the only answer the platform has for an outage.
 
 3. **D10 as two operations, or one operation with two lanes.** The backend must accept a vetting verdict for a row
    held at `CRIMINAL_CLEARANCE` (clear → recompute through the same pure lifecycle as the amber path) and for a
    `NESA_REVIEW_REQUIRED` academic hold. The queue row already carries the discriminator (`queueReasons()`); the
    operation should too, and refuse explicitly rather than returning `NOT_APPLICABLE` from a queue the officer is
    looking at.
+
+   *How it landed (one operation, three lanes).* `domain/adjudication-lanes.ts` is the single predicate that answers
+   "which holds does this row have" — `DOCUMENT` (the two statuses the operation already accepted), `CRIMINAL`
+   (`criminal_clearance_status = 'UNDER_REVIEW'`) and `ACADEMIC` (`academic_status = 'PENDING'` +
+   `failureCode = 'NESA_REVIEW_REQUIRED'`). The officer queue maps every entry through it (`heldLanes`) and
+   `adjudicate` runs it again under `FOR UPDATE`, so the screen can only offer a lane the write will accept; the
+   same list survives the edge's closed projections instead of being dropped there. `lane` is optional — absent
+   means "the row's only hold" — and a row in two lanes refuses with the lanes rather than guessing: the edge maps
+   that 409 to `ADJUDICATION_LANE_REQUIRED`, because by its own stated rule a refusal carrying an instruction needs
+   its own case. CLEAR on CRIMINAL records `CLEARED` (+ `criminal_clearance_at`), CLEAR on ACADEMIC records
+   `ELIGIBLE`, and the status is then re-derived by the SAME pure lifecycle as the amber path — with one guard: a
+   verdict on one dimension never lifts another lane's hold, so the top-level status only moves when the decision
+   removes the LAST hold. REJECT is a decision about the application, not a verdict about the registry (the
+   dimension column keeps its evidence), and a dimension decision is audited even when the status does not move
+   (`APPLICATION_ADJUDICATED`, carrying the lane) — otherwise the only trace of a human verdict would be a column
+   value. Proven in `verify-amber-adjudication-slice.ts` §3b.
 
 4. **D7 with all three allowlists, and D8 re-scoped to D14.** For D7: forensics keeps `INVALID_DOCUMENT_TYPE`;
    identity relays it as a refusal; the edge's `SAFE` set admits it. For D8: the repeat `documentId` is by design
