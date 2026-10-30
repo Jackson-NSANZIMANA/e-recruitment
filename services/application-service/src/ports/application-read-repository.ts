@@ -11,6 +11,7 @@
 // ══════════════════════════════════════════════════════════════════
 
 import type { Agency, ApplicationCategory, ApplicationStatus } from '@usrp/shared-types';
+import type { AdjudicationLane } from '../domain/adjudication-lanes.js';
 import type { DbRole } from '@usrp/shared-auth';
 
 /** A non-PII summary row — the anonymous processing code, never a name/NID. */
@@ -56,6 +57,13 @@ export interface AmberQueueEntry {
    * come from the clearance verification and the NESA binding (ADR-048 §3).
    */
   readonly reasons: readonly string[];
+  /**
+   * WHICH hold(s) this row is in (evaluation D10), in the vocabulary the
+   * `adjudicate` operation expects back in `lane`. Empty is impossible for a
+   * queued row, but the type says "could be" because the predicate is the
+   * authority, not the queue.
+   */
+  readonly heldLanes: readonly AdjudicationLane[];
 }
 
 /** An applicant-facing summary row — the agency joins the non-PII summary. */

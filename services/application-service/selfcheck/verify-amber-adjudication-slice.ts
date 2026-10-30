@@ -73,7 +73,7 @@ const RNP_APPLICANT = '6d6d6d6d-6d6d-4d6d-8d6d-6d6d6d6d6d6d';
 // needs its own citizen; they are identical fixtures (same district, same DOB)
 // and no assertion crosses from one scenario to another.
 const RDF_APPLICANTS: readonly string[] = Array.from(
-  { length: 6 },
+  { length: 10 },
   (_, i) => `6e6e6e6e-6e6e-4e6e-8e6e-6e6e6e6e6e${String(i).padStart(2, '0')}`,
 );
 const ALL_APPLICANTS = [APPLICANT, RNP_APPLICANT, ...RDF_APPLICANTS];
@@ -89,6 +89,12 @@ const APP_RED_EARLY = '6ea44444-4444-4444-8444-444444444444'; // RED pre-slot �
 const APP_RED_LATE = '6ea55555-5555-4555-8555-555555555555'; // RED post-slot → ADJUDICATION_REVIEW → CLEAR restores
 const APP_GREEN = '6ea66666-6666-4666-8666-666666666666'; // GREEN verdict → no move
 const RNP_APP = '6ea77777-7777-4777-8777-777777777777'; // cross-agency probe
+// D10: the two holds the queue showed and the operation could not reach, plus
+// the two-lane row and the reject-is-not-a-verdict row.
+const APP_CRIMINAL_HOLD = '6ea88888-8888-4888-8888-888888888888'; // criminal UNDER_REVIEW only
+const APP_ACADEMIC_HOLD = '6ea99999-9999-4999-8999-999999999999'; // NESA review only
+const APP_TWO_LANES = '6eaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';     // document AND criminal
+const APP_CRIMINAL_REJECT = '6eabbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'; // REJECT on a criminal hold
 
 const OFFICER_ID = '6e011111-1111-4111-8111-111111111111';
 
@@ -126,6 +132,7 @@ const CLEAN_FLAGS: ForensicsFlags = {
 const ALL_RDF_APPS = [
   APP_AMBER_CLEAR, APP_AMBER_PENDING, APP_AMBER_REJECT,
   APP_RED_EARLY, APP_RED_LATE, APP_GREEN,
+  APP_CRIMINAL_HOLD, APP_ACADEMIC_HOLD, APP_TWO_LANES, APP_CRIMINAL_REJECT,
 ];
 
 async function cleanup(): Promise<void> {
@@ -207,6 +214,34 @@ async function seed(): Promise<void> {
               ${allPass ? 'ELIGIBLE' : 'ELIGIBLE'}::rdf_ops.academic_eligibility_status,
               ${allPass ? 'CLEARED' : 'PENDING'}::rdf_ops.criminal_clearance_status)`;
   }
+  // D10 rows: the queue's other two lanes, and a row held in two lanes at once.
+  //   CRIMINAL_HOLD  — the registry answered UNDER_REVIEW; age/academic settled.
+  //   ACADEMIC_HOLD  — NESA handed it to a human (failureCode drives the queue).
+  //   TWO_LANES      — an amber document hold AND a criminal hold: the case that
+  //                    proves one verdict cannot lift the other lane's hold.
+  //   CRIMINAL_REJECT— a criminal hold an officer rejects outright.
+  const d10Rows: ReadonlyArray<[string, string, string, boolean]> = [
+    [APP_CRIMINAL_HOLD, 'RDF-98007', 'CRIMINAL_CLEARANCE', false],
+    [APP_ACADEMIC_HOLD, 'RDF-98008', 'ACADEMIC_VETTING', false],
+    [APP_TWO_LANES, 'RDF-98009', 'DOCUMENT_REVIEW_AMBER', true],
+    [APP_CRIMINAL_REJECT, 'RDF-98010', 'CRIMINAL_CLEARANCE', true],
+  ];
+  for (const [i, [id, code, status, academicSettled]] of d10Rows.entries()) {
+    const criminal = id === APP_TWO_LANES || id === APP_CRIMINAL_REJECT || id === APP_CRIMINAL_HOLD
+      ? 'UNDER_REVIEW'
+      : 'PENDING';
+    await admin`
+      INSERT INTO rdf_ops.applications
+        (id, processing_code, applicant_id, campaign_id, category, status,
+         age_eligibility_status, academic_status, criminal_clearance_status,
+         academic_eligibility_detail)
+      VALUES (${id}, ${code}, ${RDF_APPLICANTS[6 + i]!}, ${CAMPAIGN}, 'GENERAL_ENLISTMENT',
+              ${status}::rdf_ops.application_status,
+              'ELIGIBLE'::rdf_ops.age_eligibility_status,
+              ${academicSettled ? 'ELIGIBLE' : 'PENDING'}::rdf_ops.academic_eligibility_status,
+              ${criminal}::rdf_ops.criminal_clearance_status,
+              ${id === APP_ACADEMIC_HOLD ? admin.json({ failureCode: 'NESA_REVIEW_REQUIRED', reviewReasons: ['MALPRACTICE'] }) : null})`;
+  }
   await admin`
     INSERT INTO rnp_ops.applications (id, processing_code, applicant_id, campaign_id, category, status)
     VALUES (${RNP_APP}, 'RNP-98001', ${RNP_APPLICANT}, ${RNP_CAMPAIGN}, 'CADET_OFFICER',
@@ -227,7 +262,7 @@ async function seedDocument(appId: string, lane: 'AMBER' | 'RED' | 'GREEN', key:
        virus_scan_status, forensics_score, forensics_lane, forensics_flags, forensics_completed_at)
     VALUES (${appId}, 'OLEVEL_CERTIFICATE'::rdf_ops.document_type, ${key}, 'usrp-documents',
             'CLEAN', ${lane === 'GREEN' ? 100 : lane === 'AMBER' ? 65 : 20},
-            ${lane}::rdf_ops.document_lane, ${JSON.stringify(CLEAN_FLAGS)}::jsonb, now())
+            ${lane}::rdf_ops.document_lane, ${admin.json(CLEAN_FLAGS)}, now())
     RETURNING id`;
   const id = rows[0]?.id;
   if (!id) throw new Error('document seed failed');
@@ -361,7 +396,8 @@ async function main(): Promise<void> {
       check('200 OK', q.status === 200);
       const queue = (q.body['queue'] ?? []) as Record<string, unknown>[];
       const codes = queue.map((e) => e['processingCode']);
-      check('3 amber + 1 adjudication hold listed', queue.length === 4, `got ${queue.length}: ${codes.join(',')}`);
+      check('3 amber + 1 adjudication hold + 4 lane holds listed', queue.length === 8,
+        `got ${queue.length}: ${codes.join(',')}`);
       const amberEntry = queue.find((e) => e['processingCode'] === 'RDF-98001');
       check('amber entry carries document signals',
         amberEntry?.['documentType'] === 'OLEVEL_CERTIFICATE' && amberEntry?.['forensicsScore'] === 65);
@@ -370,11 +406,124 @@ async function main(): Promise<void> {
         lateEntry !== undefined && lateEntry['status'] === 'ADJUDICATION_REVIEW' && lateEntry['documentType'] === null);
       check('no PII fields in queue', !JSON.stringify(queue).toLowerCase().includes('name'));
 
+      // D10: the queue names the LANE, not just the reason — and it is the same
+      // vocabulary `adjudicate` accepts back.
+      const lanesOf = (code: string): readonly string[] => {
+        const entry = queue.find((e) => e['processingCode'] === code);
+        return (entry?.['heldLanes'] ?? []) as readonly string[];
+      };
+      check('document hold → heldLanes [DOCUMENT]', JSON.stringify(lanesOf('RDF-98001')) === '["DOCUMENT"]');
+      check('criminal hold → heldLanes [CRIMINAL]', JSON.stringify(lanesOf('RDF-98007')) === '["CRIMINAL"]');
+      check('NESA hold → heldLanes [ACADEMIC]', JSON.stringify(lanesOf('RDF-98008')) === '["ACADEMIC"]');
+      check('a row in two lanes names both', JSON.stringify(lanesOf('RDF-98009')) === '["DOCUMENT","CRIMINAL"]');
+
       const rnpQ = await call(base, 'GET', AMBER_QUEUE_PATH, RNP_OFFICER_TOKEN);
       check('RNP officer sees an EMPTY queue (agency isolation)',
         rnpQ.status === 200 && ((rnpQ.body['queue'] ?? []) as unknown[]).length === 0);
       check('401 unauthenticated', (await call(base, 'GET', AMBER_QUEUE_PATH)).status === 401);
       check('403 system token', (await call(base, 'GET', AMBER_QUEUE_PATH, SYSTEM_TOKEN)).status === 403);
+    }
+
+    // ── 3b. Every hold the queue shows is decidable (evaluation D10) ────────
+    // Before this, the operation accepted only the document hold: a criminal
+    // `UNDER_REVIEW` row and a NESA hold were listed in the queue and refused
+    // by the only button on the screen.
+    console.log('\n── 3b. The queue\'s other two lanes are decidable, and a refusal says why ──');
+    {
+      const criminalOf = async (id: string): Promise<string | undefined> =>
+        (await admin<{ c: string }[]>`SELECT criminal_clearance_status::text AS c FROM rdf_ops.applications WHERE id = ${id}`)[0]?.c;
+      const academicOf = async (id: string): Promise<string | undefined> =>
+        (await admin<{ a: string }[]>`SELECT academic_status::text AS a FROM rdf_ops.applications WHERE id = ${id}`)[0]?.a;
+      const queuedCodes = async (): Promise<readonly string[]> =>
+        (((await call(base, 'GET', AMBER_QUEUE_PATH, OFFICER_TOKEN)).body['queue'] ?? []) as Record<string, unknown>[])
+          .map((e) => String(e['processingCode']));
+
+      // A row held in TWO lanes cannot be decided blind: the officer is told
+      // which lanes are open, and nothing is written.
+      const ambiguous = await call(base, 'POST', ADJUDICATE_PATH, OFFICER_TOKEN, {
+        applicationId: APP_TWO_LANES, decision: 'CLEAR',
+      });
+      check('two-lane row, no lane → 409 NOT_APPLICABLE naming both lanes',
+        ambiguous.status === 409 && ambiguous.body['status'] === 'NOT_APPLICABLE'
+        && JSON.stringify(ambiguous.body['heldLanes']) === '["DOCUMENT","CRIMINAL"]',
+        JSON.stringify(ambiguous.body));
+      check('… and nothing was written (criminal still UNDER_REVIEW, still AMBER)',
+        (await criminalOf(APP_TWO_LANES)) === 'UNDER_REVIEW' && (await statusOf(APP_TWO_LANES)) === 'DOCUMENT_REVIEW_AMBER');
+
+      // A named lane the row is NOT held in is refused with the lanes it IS in.
+      const wrongLane = await call(base, 'POST', ADJUDICATE_PATH, OFFICER_TOKEN, {
+        applicationId: APP_ACADEMIC_HOLD, decision: 'CLEAR', lane: 'DOCUMENT',
+      });
+      check('wrong lane → 409 naming the real lane',
+        wrongLane.status === 409 && JSON.stringify(wrongLane.body['heldLanes']) === '["ACADEMIC"]',
+        JSON.stringify(wrongLane.body));
+      const badLane = await call(base, 'POST', ADJUDICATE_PATH, OFFICER_TOKEN, {
+        applicationId: APP_ACADEMIC_HOLD, decision: 'CLEAR', lane: 'PASSPORT',
+      });
+      check('unknown lane value → 400 INVALID_LANE (closed vocabulary)', badLane.status === 400, JSON.stringify(badLane.body));
+
+      // CRIMINAL: the verdict is the write. The status legitimately stays put
+      // here — academic is still PENDING, so the lifecycle justifies no move.
+      const criminalClear = await call(base, 'POST', ADJUDICATE_PATH, OFFICER_TOKEN, {
+        applicationId: APP_CRIMINAL_HOLD, decision: 'CLEAR', lane: 'CRIMINAL',
+      });
+      check('CRIMINAL CLEAR → 200 APPLIED', criminalClear.status === 200 && criminalClear.body['status'] === 'APPLIED',
+        JSON.stringify(criminalClear.body));
+      check('… without a lane named, the single held lane is used',
+        (await criminalOf(APP_CRIMINAL_HOLD)) === 'CLEARED');
+      check('… criminal_clearance_at stamped', (await admin<{ n: number }[]>`
+        SELECT count(*)::int AS n FROM rdf_ops.applications
+        WHERE id = ${APP_CRIMINAL_HOLD} AND criminal_clearance_at IS NOT NULL`)[0]?.['n'] === 1);
+      check('… the row left the queue (no hold remains)', !(await queuedCodes()).includes('RDF-98007'));
+      const clearedAudit = bus.published.find((e) =>
+        e.eventType === 'AUDIT_ENTRY' && (e as { action?: string }).action === 'APPLICATION_ADJUDICATED'
+        && (e as { entityId?: string }).entityId === APP_CRIMINAL_HOLD);
+      check('… audited as a DECISION, not a status advance, naming the lane',
+        clearedAudit !== undefined
+        && ((clearedAudit as unknown as { metadata: Record<string, unknown> }).metadata)['lane'] === 'CRIMINAL');
+
+      // ONE verdict never lifts ANOTHER lane's hold. The criminal gate clears;
+      // the document hold survives; only the document decision reaches green.
+      const liftCriminal = await call(base, 'POST', ADJUDICATE_PATH, OFFICER_TOKEN, {
+        applicationId: APP_TWO_LANES, decision: 'CLEAR', lane: 'CRIMINAL',
+      });
+      check('CRIMINAL CLEAR on a two-lane row → APPLIED, status UNMOVED',
+        liftCriminal.status === 200 && liftCriminal.body['fromStatus'] === 'DOCUMENT_REVIEW_AMBER'
+        && liftCriminal.body['toStatus'] === 'DOCUMENT_REVIEW_AMBER',
+        JSON.stringify(liftCriminal.body));
+      check('… the criminal verdict IS recorded', (await criminalOf(APP_TWO_LANES)) === 'CLEARED');
+      check('… and the document hold still holds', (await queuedCodes()).includes('RDF-98009'));
+
+      const liftDocument = await call(base, 'POST', ADJUDICATE_PATH, OFFICER_TOKEN, {
+        applicationId: APP_TWO_LANES, decision: 'CLEAR', lane: 'DOCUMENT',
+      });
+      check('DOCUMENT CLEAR as the LAST hold → GREEN',
+        liftDocument.status === 200 && liftDocument.body['toStatus'] === 'DOCUMENT_REVIEW_GREEN',
+        JSON.stringify(liftDocument.body));
+      const twoLaneFinal = await awaitStatus(APP_TWO_LANES, 'SLOT_ASSIGNED');
+      check('… and reconverges on the green slot lane', twoLaneFinal === 'SLOT_ASSIGNED', `got ${twoLaneFinal}`);
+
+      // ACADEMIC: NESA handed it to a human; the officer's clear IS the verdict.
+      const academicClear = await call(base, 'POST', ADJUDICATE_PATH, OFFICER_TOKEN, {
+        applicationId: APP_ACADEMIC_HOLD, decision: 'CLEAR', lane: 'ACADEMIC',
+      });
+      check('ACADEMIC CLEAR → 200 APPLIED', academicClear.status === 200, JSON.stringify(academicClear.body));
+      check('… academic gate recorded ELIGIBLE', (await academicOf(APP_ACADEMIC_HOLD)) === 'ELIGIBLE');
+      check('… and the NESA hold left the queue', !(await queuedCodes()).includes('RDF-98008'));
+
+      // REJECT is a decision about the APPLICATION, not a verdict about the
+      // registry: the dimension keeps the evidence it had.
+      const reject = await call(base, 'POST', ADJUDICATE_PATH, OFFICER_TOKEN, {
+        applicationId: APP_CRIMINAL_REJECT, decision: 'REJECT', lane: 'CRIMINAL',
+      });
+      check('REJECT on a criminal hold → REJECTED', reject.status === 200 && reject.body['toStatus'] === 'REJECTED',
+        JSON.stringify(reject.body));
+      check('… the criminal column is NOT rewritten by a rejection', (await criminalOf(APP_CRIMINAL_REJECT)) === 'UNDER_REVIEW');
+      const terminal = await call(base, 'POST', ADJUDICATE_PATH, OFFICER_TOKEN, {
+        applicationId: APP_CRIMINAL_REJECT, decision: 'CLEAR',
+      });
+      check('… a terminal row offers no lane at all (409, heldLanes empty)', terminal.status === 409,
+        JSON.stringify(terminal.body));
     }
 
     console.log('\n── 4. CLEAR on all-pass evidence → GREEN → application.cleared → SLOT_ASSIGNED (e2e) ──');
@@ -467,8 +616,10 @@ async function main(): Promise<void> {
         audits.length >= 6, `got ${audits.length}`);
       const adjudicationAudits = audits.filter(
         (e) => 'metadata' in e && (e.metadata as Record<string, unknown>)?.['stage'] === 'ADJUDICATION');
-      check('one ADJUDICATION audit per genuine decision (4: clear, clear, reject, late-clear)',
-        adjudicationAudits.length === 4, `got ${adjudicationAudits.length}`);
+      // 4 from the document/restore paths + 5 lane decisions (the two-lane row
+      // is decided twice: once per hold). Refusals audit nothing.
+      check('one ADJUDICATION audit per genuine decision (9)',
+        adjudicationAudits.length === 9, `got ${adjudicationAudits.length}`);
     }
   } finally {
     await server.stop();

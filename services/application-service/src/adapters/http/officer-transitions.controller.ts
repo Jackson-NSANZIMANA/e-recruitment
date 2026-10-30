@@ -18,6 +18,7 @@
 import { HttpError, type HttpResult, type Route } from '@usrp/shared-http';
 import { requireOfficerPermission, withAuth, type AuthVerifier } from '@usrp/shared-auth';
 import { ApplicationPersistenceError } from '../../domain/application.errors.js';
+import type { AdjudicationLane } from '../../domain/adjudication-lanes.js';
 import type {
   AcceptCommand,
   AdjudicateCommand,
@@ -38,10 +39,13 @@ const FITNESS = new Set(['FIT', 'UNFIT']);
 const CERT_VERDICTS = new Set(['CERT_VERIFIED', 'CERT_REJECTED']);
 const DECISIONS = new Set(['SHORTLIST', 'REJECT']);
 const ADJUDICATIONS = new Set(['CLEAR', 'REJECT']);
+/** The closed lane vocabulary — the three holds an officer may decide (D10). */
+const ADJUDICATION_LANES = new Set(['DOCUMENT', 'CRIMINAL', 'ACADEMIC']);
 const MAX_NOTES = 1000; // final_decision_notes is varchar(1000); history reason is varchar(200) — service truncates
 
 interface TransitionBody {
   readonly applicationId?: unknown;
+  readonly lane?: unknown;
   readonly fitnessStatus?: unknown;
   readonly certVerdict?: unknown;
   readonly physicianName?: unknown;
@@ -142,10 +146,12 @@ export function officerTransitionRoutes(
           throw new HttpError(400, 'INVALID_DECISION', 'Field "decision" must be "CLEAR" or "REJECT".');
         }
         const notes = requireNotes(body.notes);
+        const lane = requireLane(body.lane);
         const command: AdjudicateCommand = {
           actor: principal,
           applicationId,
           decision: decision as 'CLEAR' | 'REJECT',
+          ...(lane === undefined ? {} : { lane }),
           notes,
           context: { correlationId: ctx.correlationId, causationId: ctx.correlationId },
         };
@@ -177,6 +183,18 @@ function requireApplicationId(value: unknown): string {
     throw new HttpError(400, 'INVALID_APPLICATION_ID', 'Field "applicationId" must be a UUID.');
   }
   return trimmed;
+}
+
+/**
+ * Optional `lane` (evaluation D10): which hold the verdict is about. Absent is
+ * meaningful — it means "the row's only hold" — so it is not defaulted here.
+ */
+function requireLane(value: unknown): AdjudicationLane | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string' || !ADJUDICATION_LANES.has(value)) {
+    throw new HttpError(400, 'INVALID_LANE', 'Field "lane" must be "DOCUMENT", "CRIMINAL" or "ACADEMIC".');
+  }
+  return value as AdjudicationLane;
 }
 
 /** Optional notes: a string within the column bound, or null when absent. */
@@ -213,7 +231,20 @@ function mapOutcome(outcome: OfficerCommandOutcome): HttpResult {
     case 'NO_CHANGE':
       return { status: 200, body: { status: 'NO_CHANGE', currentStatus: outcome.currentStatus } };
     case 'NOT_APPLICABLE':
-      return { status: 409, body: { status: 'NOT_APPLICABLE', currentStatus: outcome.currentStatus } };
+      return {
+        status: 409,
+        body: {
+          status: 'NOT_APPLICABLE',
+          currentStatus: outcome.currentStatus,
+          // An adjudication refusal that HAS lanes to offer is an instruction,
+          // not a shrug: the officer is looking at a row the queue showed them,
+          // and the answer says which button would work (evaluation D10). A row
+          // held in no lane carries none, and the refusal stays bare.
+          ...(outcome.heldLanes !== undefined && outcome.heldLanes.length > 0
+            ? { heldLanes: outcome.heldLanes }
+            : {}),
+        },
+      };
     case 'NOT_FOUND':
       return { status: 404, body: { status: 'NOT_FOUND' } };
     case 'FORBIDDEN':
