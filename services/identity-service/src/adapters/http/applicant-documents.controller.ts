@@ -16,7 +16,9 @@
 // document-forensics-service, so nothing the client composed beyond
 // { applicationId, documentType, file } is forwarded.
 //
-// 201 carries { documentId, documentType } — never a lane, score or flag.
+// 201 carries { status, documentId, documentType, revision } — never a lane,
+// score, flag, keyed digest or revision history. A closed-review 409 carries
+// only the approved reason HUMAN_REVIEWED or CASE_ADVANCED.
 // ══════════════════════════════════════════════════════════════════
 
 import {
@@ -27,8 +29,12 @@ import {
   type Route,
 } from '@usrp/shared-http';
 import { DOCUMENT_DOOR_CODES, isKnownDocumentType, type DocumentDoorCode } from '@usrp/shared-types';
+import { logError } from '@usrp/shared-logging';
 import type { ApplicantAuthService } from '../../application/applicant-auth.service.js';
-import type { DocumentUploadGateway } from '../../ports/document-upload-gateway.js';
+import {
+  isDocumentReviewClosedReason,
+  type DocumentUploadGateway,
+} from '../../ports/document-upload-gateway.js';
 import { authHeader, authenticate } from './applicant-auth.controller.js';
 
 export const ME_DOCUMENTS_PATH = '/v1/applicants/me/applications/documents';
@@ -48,6 +54,17 @@ export interface DocumentRouteOptions {
 /** Throw the door's error for a shared code, at the status that code declares. */
 function doorError(code: DocumentDoorCode, detail: string): HttpError {
   return new HttpError(DOCUMENT_DOOR_CODES[code].status, code, detail);
+}
+
+function isPositiveSafeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1;
+}
+
+function dependencyUnavailable(): HttpResult {
+  return {
+    status: 502,
+    body: { status: 'DEPENDENCY_UNAVAILABLE', reason: 'A dependent service is unavailable.' },
+  };
 }
 
 export function applicantDocumentRoutes(
@@ -110,18 +127,49 @@ export function applicantDocumentRoutes(
           file: { bytes: file.bytes, contentType: file.contentType, filename: file.filename },
         });
         switch (result.kind) {
-          case 'UPLOADED':
+          case 'UPLOADED': {
+            const invalidFields: string[] = [];
+            if (typeof result.documentId !== 'string' || !UUID_RE.test(result.documentId)) invalidFields.push('documentId');
+            if (result.documentType !== documentType) invalidFields.push('documentType');
+            if (!isPositiveSafeInteger(result.revision)) invalidFields.push('revision');
+            if (invalidFields.length > 0) {
+              logError('document_door_contract_drift', {
+                stage: 'identity_controller',
+                code: 'INVALID_UPLOAD_RESULT',
+                fields: invalidFields,
+              });
+              return dependencyUnavailable();
+            }
             return {
               status: 201,
-              body: { status: 'UPLOADED', documentId: result.documentId, documentType: result.documentType },
+              body: {
+                status: 'UPLOADED',
+                documentId: result.documentId,
+                documentType: result.documentType,
+                revision: result.revision,
+              },
             };
+          }
           case 'REFUSED':
+            if (result.code === 'DOCUMENT_REVIEW_CLOSED') {
+              const closedStatus: unknown = result.httpStatus;
+              const closedReason: unknown = result.reason;
+              if (closedStatus !== 409 || !isDocumentReviewClosedReason(closedReason)) {
+                logError('document_door_contract_drift', {
+                  stage: 'identity_controller',
+                  code: 'DOCUMENT_REVIEW_CLOSED',
+                  reason: closedReason === undefined ? 'MISSING' : 'UNRECOGNIZED',
+                });
+                return dependencyUnavailable();
+              }
+              return {
+                status: 409,
+                body: { status: 'REFUSED', error: result.code, reason: closedReason },
+              };
+            }
             return { status: result.httpStatus, body: { status: 'REFUSED', error: result.code } };
           case 'DEPENDENCY_UNAVAILABLE':
-            return {
-              status: 502,
-              body: { status: 'DEPENDENCY_UNAVAILABLE', reason: 'A dependent service is unavailable.' },
-            };
+            return dependencyUnavailable();
         }
       },
     },

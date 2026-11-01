@@ -1099,12 +1099,14 @@ paths:
       tags: [citizen]
       x-usrp-session: applicant
       x-usrp-csrf: true
+      x-usrp-outcomes: { 409: [NOT_ACCEPTING_DOCUMENTS, DOCUMENT_REVIEW_CLOSED] }
       requestBody:
         required: true
         content:
           multipart/form-data:
             schema:
               type: object
+              additionalProperties: false
               required: [applicationId, documentType, file]
               properties:
                 applicationId: { type: string, format: uuid }
@@ -1112,15 +1114,92 @@ paths:
                 file: { type: string, format: binary }
       responses:
         '201':
-          description: Stored; only { documentId, documentType } is returned (never a verdict)
+          description: >-
+            Stored. The public Edge projection returns exactly status, documentId,
+            documentType and revision; forensic verdicts, the keyed content HMAC
+            and revision history remain internal.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [status, documentId, documentType, revision]
+                properties:
+                  status: { type: string, enum: [UPLOADED] }
+                  documentId: { type: string, format: uuid }
+                  documentType: { type: string }
+                  revision: { type: integer, minimum: 1 }
         '404':
           description: No such application for this citizen
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [error]
+                properties:
+                  error: { type: string, enum: [APPLICATION_NOT_FOUND] }
         '409':
-          description: The application is not accepting documents
+          description: >-
+            NOT_ACCEPTING_DOCUMENTS, or DOCUMENT_REVIEW_CLOSED when a human
+            review or case advancement has closed the document door.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    additionalProperties: false
+                    required: [error]
+                    properties:
+                      error: { type: string, enum: [NOT_ACCEPTING_DOCUMENTS] }
+                  - type: object
+                    additionalProperties: false
+                    required: [error, reason]
+                    properties:
+                      error: { type: string, enum: [DOCUMENT_REVIEW_CLOSED] }
+                      reason: { type: string, enum: [HUMAN_REVIEWED, CASE_ADVANCED] }
+        '413':
+          description: File is too large
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [error]
+                properties:
+                  error: { type: string, enum: [FILE_TOO_LARGE] }
         '422':
           description: Unsupported, mislabelled or infected file
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                    enum: [UNSUPPORTED_FILE_TYPE, UNSUPPORTED_DOCUMENT_TYPE, UNSUPPORTED_FILE_CONTENT, CONTENT_TYPE_MISMATCH, DOCUMENT_REJECTED_MALWARE]
+        '502':
+          description: Identity response does not match the approved upload contract
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [error]
+                properties:
+                  error: { type: string, enum: [UPSTREAM_CONTRACT_MISMATCH] }
         '503':
           description: A dependency is unavailable
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [error]
+                properties:
+                  error: { type: string, enum: [SCANNER_UNAVAILABLE, UPSTREAM_UNAVAILABLE] }
   /edge/v1/me/applications/withdraw:
     post:
       operationId: withdrawMyApplication

@@ -415,6 +415,28 @@ check(
   'no non-officer operation declares x-usrp-permission',
   EDGE_OPERATION_IDS.every((id) => edgeOperation(id).session === 'officer' || metadataFor(specLines, id).permission === undefined),
 );
+
+// D8: unlike the Identity response, Edge owns the public projection. Keep the
+// citizen OpenAPI shape pinned to the response actually built by that boundary.
+section('Citizen document upload OpenAPI matches the D8 Edge projection');
+const uploadOperationStart = specLines.findIndex((line) => line.trim() === 'operationId: uploadMyDocument');
+const uploadOperationEnd = uploadOperationStart < 0
+  ? -1
+  : specLines.findIndex((line, index) => index > uploadOperationStart && /^  \/edge\//.test(line));
+const uploadOperation = uploadOperationStart < 0
+  ? ''
+  : specLines.slice(uploadOperationStart, uploadOperationEnd < 0 ? undefined : uploadOperationEnd).join('\n');
+check('uploadMyDocument declares the two closed 409 outcomes',
+  uploadOperation.includes('x-usrp-outcomes: { 409: [NOT_ACCEPTING_DOCUMENTS, DOCUMENT_REVIEW_CLOSED] }'));
+check('201 requires status, documentId, documentType and revision with no extra properties',
+  uploadOperation.includes('required: [status, documentId, documentType, revision]') &&
+    /'201':[\s\S]*?additionalProperties: false/.test(uploadOperation));
+check('201 revision is an integer with minimum 1',
+  /revision: \{ type: integer, minimum: 1 \}/.test(uploadOperation));
+check('409 documents the closed reason enum and a closed response shape',
+  /reason: \{ type: string, enum: \[HUMAN_REVIEWED, CASE_ADVANCED\] \}/.test(uploadOperation) &&
+    /'409':[\s\S]*?additionalProperties: false/.test(uploadOperation));
+
 // The enforcement itself must bite: strip each marker from a real operation and
 // the checker has to object, or this section proves nothing.
 {

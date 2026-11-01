@@ -11,11 +11,12 @@
 import { buildMultipartFormData } from '@usrp/shared-http';
 import { classifyDocumentDoorAnswer } from '@usrp/shared-types';
 import { logError, summariseError } from '@usrp/shared-logging';
-import type {
-  DocumentRefusal,
-  DocumentUploadGateway,
-  DocumentUploadInput,
-  DocumentUploadResult,
+import {
+  isDocumentReviewClosedReason,
+  type DocumentRefusal,
+  type DocumentUploadGateway,
+  type DocumentUploadInput,
+  type DocumentUploadResult,
 } from '../ports/document-upload-gateway.js';
 
 export interface DocumentUploadGatewayOptions {
@@ -29,6 +30,19 @@ export interface DocumentUploadGatewayOptions {
 
 const DEFAULT_TIMEOUT_MS = 30_000; // virus scan + sealing legitimately takes seconds
 const TOKEN_REFRESH_MARGIN_MS = 60_000;
+const DOCUMENT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isDocumentId(value: unknown): value is string {
+  return typeof value === 'string' && DOCUMENT_ID_RE.test(value);
+}
+
+function isPositiveSafeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1;
+}
 
 export class HttpDocumentUploadGateway implements DocumentUploadGateway {
   readonly #opts: DocumentUploadGatewayOptions;
@@ -71,7 +85,8 @@ export class HttpDocumentUploadGateway implements DocumentUploadGateway {
     }
     if (res.status === 401) this.#cached = null;
 
-    const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    const rawBody: unknown = await res.json().catch(() => null);
+    const body = isRecord(rawBody) ? rawBody : {};
     const code = typeof body['error'] === 'string' ? body['error'] : undefined;
     // ONE classification, from the one shared table (D7). A 4xx we cannot name is
     // a REFUSAL, not an outage: an unclassified refusal must never be relayed as
@@ -79,17 +94,52 @@ export class HttpDocumentUploadGateway implements DocumentUploadGateway {
     // closed door forever. The drift is logged, loudly, rather than swallowed.
     const answer = classifyDocumentDoorAnswer(res.status, code);
     if (answer.kind === 'UPLOADED') {
-      const documentId = body['documentId'];
-      if (typeof documentId !== 'string') return { kind: 'DEPENDENCY_UNAVAILABLE' };
-      // The response is rebuilt from two known fields; nothing else is relayed.
-      return { kind: 'UPLOADED', documentId, documentType: input.documentType };
+      const invalidFields: string[] = [];
+      if (body['status'] !== 'UPLOADED') invalidFields.push('status');
+      if (!isDocumentId(body['documentId'])) invalidFields.push('documentId');
+      if (body['documentType'] !== input.documentType) invalidFields.push('documentType');
+      if (!isPositiveSafeInteger(body['revision'])) invalidFields.push('revision');
+      if (invalidFields.length > 0) {
+        logError('document_door_contract_drift', {
+          stage: 'forensics_response',
+          status: res.status,
+          code: 'INVALID_UPLOAD_SUCCESS',
+          fields: invalidFields,
+        });
+        return { kind: 'DEPENDENCY_UNAVAILABLE' };
+      }
+      // The response is rebuilt from the four approved fields; nothing else is relayed.
+      return {
+        kind: 'UPLOADED',
+        documentId: body['documentId'] as string,
+        documentType: input.documentType,
+        revision: body['revision'] as number,
+      };
     }
     if (answer.kind === 'RELAY') {
+      if (answer.code === 'DOCUMENT_REVIEW_CLOSED') {
+        const reason = body['reason'];
+        if (res.status !== 409 || !isDocumentReviewClosedReason(reason)) {
+          // Log only the drift category, never arbitrary upstream reason text.
+          logError('document_door_contract_drift', {
+            stage: 'forensics_response',
+            status: res.status,
+            code: 'DOCUMENT_REVIEW_CLOSED',
+            reason: reason === undefined ? 'MISSING' : 'UNRECOGNIZED',
+          });
+          return { kind: 'DEPENDENCY_UNAVAILABLE' };
+        }
+        return { kind: 'REFUSED', httpStatus: 409, code: 'DOCUMENT_REVIEW_CLOSED', reason };
+      }
       if (answer.code === 'DOCUMENT_REFUSED') {
-        // Status and closed reason only — the body is not ours to log.
+        // Status and closed code only — the body is not ours to log.
         logError('document_door_contract_drift', { stage: 'forensics_response', status: res.status, code: code ?? 'UNNAMED' });
       }
-      return { kind: 'REFUSED', httpStatus: answer.status, code: answer.code as DocumentRefusal };
+      return {
+        kind: 'REFUSED',
+        httpStatus: answer.status,
+        code: answer.code as Exclude<DocumentRefusal, 'DOCUMENT_REVIEW_CLOSED'>,
+      };
     }
     // Status and closed code only — never the body, which is not ours to log.
     logError('document_door_dependency_unavailable', { stage: 'forensics_response', status: res.status, code: code ?? 'UNNAMED' });
