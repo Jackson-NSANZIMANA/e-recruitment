@@ -186,6 +186,8 @@ async function main(): Promise<void> {
     recordStore: new forensics.PgDocumentRecordStore(),
     eventBus: forensicsBus,
     bucket: BUCKET,
+    // D8: the KEYED content digest key.
+    contentHmacKey: process.env['FORENSICS_CONTENT_HMAC_KEY'] ?? 'selfcheck_document_content_hmac_key_min_32!',
   });
   // The forensics service verifies tokens against the iam test key pair.
   const forensicsServer = await startHttpServer({

@@ -22,6 +22,8 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { sql, asJsonb } from '@usrp/shared-database';
+import { logWarn } from '@usrp/shared-logging';
+import { decidedByHuman } from '../domain/human-decision.js';
 import {
   APPLICATION_STATUSES,
   type AcademicEligibilityStatus,
@@ -66,6 +68,8 @@ interface ApplicationStateRow {
   readonly academic_status: AcademicEligibilityStatus;
   readonly criminal_clearance_status: CriminalClearanceStatus;
   readonly academic_eligibility_detail: unknown;
+  /** rls/0047: dimensions an officer has already decided — machines may not overwrite them. */
+  readonly vetting_hold_resolved_dimensions: string[];
   readonly applicant_id: string;
   readonly campaign_id: string;
   readonly category: ApplicationCategory;
@@ -131,7 +135,8 @@ export class PgApplicationRepository implements ApplicationRepository {
         // against rebalance/redelivery races and any second process.
         const rows = await tx<ApplicationStateRow[]>`
           SELECT status, age_eligibility_status, academic_status, criminal_clearance_status,
-                 academic_eligibility_detail, applicant_id, campaign_id, category
+                 academic_eligibility_detail, applicant_id, campaign_id, category,
+                 vetting_hold_resolved_dimensions
           FROM ${schema}.applications
           WHERE id = ${result.applicationId}
           FOR UPDATE
@@ -141,6 +146,21 @@ export class PgApplicationRepository implements ApplicationRepository {
         // The engine cannot stop a cross-agency mis-route (no RLS on ops
         // applications), so we assert it here rather than silently succeed.
         if (!current) return { kind: 'NOT_FOUND' };
+
+        // A HUMAN DECISION IS NOT OVERWRITTEN BY A MACHINE (D0, ADR-051).
+        // Once an officer resolved the criminal or academic hold, the dimension
+        // belongs to that decision: a late automated verdict — a redelivery, an
+        // operator's DLQ replay, the durable re-driver hours after the event —
+        // must not flip it back to UNDER_REVIEW or onto a different answer. The
+        // event is acknowledged (NO_CHANGE) and the refusal is logged, so the
+        // drift is visible without poisoning the partition.
+        if (decidedByHuman(current.vetting_hold_resolved_dimensions, result.dimension)) {
+          logWarn('vetting_verdict_after_human_decision', {
+            applicationId: result.applicationId,
+            dimension: result.dimension,
+          });
+          return { kind: 'NO_CHANGE' };
+        }
 
         // Post-update per-dimension verdicts (only the projected one changes).
         const newAge =

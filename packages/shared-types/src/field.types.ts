@@ -21,6 +21,26 @@ export interface FieldScoreRecord {
   readonly signedPayloadHash: string;    // SHA-256 of metrics payload
 }
 
+/**
+ * Why a field-sync record was REFUSED (D11). Closed set, because the tablet's
+ * sync centre renders one state per reason and a free-text reason is a reason
+ * nobody tests.
+ *
+ * OFFICER_MISMATCH is the D11 fix: the record's signed capturingOfficerId did
+ * not name the officer who is uploading it. The device signs its own claim about
+ * who captured a citizen's physical test; the platform's answer is that the
+ * authenticated principal is the only actor, so a disagreeing claim is refused
+ * rather than stored.
+ */
+export type FieldScoreRejectReason =
+  | 'UNENROLLED_DEVICE'
+  | 'REVOKED_DEVICE'
+  | 'AGENCY_MISMATCH'
+  | 'OFFICER_MISMATCH'
+  | 'BAD_SIGNATURE'
+  | 'TICKET_MISMATCH'
+  | 'NOT_ADMITTED';
+
 // ── CRDT Merge Result ─────────────────────────────────────────────
 
 export interface CRDTMergeResult {

@@ -37,6 +37,11 @@ export {
 } from './bus.js';
 
 export { KafkaEventBus, type KafkaBusOptions } from './kafka-bus.js';
+export {
+  KafkaRawPublisher,
+  type RawMessage,
+  type RawMessagePublisher,
+} from './raw-publisher.js';
 
 // Poison-message containment (ADR-025): retry, then park — never block, never drop.
 export {
@@ -52,6 +57,25 @@ export {
   type DeadLetterPolicy,
   type DeadLetterReason,
 } from './dead-letter.js';
+
+// Durable re-drive of dead letters (D2, ADR-050): a schedule, not a window.
+export {
+  DEFAULT_REDRIVE_DELAYS_MS,
+  DEFAULT_REDRIVE_POLICY,
+  PARKED_TOPIC,
+  REPLAYED_HEADER,
+  decideRedrive,
+  firstDueAtMs,
+  nextAttemptAtMs,
+  redriveDelayMs,
+  redriveKey,
+  resolveRedrivePolicy,
+  type DeadLetterHeader,
+  type RedriveDecision,
+  type RedriveLedgerEntry,
+  type RedriveParkReason,
+  type RedrivePolicy,
+} from './redrive.js';
 
 // Bootstrap: the bound and the phase marker every service main() shares.
 export {

@@ -57,6 +57,7 @@ export class PgOfficerTransitionRepository implements OfficerTransitionRepositor
     this.#sod = separationOfDuties ?? {
       finalDecisionExcludesMedicalReviewer: true,
       acceptExcludesFinalDecider: false,
+      clearanceReviewExcludesAccepter: true,
     };
   }
 
@@ -222,10 +223,12 @@ export class PgOfficerTransitionRepository implements OfficerTransitionRepositor
             campaign_id: string;
             category: ApplicationCategory;
             final_decision_by_id: string | null;
+            vetting_hold_resolvers: string[];
           }[]
         >`
           SELECT status, applicant_id, campaign_id, category,
-                 final_decision_by_id::text AS final_decision_by_id
+                 final_decision_by_id::text AS final_decision_by_id,
+                 vetting_hold_resolvers::text[] AS vetting_hold_resolvers
           FROM ${schema}.applications
           WHERE id = ${applicationId} FOR UPDATE
         `;
@@ -243,6 +246,21 @@ export class PgOfficerTransitionRepository implements OfficerTransitionRepositor
           current.final_decision_by_id === actor.officerId
         ) {
           return { kind: 'SEPARATION_OF_DUTIES', rule: 'ACCEPT_EXCLUDES_FINAL_DECIDER' };
+        }
+
+        // Four-eyes (D10, policy-gated): the officer who RESOLVED a vetting hold
+        // on this application may not also enlist the applicant. The clearance
+        // reader and the acceptance authority are separate posts precisely so
+        // one person cannot lift a criminal or academic hold and then accept on
+        // the strength of it. Read from the row's durable resolver SET
+        // (rls/0047: every officer who resolved ANY held dimension, not just the
+        // last) under the same lock — not reconstructed from history, so a
+        // redelivered event can never make the answer ambiguous.
+        if (
+          this.#sod.clearanceReviewExcludesAccepter &&
+          current.vetting_hold_resolvers.includes(actor.officerId)
+        ) {
+          return { kind: 'SEPARATION_OF_DUTIES', rule: 'ACCEPT_EXCLUDES_CLEARANCE_REVIEWER' };
         }
 
         // ── Cross-agency accept-lock (ADR-014) ──────────────────────
@@ -395,6 +413,7 @@ export class PgOfficerTransitionRepository implements OfficerTransitionRepositor
               UPDATE ${schema}.applications SET
                 criminal_clearance_status = 'CLEARED'::${schema}.criminal_clearance_status,
                 criminal_clearance_at = now(),
+                ${stampResolution(actor.officerId, 'CRIMINAL')},
                 updated_at = now()
               WHERE id = ${applicationId}
             `;
@@ -403,6 +422,7 @@ export class PgOfficerTransitionRepository implements OfficerTransitionRepositor
             await tx`
               UPDATE ${schema}.applications SET
                 academic_status = 'ELIGIBLE'::${schema}.academic_eligibility_status,
+                ${stampResolution(actor.officerId, 'ACADEMIC')},
                 updated_at = now()
               WHERE id = ${applicationId}
             `;
@@ -487,6 +507,25 @@ export class PgOfficerTransitionRepository implements OfficerTransitionRepositor
       throw wrap(cause, 'Failed to apply adjudication');
     }
   }
+
+}
+
+/**
+ * The durable fact that THIS officer resolved THIS held dimension (rls/0047).
+ * Appended, never replaced: a row held in two dimensions can be resolved by two
+ * officers, and the accept-time four-eyes read must see both. Idempotent — a
+ * repeated resolution adds nothing. The all-or-nothing CHECK on the table
+ * requires resolvers, dimensions and the timestamp to move together.
+ */
+function stampResolution(officerId: string, dimension: 'CRIMINAL' | 'ACADEMIC'): ReturnType<typeof sql> {
+  return sql`
+    vetting_hold_resolvers = CASE WHEN ${officerId}::uuid = ANY(vetting_hold_resolvers)
+                                  THEN vetting_hold_resolvers
+                                  ELSE array_append(vetting_hold_resolvers, ${officerId}::uuid) END,
+    vetting_hold_resolved_dimensions = CASE WHEN ${dimension} = ANY(vetting_hold_resolved_dimensions)
+                                            THEN vetting_hold_resolved_dimensions
+                                            ELSE array_append(vetting_hold_resolved_dimensions, ${dimension}::text) END,
+    vetting_hold_resolved_at = now()`;
 }
 
 /** Row shape the adjudicate transaction reads under FOR UPDATE. */

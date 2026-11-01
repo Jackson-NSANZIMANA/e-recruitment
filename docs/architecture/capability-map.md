@@ -3,9 +3,11 @@
 **Purpose:** the living answer to "what must exist before USRP can be
 deployed", per application, with the state of each capability **as verified in
 code** (not as remembered). Update it in the same commit as the code it
-describes. Last verified: 2026-10-26 (S00 integrity sweep), backend `main`
-`5983c15`, frontend `main` `bd6178b` (pinned to backend `cd49628`). Previous
-full verification: 2026-10-16.
+describes. Last verified: 2026-11-01 (defect closure, evaluation 2026-10-29 §2),
+backend `arena/74feaf2b-e-recruitment` `e1c3488`, frontend `main` `bd6178b`
+(pinned to backend `cd49628`; the four phase-0 front-end contracts are handed
+off, not yet consumed). Previous full verification: 2026-10-26 (S00 integrity
+sweep).
 
 Counts and SHAs are not restated here. Every CI run writes them to the
 **evidence bundle**: the `evidence-<sha>` artefact of the *Evidence bundle*
@@ -24,7 +26,7 @@ Legend: ✅ built and proven by a live selfcheck · 🟡 partial · ❌ missing 
 | Browse open campaigns, view detail | ✅ backend · 🟡 UI | public list/detail; portal campaign picker **(S)** in `apps/applicant-portal/src/routes/apply` |
 | Apply to a chosen campaign (public code), idempotent | ✅ **(S)** | ADR-030; `verify-campaign-bound-submission.ts` |
 | Policy version + evaluation date bound at filing | ✅ **(S)** | rls/0029 write-once; event `referenceDate`/`policyVersionId` |
-| Upload documents (scanned, sealed, no verdict to citizen) | ✅ **(S)** | `verify-applicant-document-door.ts` (real ClamAV, MinIO) |
+| Upload documents (scanned, sealed, no verdict to citizen) | ✅ **(S)** · ✅ revisions + review lock **(D8)** · ✅ one vocabulary **(D7)** | `verify-applicant-document-door.ts` (real ClamAV, MinIO). D8 (ADR-052, rls/0044): `revision` + keyed `content_hmac` on the slot, append-only `document_revisions` per agency schema, replacement allowed only before human review (`409 DOCUMENT_REVIEW_CLOSED`, `HUMAN_REVIEWED`/`CASE_ADVANCED`); the 201 carries `revision` and nothing else. D7: `DOCUMENT_DOOR_CODES` in `@usrp/shared-types` is the only vocabulary (`verify-document-door-contract.ts`); a citizen's typo is `422 UNSUPPORTED_DOCUMENT_TYPE`, not a fabricated outage. ❌ officer `document.reopen` (ADR-052 §3.6) |
 | Advisory document checklist | ✅ backend+edge **(S)** · ❌ screen | ADR-032 (RCS General Enlistee: A2 via NESA, no notarised degree); `verify-document-checklist.ts`; api-client hooks exist |
 | Application list / status | 🟡 | list exists; no authoritative timeline projection (BUILD-005) |
 | Exam invitation + QR in the portal (download PNG / print) | ✅ **(S)** | ADR-033; rls/0031; `verify-exam-invitation.ts`; portal `/applications/:id/exam-qr` (jsQR round-trip test) |
@@ -41,6 +43,7 @@ Legend: ✅ built and proven by a live selfcheck · 🟡 partial · ❌ missing 
 | Operation-level permissions + separation of duties | ✅ **(S)** | ADR-031; role table awaits agency ratification |
 | Application queues, detail, decision trail | ✅ reads · ✅ UI **(S06)** | frontend `packages/features/adjudication` (queues), `packages/features/applications` (search, detail, action panels) |
 | Medical review / final decision / accept / adjudicate | ✅ (permissioned, four-eyes) **(S)** | `verify-officer-lifecycle-slice.ts` |
+| Vetting-hold resolution (criminal + NESA review) | ✅ backend+edge **(D10)** · ❌ screen | ADR-051, rls/0047: the existing `adjudicate` with `lane`; four-eyes on accept via a durable resolver set; a human decision outranks a late machine verdict |
 | Officer lifecycle: create, assign posts, disable, revoke sessions | ✅ backend+edge **(S01)** · ✅ UI **(S06)** | ADR-036, rls/0033: 9 edge operations (`listOfficers`, `createOfficer`, `reissueOfficerActivation`, `releaseOfficerActivation`, `assignOfficerPosts`, `disableOfficer`, `enableOfficer`, `revokeOfficerSessions`, `activateOfficer`); one-time activation code **released once to a second administrator, never to the creator (ADR-036 Addendum A, S06)**; disable/post change ends an open browser session on the next request (`verify-officer-lifecycle.ts`); rehearsal staffs each agency through them. Screen: frontend `packages/features/identity` (`StaffPage`, `ReleaseDialog`); live staff journey `apps/officer-console/e2e/live-staff-journey.spec.ts` (`USRP_LIVE=1`) |
 | Device revocation, fleet list, venue-day assignment | ✅ backend + edge **(S09)** · ❌ UI | `field.device.manage` (field_supervisor, agency_admin); closed reason, final, audited; next score sync, next biometric evidence and enrolment refused (`pnpm rehearse --fleet`). Offline window: a device that never reconnects keeps its data until wiped (S15). ADR-036 addendum |
 | Venue live counts (expected, admitted, physical, medical, conflicts, asOf) | ✅ backend + edge **(S09)** · ❌ UI | `getVenueLiveCounts`; same-transaction projection (rls/0036); rehearsal asserts it equals the engine |
@@ -61,7 +64,7 @@ Legend: ✅ built and proven by a live selfcheck · 🟡 partial · ❌ missing 
 | Biometric check-in | 🟡 evidence model live, on-device capture B2 **(B1)** | ADR-037, rls/0034: device-signed `USRP-BIO-EVIDENCE.v1` records (Ed25519, verified against `field_devices`), modes OFF/SHADOW/ADVISORY (pilot SHADOW), evidence never a verdict: `NO_MATCH`/`INCONCLUSIVE` → supervised manual identity (`confirmManualIdentity`, field supervisor), gate records `NATIONAL_ID_CARD+CARD_PORTRAIT` / `+SUPERVISOR`; `NIDA_PORTRAIT` fails closed; no image, frame or embedding accepted (`verify-biometric-evidence.ts`); edge `getBiometricPolicy`, `recordBiometricEvidence`, `getBiometricEvidence`, `confirmManualIdentity`; rehearsal records a SHADOW row for persona A. The server-side mock matcher is dev-only |
 | Venue document clearing by the check-in post | ✅ backend+edge **(S)** · ❌ screen | ADR-032 `document.verify.venue` |
 | Walk-in register / vet (RDF) | ✅ (permissioned) | |
-| Physical test capture, signed, offline CRDT sync | ✅ service · ❌ client | field-sync-service; fixed metric schema for all agencies. `enrollFieldDevice`, `syncFieldScores` and `resolveFieldSyncConflict` are frontend registry IDs only (untyped) |
+| Physical test capture, signed, offline CRDT sync | ✅ service · ❌ client | field-sync-service; fixed metric schema for all agencies. **D11:** the authenticated principal is the only actor — a non-UUID `capturingOfficerId` is `400` (never a `500`), and a claim naming another officer is `REJECTED / OFFICER_MISMATCH` per record without losing the batch, audited; the stored officer is always the token's subject (`verify-actor-binding.ts`, 14). `enrollFieldDevice`, `syncFieldScores` and `resolveFieldSyncConflict` are frontend registry IDs only (untyped) |
 | Medical capture on the tablet | ❌ | console only |
 
 ## 4. Platform gates before any pilot
@@ -74,12 +77,14 @@ Legend: ✅ built and proven by a live selfcheck · 🟡 partial · ❌ missing 
 | CAPTCHA/WAF in front of onboarding | ❌ |
 | SMS cost cap | ✅ **S12b**: `SMS_DAILY_CAP` (required in production; sandbox default 50, shared counter file) and a per-number limit |
 | Real G2G (NIDA/NESA/HEC/RIB) authorization | ❌ no agreements · 🟡 **production-like sandbox (S12a)**: NIDA and NESA adapters on the captured wire formats behind fenced simulators (ADR-047), NESA results bound to the applicant (ADR-048 §2.1–2.2, rls/0042); `pnpm sandbox` + `pnpm rehearse --sandbox --journey <scenario>`; HEC still on a hash-keyed mock |
-| Criminal clearance by Irembo certificate | 🟡 **S12b** (ADR-048 §2.3–2.5, rls/0040): the citizen gives the Irembo application number (`attachMyClearanceCertificate`); ordered checks (authentic, allowed type, 90-day window, identity binding, content) on the real envelope; outages never a verdict; append-only verifications with no name/DOB; checklist `clearance` state and amber-queue reasons (`CLEARANCE_CONTENT_REVIEW`, `IDENTITY_NAME_PARTIAL`); `clearance-matrix` rehearsal. ❌ real Irembo APPLICATION_CODE and G2G transport (owner/RIB), the officer decision on a criminal REVIEW, per-campaign policy (S12c), the frontend |
+| Criminal clearance by Irembo certificate | 🟡 **S12b** (ADR-048 §2.3–2.5, rls/0040): the citizen gives the Irembo application number (`attachMyClearanceCertificate`); ordered checks (authentic, allowed type, 90-day window, identity binding, content) on the real envelope; outages never a verdict; append-only verifications with no name/DOB; checklist `clearance` state and amber-queue reasons (`CLEARANCE_CONTENT_REVIEW`, `IDENTITY_NAME_PARTIAL`); `clearance-matrix` rehearsal. ✅ the officer decision on a criminal REVIEW (**D10**, ADR-051), and the NESA review beside it. ❌ real Irembo APPLICATION_CODE and G2G transport (owner/RIB), per-campaign policy (S12c), the frontend |
 | Campaign policy v2 | 🟡 **S12c** (ADR-049, rls/0041): an additive `v2` block per category (age bands by qualification, education alternatives, science bar, conviction rule + not-under-prosecution, documents with satisfaction mode and notarisation, clearance values); the v1 envelope must agree with it; the six announcements publish from their printed facts; the pinned policy governs the age gate and the NESA/HEC academic gates and the per-campaign clearance values. ❌ two-day district sittings, shared multi-district venue capacity, barred-list and dismissal registry checks, the Campaign Studio authoring UI for v2 |
 | Citizen identity pre-fill | 🟡 **S12c**: `getMyIdentity` (allowlisted: names, sex, DOB, district; never photo, signature, parents' names or the NID; place of birth and nationality are not retained, so the wizard asks); SANDBOX banner in all three apps. CONTRACT-PENDING until the backend merges |
 | Real biometric matcher or ratified manual-admission policy | 🟡 manual-identity policy built (ADR-037, owner decisions; DPO sign-off pending); on-device matcher B2, thresholds B3 |
 | Backups/PITR, KMS keys, load and failure testing | ❌ |
 | G1 supply chain: signed, scanned images with SBOMs | ✅ (S03, ADR-038 / ADR-FE-014); `v0.1.0-rc1` pre-release cut 2026-10-21 |
+| Failure recovery: a transient fault ends in a result, a permanent one in a signal | ✅ backend **(D2)** · ❌ parked-topic alarm (S11a) · ❌ `fault-and-recover` journey (specified in the closure report §3; needs a fenced simulator behaviour-override, which belongs to S11a) | ADR-050, rls/0043: `public_core.event_redrive_ledger` is the schedule (unique per topic+partition+offset+group), `services/event-redrive-service` (port 4012, sandbox 4912) re-drives byte-exactly to the original topic; the pure policy is `1m/5m/15m/1h/3h/6h` then `PARKED`, `UNDECODABLE`/`NON_RETRYABLE` never re-driven, per-group breaker after 3 failures, single leader by advisory lock; parked letters emit on `events.dead-letter-parked` (`retention.ms=-1`). `verify-redrive-policy.ts` (32) |
+| Exposure posture: closed by default, announced when opened | ✅ **(D9)** | ADR-053: `resolveHttpBindHost()` — loopback unless told otherwise, `HTTP_BIND_HOST` required in production, the `0.0.0.0` default in `shared-http` deleted, compose explicit; `SANDBOX_EXPOSE_LAN=1` binds the machine's LAN IPv4 (never the wildcard) for the edge only, announces itself, and is refused together with `--real-sms` (`verify-bind-exposure.ts`, 26) |
 
 ## 5. Rehearsal and evidence
 

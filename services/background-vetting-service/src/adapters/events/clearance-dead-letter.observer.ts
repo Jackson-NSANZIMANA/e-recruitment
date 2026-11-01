@@ -8,14 +8,21 @@
 // simply gone: `clearance_certificate_verifications` keeps its PENDING row, the
 // checklist keeps saying "we are verifying", and no human is ever asked to look.
 //
-// A RE-DRIVE IS IMPOSSIBLE FROM DURABLE STATE, BY DESIGN. The certificate
-// number is never stored (only an HMAC and its last 4), so a timer cannot
-// reconstruct the registry call — and keeping the number to enable one would
-// trade a citizen's privacy for our convenience. The terminal outcome therefore
-// has to be a human, not another attempt: escalate to REVIEW/CLEARANCE_UNVERIFIED
-// so the case lands in the amber queue and the citizen is told an officer will
-// look. The number is still in hand here because this callback runs in the same
-// process, with the event that failed.
+// A RE-DRIVE IS IMPOSSIBLE FROM *DURABLE DATABASE STATE*, BY DESIGN. The
+// certificate number is never stored (only an HMAC and its last 4), so a timer
+// reading our tables cannot reconstruct the registry call — and keeping the
+// number to enable one would trade a citizen's privacy for our convenience.
+//
+// TWO LAYERS, NOT ONE (ADR-050). The event itself still carries the number, and
+// it sits byte-exact on the dead-letter topic. The platform's durable re-driver
+// (event-redrive-service) republishes THAT, on a capped backoff schedule, so a
+// registry outage that ends is recovered with no human. This observer is the
+// other layer: the first line of defence for the citizen. Within seconds of the
+// retry budget running out the case is in the amber queue as
+// REVIEW/CLEARANCE_UNVERIFIED and the citizen is told an officer will look —
+// whether or not the re-driver later succeeds. If it does, the CLEARED verdict
+// flows through the normal projection; if an officer has already decided the
+// criminal dimension, the projection refuses to overwrite that decision.
 //
 // ONLY A REGISTRY OUTAGE IS ESCALATED, and that narrowness is the safety
 // argument, not caution: `ClearanceRegistryUnavailableError` is thrown on the one

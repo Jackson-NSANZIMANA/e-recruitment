@@ -22,6 +22,8 @@ import {
   loadKafkaConfig,
   resolveEventTransport,
   type EventTransport,
+  bindHostAnnouncement,
+  resolveHttpBindHost,
 } from '@usrp/shared-config';
 import { startHttpServer } from '@usrp/shared-http';
 import { createIamService, loadIamConfig } from './index.js';
@@ -63,9 +65,18 @@ async function main(): Promise<void> {
   outboxRelay.start();
   console.log(JSON.stringify({ msg: 'outbox_relay_started', producer: IAM_OUTBOX_PRODUCER }));
 
+  // ADR-053: loopback unless this deployment says otherwise (required in
+  // production). Resolved once, announced once — an exposed process is then
+  // visible in the boot log and in `sandbox:full status`, not only in ss -ltnp.
+  const bindHost = resolveHttpBindHost({ serviceName: config.runtime.serviceName });
+  console.log(
+    JSON.stringify(bindHostAnnouncement(config.runtime.serviceName, bindHost, config.runtime.port)),
+  );
+
   const server = await startHttpServer({
     serviceName: config.runtime.serviceName,
     port: config.runtime.port,
+    host: bindHost,
     routes: [
       ...officerLoginRoutes(service.login),
       ...serviceTokenRoutes(service.serviceToken),

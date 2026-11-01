@@ -24,6 +24,7 @@ import {
   jsonb,
   index,
   uniqueIndex,
+  unique,
 } from 'drizzle-orm/pg-core';
 import { applicantIdentities, campaignPolicyVersions } from './public-core.schema.js';
 
@@ -176,6 +177,10 @@ export const rnpApplications = rnpOps.table(
     finalDecisionById: uuid('final_decision_by_id'),
     finalDecisionAt: timestamp('final_decision_at', { withTimezone: true }),
     finalDecisionNotes: varchar('final_decision_notes', { length: 1000 }),
+    // D10 (rls/0047): who resolved which HELD vetting dimension(s) on this application.
+    vettingHoldResolvers: uuid('vetting_hold_resolvers').array().notNull().default(sql`'{}'::uuid[]`),
+    vettingHoldResolvedDimensions: text('vetting_hold_resolved_dimensions').array().notNull().default(sql`'{}'::text[]`),
+    vettingHoldResolvedAt: timestamp('vetting_hold_resolved_at', { withTimezone: true }),
 
     submittedAt: timestamp('submitted_at', { withTimezone: true }),
     // BUILD-002 (rls/0029): the policy version and calendar date that governed
@@ -247,6 +252,11 @@ export const rnpDocumentRecords = rnpOps.table(
     verifiedViaApi: boolean('verified_via_api').default(false),
     apiVerificationToken: varchar('api_verification_token', { length: 128 }),
     apiVerifiedAt: timestamp('api_verified_at', { withTimezone: true }),
+    // D8 (rls/0046, ADR-052): how many times this slot has been uploaded, and a
+    // KEYED digest of the bytes (never a bare hash — see the migration header).
+    revision: integer('revision').default(1).notNull(),
+    contentHmac: varchar('content_hmac', { length: 64 }),
+
     humanReviewedById: uuid('human_reviewed_by_id'),
     humanReviewedAt: timestamp('human_reviewed_at', { withTimezone: true }),
     humanReviewDecision: varchar('human_review_decision', { length: 10 }),
@@ -262,6 +272,36 @@ export const rnpDocumentRecords = rnpOps.table(
   (t) => [
     index('idx_rnp_docs_application').on(t.applicationId),
     index('idx_rnp_docs_type').on(t.documentType),
+  ],
+);
+
+/**
+ * D8 (rls/0046, ADR-052): the append-only trail of every upload into a document
+ * slot. One row per upload, never updated, never deleted (engine-enforced).
+ */
+export const rnpDocumentRevisions = rnpOps.table(
+  'document_revisions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    documentId: uuid('document_id')
+      .references(() => rnpDocumentRecords.id)
+      .notNull(),
+    applicationId: uuid('application_id')
+      .references(() => rnpApplications.id)
+      .notNull(),
+    revision: integer('revision').notNull(),
+    contentHmac: varchar('content_hmac', { length: 64 }).notNull(),
+    fileSizeBytes: integer('file_size_bytes').notNull(),
+    mimeType: varchar('mime_type', { length: 255 }).notNull(),
+    forensicsLane: rnpDocumentLaneEnum('forensics_lane').notNull(),
+    forensicsScore: integer('forensics_score'),
+    forensicsFlags: jsonb('forensics_flags').default(sql`'{}'::jsonb`).notNull(),
+    uploadedBy: varchar('uploaded_by', { length: 32 }).default('APPLICANT').notNull(),
+    uploadedAt: timestamp('uploaded_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    unique('rnp_ops_document_revisions_slot_revision_key').on(t.documentId, t.revision),
+    index('idx_rnp_ops_document_revisions_app').on(t.applicationId, t.uploadedAt.desc()),
   ],
 );
 

@@ -280,6 +280,21 @@ apply_sql "${RLS_DIR}/0043_cross_agency_column_parity.sql" "rls/0043 (cross-agen
 # Replaces record_clearance_verification, so it MUST follow rls/0040.
 apply_sql "${RLS_DIR}/0044_clearance_unverified_escalation.sql" "rls/0044 (clearance escalation: D2)"
 
+# D2 (ADR-050): the durable re-drive ledger. One row per dead letter, with a
+# schedule, an attempt count and a parked state — a Kafka offset is a cursor and
+# cannot schedule, so this table IS the schedule (public_core, system-owned).
+apply_sql "${RLS_DIR}/0045_event_redrive_ledger.sql" "rls/0045 (event re-drive ledger)"
+
+# D8 (ADR-052): document supersession. document_records gains a revision counter
+# and a KEYED content digest; document_revisions is the append-only trail of what
+# passed through each slot (grants stripped + triggers, the rls/0007 idiom).
+apply_sql "${RLS_DIR}/0046_document_revisions.sql" "rls/0046 (document revisions)"
+
+# D10 (ADR-051): the durable resolver stamp for a resolved vetting hold, in ALL
+# THREE ops schemas — the accept-time four-eyes read (the officer who resolved a
+# criminal or NESA hold may not also accept) reads this column, not the history.
+apply_sql "${RLS_DIR}/0047_vetting_hold_resolution.sql" "rls/0047 (vetting-hold resolver stamp)"
+
 printf '\n'
 
 ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts + applicant auth + erasure requests + stored contact + edge sessions + event outbox + slot reservations + submission integrity + walk-in outbox grant + shared rate-limit buckets + required extensions + campaign control plane + functions-only command boundary + onboarding lockout + application policy binding + document venue verification + exam invitation + gate admissions + officer lifecycle + biometric identity evidence in place"

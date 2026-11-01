@@ -37,7 +37,7 @@ const gateway: GateAdmissionGateway = {
 
 let server: HttpServer;
 before(async () => {
-  server = await startHttpServer({
+  server = await startHttpServer({ host: '127.0.0.1',
     serviceName: 'identity-gate-test',
     port: 0,
     routes: gateAdmissionRoutes(gateway, KEY, verify),

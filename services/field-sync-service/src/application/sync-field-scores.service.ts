@@ -7,6 +7,11 @@
 //   2. Cross-agency guard: the device's agency must equal the officer's agency.
 //   3. Verify the Ed25519 device signature AND the metrics hash
 //      (verifyFieldScoreRecord). Tampered → REJECT (never stored).
+//   3b. BIND THE ACTOR (D11). The record carries a signed capturingOfficerId —
+//      the device's own claim about which officer captured this citizen's
+//      physical test. The authenticated principal is the only actor the platform
+//      recognizes, so a claim naming anyone else is refused (OFFICER_MISMATCH)
+//      and the value STORED is the principal's, never the claim's.
 //   4. Merge into physical_test_scores (vector-clock hybrid resolution). The
 //      store first binds the record to the application's ISSUED exam ticket:
 //      a signed ticket that is not the issued one → REJECT TICKET_MISMATCH.
@@ -33,6 +38,7 @@ import type {
   AuditEvent,
   FieldScoreCapturedEvent,
   FieldScoreRecord,
+  FieldScoreRejectReason,
 } from '@usrp/shared-types';
 import type { FieldScoreStore, SyncOutcome } from '../ports/field-score-store.js';
 import type { DeviceRegistry } from '../ports/device-registry.js';
@@ -46,13 +52,11 @@ export type RecordStatus =
   | 'NOT_FOUND'
   | 'REJECTED';
 
-export type RejectReason =
-  | 'UNENROLLED_DEVICE'
-  | 'REVOKED_DEVICE'
-  | 'AGENCY_MISMATCH'
-  | 'BAD_SIGNATURE'
-  | 'TICKET_MISMATCH'
-  | 'NOT_ADMITTED';
+/**
+ * Re-exported from @usrp/shared-types so the tablet's sync centre and this
+ * service cannot disagree about the closed set (D11).
+ */
+export type RejectReason = FieldScoreRejectReason;
 
 export interface RecordSyncResult {
   readonly applicationId: string;
@@ -66,6 +70,12 @@ export interface SyncFieldScoresCommand {
   readonly records: readonly FieldScoreRecord[];
   /** The uploading officer's agency (from their verified token). */
   readonly actorAgency: Agency;
+  /**
+   * The uploading officer's subject id, from the VERIFIED token (D11). This is
+   * the only actor the platform accepts: the record's own capturingOfficerId is
+   * the device's claim, and a claim that disagrees is refused.
+   */
+  readonly actorSubjectId: string;
   readonly context: EventContext;
 }
 
@@ -87,7 +97,9 @@ export class SyncFieldScoresService {
     // One last-seen stamp per device per batch (monotonic, so once is enough).
     const stamped = new Set<string>();
     for (const record of command.records) {
-      results.push(await this.syncOne(record, command.actorAgency, command.context, stamped));
+      results.push(
+        await this.syncOne(record, command.actorAgency, command.actorSubjectId, command.context, stamped),
+      );
     }
     return { results };
   }
@@ -95,6 +107,7 @@ export class SyncFieldScoresService {
   private async syncOne(
     record: FieldScoreRecord,
     actorAgency: Agency,
+    actorSubjectId: string,
     context: EventContext,
     stamped: Set<string>,
   ): Promise<RecordSyncResult> {
@@ -124,6 +137,15 @@ export class SyncFieldScoresService {
     });
     if (!signatureOk) return this.reject(base, 'BAD_SIGNATURE', actorAgency, context);
 
+    // 3b. The actor is the AUTHENTICATED officer, not the device's claim (D11).
+    // A record signed by a genuine device that names a different officer is not
+    // forgery of the metrics — it is an unsupported claim about who did the
+    // work, on a record that becomes legal evidence of a citizen's fitness. It is
+    // refused, per record, so one bad record cannot lose a tablet's morning.
+    if (record.capturingOfficerId !== actorSubjectId) {
+      return this.reject(base, 'OFFICER_MISMATCH', actorAgency, context);
+    }
+
     // A SIGNED contact from an active device of this agency: stamp last-seen
     // (S09). Never before the signature check — a forger must not make a device
     // look alive — and never for a revoked device (refused above).
@@ -143,7 +165,8 @@ export class SyncFieldScoresService {
       agency: actorAgency,
       qrInvitationCode: record.qrInvitationCode,
       deviceId: record.deviceId,
-      capturingOfficerId: record.capturingOfficerId,
+      // The AUTHENTICATED officer (equal to the claim by 3b), not the claim.
+      capturingOfficerId: actorSubjectId,
       capturedAt: record.capturedAt,
       vectorClock: record.vectorClock,
       deviceSignature: record.deviceSignature,

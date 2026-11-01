@@ -53,6 +53,7 @@ export function createDocumentForensicsService(
       analyzer,
       recordStore,
       eventBus,
+      contentHmacKey: config.ingress.contentHmacKey,
     }),
     uploadDocument: new UploadDocumentService({
       ownership: new PgApplicationOwnershipReader(),
@@ -61,6 +62,7 @@ export function createDocumentForensicsService(
       recordStore,
       eventBus,
       bucket: config.ingress.bucket,
+      contentHmacKey: config.ingress.contentHmacKey,
     }),
   };
 }

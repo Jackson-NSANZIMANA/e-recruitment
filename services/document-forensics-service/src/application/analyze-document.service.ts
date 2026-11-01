@@ -12,6 +12,7 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { newEnvelope, type EventBus, type EventContext } from '@usrp/shared-events';
+import { hmacSha256Hex } from '@usrp/shared-security';
 import type {
   Agency,
   AuditEvent,
@@ -29,6 +30,12 @@ export interface AnalyzeDocumentCommand {
   readonly documentType: DocumentType;
   readonly objectBucket: string;
   readonly objectKey: string;
+  /**
+   * D8: the declared media type, carried onto the revision row. analyze/ gets a
+   * reference rather than a part, so this is what the caller declared — the
+   * bytes were already admitted by whoever stored them.
+   */
+  readonly mimeType: string;
   readonly context: EventContext;
 }
 
@@ -37,13 +44,17 @@ export type AnalyzeDocumentOutcome =
   | { readonly kind: 'APPLICATION_NOT_FOUND' }
   | { readonly kind: 'OBJECT_NOT_FOUND' }
   | { readonly kind: 'UNSUPPORTED_DOCUMENT_TYPE' }
-  | { readonly kind: 'SCANNER_UNAVAILABLE'; readonly detail: string };
+  | { readonly kind: 'SCANNER_UNAVAILABLE'; readonly detail: string }
+  /** D8: the slot is human-reviewed; a re-analysis may not overwrite it. */
+  | { readonly kind: 'REVIEW_CLOSED'; readonly reason: 'HUMAN_REVIEWED' | 'CASE_ADVANCED' };
 
 export interface AnalyzeDocumentDeps {
   readonly objectStore: ObjectStore;
   readonly analyzer: ForensicsAnalyzer;
   readonly recordStore: DocumentRecordStore;
   readonly eventBus: EventBus;
+  /** D8: key for the content digest (see UploadDocumentDeps.contentHmacKey). */
+  readonly contentHmacKey: string;
 }
 
 export class AnalyzeDocumentService {
@@ -77,10 +88,23 @@ export class AnalyzeDocumentService {
       objectBucket: command.objectBucket,
       objectKey: command.objectKey,
       fileSizeBytes: bytes.length,
+      mimeType: command.mimeType,
       virusScanStatus: analysis.verdict.flags.virusScanClean ? 'CLEAN' : 'INFECTED',
+      // D8: analyze/ judges an object that is ALREADY at rest, so the digest is
+      // computed over the bytes it just read, and there is no object to write.
+      // A re-analysis of unchanged bytes keeps the revision; different bytes
+      // under the same key are a supersession the reviewer can see.
+      contentHmac: hmacSha256Hex(this.#deps.contentHmacKey, bytes),
       verdict: analysis.verdict,
+      writeObject: () => Promise.resolve(),
     });
     if (recorded.kind === 'APPLICATION_NOT_FOUND') return { kind: 'APPLICATION_NOT_FOUND' };
+    // D8 (ADR-052 §3.3): the slot is under human review. analyze/ is the
+    // system-internal door; a re-analysis that would overwrite a REVIEWED
+    // verdict is refused for the same reason a citizen re-upload is.
+    if (recorded.kind === 'REVIEW_CLOSED') {
+      return { kind: 'REVIEW_CLOSED', reason: recorded.reason };
+    }
 
     const result: DocumentForensicsCompletedEvent = {
       ...newEnvelope(command.context),

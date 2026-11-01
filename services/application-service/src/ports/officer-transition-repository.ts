@@ -134,7 +134,11 @@ export type OfficerTransitionOutcome =
  */
 export interface SeparationOfDutiesOutcome {
   readonly kind: 'SEPARATION_OF_DUTIES';
-  readonly rule: 'FINAL_DECISION_EXCLUDES_MEDICAL_REVIEWER' | 'ACCEPT_EXCLUDES_FINAL_DECIDER';
+  readonly rule:
+    | 'FINAL_DECISION_EXCLUDES_MEDICAL_REVIEWER'
+    | 'ACCEPT_EXCLUDES_FINAL_DECIDER'
+    /** D10: the officer resolved this application's vetting hold, then tried to accept it. */
+    | 'ACCEPT_EXCLUDES_CLEARANCE_REVIEWER';
 }
 
 /**
@@ -194,6 +198,7 @@ export type AdjudicateOutcome =
       readonly heldLanes: readonly AdjudicationLane[];
     }
   | { readonly kind: 'NOT_FOUND' };
+
 
 export interface OfficerTransitionRepository {
   medicalReview(input: MedicalReviewInput): Promise<OfficerTransitionOutcome>;

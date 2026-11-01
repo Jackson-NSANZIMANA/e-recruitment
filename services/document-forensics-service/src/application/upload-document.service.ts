@@ -46,6 +46,7 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { newEnvelope, type EventBus, type EventContext } from '@usrp/shared-events';
+import { hmacSha256Hex } from '@usrp/shared-security';
 import type {
   Agency,
   AuditEvent,
@@ -102,6 +103,15 @@ export type UploadDocumentOutcome =
       readonly agency: Agency;
       readonly objectKey: string;
       /**
+       * D8: which revision of this slot the bytes are. 1 for the first upload,
+       * n+1 when different bytes replaced an unreviewed earlier upload, and
+       * unchanged when a retry delivered IDENTICAL bytes (a retry is not a
+       * revision — see the store).
+       */
+      readonly revision: number;
+      /** D8: true only when this upload replaced DIFFERENT bytes. */
+      readonly superseded: boolean;
+      /**
        * The real verdict. The USE CASE reports it honestly; the CONTROLLER
        * decides disclosure and deliberately withholds it from a citizen-facing
        * response (a score returned to the uploader is a forgery-tuning oracle).
@@ -122,7 +132,14 @@ export type UploadDocumentOutcome =
     }
   /** ClamAV flagged the bytes. Nothing was stored. */
   | { readonly kind: 'MALWARE_DETECTED' }
-  | { readonly kind: 'SCANNER_UNAVAILABLE'; readonly detail: string };
+  | { readonly kind: 'SCANNER_UNAVAILABLE'; readonly detail: string }
+  /**
+   * D8 (ADR-052 §3.3): this slot is under human review, or the case has moved
+   * past document review. A reviewed document is EVIDENCE — replacing it needs
+   * an officer-initiated re-open, not a citizen upload. Nothing was written and
+   * the stored object was not touched.
+   */
+  | { readonly kind: 'REVIEW_CLOSED'; readonly reason: 'HUMAN_REVIEWED' | 'CASE_ADVANCED' };
 
 export interface UploadDocumentDeps {
   readonly ownership: ApplicationOwnershipReader;
@@ -132,6 +149,12 @@ export interface UploadDocumentDeps {
   readonly eventBus: EventBus;
   /** Destination bucket (MINIO_BUCKET_DOCUMENTS). */
   readonly bucket: string;
+  /**
+   * D8: the KEY for the content digest. The digest identifies bytes without
+   * being a confirmation oracle, and never leaves this service — not to an
+   * audit event, not to a citizen response.
+   */
+  readonly contentHmacKey: string;
 }
 
 export class UploadDocumentService {
@@ -202,12 +225,17 @@ export class UploadDocumentService {
       return { kind: 'MALWARE_DETECTED' };
     }
 
-    // ── 4. Store, THEN record. Order matters. ──
-    // The object must exist before a row points at it: a row without an object
-    // makes analyze/ report OBJECT_NOT_FOUND for a document the console lists.
-    // The reverse order is safely retryable — the key is derived, so a retry
-    // overwrites the same object and UPDATEs the same row.
-    await this.#deps.objectWriter.putObject(this.#deps.bucket, objectKey, command.bytes);
+    // ── 4. Record, and let the STORE write the object (D8). ──
+    // The object must exist before a row points at it (a row without an object
+    // makes analyze/ report OBJECT_NOT_FOUND for a document the console lists),
+    // so the write belongs in this transaction — but not before the review gate.
+    // Handing the put inside the slot lock is what makes the refusal REAL: on
+    // REVIEW_CLOSED the bytes at rest are untouched, because the callback that
+    // would replace them is never called.
+    //
+    // The digest is keyed (ADR-052 §3.2) so the store can recognise a retry of
+    // identical bytes without the digest ever being a guess-confirmation oracle.
+    const contentHmac = hmacSha256Hex(this.#deps.contentHmacKey, command.bytes);
 
     const recorded = await this.#deps.recordStore.recordVerdict({
       applicationId: command.applicationId,
@@ -216,15 +244,26 @@ export class UploadDocumentService {
       objectBucket: this.#deps.bucket,
       objectKey,
       fileSizeBytes: command.bytes.length,
+      mimeType: command.declaredMediaType,
       virusScanStatus: 'CLEAN',
+      contentHmac,
       verdict: analysis.verdict,
-      // Ingress REPLACES: the object key is derived from (agency, application,
-      // type), so these bytes take the place of an earlier upload of the same
-      // document. Any human decision about the old bytes is withdrawn with them
-      // (evaluation D14) — the record must not claim a review of content it no
-      // longer holds. analyze/ omits this: it re-scores what is already stored.
-      objectReplaced: true,
+      writeObject: async () => {
+        await this.#deps.objectWriter.putObject(this.#deps.bucket, objectKey, command.bytes);
+      },
     });
+    if (recorded.kind === 'REVIEW_CLOSED') {
+      // The officer reviewed these bytes, or the case has moved on. The refusal
+      // is an auditable fact and names no internals; nothing was stored and
+      // nothing was overwritten.
+      await this.#deps.eventBus.publish(
+        this.#audit(command, agency, 'DOCUMENT_REUPLOAD_REFUSED', {
+          documentType: command.documentType,
+          reason: recorded.reason,
+        }),
+      );
+      return { kind: 'REVIEW_CLOSED', reason: recorded.reason };
+    }
     if (recorded.kind === 'APPLICATION_NOT_FOUND') {
       // Defence in depth: the ownership read already proved the row exists in
       // this agency's schema, so reaching here means it was deleted mid-flight.
@@ -250,14 +289,14 @@ export class UploadDocumentService {
         documentId: recorded.documentId,
         documentType: command.documentType,
         fileSizeBytes: command.bytes.length,
+        // D8: the revision and whether it replaced anything — the two facts a
+        // reviewer needs, and neither is the digest.
+        revision: recorded.revision,
+        superseded: recorded.superseded,
         lane: analysis.verdict.lane,
         forensicsScore: analysis.verdict.score,
         c2paManifestPresent: signals.hasC2paManifest,
         encryptedAtRest: true,
-        // The legal-process fact, in the trail: the citizen replaced a document,
-        // and whether that also withdrew an officer's decision about the old one.
-        replacedEarlierUpload: true,
-        ...(recorded.reviewCleared === true ? { clearedPriorReview: true } : {}),
       }),
     );
 
@@ -266,6 +305,8 @@ export class UploadDocumentService {
       documentId: recorded.documentId,
       agency,
       objectKey,
+      revision: recorded.revision,
+      superseded: recorded.superseded,
       verdict: analysis.verdict,
     };
   }

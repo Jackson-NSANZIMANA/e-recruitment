@@ -9,6 +9,7 @@ export * from './agency.types';
 export * from './applicant.types';
 export * from './campaign.types';
 export * from './category-agency';
+export * from './document-door.types';
 export * from './eligibility.types';
 export * from './events.types';
 export * from './field.types';

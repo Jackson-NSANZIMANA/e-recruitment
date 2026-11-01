@@ -13,7 +13,7 @@ agency must ratify or amend them. Nothing here is policy until signed.
 | `screening_officer` | `walkin.register`, `walkin.vet`, `identity.verify`, `biometric.verify`, `document.verify.venue`, `field.device.enroll`, `field.score.sync`, + read | Venue staffing. `document.verify.venue` = the front-door check-in post clears a paper at the venue (**decided 2026-10-14**, ADR-032) |
 | `field_supervisor` | `field.device.enroll`, `field.device.manage` (S09, decided 2026-10-21), `field.score.sync`, `field.conflict.resolve`, + read | Who resolves physical-evidence conflicts |
 | `medical_officer` | `medical.review`, + read | RDF board vs RNP/RCS certificate verification |
-| `adjudicator` | `adjudication.decide`, + read | Document / late-disqualification holds |
+| `adjudicator` | `adjudication.decide`, `vetting.hold.resolve` (**decided 2026-11-01**, ADR-051), + read | Document / late-disqualification holds, and the two VETTING holds (a criminal-clearance review, a NESA review) the amber queue lists |
 | `decision_authority` | `decision.final`, `application.accept`, + read | **Who signs and who enlists** |
 | `dpo` | `erasure.queue.read`, `erasure.decide` | Law N° 058/2021 officer |
 
@@ -22,6 +22,7 @@ agency must ratify or amend them. Nothing here is policy until signed.
 |---|---|---|
 | Final decision ≠ officer who recorded the medical verdict | **ON** | Confirm |
 | Accept ≠ officer who signed the final decision | off | On or off? |
+| Accept ≠ officer who resolved a vetting hold (`SOD_CLEARANCE_REVIEW_EXCLUDES_ACCEPTER`, ADR-051) | **ON** (decided 2026-11-01) | The reviewer of clearance evidence and the accepting authority are separate posts; an agency opts OUT, never in |
 | Any override of the above | none exists | Needed? Who? Reason + audit? |
 
 ## 3. Migration of existing accounts

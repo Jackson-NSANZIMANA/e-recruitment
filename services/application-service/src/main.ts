@@ -41,6 +41,8 @@ import {
   loadKafkaConfig,
   resolveEventTransport,
   type EventTransport,
+  bindHostAnnouncement,
+  resolveHttpBindHost,
 } from '@usrp/shared-config';
 import { makeAuthVerifier } from '@usrp/shared-auth';
 import { startHttpServer } from '@usrp/shared-http';
@@ -152,9 +154,18 @@ async function main(): Promise<void> {
     slotRetryTimer.unref();
   }
 
+  // ADR-053: loopback unless this deployment says otherwise (required in
+  // production). Resolved once, announced once — an exposed process is then
+  // visible in the boot log and in `sandbox:full status`, not only in ss -ltnp.
+  const bindHost = resolveHttpBindHost({ serviceName: config.runtime.serviceName });
+  console.log(
+    JSON.stringify(bindHostAnnouncement(config.runtime.serviceName, bindHost, config.runtime.port)),
+  );
+
   const server = await startHttpServer({
     serviceName: config.runtime.serviceName,
     port: config.runtime.port,
+    host: bindHost,
     routes: [
       ...campaignPublicReadRoutes(service.campaignPublicRead), // safe published-only anonymous projection
       ...campaignControlRoutes(service.campaignControl, verify), // agency-admin BUILD-001 commands

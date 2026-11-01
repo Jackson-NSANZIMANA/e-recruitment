@@ -34,12 +34,19 @@
 // handed to the services' environment; nothing it holds is written or printed.
 // The daily cost cap (SMS_DAILY_CAP, default 50) and the per-number limit apply.
 //
+// Exposure (ADR-053): every process binds LOOPBACK. SANDBOX_EXPOSE_LAN=1 binds the
+// EDGE ONLY to this machine's LAN address, so a tablet on the venue network can
+// reach it — and it says so loudly. It refuses to combine with SANDBOX_SMS=twilio:
+// a synthetic-population identity door on venue Wi-Fi with live SMS behind it is
+// the one accident this project cannot recover from.
+//
 // Optional: SANDBOX_DB (default usrp_sandbox), SANDBOX_PRIVATE_PERSONA_DIR, SANDBOX_NESA_LIVE=1 +
 // SANDBOX_NESA_LIVE_INDEX are passed to the simulator only. Nothing they hold
 // is written by this script.
 // ══════════════════════════════════════════════════════════════════
 
 import { execFileSync, spawn } from 'node:child_process';
+import { networkInterfaces } from 'node:os';
 import { generateKeyPairSync, randomBytes } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -66,6 +73,9 @@ const SERVICE_PORTS: Readonly<Record<string, number>> = {
   'notification-service': 4908,
   'field-sync-service': 4909,
   'audit-service': 4910,
+  // D2: the dead-letter re-drive worker. No business routes; it holds no case
+  // state, so it is started with the rest and probed on /ready like the sink.
+  'event-redrive-service': 4912,
   'iam-service': 4911,
   'edge-gateway': EDGE_PORT,
   // Opt-in, see FORENSICS below: without its object store and scanner it is not started.
@@ -78,6 +88,26 @@ const SANDBOX_CLIENT_SERVICE_ID = '66666666-6666-4666-8666-666666666666';
 
 const out = (line = ''): void => { process.stdout.write(`${line}\n`); };
 const fail = (message: string): never => { process.stderr.write(`✗ ${message}\n`); process.exit(1); };
+
+/**
+ * ADR-053. Where the ticket/venue network can reach this machine, if — and only
+ * if — someone asked for it. LOOPBACK otherwise.
+ */
+function lanAddress(): string {
+  const override = (process.env['SANDBOX_LAN_ADDRESS'] ?? '').trim();
+  if (override !== '') {
+    if (!/^(?:\d{1,3}\.){3}\d{1,3}$/.test(override)) fail('SANDBOX_LAN_ADDRESS must be an IPv4 address.');
+    return override;
+  }
+  for (const addresses of Object.values(networkInterfaces())) {
+    for (const address of addresses ?? []) {
+      if (address.family === 'IPv4' && !address.internal) return address.address;
+    }
+  }
+  return fail('SANDBOX_EXPOSE_LAN=1, but this machine has no non-loopback IPv4 address to expose.');
+}
+
+const EXPOSE_LAN = (process.env['SANDBOX_EXPOSE_LAN'] ?? '') === '1';
 
 function sh(cmd: string, args: readonly string[], input?: string): string {
   return execFileSync(cmd, args, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], ...(input === undefined ? {} : { input }) });
@@ -155,6 +185,7 @@ function secrets(): Secrets {
     RIB_HMAC_SECRET: freshSecret(),
     HEC_HMAC_SECRET: freshSecret(),
     MINIO_ENCRYPTION_KEY: freshSecret(),
+    FORENSICS_CONTENT_HMAC_KEY: freshSecret(),
     MINIO_ROOT_PASSWORD: freshSecret(),
     TWILIO_ACCOUNT_SID: `AC${randomBytes(16).toString('hex')}`,
     TWILIO_AUTH_TOKEN: freshSecret(),
@@ -176,7 +207,14 @@ function serviceEnv(s: Secrets): Record<string, string> {
   Object.assign(env, {
     NODE_ENV: 'production',
     USRP_ENVIRONMENT: 'sandbox',
+    // ADR-053: loopback unless this launcher was told otherwise (below, edge only).
+    USRP_HTTP_BIND_HOST: '127.0.0.1',
     LOG_LEVEL: 'info',
+    // D2: the production schedule is 1m..6h; the sandbox compresses it so a
+    // journey can watch a letter be re-driven, parked and re-read in one pass.
+    REDRIVE_TICK_INTERVAL_MS: '5000',
+    REDRIVE_DELAYS_MS: '5000,10000,20000,30000,60000,120000',
+    REDRIVE_GROUP_FAILURE_THRESHOLD: '3',
     DATABASE_URL: `postgresql://usrp_app:app_pw@localhost:5432/${DB}`,
     KAFKA_BROKERS: 'localhost:4992',
     KAFKA_SSL: 'false',
@@ -189,7 +227,6 @@ function serviceEnv(s: Secrets): Record<string, string> {
     // interface of the developer's machine. The scripts keep their `localhost`
     // URLs: Node connects localhost with family auto-selection (default since
     // Node 20), so a 127.0.0.1 bind is reachable as either family.
-    USRP_HTTP_BIND_HOST: '127.0.0.1',
     IDENTITY_CLIENT_ID: SANDBOX_CLIENT_ID,
     IAM_BASE_URL: local(4911),
     APPLICATION_SERVICE_BASE_URL: local(4906),
@@ -324,6 +361,13 @@ function stopProcesses(): void {
 }
 
 async function up(): Promise<void> {
+  // ADR-053 §3.3: the two flags that must never coexist. A synthetic-population
+  // identity door reachable from venue Wi-Fi, with the owner's live Twilio account
+  // behind it, is the one accident this project could not recover from. It is
+  // refused here rather than discouraged in a runbook.
+  if (EXPOSE_LAN && (process.env['SANDBOX_SMS'] ?? '').trim().toLowerCase() === 'twilio') {
+    fail('SANDBOX_EXPOSE_LAN=1 cannot be combined with SANDBOX_SMS=twilio: a network-reachable sandbox with live SMS behind it. Run the venue rehearsal on the SMS emulator.');
+  }
   for (const svc of Object.keys(SERVICE_PORTS)) {
     if (!existsSync(join(REPO, 'services', svc, 'dist', 'main.js'))) fail(`services/${svc} is not built — run pnpm build first`);
   }
@@ -379,14 +423,22 @@ async function up(): Promise<void> {
   await waitReady('g2g-sandbox', SIMULATOR_PORT, '/health', 30_000);
 
   const env = serviceEnv(s);
+  const exposedTo = EXPOSE_LAN ? lanAddress() : null;
   for (const svc of Object.keys(SERVICE_PORTS)) {
     out(`▶ ${svc} on :${String(SERVICE_PORTS[svc])}`);
-    startDetached(svc, [`services/${svc}/dist/main.js`], SMS_SERVICES.has(svc) ? env : withoutSmsCredentials(env));
+    // ADR-053: ONE process may leave loopback, and only on request.
+    const svcEnv = exposedTo !== null && svc === 'edge-gateway' ? { ...env, USRP_HTTP_BIND_HOST: exposedTo } : env;
+    startDetached(svc, [`services/${svc}/dist/main.js`], SMS_SERVICES.has(svc) ? svcEnv : withoutSmsCredentials(svcEnv));
   }
   for (const [svc, port] of Object.entries(SERVICE_PORTS)) await waitReady(svc, port, '/ready');
   out('');
   out(`✓ sandbox up · edge http://localhost:${String(EDGE_PORT)} · simulators :${String(SIMULATOR_PORT)} · database ${DB} · broker :4992`);
   out(`  SMS: ${(process.env['SANDBOX_SMS'] ?? '').toLowerCase() === 'twilio' ? 'REAL Twilio (owner opt-in)' : 'Twilio emulator'} · inbox .sandbox/sms/inbox.jsonl · logs: .sandbox/logs/ · rehearse: pnpm rehearse --sandbox <scenario>`);
+  out(
+    exposedTo === null
+      ? '  Exposure: LOOPBACK ONLY (every process). Set SANDBOX_EXPOSE_LAN=1 to reach the edge from a tablet on this network.'
+      : `  Exposure: ⚠ EDGE EXPOSED on http://${exposedTo}:${String(EDGE_PORT)} — the other processes stay loopback. Synthetic population only; real SMS is refused with this flag.`,
+  );
 }
 
 function down(): void {

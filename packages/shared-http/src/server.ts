@@ -31,7 +31,6 @@ import { randomUUID } from 'node:crypto';
 import { HttpError } from './errors.js';
 import { parseCookieHeader, serializeSetCookie } from './cookies.js';
 import { corsPreflightHeaders, corsResponseHeaders, isAllowedOrigin } from './cors.js';
-import { resolveBindHost } from './bind-host.js';
 import { versionBody } from './version.js';
 import type {
   AccessLogRecord,
@@ -127,19 +126,17 @@ function mergeVary(a: string | undefined, b: string | undefined): string | undef
  * Routes are matched exactly on method + path; `/health`, `/ready` and
  * `/version` are reserved and served by the transport itself.
  */
-// `async` on purpose: the bind host is resolved here (see bind-host.ts), and a
-// misconfigured USRP_HTTP_BIND_HOST must REJECT this promise rather than throw
-// synchronously — a caller that writes `startHttpServer(o).catch(...)` would
-// otherwise never see it, and the process would die on an uncaught exception.
-export async function startHttpServer(options: HttpServerOptions): Promise<HttpServer> {
+export function startHttpServer(options: HttpServerOptions): Promise<HttpServer> {
   const {
     serviceName,
     port,
     routes,
-    // USRP_HTTP_BIND_HOST, default 0.0.0.0 (see bind-host.ts): the sandbox sets
-    // it to loopback so eleven credential-bearing services and the edge stop
-    // listening on every interface of a developer's machine.
-    host = resolveBindHost(),
+    // NO DEFAULT (ADR-053). It used to be '0.0.0.0', and no service passed a
+    // host, so thirteen processes were reachable from the venue network with
+    // nobody having decided it. Callers now state where they listen; the value
+    // comes from `resolveHttpBindHost` (loopback unless a deployment says
+    // otherwise, and a required variable in production).
+    host,
     maxBodyBytes = DEFAULT_MAX_BODY_BYTES,
     shutdownTimeoutMs = DEFAULT_SHUTDOWN_TIMEOUT_MS,
     handleSignals = true,

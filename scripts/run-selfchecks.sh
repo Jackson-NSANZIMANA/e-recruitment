@@ -75,6 +75,8 @@ export MINIO_BUCKET_DOCUMENTS="${MINIO_BUCKET_DOCUMENTS:-usrp-documents}"
 # one. Committed DEV-ONLY value, same posture as the Ed25519 keypair above;
 # production keys come from HSM/KMS.
 export MINIO_ENCRYPTION_KEY="${MINIO_ENCRYPTION_KEY:-dev_document_envelope_key_min_32_chars!!}"
+# D8 (ADR-052): the KEYED digest for document revisions — dev value, like the rest.
+export FORENSICS_CONTENT_HMAC_KEY="${FORENSICS_CONTENT_HMAC_KEY:-dev_document_content_hmac_key_min_32_ch!}"
 export CLAMAV_HOST="${CLAMAV_HOST:-localhost}"
 export CLAMAV_PORT="${CLAMAV_PORT:-3310}"
 export CLAMAV_TIMEOUT_MS="${CLAMAV_TIMEOUT_MS:-30000}"
@@ -200,6 +202,38 @@ run_ts "deployment hygiene (EXPOSE ↔ .env.example port map, non-root, exec-for
 # OpenAPI document and the approved upstream catalogue is known in milliseconds.
 # It is the check that would have caught the four BFF services that never
 # existed being read as fact for a month.
+# D7: the document door's closed vocabulary is declared ONCE and both services
+# agree with it in both directions. This is the proof whose absence let
+# forensics answer INVALID_DOCUMENT_TYPE while identity called it "unavailable"
+# and the citizen was told to retry a closed door (evaluation 2026-10-29, D7).
+# D9: no process can inherit network exposure. Loopback is the default, production
+# must say where it listens, containers declare it, and the sandbox refuses to put a
+# network-reachable door in front of live SMS (evaluation 2026-10-29, D9).
+run_ts "shared-config: bind host and exposure (loopback by default, ADR-053)" packages/shared-config/selfcheck/verify-bind-exposure.ts
+# D11: the device's signed claim about WHO captured a physical test is checked
+# against the authenticated officer, and the stored actor is the principal's
+# (evaluation 2026-10-29, D11). Zero infrastructure: the real use case, fake ports.
+run_ts "field-sync: actor binding — the token is the only actor (D11)" services/field-sync-service/selfcheck/verify-actor-binding.ts
+run_ts "shared-types: document-door contract (producer ↔ vocabulary ↔ consumer, D7)" packages/shared-types/selfcheck/verify-document-door-contract.ts
+# D10: the amber queue's two human holds (a criminal-clearance review, a NESA
+# review) have a VERB, its own permission, a closed reason vocabulary where the
+# reason IS the verdict, and four eyes on the accept side (evaluation 2026-10-29,
+# D10). Zero infrastructure: the real use case against a fake repository, plus
+# structural assertions on the SQL predicate and the accept transaction.
+run_ts "application-service: one hold verb, resolver set, human decision outranks machine (D10)" services/application-service/selfcheck/verify-hold-resolution.ts
+# D8: a reviewed document is EVIDENCE. A second upload supersedes (versioned,
+# keyed digest, append-only trail) only while the case is still in document
+# review and no officer has decided; otherwise 409 DOCUMENT_REVIEW_CLOSED — and
+# the refusal never touches the reviewed bytes (evaluation 2026-10-29, D8).
+# Zero infrastructure: the pure decision is swept exhaustively, then the wiring.
+run_ts "document-forensics: supersession and the review lock (D8)" services/document-forensics-service/selfcheck/verify-document-supersession.ts
+# D2: a dead letter is re-driven on a SCHEDULE (1m..6h, six attempts), then
+# PARKED with a closed reason and a signal — never retried forever, never
+# silently. UNDECODABLE/NON_RETRYABLE are never re-driven and a per-group breaker
+# stops a broken handler turning the deployment into a retry furnace
+# (evaluation 2026-10-29, D2). Zero infrastructure: pure policy, exhaustive.
+run_ts "event-redrive: dead-letter schedule, cap and circuit breaker (D2)" services/event-redrive-service/selfcheck/verify-redrive-policy.ts
+run_ts "event-redrive: ledger intake, inherited attempts and cursor on Postgres (D2)" services/event-redrive-service/selfcheck/verify-redrive-ledger-live.ts
 run_ts "edge-gateway: contract drift (registry ↔ OpenAPI ↔ upstream catalogue)" services/edge-gateway/selfcheck/verify-edge-contract.ts
 run_ts "edge-gateway: BUILD-001 live campaign HTTP/session/CSRF/idempotency boundary" services/edge-gateway/selfcheck/verify-campaign-http-boundary.ts
 run_ts "edge-gateway: operational reads + DPO queue/decision boundary (ADR-039)" services/edge-gateway/selfcheck/verify-operational-reads-boundary.ts
@@ -375,7 +409,6 @@ run_ts "document-forensics: upload ingress (multipart → ClamAV → sealed MinI
 # key by design, so the row must also stop claiming a human decision about bytes
 # that no longer exist — while analyze/ (a re-scan of the SAME object) must not
 # withdraw one. A pure SQL proof: no MinIO, no ClamAV, no scanner.
-run_ts "document-forensics: a re-upload withdraws the human review (D14)" services/document-forensics-service/selfcheck/verify-document-review-replacement.ts
 run_ts "application-service: amber routing + adjudication" services/application-service/selfcheck/verify-amber-adjudication-slice.ts
 run_ts "application-service: walk-in lane (register → vet → physical → merged funnel)" services/application-service/selfcheck/verify-walk-in-slice.ts
 # The whole spine composed: one real submission → all 3 gates → DOCUMENT_REVIEW_GREEN.

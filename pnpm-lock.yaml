@@ -495,6 +495,40 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
+  services/event-redrive-service:
+    dependencies:
+      '@usrp/shared-config':
+        specifier: workspace:*
+        version: link:../../packages/shared-config
+      '@usrp/shared-database':
+        specifier: workspace:*
+        version: link:../../packages/shared-database
+      '@usrp/shared-events':
+        specifier: workspace:*
+        version: link:../../packages/shared-events
+      '@usrp/shared-http':
+        specifier: workspace:*
+        version: link:../../packages/shared-http
+      '@usrp/shared-logging':
+        specifier: workspace:*
+        version: link:../../packages/shared-logging
+      '@usrp/shared-types':
+        specifier: workspace:*
+        version: link:../../packages/shared-types
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.2
+      kafkajs:
+        specifier: ^2.2.4
+        version: 2.2.4(patch_hash=5ac6d2yd2k5lvn6witxt43mxna)
+      tsx:
+        specifier: ^4.21.0
+        version: 4.23.0
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
   services/field-sync-service:
     dependencies:
       '@usrp/shared-auth':

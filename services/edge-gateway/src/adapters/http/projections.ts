@@ -271,6 +271,7 @@ function queueReasonCodes(value: unknown): readonly string[] {
   return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string' && /^[A-Z][A-Z0-9_]{2,47}$/.test(v)).slice(0, 8) : [];
 }
 
+
 export function projectAmberQueue(body: unknown, agency: Agency): readonly EdgeAmberQueueEntry[] {
   return rows(field(body, 'queue')).map((entry) => ({
     applicationId: str(field(entry, 'applicationId')),

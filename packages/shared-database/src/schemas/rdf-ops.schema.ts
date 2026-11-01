@@ -17,6 +17,7 @@ import {
   jsonb,
   index,
   uniqueIndex,
+  unique,
 } from 'drizzle-orm/pg-core';
 import { applicantIdentities, campaignPolicyVersions } from './public-core.schema.js';
 
@@ -185,6 +186,10 @@ export const rdfApplications = rdfOps.table(
     finalDecisionById: uuid('final_decision_by_id'),
     finalDecisionAt: timestamp('final_decision_at', { withTimezone: true }),
     finalDecisionNotes: varchar('final_decision_notes', { length: 1000 }),
+    // D10 (rls/0047): who resolved which HELD vetting dimension(s) on this application.
+    vettingHoldResolvers: uuid('vetting_hold_resolvers').array().notNull().default(sql`'{}'::uuid[]`),
+    vettingHoldResolvedDimensions: text('vetting_hold_resolved_dimensions').array().notNull().default(sql`'{}'::text[]`),
+    vettingHoldResolvedAt: timestamp('vetting_hold_resolved_at', { withTimezone: true }),
 
     submittedAt: timestamp('submitted_at', { withTimezone: true }),
     // BUILD-002 (rls/0029): the policy version and calendar date that governed
@@ -274,6 +279,11 @@ export const rdfDocumentRecords = rdfOps.table(
     apiVerificationToken: varchar('api_verification_token', { length: 128 }),
     apiVerifiedAt: timestamp('api_verified_at', { withTimezone: true }),
 
+    // D8 (rls/0046, ADR-052): how many times this slot has been uploaded, and a
+    // KEYED digest of the bytes (never a bare hash — see the migration header).
+    revision: integer('revision').default(1).notNull(),
+    contentHmac: varchar('content_hmac', { length: 64 }),
+
     // Human review (Amber Lane)
     humanReviewedById: uuid('human_reviewed_by_id'),
     humanReviewedAt: timestamp('human_reviewed_at', { withTimezone: true }),
@@ -292,6 +302,36 @@ export const rdfDocumentRecords = rdfOps.table(
     index('idx_rdf_docs_application').on(t.applicationId),
     index('idx_rdf_docs_type').on(t.documentType),
     index('idx_rdf_docs_lane').on(t.forensicsLane),
+  ],
+);
+
+/**
+ * D8 (rls/0046, ADR-052): the append-only trail of every upload into a document
+ * slot. One row per upload, never updated, never deleted (engine-enforced).
+ */
+export const rdfDocumentRevisions = rdfOps.table(
+  'document_revisions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    documentId: uuid('document_id')
+      .references(() => rdfDocumentRecords.id)
+      .notNull(),
+    applicationId: uuid('application_id')
+      .references(() => rdfApplications.id)
+      .notNull(),
+    revision: integer('revision').notNull(),
+    contentHmac: varchar('content_hmac', { length: 64 }).notNull(),
+    fileSizeBytes: integer('file_size_bytes').notNull(),
+    mimeType: varchar('mime_type', { length: 255 }).notNull(),
+    forensicsLane: rdfDocumentLaneEnum('forensics_lane').notNull(),
+    forensicsScore: integer('forensics_score'),
+    forensicsFlags: jsonb('forensics_flags').default(sql`'{}'::jsonb`).notNull(),
+    uploadedBy: varchar('uploaded_by', { length: 32 }).default('APPLICANT').notNull(),
+    uploadedAt: timestamp('uploaded_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    unique('rdf_ops_document_revisions_slot_revision_key').on(t.documentId, t.revision),
+    index('idx_rdf_ops_document_revisions_app').on(t.applicationId, t.uploadedAt.desc()),
   ],
 );
 

@@ -17,7 +17,7 @@ const calls: { applicantId: string; input: DocumentUploadInput }[] = [];
 let nextResult: DocumentUploadResult = {
   kind: 'UPLOADED',
   documentId: '33333333-3333-4333-8333-333333333333',
-  documentType: 'NATIONAL_ID_COPY',
+  documentType: 'NATIONAL_ID',
 };
 
 const auth = {
@@ -34,7 +34,7 @@ const gateway: DocumentUploadGateway = {
 
 let server: HttpServer;
 before(async () => {
-  server = await startHttpServer({
+  server = await startHttpServer({ host: '127.0.0.1',
     serviceName: 'identity-docs-test',
     port: 0,
     routes: applicantDocumentRoutes(auth, gateway, {
@@ -70,7 +70,7 @@ const pdf = (): Blob => new Blob([Buffer.from('%PDF-1.4 test')], { type: 'applic
 
 test('the subject is the SESSION, never the form', async () => {
   calls.length = 0;
-  const r = await post({ applicationId: APPLICATION, documentType: 'NATIONAL_ID_COPY', file: pdf() });
+  const r = await post({ applicationId: APPLICATION, documentType: 'NATIONAL_ID', file: pdf() });
   assert.equal(r.status, 201);
   assert.equal(calls[0]?.applicantId, APPLICANT);
   assert.equal(r.json['documentId'], '33333333-3333-4333-8333-333333333333');
@@ -81,7 +81,7 @@ test('a client applicantId part is refused, nothing forwarded', async () => {
   const r = await post({
     applicantId: '99999999-9999-4999-8999-999999999999',
     applicationId: APPLICATION,
-    documentType: 'NATIONAL_ID_COPY',
+    documentType: 'NATIONAL_ID',
     file: pdf(),
   });
   assert.equal(r.status, 400);
@@ -97,21 +97,24 @@ test('no session / bad session → 401 before the body is considered', async () 
 
 test('shape errors are 400/422 and never reach the gateway', async () => {
   calls.length = 0;
-  assert.equal((await post({ applicationId: 'x', documentType: 'NATIONAL_ID_COPY', file: pdf() })).status, 400);
+  assert.equal((await post({ applicationId: 'x', documentType: 'NATIONAL_ID', file: pdf() })).status, 400);
   assert.equal((await post({ applicationId: APPLICATION, documentType: 'lower', file: pdf() })).status, 400);
-  assert.equal((await post({ applicationId: APPLICATION, documentType: 'NATIONAL_ID_COPY' })).status, 400);
+  assert.equal((await post({ applicationId: APPLICATION, documentType: 'NATIONAL_ID' })).status, 400);
   const exe = new Blob([Buffer.from('MZ')], { type: 'application/x-msdownload' });
-  assert.equal((await post({ applicationId: APPLICATION, documentType: 'NATIONAL_ID_COPY', file: exe })).status, 422);
+  assert.equal((await post({ applicationId: APPLICATION, documentType: 'NATIONAL_ID', file: exe })).status, 422);
+  // D7: a type no agency models is refused HERE (422), before a round trip and a
+  // ClamAV scan — not forwarded to be refused by the owning service.
+  assert.equal((await post({ applicationId: APPLICATION, documentType: 'NO_SUCH_DOCUMENT', file: pdf() })).status, 422);
   assert.equal(calls.length, 0);
 });
 
 test('refusals are a closed code set; dependency faults are 502 with no detail', async () => {
   nextResult = { kind: 'REFUSED', httpStatus: 422, code: 'DOCUMENT_REJECTED_MALWARE' };
-  const refused = await post({ applicationId: APPLICATION, documentType: 'NATIONAL_ID_COPY', file: pdf() });
+  const refused = await post({ applicationId: APPLICATION, documentType: 'NATIONAL_ID', file: pdf() });
   assert.equal(refused.status, 422);
   assert.equal(refused.json['error'], 'DOCUMENT_REJECTED_MALWARE');
   nextResult = { kind: 'DEPENDENCY_UNAVAILABLE' };
-  const down = await post({ applicationId: APPLICATION, documentType: 'NATIONAL_ID_COPY', file: pdf() });
+  const down = await post({ applicationId: APPLICATION, documentType: 'NATIONAL_ID', file: pdf() });
   assert.equal(down.status, 502);
 });
 
@@ -119,12 +122,12 @@ test('buildMultipartFormData round-trips through the parser, bytes intact', asyn
   const { buildMultipartFormData, parseMultipartFormData } = await import('@usrp/shared-http');
   const bytes = Buffer.from([0x25, 0x50, 0x44, 0x46, 0x0d, 0x0a, 0x00, 0xff, 0x2d, 0x2d]);
   const built = buildMultipartFormData(
-    { applicationId: APPLICATION, documentType: 'NATIONAL_ID_COPY' },
+    { applicationId: APPLICATION, documentType: 'NATIONAL_ID' },
     { fieldName: 'file', contentType: 'application/pdf', bytes },
   );
   const parsed = parseMultipartFormData(built.body, built.contentType, { maxParts: 6, maxFiles: 1, maxFieldBytes: 1024 });
   assert.equal(parsed.fields.get('applicationId'), APPLICATION);
-  assert.equal(parsed.fields.get('documentType'), 'NATIONAL_ID_COPY');
+  assert.equal(parsed.fields.get('documentType'), 'NATIONAL_ID');
   assert.deepEqual(parsed.files[0]?.bytes, bytes);
   assert.equal(parsed.files[0]?.contentType, 'application/pdf');
   assert.throws(() => buildMultipartFormData({ 'bad"name': 'x' }, { fieldName: 'file', contentType: 'application/pdf', bytes }));

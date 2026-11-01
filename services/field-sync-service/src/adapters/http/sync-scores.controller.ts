@@ -107,6 +107,10 @@ function parseRecord(v: unknown): FieldScoreRecord {
     metrics: parseMetrics(r['metrics']),
     capturedAt: str(r['capturedAt'], 'capturedAt'),
     deviceId: str(r['deviceId'], 'deviceId'),
+    // D11: the column is uuid NOT NULL in all three schemas and this value is
+    // signed by the device. A shape check makes a malformed claim a 400 for the
+    // tablet instead of a 500 from Postgres — and the claim is then BOUND to the
+    // authenticated principal in the use case, never trusted on its own.
     capturingOfficerId: uuid(r['capturingOfficerId'], 'capturingOfficerId'),
     vectorClock: parseVectorClock(r['vectorClock']),
     deviceSignature: str(r['deviceSignature'], 'deviceSignature'),
@@ -132,6 +136,8 @@ export function syncScoresRoute(service: SyncFieldScoresService, verify: AuthVer
       const outcome = await service.sync({
         records,
         actorAgency: principal.agency,
+        // D11: the authenticated subject, from the verified officer token.
+        actorSubjectId: principal.subjectId,
         context: { correlationId: ctx.correlationId, causationId: ctx.correlationId },
       });
 

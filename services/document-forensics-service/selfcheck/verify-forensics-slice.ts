@@ -331,11 +331,12 @@ async function main(): Promise<void> {
     analyzer: new BoundedRealAnalyzer(new ClamavVirusScanner(SCANNER)),
     recordStore: new PgDocumentRecordStore(),
     eventBus: bus,
+    contentHmacKey: process.env['FORENSICS_CONTENT_HMAC_KEY'] ?? 'selfcheck_document_content_hmac_key_min_32!',
   });
   const verify = makeAuthVerifier({
     publicKeyPem: AUTH_KEYS.publicKeyPem, issuer: 'usrp', audience: 'usrp-services',
   });
-  const server = await startHttpServer({
+  const server = await startHttpServer({ host: '127.0.0.1',
     serviceName: 'document-forensics-selfcheck',
     port: 0,
     routes: [analyzeDocumentRoute(service, verify)],
@@ -464,8 +465,10 @@ async function main(): Promise<void> {
         analyzer: new BoundedRealAnalyzer(new DownScanner()),
         recordStore: new PgDocumentRecordStore(),
         eventBus: downBus,
+        // D8: required; the digest is keyed, and this slice never asserts a value.
+        contentHmacKey: process.env['FORENSICS_CONTENT_HMAC_KEY'] ?? 'selfcheck_document_content_hmac_key_min_32!',
       });
-      const downServer = await startHttpServer({
+      const downServer = await startHttpServer({ host: '127.0.0.1',
         serviceName: 'forensics-down-selfcheck',
         port: 0,
         routes: [analyzeDocumentRoute(downService, verify)],
