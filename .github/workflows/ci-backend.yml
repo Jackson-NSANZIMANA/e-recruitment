@@ -312,6 +312,7 @@ jobs:
           - document-forensics-service
           - edge-gateway
           - eligibility-service
+          - event-redrive-service
           - field-sync-service
           - iam-service
           - identity-service
