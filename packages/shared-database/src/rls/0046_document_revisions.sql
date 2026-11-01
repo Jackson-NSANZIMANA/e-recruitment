@@ -92,7 +92,8 @@ BEGIN
           '%I.document_revisions is append-only: %% is not permitted on the revision trail (ADR-052)',
           TG_OP USING ERRCODE = 'insufficient_privilege';
       END;
-      $body$$f$, schema_name, schema_name);
+      $body$
+      $f$, schema_name, schema_name);
 
     EXECUTE format('DROP TRIGGER IF EXISTS trg_%I_revisions_no_update ON %I.document_revisions',
       schema_name, schema_name);
