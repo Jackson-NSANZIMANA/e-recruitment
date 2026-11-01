@@ -44,8 +44,12 @@ import {
   type Route,
 } from '@usrp/shared-http';
 import { withAuth, type AuthVerifier } from '@usrp/shared-auth';
-import type { DocumentType } from '@usrp/shared-types';
-import { AGENCY_DOCUMENT_TYPES } from '../../domain/agency-documents.js';
+import {
+  DOCUMENT_DOOR_CODES,
+  isKnownDocumentType,
+  type DocumentDoorCode,
+  type DocumentType,
+} from '@usrp/shared-types';
 import { DocumentEnvelopeError } from '../../domain/document-envelope.js';
 import { ForensicsPersistenceError } from '../../domain/forensics.errors.js';
 import { ObjectStoreUnavailableError } from '../../ports/object-store.js';
@@ -91,13 +95,11 @@ function hasControlCharacter(value: string): boolean {
 
 /**
  * Every document type any agency models — DERIVED from the per-agency sets, not
- * retyped. The per-agency check happens in the use case once the agency is known
- * from ownership; this is only the "is that a word at all" gate. A third
- * hand-maintained copy of this list is how one agency's enum silently drifts.
+ * retyped, and now declared once in @usrp/shared-types (D7) so identity-service
+ * validates against the SAME set before spending a round trip. The per-agency
+ * check happens in the use case once the agency is known from ownership; this is
+ * only the "is that a word at all" gate.
  */
-const KNOWN_DOCUMENT_TYPES: ReadonlySet<string> = new Set(
-  Object.values(AGENCY_DOCUMENT_TYPES).flatMap((types) => [...types]),
-);
 
 export interface UploadRouteOptions {
   /** FORENSICS_MAX_FILE_SIZE_MB, in bytes. */
@@ -129,31 +131,28 @@ export function uploadDocumentRoute(
 
       const file = form.files[0];
       if (file === undefined) {
-        throw new HttpError(400, 'MISSING_FILE', `A file part named "${FILE_FIELD}" is required.`);
+        throw documentDoorError('MISSING_FILE', `A file part named "${FILE_FIELD}" is required.`);
       }
       if (file.fieldName !== FILE_FIELD) {
-        throw new HttpError(
-          400,
+        throw documentDoorError(
           'MISSING_FILE',
           `The file part must be named "${FILE_FIELD}", got "${file.fieldName}".`,
         );
       }
       if (file.filename.length > MAX_FILENAME_LENGTH || hasControlCharacter(file.filename)) {
-        throw new HttpError(400, 'INVALID_FILENAME', 'The filename is too long or malformed.');
+        throw documentDoorError('INVALID_FILENAME', 'The filename is too long or malformed.');
       }
       if (file.bytes.length === 0) {
-        throw new HttpError(400, 'EMPTY_FILE', 'The uploaded file is empty.');
+        throw documentDoorError('EMPTY_FILE', 'The uploaded file is empty.');
       }
       if (file.bytes.length > options.maxFileSizeBytes) {
-        throw new HttpError(
-          413,
+        throw documentDoorError(
           'FILE_TOO_LARGE',
           `The file exceeds the ${String(options.maxFileSizeBytes)}-byte limit.`,
         );
       }
       if (!allowed.has(file.contentType)) {
-        throw new HttpError(
-          422,
+        throw documentDoorError(
           'UNSUPPORTED_FILE_TYPE',
           `Declared type "${file.contentType}" is not accepted.`,
         );
@@ -162,10 +161,11 @@ export function uploadDocumentRoute(
       const applicantId = requireUuid(form, 'applicantId');
       const applicationId = requireUuid(form, 'applicationId');
       const rawDocumentType = form.fields.get('documentType');
-      if (rawDocumentType === undefined || !KNOWN_DOCUMENT_TYPES.has(rawDocumentType)) {
-        throw new HttpError(400, 'INVALID_DOCUMENT_TYPE', 'documentType is missing or unknown.');
+      if (rawDocumentType === undefined || !isKnownDocumentType(rawDocumentType)) {
+        throw documentDoorError('INVALID_DOCUMENT_TYPE', 'documentType is missing or unknown.');
       }
-      const documentType = rawDocumentType as DocumentType;
+      // isKnownDocumentType is a type predicate, so this is already a DocumentType.
+      const documentType: DocumentType = rawDocumentType;
 
       try {
         const outcome = await service.upload({
@@ -192,34 +192,43 @@ function mapOutcome(outcome: UploadDocumentOutcome, documentType: DocumentType):
         body: { status: 'UPLOADED', documentId: outcome.documentId, documentType },
       };
     case 'APPLICATION_NOT_FOUND':
-      return { status: 404, body: { error: 'APPLICATION_NOT_FOUND' } };
+      return doorResult('APPLICATION_NOT_FOUND');
     case 'NOT_ACCEPTING_DOCUMENTS':
-      return {
-        status: 409,
-        body: { error: 'NOT_ACCEPTING_DOCUMENTS', currentStatus: outcome.status },
-      };
+      return doorResult('NOT_ACCEPTING_DOCUMENTS', { currentStatus: outcome.status });
     case 'UNSUPPORTED_DOCUMENT_TYPE':
-      return { status: 422, body: { error: 'UNSUPPORTED_DOCUMENT_TYPE' } };
+      return doorResult('UNSUPPORTED_DOCUMENT_TYPE');
     case 'UNSUPPORTED_CONTENT':
-      return { status: 422, body: { error: 'UNSUPPORTED_FILE_CONTENT' } };
+      return doorResult('UNSUPPORTED_FILE_CONTENT');
     case 'CONTENT_TYPE_MISMATCH':
-      return {
-        status: 422,
-        body: { error: 'CONTENT_TYPE_MISMATCH', declared: outcome.declared },
-      };
+      return doorResult('CONTENT_TYPE_MISMATCH', { declared: outcome.declared });
     case 'MALWARE_DETECTED':
-      return { status: 422, body: { error: 'DOCUMENT_REJECTED_MALWARE' } };
+      return doorResult('DOCUMENT_REJECTED_MALWARE');
     case 'SCANNER_UNAVAILABLE':
-      return { status: 503, body: { error: 'SCANNER_UNAVAILABLE' } };
+      return doorResult('SCANNER_UNAVAILABLE');
     default:
       return assertNever(outcome);
   }
 }
 
+/**
+ * Build an answer from the shared vocabulary (D7). The status is NOT passed in:
+ * it comes from DOCUMENT_DOOR_CODES, so a controller cannot answer 400 for a
+ * code the contract says is 422 — and identity-service, which classifies from
+ * the same table, cannot disagree with it.
+ */
+function doorResult(code: DocumentDoorCode, extra: Record<string, unknown> = {}): HttpResult {
+  return { status: DOCUMENT_DOOR_CODES[code].status, body: { error: code, ...extra } };
+}
+
+/** Throw the door's error for a shared code, at the status the table declares. */
+function documentDoorError(code: DocumentDoorCode, detail: string, cause?: unknown): HttpError {
+  return new HttpError(DOCUMENT_DOOR_CODES[code].status, code, detail, cause === undefined ? undefined : { cause });
+}
+
 function requireUuid(form: MultipartForm, field: string): string {
   const value = form.fields.get(field);
   if (value === undefined || !UUID_RE.test(value)) {
-    throw new HttpError(400, 'INVALID_REQUEST', `Field "${field}" must be a UUID.`);
+    throw documentDoorError('INVALID_REQUEST', `Field "${field}" must be a UUID.`);
   }
   return value;
 }
@@ -227,21 +236,15 @@ function requireUuid(form: MultipartForm, field: string): string {
 function mapDomainError(err: unknown): HttpError {
   if (err instanceof HttpError) return err;
   if (err instanceof ObjectStoreUnavailableError) {
-    return new HttpError(503, 'OBJECT_STORE_UNAVAILABLE', 'object store unreachable', {
-      cause: err,
-    });
+    return documentDoorError('OBJECT_STORE_UNAVAILABLE', 'object store unreachable', err);
   }
   if (err instanceof DocumentEnvelopeError) {
-    return new HttpError(500, 'DOCUMENT_ENCRYPTION_ERROR', 'failed to seal the document', {
-      cause: err,
-    });
+    return documentDoorError('DOCUMENT_ENCRYPTION_ERROR', 'failed to seal the document', err);
   }
   if (err instanceof ForensicsPersistenceError) {
-    return new HttpError(500, 'FORENSICS_PERSISTENCE_ERROR', 'failed to record verdict', {
-      cause: err,
-    });
+    return documentDoorError('FORENSICS_PERSISTENCE_ERROR', 'failed to record verdict', err);
   }
-  return new HttpError(500, 'INTERNAL_ERROR', 'unexpected failure', { cause: err });
+  return documentDoorError('INTERNAL_ERROR', 'unexpected failure', err);
 }
 
 function assertNever(value: never): never {

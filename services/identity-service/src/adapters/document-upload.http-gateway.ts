@@ -9,6 +9,7 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { buildMultipartFormData } from '@usrp/shared-http';
+import { classifyDocumentDoorAnswer } from '@usrp/shared-types';
 import { logError, summariseError } from '@usrp/shared-logging';
 import type {
   DocumentRefusal,
@@ -28,17 +29,6 @@ export interface DocumentUploadGatewayOptions {
 
 const DEFAULT_TIMEOUT_MS = 30_000; // virus scan + sealing legitimately takes seconds
 const TOKEN_REFRESH_MARGIN_MS = 60_000;
-
-const REFUSALS: ReadonlySet<string> = new Set<DocumentRefusal>([
-  'APPLICATION_NOT_FOUND',
-  'NOT_ACCEPTING_DOCUMENTS',
-  'UNSUPPORTED_DOCUMENT_TYPE',
-  'UNSUPPORTED_FILE_CONTENT',
-  'CONTENT_TYPE_MISMATCH',
-  'DOCUMENT_REJECTED_MALWARE',
-  'FILE_TOO_LARGE',
-  'UNSUPPORTED_FILE_TYPE',
-]);
 
 export class HttpDocumentUploadGateway implements DocumentUploadGateway {
   readonly #opts: DocumentUploadGatewayOptions;
@@ -82,18 +72,27 @@ export class HttpDocumentUploadGateway implements DocumentUploadGateway {
     if (res.status === 401) this.#cached = null;
 
     const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-    if (res.status === 201) {
+    const code = typeof body['error'] === 'string' ? body['error'] : undefined;
+    // ONE classification, from the one shared table (D7). A 4xx we cannot name is
+    // a REFUSAL, not an outage: an unclassified refusal must never be relayed as
+    // "the service is unavailable", because that teaches the citizen to retry a
+    // closed door forever. The drift is logged, loudly, rather than swallowed.
+    const answer = classifyDocumentDoorAnswer(res.status, code);
+    if (answer.kind === 'UPLOADED') {
       const documentId = body['documentId'];
       if (typeof documentId !== 'string') return { kind: 'DEPENDENCY_UNAVAILABLE' };
       // The response is rebuilt from two known fields; nothing else is relayed.
       return { kind: 'UPLOADED', documentId, documentType: input.documentType };
     }
-    const code = typeof body['error'] === 'string' ? body['error'] : '';
-    if (res.status >= 400 && res.status < 500 && REFUSALS.has(code)) {
-      return { kind: 'REFUSED', httpStatus: res.status, code: code as DocumentRefusal };
+    if (answer.kind === 'RELAY') {
+      if (answer.code === 'DOCUMENT_REFUSED') {
+        // Status and closed reason only — the body is not ours to log.
+        logError('document_door_contract_drift', { stage: 'forensics_response', status: res.status, code: code ?? 'UNNAMED' });
+      }
+      return { kind: 'REFUSED', httpStatus: answer.status, code: answer.code as DocumentRefusal };
     }
     // Status and closed code only — never the body, which is not ours to log.
-    logError('document_door_dependency_unavailable', { stage: 'forensics_response', status: res.status, code });
+    logError('document_door_dependency_unavailable', { stage: 'forensics_response', status: res.status, code: code ?? 'UNNAMED' });
     return { kind: 'DEPENDENCY_UNAVAILABLE' };
   }
 

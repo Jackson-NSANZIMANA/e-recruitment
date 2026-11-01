@@ -3,6 +3,12 @@
 //
 //   POST /v1/applicants/me/applications/documents   (multipart/form-data)
 //
+// D7: every answer this route gives is built from the ONE shared document-door
+// vocabulary (@usrp/shared-types DOCUMENT_DOOR_CODES), which is also what
+// document-forensics-service renders from and what the gateway classifies from.
+// An unknown document type is refused HERE, at 422, before a round trip and a
+// ClamAV scan are spent on a document type that agency never accepts.
+//
 // SESSION-authenticated like every /me route. The subject is DERIVED from the
 // opaque session; a client-supplied `applicantId` part is REFUSED (an ignored
 // authorization field is a control the caller thinks exists). The multipart
@@ -20,6 +26,7 @@ import {
   type HttpResult,
   type Route,
 } from '@usrp/shared-http';
+import { DOCUMENT_DOOR_CODES, isKnownDocumentType, type DocumentDoorCode } from '@usrp/shared-types';
 import type { ApplicantAuthService } from '../../application/applicant-auth.service.js';
 import type { DocumentUploadGateway } from '../../ports/document-upload-gateway.js';
 import { authHeader, authenticate } from './applicant-auth.controller.js';
@@ -38,6 +45,11 @@ export interface DocumentRouteOptions {
   readonly allowedMediaTypes: readonly string[];
 }
 
+/** Throw the door's error for a shared code, at the status that code declares. */
+function doorError(code: DocumentDoorCode, detail: string): HttpError {
+  return new HttpError(DOCUMENT_DOOR_CODES[code].status, code, detail);
+}
+
 export function applicantDocumentRoutes(
   service: ApplicantAuthService,
   documents: DocumentUploadGateway | null,
@@ -52,7 +64,7 @@ export function applicantDocumentRoutes(
       handler: async (ctx): Promise<HttpResult> => {
         const applicantId = await authenticate(authHeader(ctx.headers['authorization']), service);
         if (documents === null) {
-          throw new HttpError(503, 'DOCUMENTS_UNAVAILABLE', 'Document upload is not available.');
+          throw doorError('DOCUMENTS_UNAVAILABLE', 'Document upload is not available.');
         }
 
         const form = parseMultipartFormData(await ctx.rawBody(), rawContentType(ctx.headers), {
@@ -61,28 +73,35 @@ export function applicantDocumentRoutes(
           maxFieldBytes: MAX_FIELD_BYTES,
         });
         if (form.fields.has('applicantId')) {
-          throw new HttpError(400, 'FORBIDDEN_FIELD', 'Field "applicantId" is not accepted.');
+          throw doorError('FORBIDDEN_FIELD', 'Field "applicantId" is not accepted.');
         }
         const applicationId = form.fields.get('applicationId');
         if (applicationId === undefined || !UUID_RE.test(applicationId)) {
-          throw new HttpError(400, 'INVALID_REQUEST', 'Field "applicationId" must be a UUID.');
+          throw doorError('INVALID_REQUEST', 'Field "applicationId" must be a UUID.');
         }
         const documentType = form.fields.get('documentType');
         if (documentType === undefined || !DOCUMENT_TYPE_RE.test(documentType)) {
-          throw new HttpError(400, 'INVALID_REQUEST', 'Field "documentType" is required.');
+          throw doorError('INVALID_REQUEST', 'Field "documentType" is required.');
+        }
+        // The word must be a document type USRP models at all. Which AGENCY then
+        // accepts it is the owning service's call (the agency comes from
+        // ownership of the application, never from this request) — but a type no
+        // agency models is refused here, as a caller error, not upstream.
+        if (!isKnownDocumentType(documentType)) {
+          throw doorError('UNSUPPORTED_DOCUMENT_TYPE', 'That document type is not accepted.');
         }
         const file = form.files[0];
         if (file === undefined || file.fieldName !== 'file') {
-          throw new HttpError(400, 'MISSING_FILE', 'A file part named "file" is required.');
+          throw doorError('MISSING_FILE', 'A file part named "file" is required.');
         }
         if (file.bytes.length === 0) {
-          throw new HttpError(400, 'EMPTY_FILE', 'The uploaded file is empty.');
+          throw doorError('EMPTY_FILE', 'The uploaded file is empty.');
         }
         if (file.bytes.length > options.maxFileSizeBytes) {
-          throw new HttpError(413, 'FILE_TOO_LARGE', 'The file is too large.');
+          throw doorError('FILE_TOO_LARGE', 'The file is too large.');
         }
         if (!allowed.has(file.contentType)) {
-          throw new HttpError(422, 'UNSUPPORTED_FILE_TYPE', 'That file type is not accepted.');
+          throw doorError('UNSUPPORTED_FILE_TYPE', 'That file type is not accepted.');
         }
 
         const result = await documents.uploadForApplicant(applicantId, {

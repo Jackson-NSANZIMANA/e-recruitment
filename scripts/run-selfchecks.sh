@@ -200,6 +200,11 @@ run_ts "deployment hygiene (EXPOSE ↔ .env.example port map, non-root, exec-for
 # OpenAPI document and the approved upstream catalogue is known in milliseconds.
 # It is the check that would have caught the four BFF services that never
 # existed being read as fact for a month.
+# D7: the document door's closed vocabulary is declared ONCE and both services
+# agree with it in both directions. This is the proof whose absence let
+# forensics answer INVALID_DOCUMENT_TYPE while identity called it "unavailable"
+# and the citizen was told to retry a closed door (evaluation 2026-10-29, D7).
+run_ts "shared-types: document-door contract (producer ↔ vocabulary ↔ consumer, D7)" packages/shared-types/selfcheck/verify-document-door-contract.ts
 run_ts "edge-gateway: contract drift (registry ↔ OpenAPI ↔ upstream catalogue)" services/edge-gateway/selfcheck/verify-edge-contract.ts
 run_ts "edge-gateway: BUILD-001 live campaign HTTP/session/CSRF/idempotency boundary" services/edge-gateway/selfcheck/verify-campaign-http-boundary.ts
 run_ts "edge-gateway: operational reads + DPO queue/decision boundary (ADR-039)" services/edge-gateway/selfcheck/verify-operational-reads-boundary.ts
