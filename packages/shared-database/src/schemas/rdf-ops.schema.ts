@@ -13,7 +13,6 @@ import {
   text,
   date,
   integer,
-  numeric,
   boolean,
   jsonb,
   index,
