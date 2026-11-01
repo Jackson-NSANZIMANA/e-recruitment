@@ -104,6 +104,8 @@ interface StubState {
   readonly calls: string[];
   /** Set to make final-decision answer 503 so a retry would be visible. */
   finalDecisionUnavailable: boolean;
+  /** Every body the edge forwarded to POST /v1/applications/adjudicate (D10: did the lane arrive?). */
+  adjudicateBodies: { applicationId?: unknown; decision?: unknown; lane?: unknown; notes?: unknown }[];
   /** The Authorization header the last officer-route call carried. */
   lastAuthorization: string | undefined;
   /** Whether any inbound upstream request carried a cookie header. */
@@ -131,8 +133,12 @@ const WALK_IN_APPLICANT_ID = randomUUID();
 const SUBMIT_APPLICATION_ID = "0d1f2e3c-4b5a-4968-8776-655443332211";
 const SUBMIT_PROCESSING_CODE = "RDF-77042";
 
+// D10: a row held in TWO lanes (a document hold and a criminal-record hold) refuses until told which one.
+const TWO_LANE_APPLICATION_ID = randomUUID();
+
 const state: StubState = {
   calls: [],
+  adjudicateBodies: [],
   finalDecisionUnavailable: false,
   lastAuthorization: undefined,
   sawCookieHeader: false,
@@ -299,6 +305,25 @@ async function stubHandler(
         status: "CROSS_AGENCY_LOCKED",
         lockedByAgency: "RNP",
       });
+
+    case "POST /v1/applications/adjudicate": {
+      // The real service's behaviour (officer-transitions.controller): a two-lane row without a lane is a
+      // 409 NOT_APPLICABLE that NAMES the lanes; the same request with one of them is applied.
+      const b = (body ?? {}) as { applicationId?: unknown; lane?: unknown };
+      state.adjudicateBodies.push(b);
+      if (b.applicationId === TWO_LANE_APPLICATION_ID && b.lane === undefined) {
+        return send(res, 409, {
+          status: "NOT_APPLICABLE",
+          currentStatus: "DOCUMENT_REVIEW_AMBER",
+          heldLanes: ["DOCUMENT", "CRIMINAL"],
+        });
+      }
+      return send(res, 200, {
+        status: "APPLIED",
+        fromStatus: "CRIMINAL_CLEARANCE",
+        toStatus: "DOCUMENT_REVIEW_GREEN",
+      });
+    }
 
     case "POST /v1/applications/final-decision":
       if (state.finalDecisionUnavailable) {
@@ -865,6 +890,48 @@ async function main(): Promise<void> {
       `${String(after - before)} attempts — a retried transition is a double write on a legal record`,
     );
     state.finalDecisionUnavailable = false;
+
+    // ── D10: the officer's lane answer must REACH the service ─────────
+    // The edge refuses a two-lane row with ADJUDICATION_LANE_REQUIRED, an instruction to send one of the lanes
+    // back. Until the handler forwarded `lane`, following that instruction produced the same refusal again:
+    // every proof of lanes ran against the service directly, so nothing at the browser's boundary noticed.
+    section("Adjudication: a lane the officer sends is forwarded, never dropped");
+    const adjudicate = (body: Record<string, unknown>) =>
+      call("POST", "/edge/v1/applications/adjudicate", { body });
+    const bodiesBefore = state.adjudicateBodies.length;
+
+    const noLane = await adjudicate({ applicationId: TWO_LANE_APPLICATION_ID, decision: "CLEAR" });
+    check("a two-lane row without a lane is ADJUDICATION_LANE_REQUIRED (409)", noLane.status === 409 && noLane.text.includes("ADJUDICATION_LANE_REQUIRED"), noLane.text);
+    check(
+      "…and the refusal names BOTH lanes",
+      noLane.text.includes("DOCUMENT") && noLane.text.includes("CRIMINAL"),
+      noLane.text,
+    );
+
+    const withLane = await adjudicate({ applicationId: TWO_LANE_APPLICATION_ID, decision: "CLEAR", lane: "CRIMINAL" });
+    check("the SAME row with lane=CRIMINAL is applied (200)", withLane.status === 200, `${String(withLane.status)} ${withLane.text}`);
+    const forwarded = state.adjudicateBodies.at(-1);
+    check("the service received lane=CRIMINAL (the edge did not drop it)", forwarded?.lane === "CRIMINAL", JSON.stringify(forwarded));
+
+    const sent = state.adjudicateBodies.length;
+    const badLane = await adjudicate({ applicationId: TWO_LANE_APPLICATION_ID, decision: "CLEAR", lane: "EVERYTHING" });
+    check("a lane outside the closed set is a 400 at the edge", badLane.status === 400, `${String(badLane.status)} ${badLane.text}`);
+    const notAString = await adjudicate({ applicationId: TWO_LANE_APPLICATION_ID, decision: "CLEAR", lane: 7 });
+    check("a non-string lane is a 400 at the edge", notAString.status === 400, `${String(notAString.status)} ${notAString.text}`);
+    check("…and neither reached the service", state.adjudicateBodies.length === sent, `${String(state.adjudicateBodies.length - sent)} extra call(s)`);
+
+    const single = await adjudicate({ applicationId: APPLICATION_ID, decision: "CLEAR" });
+    check("a single-hold row needs no lane (200)", single.status === 200, `${String(single.status)} ${single.text}`);
+    check(
+      "…and the edge invents none (no `lane` key forwarded)",
+      state.adjudicateBodies.at(-1) !== undefined && !Object.hasOwn(state.adjudicateBodies.at(-1) ?? {}, "lane"),
+      JSON.stringify(state.adjudicateBodies.at(-1)),
+    );
+    check(
+      "exactly the valid requests were forwarded (3 of the 5 sent: the two 400s never left the edge)",
+      state.adjudicateBodies.length - bodiesBefore === 3,
+      String(state.adjudicateBodies.length - bodiesBefore),
+    );
 
     // ── 13. Refresh rotates, with a grace window ────────────────────
     section("Refresh rotates both secrets and keeps in-flight requests alive");
