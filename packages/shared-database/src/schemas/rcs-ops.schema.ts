@@ -21,10 +21,12 @@ import {
   text,
   date,
   integer,
+  numeric,
   boolean,
   jsonb,
   index,
   uniqueIndex,
+  unique,
 } from 'drizzle-orm/pg-core';
 import { applicantIdentities, campaignPolicyVersions } from './public-core.schema.js';
 
@@ -300,6 +302,36 @@ export const rcsDocumentRecords = rcsOps.table(
   (t) => [
     index('idx_rcs_docs_application').on(t.applicationId),
     index('idx_rcs_docs_type').on(t.documentType),
+  ],
+);
+
+/**
+ * D8 (rls/0046, ADR-052): the append-only trail of every upload into a document
+ * slot. One row per upload, never updated, never deleted (engine-enforced).
+ */
+export const rcsDocumentRevisions = rcsOps.table(
+  'document_revisions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    documentId: uuid('document_id')
+      .references(() => rcsDocumentRecords.id)
+      .notNull(),
+    applicationId: uuid('application_id')
+      .references(() => rcsApplications.id)
+      .notNull(),
+    revision: integer('revision').notNull(),
+    contentHmac: varchar('content_hmac', { length: 64 }).notNull(),
+    fileSizeBytes: integer('file_size_bytes').notNull(),
+    mimeType: varchar('mime_type', { length: 255 }).notNull(),
+    forensicsLane: rcsDocumentLaneEnum('forensics_lane').notNull(),
+    forensicsScore: integer('forensics_score'),
+    forensicsFlags: jsonb('forensics_flags').default(sql`'{}'::jsonb`).notNull(),
+    uploadedBy: varchar('uploaded_by', { length: 32 }).default('APPLICANT').notNull(),
+    uploadedAt: timestamp('uploaded_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    unique('rcs_ops_document_revisions_slot_revision_key').on(t.documentId, t.revision),
+    index('idx_rcs_ops_document_revisions_app').on(t.applicationId, t.uploadedAt.desc()),
   ],
 );
 

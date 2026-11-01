@@ -123,7 +123,7 @@ export class PgDocumentRecordStore implements DocumentRecordStore {
             ) VALUES (
               ${slot.id}, ${input.applicationId}, ${revision}, ${input.contentHmac},
               ${input.fileSizeBytes}, ${input.mimeType},
-              ${verdict.lane}::${schema}.document_lane, ${String(verdict.score)}::numeric,
+              ${verdict.lane}::${schema}.document_lane, ${verdict.score},
               ${tx.json(asJsonb(verdict.flags))}, 'APPLICANT'
             )
           `;
@@ -187,7 +187,7 @@ export class PgDocumentRecordStore implements DocumentRecordStore {
           ) VALUES (
             ${row.id}, ${input.applicationId}, 1, ${input.contentHmac},
             ${input.fileSizeBytes}, ${input.mimeType},
-            ${verdict.lane}::${schema}.document_lane, ${String(verdict.score)}::numeric,
+            ${verdict.lane}::${schema}.document_lane, ${verdict.score},
             ${tx.json(asJsonb(verdict.flags))}, 'APPLICANT'
           )
         `;

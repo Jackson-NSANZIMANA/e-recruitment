@@ -20,10 +20,12 @@ import {
   text,
   date,
   integer,
+  numeric,
   boolean,
   jsonb,
   index,
   uniqueIndex,
+  unique,
 } from 'drizzle-orm/pg-core';
 import { applicantIdentities, campaignPolicyVersions } from './public-core.schema.js';
 
@@ -271,6 +273,36 @@ export const rnpDocumentRecords = rnpOps.table(
   (t) => [
     index('idx_rnp_docs_application').on(t.applicationId),
     index('idx_rnp_docs_type').on(t.documentType),
+  ],
+);
+
+/**
+ * D8 (rls/0046, ADR-052): the append-only trail of every upload into a document
+ * slot. One row per upload, never updated, never deleted (engine-enforced).
+ */
+export const rnpDocumentRevisions = rnpOps.table(
+  'document_revisions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    documentId: uuid('document_id')
+      .references(() => rnpDocumentRecords.id)
+      .notNull(),
+    applicationId: uuid('application_id')
+      .references(() => rnpApplications.id)
+      .notNull(),
+    revision: integer('revision').notNull(),
+    contentHmac: varchar('content_hmac', { length: 64 }).notNull(),
+    fileSizeBytes: integer('file_size_bytes').notNull(),
+    mimeType: varchar('mime_type', { length: 255 }).notNull(),
+    forensicsLane: rnpDocumentLaneEnum('forensics_lane').notNull(),
+    forensicsScore: integer('forensics_score'),
+    forensicsFlags: jsonb('forensics_flags').default(sql`'{}'::jsonb`).notNull(),
+    uploadedBy: varchar('uploaded_by', { length: 32 }).default('APPLICANT').notNull(),
+    uploadedAt: timestamp('uploaded_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    unique('rnp_ops_document_revisions_slot_revision_key').on(t.documentId, t.revision),
+    index('idx_rnp_ops_document_revisions_app').on(t.applicationId, t.uploadedAt.desc()),
   ],
 );
 

@@ -572,6 +572,242 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public_core.event_redrive_cursor": {
+      "name": "event_redrive_cursor",
+      "schema": "public_core",
+      "columns": {
+        "topic": {
+          "name": "topic",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "partition": {
+          "name": "partition",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "next_offset": {
+          "name": "next_offset",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "event_redrive_cursor_topic_partition_pk": {
+          "name": "event_redrive_cursor_topic_partition_pk",
+          "columns": [
+            "topic",
+            "partition"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public_core.event_redrive_ledger": {
+      "name": "event_redrive_ledger",
+      "schema": "public_core",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "source_topic": {
+          "name": "source_topic",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source_partition": {
+          "name": "source_partition",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source_offset": {
+          "name": "source_offset",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "group_id": {
+          "name": "group_id",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "event_id": {
+          "name": "event_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reason": {
+          "name": "reason",
+          "type": "varchar(24)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "consecutive_group_failures": {
+          "name": "consecutive_group_failures",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "state": {
+          "name": "state",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'RETRYING'"
+        },
+        "first_seen_at": {
+          "name": "first_seen_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "last_attempt_at": {
+          "name": "last_attempt_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "next_attempt_at": {
+          "name": "next_attempt_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "last_error_code": {
+          "name": "last_error_code",
+          "type": "varchar(48)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "parked_reason": {
+          "name": "parked_reason",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "parked_at": {
+          "name": "parked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "idx_event_redrive_due": {
+          "name": "idx_event_redrive_due",
+          "columns": [
+            {
+              "expression": "next_attempt_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_event_redrive_group": {
+          "name": "idx_event_redrive_group",
+          "columns": [
+            {
+              "expression": "group_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "source_topic",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "state",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_event_redrive_chain": {
+          "name": "idx_event_redrive_chain",
+          "columns": [
+            {
+              "expression": "group_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "event_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "uq_event_redrive_letter": {
+          "name": "uq_event_redrive_letter",
+          "nullsNotDistinct": false,
+          "columns": [
+            "source_topic",
+            "source_partition",
+            "source_offset",
+            "group_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public_core.applicant_identities": {
       "name": "applicant_identities",
       "schema": "public_core",
@@ -3594,6 +3830,26 @@
           "primaryKey": false,
           "notNull": false
         },
+        "vetting_hold_resolvers": {
+          "name": "vetting_hold_resolvers",
+          "type": "uuid[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::uuid[]"
+        },
+        "vetting_hold_resolved_dimensions": {
+          "name": "vetting_hold_resolved_dimensions",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::text[]"
+        },
+        "vetting_hold_resolved_at": {
+          "name": "vetting_hold_resolved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "submitted_at": {
           "name": "submitted_at",
           "type": "timestamp with time zone",
@@ -4339,6 +4595,19 @@
           "primaryKey": false,
           "notNull": false
         },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "content_hmac": {
+          "name": "content_hmac",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
         "human_reviewed_by_id": {
           "name": "human_reviewed_by_id",
           "type": "uuid",
@@ -4434,6 +4703,156 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "rcs_ops.document_revisions": {
+      "name": "document_revisions",
+      "schema": "rcs_ops",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "document_id": {
+          "name": "document_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "application_id": {
+          "name": "application_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "content_hmac": {
+          "name": "content_hmac",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "file_size_bytes": {
+          "name": "file_size_bytes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mime_type": {
+          "name": "mime_type",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "forensics_lane": {
+          "name": "forensics_lane",
+          "type": "document_lane",
+          "typeSchema": "rcs_ops",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "forensics_score": {
+          "name": "forensics_score",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "forensics_flags": {
+          "name": "forensics_flags",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "uploaded_by": {
+          "name": "uploaded_by",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'APPLICANT'"
+        },
+        "uploaded_at": {
+          "name": "uploaded_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "idx_rcs_ops_document_revisions_app": {
+          "name": "idx_rcs_ops_document_revisions_app",
+          "columns": [
+            {
+              "expression": "application_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "uploaded_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "document_revisions_document_id_document_records_id_fk": {
+          "name": "document_revisions_document_id_document_records_id_fk",
+          "tableFrom": "document_revisions",
+          "tableTo": "document_records",
+          "schemaTo": "rcs_ops",
+          "columnsFrom": [
+            "document_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "document_revisions_application_id_applications_id_fk": {
+          "name": "document_revisions_application_id_applications_id_fk",
+          "tableFrom": "document_revisions",
+          "tableTo": "applications",
+          "schemaTo": "rcs_ops",
+          "columnsFrom": [
+            "application_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "rcs_ops_document_revisions_slot_revision_key": {
+          "name": "rcs_ops_document_revisions_slot_revision_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "document_id",
+            "revision"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -5314,6 +5733,26 @@
           "primaryKey": false,
           "notNull": false
         },
+        "vetting_hold_resolvers": {
+          "name": "vetting_hold_resolvers",
+          "type": "uuid[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::uuid[]"
+        },
+        "vetting_hold_resolved_dimensions": {
+          "name": "vetting_hold_resolved_dimensions",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::text[]"
+        },
+        "vetting_hold_resolved_at": {
+          "name": "vetting_hold_resolved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "submitted_at": {
           "name": "submitted_at",
           "type": "timestamp with time zone",
@@ -6046,6 +6485,19 @@
           "primaryKey": false,
           "notNull": false
         },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "content_hmac": {
+          "name": "content_hmac",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
         "human_reviewed_by_id": {
           "name": "human_reviewed_by_id",
           "type": "uuid",
@@ -6156,6 +6608,156 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "rdf_ops.document_revisions": {
+      "name": "document_revisions",
+      "schema": "rdf_ops",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "document_id": {
+          "name": "document_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "application_id": {
+          "name": "application_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "content_hmac": {
+          "name": "content_hmac",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "file_size_bytes": {
+          "name": "file_size_bytes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mime_type": {
+          "name": "mime_type",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "forensics_lane": {
+          "name": "forensics_lane",
+          "type": "document_lane",
+          "typeSchema": "rdf_ops",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "forensics_score": {
+          "name": "forensics_score",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "forensics_flags": {
+          "name": "forensics_flags",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "uploaded_by": {
+          "name": "uploaded_by",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'APPLICANT'"
+        },
+        "uploaded_at": {
+          "name": "uploaded_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "idx_rdf_ops_document_revisions_app": {
+          "name": "idx_rdf_ops_document_revisions_app",
+          "columns": [
+            {
+              "expression": "application_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "uploaded_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "document_revisions_document_id_document_records_id_fk": {
+          "name": "document_revisions_document_id_document_records_id_fk",
+          "tableFrom": "document_revisions",
+          "tableTo": "document_records",
+          "schemaTo": "rdf_ops",
+          "columnsFrom": [
+            "document_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "document_revisions_application_id_applications_id_fk": {
+          "name": "document_revisions_application_id_applications_id_fk",
+          "tableFrom": "document_revisions",
+          "tableTo": "applications",
+          "schemaTo": "rdf_ops",
+          "columnsFrom": [
+            "application_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "rdf_ops_document_revisions_slot_revision_key": {
+          "name": "rdf_ops_document_revisions_slot_revision_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "document_id",
+            "revision"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -7066,6 +7668,26 @@
           "primaryKey": false,
           "notNull": false
         },
+        "vetting_hold_resolvers": {
+          "name": "vetting_hold_resolvers",
+          "type": "uuid[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::uuid[]"
+        },
+        "vetting_hold_resolved_dimensions": {
+          "name": "vetting_hold_resolved_dimensions",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::text[]"
+        },
+        "vetting_hold_resolved_at": {
+          "name": "vetting_hold_resolved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "submitted_at": {
           "name": "submitted_at",
           "type": "timestamp with time zone",
@@ -7783,6 +8405,19 @@
           "primaryKey": false,
           "notNull": false
         },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "content_hmac": {
+          "name": "content_hmac",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
         "human_reviewed_by_id": {
           "name": "human_reviewed_by_id",
           "type": "uuid",
@@ -7878,6 +8513,156 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "rnp_ops.document_revisions": {
+      "name": "document_revisions",
+      "schema": "rnp_ops",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "document_id": {
+          "name": "document_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "application_id": {
+          "name": "application_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "content_hmac": {
+          "name": "content_hmac",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "file_size_bytes": {
+          "name": "file_size_bytes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mime_type": {
+          "name": "mime_type",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "forensics_lane": {
+          "name": "forensics_lane",
+          "type": "document_lane",
+          "typeSchema": "rnp_ops",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "forensics_score": {
+          "name": "forensics_score",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "forensics_flags": {
+          "name": "forensics_flags",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "uploaded_by": {
+          "name": "uploaded_by",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'APPLICANT'"
+        },
+        "uploaded_at": {
+          "name": "uploaded_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "idx_rnp_ops_document_revisions_app": {
+          "name": "idx_rnp_ops_document_revisions_app",
+          "columns": [
+            {
+              "expression": "application_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "uploaded_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "document_revisions_document_id_document_records_id_fk": {
+          "name": "document_revisions_document_id_document_records_id_fk",
+          "tableFrom": "document_revisions",
+          "tableTo": "document_records",
+          "schemaTo": "rnp_ops",
+          "columnsFrom": [
+            "document_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "document_revisions_application_id_applications_id_fk": {
+          "name": "document_revisions_application_id_applications_id_fk",
+          "tableFrom": "document_revisions",
+          "tableTo": "applications",
+          "schemaTo": "rnp_ops",
+          "columnsFrom": [
+            "application_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "rnp_ops_document_revisions_slot_revision_key": {
+          "name": "rnp_ops_document_revisions_slot_revision_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "document_id",
+            "revision"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

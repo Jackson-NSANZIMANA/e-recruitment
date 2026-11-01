@@ -67,7 +67,7 @@ BEGIN
         file_size_bytes     integer NOT NULL,
         mime_type           varchar(255) NOT NULL,
         forensics_lane      %I.document_lane NOT NULL,
-        forensics_score     numeric(5,2),
+        forensics_score     integer,
         forensics_flags     jsonb NOT NULL DEFAULT '{}'::jsonb,
         uploaded_by         varchar(32) NOT NULL DEFAULT 'APPLICANT',
         uploaded_at         timestamptz NOT NULL DEFAULT now(),

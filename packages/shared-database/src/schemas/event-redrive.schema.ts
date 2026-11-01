@@ -7,7 +7,7 @@
 // events.dead-letter, and this table only records WHEN and WHETHER.
 // ══════════════════════════════════════════════════════════════════
 
-import { bigint, index, integer, timestamp, unique, uuid, varchar } from 'drizzle-orm/pg-core';
+import { bigint, index, integer, primaryKey, timestamp, unique, uuid, varchar } from 'drizzle-orm/pg-core';
 import { publicCore } from './public-core.schema.js';
 
 export const eventRedriveLedger = publicCore.table(
@@ -19,6 +19,8 @@ export const eventRedriveLedger = publicCore.table(
     /** Kafka offsets are 64-bit: bigint mode 'bigint' keeps them exact. */
     sourceOffset: bigint('source_offset', { mode: 'bigint' }).notNull(),
     groupId: varchar('group_id', { length: 128 }).notNull(),
+    /** x-usrp-dlq-event-id: lets a returning event inherit the attempts already spent. */
+    eventId: varchar('event_id', { length: 64 }),
     /** The ADR-025 reason the letter arrived with. */
     reason: varchar('reason', { length: 24 }).notNull(),
     attempts: integer('attempts').default(0).notNull(),
@@ -35,5 +37,18 @@ export const eventRedriveLedger = publicCore.table(
     unique('uq_event_redrive_letter').on(t.sourceTopic, t.sourcePartition, t.sourceOffset, t.groupId),
     index('idx_event_redrive_due').on(t.nextAttemptAt),
     index('idx_event_redrive_group').on(t.groupId, t.sourceTopic, t.state),
+    index('idx_event_redrive_chain').on(t.groupId, t.eventId),
   ],
+);
+
+/** How far into each dead-letter partition the worker has REGISTERED letters (rls/0045). */
+export const eventRedriveCursor = publicCore.table(
+  'event_redrive_cursor',
+  {
+    topic: varchar('topic', { length: 128 }).notNull(),
+    partition: integer('partition').notNull(),
+    nextOffset: bigint('next_offset', { mode: 'bigint' }).notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.topic, t.partition] })],
 );
