@@ -73,15 +73,19 @@ function record(applicationId: string, claimedOfficerId: string, counter: number
 
 /** Records what the store was asked to write, so "nothing was stored" is provable. */
 const storeCalls: SyncRecordInput[] = [];
+/** Only `find` and `touch` are on the path under test; the rest throw if reached. */
 const registry: DeviceRegistry = {
   find: (deviceId: string): Promise<DeviceRecord | null> =>
     Promise.resolve(
       deviceId === DEVICE ? { deviceId: DEVICE, publicKeyPem: keys.publicKeyPem, agency: 'RDF', revokedAt: null } : null,
     ),
   touch: (): Promise<void> => Promise.resolve(),
-  enroll: () => Promise.resolve({ kind: 'ENROLLED' as const }),
-  list: () => Promise.resolve([]),
-  revoke: () => Promise.resolve({ kind: 'REVOKED' as const }),
+  enroll: (): Promise<never> => {
+    throw new Error('unexpected enroll');
+  },
+  list: (): Promise<never> => Promise.reject(new Error('unexpected list')),
+  revoke: (): Promise<never> => Promise.reject(new Error('unexpected revoke')),
+  assign: (): Promise<never> => Promise.reject(new Error('unexpected assign')),
 } as DeviceRegistry;
 
 const store = {
