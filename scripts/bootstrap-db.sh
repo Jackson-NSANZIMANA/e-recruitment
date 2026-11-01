@@ -266,6 +266,11 @@ apply_sql "${RLS_DIR}/0040_clearance_certificates.sql" "rls/0040 (clearance cert
 # S12c (ADR-049): database-level guard on the additive campaign policy v2 block.
 apply_sql "${RLS_DIR}/0041_campaign_policy_v2.sql" "rls/0041 (campaign policy v2 guard)"
 
+# D8 (ADR-052): document supersession. document_records gains a revision counter
+# and a KEYED content digest; document_revisions is the append-only trail of what
+# passed through each slot (grants stripped + triggers, the rls/0007 idiom).
+apply_sql "${RLS_DIR}/0044_document_revisions.sql" "rls/0044 (document revisions)"
+
 # D10 (ADR-051): the durable resolver stamp for a resolved vetting hold, in ALL
 # THREE ops schemas — the accept-time four-eyes read (the officer who resolved a
 # criminal or NESA hold may not also accept) reads this column, not the history.

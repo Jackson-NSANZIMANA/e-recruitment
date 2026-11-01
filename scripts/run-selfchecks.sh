@@ -75,6 +75,8 @@ export MINIO_BUCKET_DOCUMENTS="${MINIO_BUCKET_DOCUMENTS:-usrp-documents}"
 # one. Committed DEV-ONLY value, same posture as the Ed25519 keypair above;
 # production keys come from HSM/KMS.
 export MINIO_ENCRYPTION_KEY="${MINIO_ENCRYPTION_KEY:-dev_document_envelope_key_min_32_chars!!}"
+# D8 (ADR-052): the KEYED digest for document revisions — dev value, like the rest.
+export FORENSICS_CONTENT_HMAC_KEY="${FORENSICS_CONTENT_HMAC_KEY:-dev_document_content_hmac_key_min_32_ch!}"
 export CLAMAV_HOST="${CLAMAV_HOST:-localhost}"
 export CLAMAV_PORT="${CLAMAV_PORT:-3310}"
 export CLAMAV_TIMEOUT_MS="${CLAMAV_TIMEOUT_MS:-30000}"
@@ -219,6 +221,12 @@ run_ts "shared-types: document-door contract (producer ↔ vocabulary ↔ consum
 # D10). Zero infrastructure: the real use case against a fake repository, plus
 # structural assertions on the SQL predicate and the accept transaction.
 run_ts "application-service: vetting-hold resolution + separation of duties (D10)" services/application-service/selfcheck/verify-vetting-hold.ts
+# D8: a reviewed document is EVIDENCE. A second upload supersedes (versioned,
+# keyed digest, append-only trail) only while the case is still in document
+# review and no officer has decided; otherwise 409 DOCUMENT_REVIEW_CLOSED — and
+# the refusal never touches the reviewed bytes (evaluation 2026-10-29, D8).
+# Zero infrastructure: the pure decision is swept exhaustively, then the wiring.
+run_ts "document-forensics: supersession and the review lock (D8)" services/document-forensics-service/selfcheck/verify-document-supersession.ts
 run_ts "edge-gateway: contract drift (registry ↔ OpenAPI ↔ upstream catalogue)" services/edge-gateway/selfcheck/verify-edge-contract.ts
 run_ts "edge-gateway: BUILD-001 live campaign HTTP/session/CSRF/idempotency boundary" services/edge-gateway/selfcheck/verify-campaign-http-boundary.ts
 run_ts "edge-gateway: operational reads + DPO queue/decision boundary (ADR-039)" services/edge-gateway/selfcheck/verify-operational-reads-boundary.ts

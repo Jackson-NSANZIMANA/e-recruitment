@@ -69,6 +69,13 @@ export interface DocumentIngressConfig {
   readonly encryptionKey: string;
   readonly maxFileSizeBytes: number;
   readonly allowedMediaTypes: readonly string[];
+  /**
+   * D8 (ADR-052 §3.2): the key for the document CONTENT digest. Keyed, not a
+   * plain SHA-256 — a bare digest of a national ID or a birth certificate is a
+   * confirmation oracle for anyone holding a candidate document. Required, and
+   * never reuses the at-rest encryption key: one secret, one purpose.
+   */
+  readonly contentHmacKey: string;
 }
 
 export interface DocumentForensicsConfig {
@@ -100,6 +107,8 @@ export function loadDocumentForensicsConfig(
       CLAMAV_PORT: withDefault(integer({ min: 1, max: 65535 }), 3310),
       CLAMAV_TIMEOUT_MS: withDefault(integer({ min: 1000, max: 300000 }), 30000),
       FORENSICS_MAX_FILE_SIZE_MB: withDefault(integer({ min: 1, max: 50 }), 10),
+      // REQUIRED and secret: see DocumentIngressConfig.contentHmacKey.
+      FORENSICS_CONTENT_HMAC_KEY: string({ minLength: 32, secret: true }),
       FORENSICS_ALLOWED_MIME_TYPES: withDefault(list({ minItems: 1 }), DEFAULT_MEDIA_TYPES),
     },
     source,
@@ -126,6 +135,7 @@ export function loadDocumentForensicsConfig(
       encryptionKey: env.MINIO_ENCRYPTION_KEY,
       maxFileSizeBytes: env.FORENSICS_MAX_FILE_SIZE_MB * BYTES_PER_MB,
       allowedMediaTypes: env.FORENSICS_ALLOWED_MIME_TYPES,
+      contentHmacKey: env.FORENSICS_CONTENT_HMAC_KEY,
     },
   };
 }

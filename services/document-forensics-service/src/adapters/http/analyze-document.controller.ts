@@ -46,6 +46,8 @@ interface AnalyzeBody {
   readonly documentType?: unknown;
   readonly objectKey?: unknown;
   readonly objectBucket?: unknown;
+  /** D8: what the caller declared when it stored the bytes. Defaults to octet-stream. */
+  readonly mimeType?: unknown;
 }
 
 export function analyzeDocumentRoute(service: AnalyzeDocumentService, verify: AuthVerifier): Route {
@@ -72,6 +74,8 @@ export function analyzeDocumentRoute(service: AnalyzeDocumentService, verify: Au
         body.objectBucket === undefined
           ? DEFAULT_BUCKET
           : requireString(body.objectBucket, 'objectBucket', MAX_BUCKET_LENGTH);
+      const mimeType =
+        body.mimeType === undefined ? 'application/octet-stream' : requireString(body.mimeType, 'mimeType', 255);
 
       try {
         const outcome = await service.analyze({
@@ -80,6 +84,7 @@ export function analyzeDocumentRoute(service: AnalyzeDocumentService, verify: Au
           documentType: documentType as DocumentType,
           objectBucket,
           objectKey,
+          mimeType,
           context: { correlationId: ctx.correlationId, causationId: ctx.correlationId },
         });
         return mapOutcome(outcome);
@@ -111,6 +116,9 @@ function mapOutcome(outcome: AnalyzeDocumentOutcome): HttpResult {
       return { status: 422, body: { error: 'UNSUPPORTED_DOCUMENT_TYPE' } };
     case 'SCANNER_UNAVAILABLE':
       return { status: 503, body: { error: 'SCANNER_UNAVAILABLE' } };
+    case 'REVIEW_CLOSED':
+      // D8: a reviewed slot may not be re-verdicted by an automated pass.
+      return { status: 409, body: { error: 'DOCUMENT_REVIEW_CLOSED', reason: outcome.reason } };
   }
 }
 

@@ -278,6 +278,11 @@ export const rdfDocumentRecords = rdfOps.table(
     apiVerificationToken: varchar('api_verification_token', { length: 128 }),
     apiVerifiedAt: timestamp('api_verified_at', { withTimezone: true }),
 
+    // D8 (rls/0044, ADR-052): how many times this slot has been uploaded, and a
+    // KEYED digest of the bytes (never a bare hash — see the migration header).
+    revision: integer('revision').default(1).notNull(),
+    contentHmac: varchar('content_hmac', { length: 64 }),
+
     // Human review (Amber Lane)
     humanReviewedById: uuid('human_reviewed_by_id'),
     humanReviewedAt: timestamp('human_reviewed_at', { withTimezone: true }),

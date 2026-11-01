@@ -187,9 +187,17 @@ export function uploadDocumentRoute(
 function mapOutcome(outcome: UploadDocumentOutcome, documentType: DocumentType): HttpResult {
   switch (outcome.kind) {
     case 'UPLOADED':
+      // D8 (ADR-052 §3.5): `revision` is added, and nothing else. It says a
+      // document was REPLACED — not how it scored. Lane/score/flags stay
+      // withheld: a verdict handed to the uploader is a forgery-tuning oracle.
       return {
         status: 201,
-        body: { status: 'UPLOADED', documentId: outcome.documentId, documentType },
+        body: {
+          status: 'UPLOADED',
+          documentId: outcome.documentId,
+          documentType,
+          revision: outcome.revision,
+        },
       };
     case 'APPLICATION_NOT_FOUND':
       return doorResult('APPLICATION_NOT_FOUND');
@@ -205,6 +213,11 @@ function mapOutcome(outcome: UploadDocumentOutcome, documentType: DocumentType):
       return doorResult('DOCUMENT_REJECTED_MALWARE');
     case 'SCANNER_UNAVAILABLE':
       return doorResult('SCANNER_UNAVAILABLE');
+    case 'REVIEW_CLOSED':
+      // D8 (ADR-052 §3.3): a reviewed document is evidence. The code is in the
+      // shared vocabulary (409), the reason is a closed pair, and the citizen
+      // copy lives in the front-end hand-off — the officer path is a re-open.
+      return doorResult('DOCUMENT_REVIEW_CLOSED', { reason: outcome.reason });
     default:
       return assertNever(outcome);
   }

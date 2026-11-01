@@ -182,6 +182,7 @@ function secrets(): Secrets {
     RIB_HMAC_SECRET: freshSecret(),
     HEC_HMAC_SECRET: freshSecret(),
     MINIO_ENCRYPTION_KEY: freshSecret(),
+    FORENSICS_CONTENT_HMAC_KEY: freshSecret(),
     MINIO_ROOT_PASSWORD: freshSecret(),
     TWILIO_ACCOUNT_SID: `AC${randomBytes(16).toString('hex')}`,
     TWILIO_AUTH_TOKEN: freshSecret(),
