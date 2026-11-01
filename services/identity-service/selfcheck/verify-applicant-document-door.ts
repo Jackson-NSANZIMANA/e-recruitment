@@ -73,6 +73,7 @@ const STRANGER = 'b3000000-0000-4000-8000-000000000002';
 const CITIZEN_HASH = 'b3'.repeat(32);
 const STRANGER_HASH = 'b4'.repeat(32);
 const CAMPAIGN = 'b3000000-0000-4000-8000-0000000000c1';
+const CAMPAIGN_ADVANCED = 'b3000000-0000-4000-8000-0000000000c2';
 const APP_MINE = 'b3000000-0000-4000-8000-00000000a001';
 const APP_THEIRS = 'b3000000-0000-4000-8000-00000000a002';
 const APP_ADVANCED = 'b3000000-0000-4000-8000-00000000a003';
@@ -123,7 +124,7 @@ async function cleanup(): Promise<void> {
     await tx`DELETE FROM rdf_ops.application_status_history WHERE application_id IN ${tx(ids)}`;
     await tx`DELETE FROM rdf_ops.applications WHERE id IN ${tx(ids)}`;
     await tx`DELETE FROM public_core.applicant_sessions WHERE applicant_id IN ${tx([CITIZEN, STRANGER])}`;
-    await tx`DELETE FROM public_core.recruitment_campaigns WHERE id = ${CAMPAIGN}`;
+    await tx`DELETE FROM public_core.recruitment_campaigns WHERE id IN ${tx([CAMPAIGN, CAMPAIGN_ADVANCED])}`;
     await tx`DELETE FROM public_core.applicant_identities WHERE id IN ${tx([CITIZEN, STRANGER])}`;
     await tx`DELETE FROM public_core.service_accounts WHERE client_id = ${CLIENT_ID}`;
   });
@@ -155,12 +156,15 @@ async function seed(): Promise<void> {
          examination_end_date, examination_reporting_hour)
       VALUES (${CAMPAIGN}, ${`LEGACY-${CAMPAIGN.replaceAll('-', '').toUpperCase()}`},
               'doc door', 'RDF', 'REGISTRATION_OPEN', '["GENERAL_ENLISTMENT"]',
+              now() - interval '1 day', now() + interval '30 days', '2026-12-01', '2026-12-10', 7),
+             (${CAMPAIGN_ADVANCED}, ${`LEGACY-${CAMPAIGN_ADVANCED.replaceAll('-', '').toUpperCase()}`},
+              'doc door advanced', 'RDF', 'REGISTRATION_OPEN', '["GENERAL_ENLISTMENT"]',
               now() - interval '1 day', now() + interval '30 days', '2026-12-01', '2026-12-10', 7)`;
     await tx`
       INSERT INTO rdf_ops.applications (id, processing_code, applicant_id, campaign_id, category, status)
       VALUES (${APP_MINE}, 'RDF-97201', ${CITIZEN}, ${CAMPAIGN}, 'GENERAL_ENLISTMENT', 'SUBMITTED'::rdf_ops.application_status),
              (${APP_THEIRS}, 'RDF-97202', ${STRANGER}, ${CAMPAIGN}, 'GENERAL_ENLISTMENT', 'SUBMITTED'::rdf_ops.application_status),
-             (${APP_ADVANCED}, 'RDF-97203', ${CITIZEN}, ${CAMPAIGN}, 'GENERAL_ENLISTMENT', 'SUBMITTED'::rdf_ops.application_status)`;
+             (${APP_ADVANCED}, 'RDF-97203', ${CITIZEN}, ${CAMPAIGN_ADVANCED}, 'GENERAL_ENLISTMENT', 'SUBMITTED'::rdf_ops.application_status)`;
   });
   await admin.begin(async (tx) => {
     await tx`SET LOCAL ROLE ${sql('usrp_iam_service')}`;
