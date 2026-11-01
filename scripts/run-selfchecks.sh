@@ -252,6 +252,12 @@ fi
 # database must agree. Runs early: every proof below asserts behaviour ON
 # this schema, so a silent divergence here would undermine all of them.
 run_ts "shared-database: schema drift (.ts ↔ snapshot ↔ live DB)" packages/shared-database/selfcheck/verify-schema-drift.ts
+# Cross-agency column parity (evaluation D1/D12). The drift proof above binds
+# .ts ↔ snapshot ↔ live; it says nothing about whether the three AGENCY schemas
+# agree with each other. They did not: a column present in rdf_ops alone, named
+# by an agency-agnostic adapter, is a 42703 that only RNP and RCS ever see — and
+# every proof that drives those paths is an RDF proof, so nothing went red.
+run_ts "shared-database: cross-agency column parity (D1/D12 — declared divergences only)" packages/shared-database/selfcheck/verify-cross-agency-column-parity.ts
 # BUILD-001 migration acceptance: apply the exact pre-feature migrations to a
 # disposable real PostgreSQL database, insert legacy campaign/session rows,
 # apply 0002–0004, then replay every bootstrap RLS SQL file twice and attempt
@@ -365,6 +371,11 @@ run_ts "document-forensics: bounded-real analyzer (MinIO+ClamAV)" services/docum
 # analyze/ should turn its OWN proof red first rather than surface as a
 # confusing failure in the middle of this one.
 run_ts "document-forensics: upload ingress (multipart → ClamAV → sealed MinIO → verdict)" services/document-forensics-service/selfcheck/verify-document-upload-slice.ts
+# D14 (evaluation 2026-10-29): a corrected RE-UPLOAD overwrites the same object
+# key by design, so the row must also stop claiming a human decision about bytes
+# that no longer exist — while analyze/ (a re-scan of the SAME object) must not
+# withdraw one. A pure SQL proof: no MinIO, no ClamAV, no scanner.
+run_ts "document-forensics: a re-upload withdraws the human review (D14)" services/document-forensics-service/selfcheck/verify-document-review-replacement.ts
 run_ts "application-service: amber routing + adjudication" services/application-service/selfcheck/verify-amber-adjudication-slice.ts
 run_ts "application-service: walk-in lane (register → vet → physical → merged funnel)" services/application-service/selfcheck/verify-walk-in-slice.ts
 # The whole spine composed: one real submission → all 3 gates → DOCUMENT_REVIEW_GREEN.

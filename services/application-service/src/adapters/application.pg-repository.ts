@@ -439,12 +439,20 @@ export class PgApplicationRepository implements ApplicationRepository {
     const schema = sql(AGENCY_TARGET[result.agency].schema);
     const completeRank = APPLICATION_STATUSES.indexOf('PHYSICAL_TEST_COMPLETE');
 
+    // The walk-in lane exists only in rdf_ops (ADR-012): is_walk_in is an
+    // RDF-only column, and this projection is agency-agnostic. Naming it for
+    // RNP/RCS was a 42703 that held every physical-test projection for two of
+    // the three agencies while the RDF proof stayed green (evaluation D12).
+    // A schema without the lane answers `false` — it has no walk-in rows by
+    // construction, and the whole lane-local branch below is then unreachable.
+    const walkInFlag = result.agency === 'RDF' ? sql`is_walk_in` : sql`false AS is_walk_in`;
+
     try {
       return await sql.begin(async (tx): Promise<ApplyPhysicalTestOutcome> => {
         await tx`SET LOCAL ROLE ${sql(SYSTEM_ROLE)}`;
 
         const rows = await tx<{ status: ApplicationStatus; applicant_id: string; is_walk_in: boolean }[]>`
-          SELECT status, applicant_id, is_walk_in
+          SELECT status, applicant_id, ${walkInFlag}
           FROM ${schema}.applications
           WHERE id = ${result.applicationId}
           FOR UPDATE

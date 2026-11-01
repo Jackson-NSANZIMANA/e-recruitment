@@ -38,6 +38,24 @@ function str(v: unknown, field: string): string {
   return v;
 }
 
+/**
+ * A field whose COLUMN is `uuid` (evaluation D11). Left as a bare string, a
+ * non-UUID reaches the INSERT, PostgreSQL raises 22P02, and a malformed request
+ * is reported as a 500 — the officer's tablet retries a batch that can never
+ * succeed, and the operator gets a "server error" for a typo.
+ *
+ * It is CHECKED, never rewritten: capturingOfficerId is inside the payload the
+ * device signed, so normalising it would invalidate the signature. A shape the
+ * device signed is a shape we refuse.
+ */
+function uuid(v: unknown, field: string): string {
+  const value = str(v, field);
+  if (!UUID_RE.test(value)) {
+    throw new HttpError(400, 'INVALID_RECORD', `Field "${field}" must be a UUID.`);
+  }
+  return value;
+}
+
 function num(v: unknown, field: string): number {
   if (typeof v !== 'number' || !Number.isFinite(v)) {
     throw new HttpError(400, 'INVALID_RECORD', `Field "${field}" must be a finite number.`);
@@ -89,7 +107,7 @@ function parseRecord(v: unknown): FieldScoreRecord {
     metrics: parseMetrics(r['metrics']),
     capturedAt: str(r['capturedAt'], 'capturedAt'),
     deviceId: str(r['deviceId'], 'deviceId'),
-    capturingOfficerId: str(r['capturingOfficerId'], 'capturingOfficerId'),
+    capturingOfficerId: uuid(r['capturingOfficerId'], 'capturingOfficerId'),
     vectorClock: parseVectorClock(r['vectorClock']),
     deviceSignature: str(r['deviceSignature'], 'deviceSignature'),
     signedPayloadHash: str(r['signedPayloadHash'], 'signedPayloadHash'),

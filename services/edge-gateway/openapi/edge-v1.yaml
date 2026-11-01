@@ -460,7 +460,11 @@ paths:
       x-usrp-retry-on-g2g: true
       responses:
         '200':
-          description: Amber queue
+          description: >-
+            Amber queue. Each entry names why a human must look (`reasons`,
+            closed codes) and WHICH hold it is in (`heldLanes` — DOCUMENT,
+            CRIMINAL, ACADEMIC), which is exactly the `lane` the adjudicate
+            operation accepts back. A row can be held in more than one lane.
         '401':
           description: Unauthorized
 
@@ -585,13 +589,44 @@ paths:
       tags: [officer-transitions]
       x-usrp-session: officer
       x-usrp-permission: adjudication.decide
-      x-usrp-outcomes: { 409: [ILLEGAL_TRANSITION] }
+      x-usrp-outcomes: { 409: [ILLEGAL_TRANSITION, ADJUDICATION_LANE_REQUIRED] }
       x-usrp-csrf: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [applicationId, decision]
+              properties:
+                applicationId:
+                  type: string
+                decision:
+                  type: string
+                  enum: [CLEAR, REJECT]
+                lane:
+                  type: string
+                  enum: [DOCUMENT, CRIMINAL, ACADEMIC]
+                  description: >-
+                    WHICH hold this verdict is about (D10). Omit it when the row
+                    is held in exactly one lane; when a row is held in several,
+                    the refusal names them in `heldLanes` and the decision must
+                    say which one it is.
+                notes:
+                  type: string
+                  maxLength: 1000
       responses:
         '200':
-          description: Adjudicated
+          description: >-
+            APPLIED or NO_CHANGE. A dimension verdict (CRIMINAL, ACADEMIC) is
+            APPLIED even when fromStatus equals toStatus: the verdict is the
+            write, and the top-level status only moves when the decision removes
+            the LAST hold on the row.
         '409':
-          description: Conflict
+          description: >-
+            ILLEGAL_TRANSITION (nothing here needs a human, or the row is not at
+            a decidable stage) | ADJUDICATION_LANE_REQUIRED (the row is held in
+            the lanes listed in `heldLanes`; send the one you are deciding)
 
   /edge/v1/applications/walk-in/register:
     post:

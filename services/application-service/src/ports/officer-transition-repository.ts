@@ -19,6 +19,7 @@
 
 import type { Agency, ApplicationCategory, ApplicationStatus } from '@usrp/shared-types';
 import type { DbRole } from '@usrp/shared-auth';
+import type { AdjudicationLane } from '../domain/adjudication-lanes.js';
 
 /**
  * Shared identity for an officer-driven command. `agency` + `dbRole` come from
@@ -84,6 +85,14 @@ export interface AdjudicateInput {
   readonly actor: OfficerActor;
   readonly applicationId: string;
   readonly decision: 'CLEAR' | 'REJECT';
+  /**
+   * WHICH hold this verdict is about (evaluation D10). Omitted = "the row's only
+   * hold": the queue shows rows held in up to three lanes (see
+   * domain/adjudication-lanes.ts), and only the officer can say which one they
+   * are deciding when a row is in more than one. A lane the row is not held in
+   * is refused, with `heldLanes` naming the ones that are.
+   */
+  readonly lane?: AdjudicationLane;
   readonly notes: string | null;
 }
 
@@ -107,7 +116,12 @@ export interface AdjudicateInput {
 export type OfficerTransitionOutcome =
   | { readonly kind: 'APPLIED'; readonly fromStatus: ApplicationStatus; readonly toStatus: ApplicationStatus }
   | { readonly kind: 'NO_CHANGE'; readonly currentStatus: ApplicationStatus }
-  | { readonly kind: 'NOT_APPLICABLE'; readonly currentStatus: ApplicationStatus }
+  | {
+      readonly kind: 'NOT_APPLICABLE';
+      readonly currentStatus: ApplicationStatus;
+      /** Adjudication only (evaluation D10): the lanes the row IS held in. */
+      readonly heldLanes?: readonly AdjudicationLane[];
+    }
   | { readonly kind: 'NOT_FOUND' }
   | { readonly kind: 'CROSS_AGENCY_LOCKED'; readonly lockedByAgency: Agency }
   | SeparationOfDutiesOutcome;
@@ -153,7 +167,15 @@ export type AcceptOutcome =
 export type AdjudicateOutcome =
   | {
       readonly kind: 'APPLIED';
+      /** The lane this verdict decided (whatever the row's other holds are). */
+      readonly lane: AdjudicationLane;
       readonly fromStatus: ApplicationStatus;
+      /**
+       * Where the row landed. EQUAL to `fromStatus` when the decision was
+       * recorded but another lane still holds the row: a criminal verdict does
+       * not lift a document hold, so the top-level status only moves when the
+       * decision removes the LAST hold.
+       */
       readonly toStatus: ApplicationStatus;
       /** True exactly when CLEAR restored the row to DOCUMENT_REVIEW_GREEN. */
       readonly clearedToGreen: boolean;
@@ -162,7 +184,15 @@ export type AdjudicateOutcome =
       readonly category: ApplicationCategory;
     }
   | { readonly kind: 'NO_CHANGE'; readonly currentStatus: ApplicationStatus }
-  | { readonly kind: 'NOT_APPLICABLE'; readonly currentStatus: ApplicationStatus }
+  | {
+      readonly kind: 'NOT_APPLICABLE';
+      readonly currentStatus: ApplicationStatus;
+      /**
+       * The lanes the row IS held in — empty when nothing here needs a human.
+       * Carried so the refusal can be explained instead of shrugged at.
+       */
+      readonly heldLanes: readonly AdjudicationLane[];
+    }
   | { readonly kind: 'NOT_FOUND' };
 
 export interface OfficerTransitionRepository {
@@ -170,9 +200,10 @@ export interface OfficerTransitionRepository {
   finalDecision(input: FinalDecisionInput): Promise<OfficerTransitionOutcome>;
   accept(input: AcceptInput): Promise<AcceptOutcome>;
   /**
-   * Adjudicate an application held at DOCUMENT_REVIEW_AMBER (routine document
-   * review) or ADJUDICATION_REVIEW (late-disqualification hold), as the
-   * officer's DB role, in one transaction:
+   * Adjudicate an application held in ONE of the three lanes
+   * (domain/adjudication-lanes.ts), as the officer's DB role, in one
+   * transaction. DOCUMENT covers DOCUMENT_REVIEW_AMBER (routine document
+   * review) and ADJUDICATION_REVIEW (late-disqualification hold):
    *   • REJECT — → REJECTED; on an AMBER hold, stamps the un-reviewed AMBER
    *     document_records rows human_reviewed_by_id/_at/_decision.
    *   • CLEAR from DOCUMENT_REVIEW_AMBER — the document hold is lifted; the
@@ -184,8 +215,18 @@ export interface OfficerTransitionRepository {
    *   • CLEAR from ADJUDICATION_REVIEW — restores the stage the row held when
    *     the late flag arrived (last from_status into ADJUDICATION_REVIEW on
    *     the append-only history); no document stamp (not a document decision).
-   * Any other status → NOT_APPLICABLE. Idempotent/hold-safe/cross-agency
-   * guarded exactly like the other officer transitions.
+   *   • CRIMINAL (evaluation D10) — the row's criminal gate is UNDER_REVIEW:
+   *     CLEAR records `criminal_clearance_status = CLEARED` (+ `criminal_clearance_at`),
+   *     REJECT → REJECTED. ACADEMIC — the NESA hold (`academic_status = PENDING`
+   *     with `failureCode = NESA_REVIEW_REQUIRED`): CLEAR records the gate as
+   *     ELIGIBLE, REJECT → REJECTED.
+   *     A REJECT is a decision about the APPLICATION, never a verdict about the
+   *     dimension: the registry said "a human must judge", not "guilty", so the
+   *     dimension column is left as the evidence left it.
+   * A row held in no lane, or in a lane the caller did not name (and does not
+   * have exactly one of), → NOT_APPLICABLE with `heldLanes`.
+   * Idempotent/hold-safe/cross-agency guarded exactly like the other officer
+   * transitions.
    */
   adjudicate(input: AdjudicateInput): Promise<AdjudicateOutcome>;
 }

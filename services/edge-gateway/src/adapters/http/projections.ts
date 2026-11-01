@@ -248,7 +248,22 @@ export interface EdgeAmberQueueEntry {
   readonly queuedAt: string | null;
   /** S12b: why a human must look (closed upper-case codes; document holds add none). */
   readonly reasons: readonly string[];
+  /**
+   * WHICH hold(s) the row is in, in the vocabulary `adjudicateApplication`
+   * accepts back (evaluation D10). The screen renders one button per lane, so a
+   * row the operation cannot touch must not be able to offer one.
+   */
+  readonly heldLanes: readonly string[];
   readonly agency: Agency;
+}
+
+/** The three lanes an officer may decide. Anything else an upstream adds is dropped. */
+const ADJUDICATION_LANES: ReadonlySet<string> = new Set(['DOCUMENT', 'CRIMINAL', 'ACADEMIC']);
+
+function laneCodes(value: unknown): readonly string[] {
+  return Array.isArray(value)
+    ? value.filter((v): v is string => typeof v === 'string' && ADJUDICATION_LANES.has(v)).slice(0, 3)
+    : [];
 }
 
 /** Closed-vocabulary codes only: anything else an upstream ever adds is dropped. */
@@ -266,6 +281,7 @@ export function projectAmberQueue(body: unknown, agency: Agency): readonly EdgeA
     forensicsFlags: jsonObject(field(entry, 'forensicsFlags')),
     queuedAt: str(field(entry, 'queuedAt')),
     reasons: queueReasonCodes(field(entry, 'reasons')),
+    heldLanes: laneCodes(field(entry, 'heldLanes')),
     agency,
   }));
 }

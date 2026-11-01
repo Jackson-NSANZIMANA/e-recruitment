@@ -189,6 +189,10 @@ export const rcsApplications = rcsOps.table(
     qrInvitationCode: varchar('qr_invitation_code', { length: 64 }).unique(),
     qrInvitationIssuedAt: timestamp('qr_invitation_issued_at', { withTimezone: true }),
     smsNotificationSentAt: timestamp('sms_notification_sent_at', { withTimezone: true }),
+    // rls/0043 (evaluation D1): the delivery outcome the invitation projection
+    // records in the SAME transaction that advances the row. Platform-wide, so all
+    // three schemas carry it — the shared adapter writes it without an agency branch.
+    smsNotificationStatus: varchar('sms_notification_status', { length: 20 }),
 
     // ── Physical test results ─────────────────────────────────────
     physicalTestCompletedAt: timestamp('physical_test_completed_at', { withTimezone: true }),
@@ -311,6 +315,9 @@ export const rcsPhysicalTestScores = rcsOps.table(
     capturedAt: timestamp('captured_at', { withTimezone: true }).notNull(),
     syncedAt: timestamp('synced_at', { withTimezone: true }).defaultNow(),
     syncConflictDetected: boolean('sync_conflict_detected').default(false),
+    // rls/0043 (evaluation D12): the officer's adjudication label of a conflict.
+    // Agency-agnostic adjudication, so all three schemas carry it.
+    syncConflictResolution: varchar('sync_conflict_resolution', { length: 50 }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [

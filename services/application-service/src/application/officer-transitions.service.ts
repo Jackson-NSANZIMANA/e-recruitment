@@ -25,6 +25,7 @@ import type {
   AuditEvent,
 } from '@usrp/shared-types';
 import { dbRoleForPrincipal, type Principal } from '@usrp/shared-auth';
+import type { AdjudicationLane } from '../domain/adjudication-lanes.js';
 import type {
   AdjudicateOutcome,
   OfficerActor,
@@ -85,6 +86,12 @@ export interface AdjudicateCommand {
   readonly actor: Principal;
   readonly applicationId: string;
   readonly decision: 'CLEAR' | 'REJECT';
+  /**
+   * WHICH hold the verdict is about (evaluation D10): DOCUMENT, CRIMINAL or
+   * ACADEMIC. Omitted = the row's only hold; a row held in more than one lane
+   * needs it, and a lane the row is not held in is refused by the repository.
+   */
+  readonly lane?: AdjudicationLane;
   readonly notes: string | null;
   readonly context: EventContext;
 }
@@ -223,17 +230,22 @@ export class OfficerTransitionsService {
       actor,
       applicationId: command.applicationId,
       decision: command.decision,
+      ...(command.lane === undefined ? {} : { lane: command.lane }),
       notes: command.notes,
     });
     if (outcome.kind !== 'APPLIED') return outcome;
 
+    // Every recorded decision is audited, INCLUDING one that leaves the status
+    // where it was (a criminal verdict while a document hold is still open):
+    // the officer decided something, and the trail must be able to say who and
+    // what — otherwise the only trace of a human verdict is a column value.
     await this.#audit(
       { kind: 'APPLIED', fromStatus: outcome.fromStatus, toStatus: outcome.toStatus },
       command.actor,
       command.context,
       command.applicationId,
       'ADJUDICATION',
-      { decision: command.decision },
+      { decision: command.decision, lane: outcome.lane },
     );
 
     if (outcome.clearedToGreen) {
@@ -271,7 +283,12 @@ export class OfficerTransitionsService {
       eventType: 'AUDIT_ENTRY',
       entityType: 'APPLICATION',
       entityId: applicationId,
-      action: outcome.toStatus === 'REJECTED' ? 'APPLICATION_REJECTED' : 'APPLICATION_STATUS_ADVANCED',
+      action:
+        outcome.fromStatus === outcome.toStatus
+          ? 'APPLICATION_ADJUDICATED'
+          : outcome.toStatus === 'REJECTED'
+            ? 'APPLICATION_REJECTED'
+            : 'APPLICATION_STATUS_ADVANCED',
       performedBy: officer.subjectId,
       agency: officer.agency,
       previousStatus: outcome.fromStatus,

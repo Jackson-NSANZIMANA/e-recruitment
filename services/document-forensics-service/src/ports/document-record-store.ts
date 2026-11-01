@@ -21,11 +21,24 @@ export interface RecordVerdictInput {
   readonly fileSizeBytes: number;
   readonly virusScanStatus: 'CLEAN' | 'INFECTED';
   readonly verdict: ForensicsVerdict;
+  /**
+   * These bytes REPLACED an earlier upload of this document type (the ingress
+   * path, where the citizen re-uploads a corrected file). The row and the
+   * object key are deliberately stable, so the record must also stop claiming
+   * anything a human decided about the OLD bytes — see the review columns in
+   * the adapter. Absent for a RE-ANALYSIS of the same stored object (the
+   * analyze/ path), which replaces no content at all.
+   */
+  readonly objectReplaced?: boolean;
 }
 
 export type RecordVerdictOutcome =
-  /** Verdict stored (new document row, or re-analysis of the same object). */
-  | { readonly kind: 'RECORDED'; readonly documentId: string }
+  /**
+   * Verdict stored — a new document row, a re-analysis of the same object, or a
+   * replacement of it. `reviewCleared` reports that a PREVIOUS human decision
+   * was withdrawn because the bytes it was made about no longer exist.
+   */
+  | { readonly kind: 'RECORDED'; readonly documentId: string; readonly reviewCleared?: boolean }
   /** No such application in the claimed agency's schema — cross-agency guard. */
   | { readonly kind: 'APPLICATION_NOT_FOUND' };
 

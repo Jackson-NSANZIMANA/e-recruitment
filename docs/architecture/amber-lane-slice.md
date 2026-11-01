@@ -32,6 +32,23 @@ service) — the amber machinery was modeled-but-dead since the baseline schema.
                          pending → furthest vetting stage (no premature green)
           CLEAR@ADJUDICATION_REVIEW → restore pre-flag stage from history
           REJECT → REJECTED; amber doc rows stamped human_reviewed_* (officer UUID)
+
+        the OTHER two lanes the queue shows (evaluation D10) — same operation,
+        `lane` names which hold the verdict is about:
+        GET  /v1/applications/amber-queue  → each entry carries `heldLanes`
+          CRIMINAL  criminal_clearance_status = UNDER_REVIEW
+          ACADEMIC  academic_status = PENDING + failureCode NESA_REVIEW_REQUIRED
+        POST /v1/applications/adjudicate { decision, lane? }
+          CLEAR@CRIMINAL → criminal CLEARED + criminal_clearance_at
+          CLEAR@ACADEMIC → academic ELIGIBLE
+          REJECT         → REJECTED (a decision about the APPLICATION, never a
+                           verdict about the registry: the dimension keeps the
+                           evidence it had)
+          a verdict on ONE lane never lifts ANOTHER lane's hold: the top-level
+          status moves only when the decision removes the LAST hold (so a
+          criminal CLEAR cannot walk a row past an un-reviewed amber document)
+          row held in >1 lane, no `lane` → 409 ADJUDICATION_LANE_REQUIRED + the
+          lanes (never a silent NOT_APPLICABLE from a row the officer can see)
 ```
 
 Late vetting hard-fails (lifecycle.ts) follow the same policy: pre-slot →

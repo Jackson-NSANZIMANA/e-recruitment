@@ -18,7 +18,9 @@
 //                   It carries NO note: the upstream route has no such field.
 //   final-decision  { applicationId, decision: SHORTLIST|REJECT, notes? }
 //   accept          { applicationId }
-//   adjudicate      { applicationId, decision: CLEAR|REJECT, notes? }
+//   adjudicate      { applicationId, decision: CLEAR|REJECT, lane?: DOCUMENT|CRIMINAL|ACADEMIC, notes? }
+//                   `lane` is the answer to an ADJUDICATION_LANE_REQUIRED refusal (D10): it MUST be
+//                   forwarded, or a row held in two lanes could never be decided from a browser.
 //
 // NONE RETURNS AN APPLICATION. The old frontend hook was typed
 // UseMutationResult<Application> and wrote the response into its detail cache,
@@ -42,6 +44,8 @@ const FITNESS: ReadonlySet<string> = new Set(['FIT', 'UNFIT']);
 const CERT_VERDICTS: ReadonlySet<string> = new Set(['CERT_VERIFIED', 'CERT_REJECTED']);
 const DECISIONS: ReadonlySet<'SHORTLIST' | 'REJECT'> = new Set(['SHORTLIST', 'REJECT']);
 const ADJUDICATIONS: ReadonlySet<'CLEAR' | 'REJECT'> = new Set(['CLEAR', 'REJECT']);
+/** Which hold a verdict is about (D10). The same closed vocabulary the service accepts back. */
+const ADJUDICATION_LANES: ReadonlySet<'DOCUMENT' | 'CRIMINAL' | 'ACADEMIC'> = new Set(['DOCUMENT', 'CRIMINAL', 'ACADEMIC']);
 /** final_decision_notes is varchar(1000) upstream. */
 const MAX_NOTES = 1_000;
 const MAX_PHYSICIAN = 200;
@@ -136,13 +140,25 @@ export function adjudicateApplicationHandler(deps: EdgeDeps): RouteHandler {
     const body = await readJsonBody(ctx);
     const applicationId = requireUuid(body.applicationId, 'applicationId');
     const decision = requireOneOf<'CLEAR' | 'REJECT'>(body.decision, 'decision', ADJUDICATIONS);
+    // Optional: absent means "the row's only hold". Present, it is checked here against the closed set (a
+    // wrong value is the officer's 400, not an upstream surprise) and FORWARDED: dropping it turned the
+    // edge's own "send a lane" refusal into an endless loop for any row held in two lanes.
+    const lane =
+      body.lane === undefined
+        ? undefined
+        : requireOneOf<'DOCUMENT' | 'CRIMINAL' | 'ACADEMIC'>(body.lane, 'lane', ADJUDICATION_LANES);
     const notes = optionalNote(body.notes ?? body.note, MAX_NOTES);
 
     const upstream = await deps.upstream.call({
       operation: UPSTREAM.adjudicate,
       correlationId: ctx.correlationId,
       credential: session.upstreamCredential,
-      body: { applicationId, decision, ...(notes === undefined ? {} : { notes }) },
+      body: {
+        applicationId,
+        decision,
+        ...(lane === undefined ? {} : { lane }),
+        ...(notes === undefined ? {} : { notes }),
+      },
     });
     return transitionResult(applicationId, upstream.status, upstream.body);
   });
