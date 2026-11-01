@@ -4,9 +4,13 @@
 at `b004fca` (the `main` that merged #53). It answers one question per claim: *is this true of the code in this
 repository, and is it the whole truth?*
 
-**Method and limits.** Static reading only. This audit environment has no Docker, no Postgres, no built workspace
-and no frontend checkout, so nothing in §1 of the evaluation ("proven live") could be re-run, and every claim about
-`e-recruitment-ui` is out of scope. What *is* checkable — the defect mechanisms, the guards around them, and the
+**Method and limits.** The audit was written in two passes, and the second changed what can be said. The first pass was
+**static reading only** (no Docker, no Postgres, no built workspace, no frontend checkout), so nothing in §1 of the
+evaluation ("proven live") could be re-run from it, and every claim about `e-recruitment-ui` is out of scope. The
+fixes recorded in §6 were then built and **re-proven against a live PostgreSQL 16 cluster**, and on 2026-11-01 the
+whole branch was independently re-run end to end (a full sandbox boot, the 24 sandbox journeys, the new proofs, and
+each fix deliberately broken to confirm its proof goes red); that run found the edge gap described at D10 in §6.
+What *is* checkable from reading alone — the defect mechanisms, the guards around them, and the
 arithmetic of §3 — was checked, with file and line evidence below. Ratings (§3) are judgement calls and are not
 re-litigated; what is re-litigated is whether the **built/missing** columns that justify them are accurate, and
 two of them are not.
@@ -206,7 +210,11 @@ validates it as a bounded string only (deliberately: it is inside the device-sig
 `FieldSyncPersistenceError` wraps it, and the service answers 500. A 400 is the honest answer: the *shape* of the
 field is checkable without touching the signature.
 
-**False:** "the edge session carries no officer subject". It does.
+**Half false:** "the edge session carries no officer subject". The *server-side* session does — but the response the
+**browser** receives (`GET /edge/v1/session`: kind, agency, roles, permissions, expiries) deliberately does not, so a
+client cannot attribute a capture to its own officer from that response. Both statements are true; they are about
+different things, and the design this section ends on (the edge injects the session's subject, the client is never
+trusted to name the officer) is the stronger one precisely because of the second.
 `services/edge-gateway/src/domain/session.types.ts:30` — `readonly subjectId: string | null` — persisted at
 `adapters/session-store.pg-repository.ts:164-181` (`subject_id`, with a check that an officer session has one) and
 set at login (`adapters/http/officer-auth.controller.ts:90,104,130`). The DB column exists in
@@ -448,7 +456,7 @@ protocol is involved, over real sockets. The proofs are the ones `scripts/run-se
 | D7 | The door's fixable 4xx stops being reported as our outage: identity folds `INVALID_DOCUMENT_TYPE` onto `UNSUPPORTED_DOCUMENT_TYPE` before the edge's closed `SAFE` set sees it. | `verify-edge-contract`, `verify-edge-security` |
 | D8/D14 | A re-upload overwrites the same object key by design, so the row stops claiming a human decision about bytes that no longer exist: `human_reviewed_*` cleared + audited, and the document returns to the amber queue predicate. A re-ANALYSIS of the same object does not withdraw a stamp. | `verify-document-review-replacement` (new, SQL-only, no MinIO/ClamAV) |
 | D9 | `USRP_HTTP_BIND_HOST`, `0.0.0.0` by default; the sandbox launcher binds its twelve processes to loopback; an unrecognised value is a **boot refusal**, and `startHttpServer` is now `async` so that refusal is a rejected promise rather than an uncaught throw. | `packages/shared-http/test/bind-host.test.ts` (new) |
-| D10 | One operation, three lanes — see §6 item 3. The queue names the lane (`heldLanes`), the edge preserves it, and `adjudicate` re-reads the lanes under `FOR UPDATE` before deciding. | `verify-amber-adjudication-slice` §3b |
+| D10 | One operation, three lanes — see §6 item 3. The queue names the lane (`heldLanes`), the edge preserves it, **forwards the officer's `lane` answer (validated against the closed set at the edge)**, and `adjudicate` re-reads the lanes under `FOR UPDATE` before deciding. The forwarding was missing until the 2026-11-01 re-run: the edge dropped `lane`, so following its own `ADJUDICATION_LANE_REQUIRED` instruction returned the same refusal; every earlier proof drove the service directly. | `verify-amber-adjudication-slice` §3b (service) and `verify-edge-security` "Adjudication: a lane the officer sends is forwarded" (edge) |
 | D11 | Non-UUID `capturingOfficerId` is a 400; the session's `subjectId` reaches field-sync, is forwarded to the resolver, and the `resolverIsCapturingOfficer` fact is recorded on the conflict resolution. | `verify-field-sync-slice` §5b |
 | D12 | `is_walk_in` and `sync_conflict_resolution` are platform-wide (`rls/0043`); the field lane projects the walk-in flag per agency instead of assuming `rdf_ops`. | `verify-cross-agency-column-parity`, `verify-field-sync-slice` |
 | D13 | **Open.** The verifier, the parser and the send-side `StatusCallback` form field all exist and are tested, and the application side already projects a delivery result (`applyNotificationDelivery` → `sms_notification_status` + `SLOT_INVITATION_DELIVERED`). What does not exist is the ingress, and it is blocked on a correlation decision, not on code: the callback URL is channel-level, so a callback carries only `MessageSid` and **nothing in the schema maps a sid to an application**. Three candidate fixes, in order of my preference: (a) a small `sms_deliveries` table owned by notification-service (`sid → application_id`, written at send time) — the only one that also answers "did we ever send this, and to which number class", and the only one that does not put a record id in a public URL; (b) a per-message `StatusCallback` URL carrying the application id (port change; Twilio signs the full URL, so verification still works); (c) an `sms_message_sid` column on all three `applications` tables. Any of the three then needs the public, unauthenticated route (edge, `publicAllowlist`) + signature verification inside notification-service, which holds the auth token. |

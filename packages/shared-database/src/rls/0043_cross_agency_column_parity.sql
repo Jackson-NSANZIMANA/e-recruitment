@@ -20,7 +20,7 @@
 -- ── HOW A DIVERGENCE IS CLASSIFIED (the rule this migration applies) ──
 --
 --   PLATFORM-WIDE capability  → the column belongs in ALL THREE schemas, and
---                               rls/0044's parity proof keeps it there.
+--                               selfcheck/verify-cross-agency-column-parity.ts keeps it there.
 --   AGENCY-SPECIFIC process   → the column stays in one schema BY DESIGN and
 --                               the shared code must branch on the agency.
 --
@@ -29,7 +29,7 @@
 -- officer's adjudication; neither is a property of RDF's process. The genuinely
 -- agency-specific columns — RDF's walk-in lane and in-house medical board, RCS's
 -- notarisation and celibacy certificate, RNP's threshold and registration DPU —
--- stay where they are and are declared in rls/0044's allowlist with a reason.
+-- stay where they are and are declared in that proof's DIVERGENCES list with a reason.
 --
 -- DEFAULTS AND TYPES ARE COPIED FROM rdf_ops BY IDENTICAL TEXT, not re-invented:
 -- the three schemas are read by one adapter, so a varchar(50) here and
