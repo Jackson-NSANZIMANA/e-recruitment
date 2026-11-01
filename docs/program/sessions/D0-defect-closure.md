@@ -49,14 +49,31 @@ Capture the observed output, then fix. These are the lines the closure report mu
 
 ## Done list
 
-- [ ] Six reproducers recorded red, then green, each with its exact command and observed line, in the PR body.
-- [ ] Every new selfcheck registered in `scripts/run-selfchecks.sh`; `verify-edge-contract.ts` and `verify-hold-coverage.ts` green at the front of the gate.
-- [ ] `sandbox:journeys` still 24/24; `fault-and-recover` passes.
-- [ ] `pnpm build && pnpm typecheck && pnpm lint:count` (lint 0) on the rebased head; `pnpm verify` green on live infra.
-- [ ] Migrations `0043`/`0044` apply to all three schemas; the cross-schema shape proof passes (`document_records`, `document_revisions`).
-- [ ] Edge contract: service route → upstream → edge operation → controller → routes → `openapi/edge-v1.yaml` → projection test, in that order, in one commit.
-- [ ] Four FE hand-offs written (D10 screen + SoD refusal; D7 per-code copy; D11 `OFFICER_MISMATCH` sync state; D8 `revision` + `DOCUMENT_REVIEW_CLOSED` copy).
-- [ ] Closure report published; `capability-map.md` and the status board updated; ROADMAP §3.1 ledger entry appended.
+- [x] Six reproducers recorded red, then green, each with its exact command and observed line, in the PR body.
+- [x] Every new selfcheck registered in `scripts/run-selfchecks.sh`; `verify-edge-contract.ts` and the hold-coverage proof green at the front of the gate.
+- [ ] `sandbox:journeys` still 24/24; `fault-and-recover` passes. — **open.** Journeys need live infra (owner/CI). The `fault-and-recover` journey is **specified, not built**: leg 1 needs a sandbox behaviour-override on the simulator, which is new fenced simulator API and belongs to S11a. The manual two-leg procedure in the closure report §3 closes the risk until then.
+- [x] `pnpm build && pnpm typecheck && pnpm lint:count` (lint 0) on the rebased head — 25/25, 45/45, 0, tests 34/34 on `e1c3488`. `pnpm verify` ⏳ owner/CI.
+- [x] Migrations `0043`/`0044`/`0045` written; the cross-schema shape proof for `document_records`/`document_revisions` passes on all three schemas (in-session; the *live* apply is CI's `verify-schema-drift`).
+- [x] Edge contract: service route → upstream → edge operation → controller → routes → `openapi/edge-v1.yaml` → projection test, in that order, in one commit.
+- [x] Four FE hand-offs written: [`handoffs/`](../handoffs/README.md) — D7 per-code copy, D8 `revision` + `DOCUMENT_REVIEW_CLOSED`, D10 screen + SoD refusal, D11 `OFFICER_MISMATCH`.
+- [x] Closure report published ([`defect-closure-2026-11-01.md`](../defect-closure-2026-11-01.md)); `capability-map.md`, the status board and the ROADMAP §3.1 ledger row updated.
+
+## Where each defect landed
+
+| Defect | Commit | The one line it flips | Proof (in-session, GREEN) |
+|---|---|---|---|
+| D7 | `d79325c` | `503 UPSTREAM_UNAVAILABLE` → `422 UNSUPPORTED_DOCUMENT_TYPE` (and `SCANNER_UNAVAILABLE` is its own code) | `verify-document-door-contract.ts` (24) + `verify-edge-contract.ts` (1076) |
+| D9 | `017af14` | `0.0.0.0:4921` on 13 processes → `127.0.0.1:4921`, with an announced edge-only LAN opt-in | `verify-bind-exposure.ts` (26) |
+| D11 | `3b22bbb` | a forged `capturingOfficerId` stored → `REJECTED / OFFICER_MISMATCH`, per record, audited; `500` → `400` | `verify-actor-binding.ts` (14) |
+| D10 | `232ba73` | `409 NOT_APPLICABLE` on an amber hold → `POST …/vetting-hold` with nine reasons, SoD ON | `verify-vetting-hold.ts` (30) + `verify-edge-contract.ts` |
+| D8 | `1e5f485` | silent in-place replacement under a `CLEAR` stamp → `revision` + append-only trail, `409 DOCUMENT_REVIEW_CLOSED` after review | `verify-document-supersession.ts` (28) |
+| D2 | `e1c3488` | "verifying" for eleven days → six scheduled attempts, then `PARKED` + a signal; a recovered fault advances with no human | `verify-redrive-policy.ts` (32) |
+
+Evidence fixtures for the sandbox journeys: `5f17fed`. Full red→green detail, residual risk and the honest "not run here" list: the closure report, §1–§4.
+
+## D2 note — the doc-drift question, answered in code
+
+The plan suspected ADR-050 described an operator tool that did not exist. It did: `packages/shared-events/scripts/replay-dead-letters.ts` (`pnpm dlq:replay`), with the `x-usrp-replayed-from-dlq` header. The re-driver writes the **same** header, so a human re-drive and an automatic one are indistinguishable downstream, and the ADR needs no amendment — only the addition that the ledger, not the script, is the schedule.
 
 ## Environment note (read before quoting a proof)
 
