@@ -122,6 +122,10 @@ services:
       USRP_ENVIRONMENT: development
       SANDBOX_PORT: 3100
       SANDBOX_LATENCY_SCALE: "0"
+      # ADR-053: the simulator binds loopback by default. Inside a container the
+      # published port still needs 0.0.0.0 here; the HOST side stays loopback
+      # because the port mapping below is 127.0.0.1:3100.
+      SANDBOX_BIND_HOST: "0.0.0.0"
     volumes:
       - ../..:/repo:ro
     ports:

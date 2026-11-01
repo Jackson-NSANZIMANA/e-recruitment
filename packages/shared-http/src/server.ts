@@ -131,7 +131,12 @@ export function startHttpServer(options: HttpServerOptions): Promise<HttpServer>
     serviceName,
     port,
     routes,
-    host = '0.0.0.0',
+    // NO DEFAULT (ADR-053). It used to be '0.0.0.0', and no service passed a
+    // host, so thirteen processes were reachable from the venue network with
+    // nobody having decided it. Callers now state where they listen; the value
+    // comes from `resolveHttpBindHost` (loopback unless a deployment says
+    // otherwise, and a required variable in production).
+    host,
     maxBodyBytes = DEFAULT_MAX_BODY_BYTES,
     shutdownTimeoutMs = DEFAULT_SHUTDOWN_TIMEOUT_MS,
     handleSignals = true,

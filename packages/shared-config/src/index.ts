@@ -14,6 +14,9 @@
 //   statement in every service main(), before any other loader:
 //     import { assertProductionSecrets, resolveEventTransport } from '@usrp/shared-config'
 //
+//   HTTP bind host — every service passes this to startHttpServer (ADR-053):
+//     import { resolveHttpBindHost } from '@usrp/shared-config'
+//
 //   Dev-adapter guard — call at the wiring site, before constructing a
 //   development-only adapter (LogSmsChannel, MockBiometricMatcher, …):
 //     import { assertDevAdapterAllowed } from '@usrp/shared-config'
@@ -73,6 +76,17 @@ export {
   type SecurityConfig,
   type ServiceConfig,
 } from './config.js';
+
+export {
+  BIND_HOST_VAR,
+  BindHostError,
+  LOOPBACK,
+  bindHostAnnouncement,
+  isExposedHost,
+  isIpLiteral,
+  resolveHttpBindHost,
+  type BindHostOptions,
+} from './bind-host.js';
 
 export {
   assertDevAdapterAllowed,

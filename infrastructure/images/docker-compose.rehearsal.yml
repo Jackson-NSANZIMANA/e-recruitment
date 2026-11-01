@@ -45,6 +45,11 @@ x-service: &service
 
 x-env: &env
   NODE_ENV: development
+  # ADR-053: services bind loopback unless a deployment says otherwise, and this
+  # is the one place that must say so — inside a container, 127.0.0.1 is reachable
+  # by nobody but the process itself. Exposure here is bounded by the compose
+  # network and the SPA proxy, not by the interface.
+  HTTP_BIND_HOST: "0.0.0.0"
   DATABASE_URL: postgresql://usrp_app:app_pw@usrp-postgres:5432/${USRP_REHEARSAL_DB:-usrp_images}
   DATABASE_MAX_CONNECTIONS: "5"
   KAFKA_BROKERS: stack-kafka:9092

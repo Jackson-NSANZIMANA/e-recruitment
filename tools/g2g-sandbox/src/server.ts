@@ -27,6 +27,13 @@ export interface SandboxServerOptions {
   readonly world: SandboxWorld;
   readonly environment: UsrpEnvironment;
   readonly port: number;
+  /**
+   * ADR-053. The simulator ALWAYS binds loopback — it impersonates government
+   * registries and holds a synthetic national population plus, optionally, the
+   * owner's private persona. The field is exported so a caller cannot pretend
+   * the choice exists; `bindHost` below additionally forces loopback whenever a
+   * private overlay is loaded.
+   */
   readonly host?: string;
   readonly modules?: readonly SimulatorModule[];
   readonly profiles?: Readonly<Record<Authority, AuthorityProfile>>;
@@ -71,9 +78,14 @@ export function createSandboxServer(options: SandboxServerOptions): Promise<Http
   const world = options.world;
   // NESA's public response shape can serve a private owner persona. Never expose
   // it beyond loopback, even when a caller asks this server to bind wildcard.
-  const bindHost = world.overlay !== null || options.environment === 'sandbox'
-    ? '127.0.0.1'
-    : options.host;
+  //
+  // ADR-053: loopback by DEFAULT on every path — a simulation of the government
+  // must never be the thing that answers on a venue network. The one exception is
+  // a container, where a published loopback port on the host still requires the
+  // process inside to listen on 0.0.0.0; that is opt-in via SANDBOX_BIND_HOST and
+  // the compose publish rule keeps the HOST side loopback.
+  const requested = options.host ?? process.env['SANDBOX_BIND_HOST'] ?? '127.0.0.1';
+  const bindHost = world.overlay !== null || options.environment === 'sandbox' ? '127.0.0.1' : requested;
 
   async function dispatch(ctx: RequestContext): Promise<HttpResult | null> {
     const module = modules.find((m) => m.matches(ctx.method.toUpperCase(), ctx.path));
@@ -129,7 +141,7 @@ export function createSandboxServer(options: SandboxServerOptions): Promise<Http
   return startHttpServer({
     serviceName: 'g2g-sandbox',
     port: options.port,
-    ...(bindHost === undefined ? {} : { host: bindHost }),
+    host: bindHost,
     routes: [],
     fallback: dispatch,
     responseHeaders: { [SANDBOX_RESPONSE_HEADER]: '1' },

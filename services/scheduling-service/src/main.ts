@@ -21,6 +21,8 @@ import {
   loadKafkaConfig,
   resolveEventTransport,
   type EventTransport,
+  bindHostAnnouncement,
+  resolveHttpBindHost,
 } from '@usrp/shared-config';
 import { startHttpServer, type HttpResult } from '@usrp/shared-http';
 import { makeAuthVerifier } from '@usrp/shared-auth';
@@ -72,9 +74,18 @@ async function main(): Promise<void> {
     console.log(JSON.stringify({ msg: 'event_consumer_started', topic: 'application.cleared' }));
   }
 
+  // ADR-053: loopback unless this deployment says otherwise (required in
+  // production). Resolved once, announced once — an exposed process is then
+  // visible in the boot log and in `sandbox:full status`, not only in ss -ltnp.
+  const bindHost = resolveHttpBindHost({ serviceName: config.runtime.serviceName });
+  console.log(
+    JSON.stringify(bindHostAnnouncement(config.runtime.serviceName, bindHost, config.runtime.port)),
+  );
+
   const server = await startHttpServer({
     serviceName: config.runtime.serviceName,
     port: config.runtime.port,
+    host: bindHost,
     // Scheduling runs off the event backbone. The public key route publishes
     // only the Ed25519 verification key; the authenticated BUILD-001 command
     // configures the scheduling-owned campaign session and coverage head.

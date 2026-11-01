@@ -127,8 +127,13 @@ export interface HttpServerOptions {
   readonly serviceName: string;
   readonly port: number;
   readonly routes: readonly Route[];
-  /** Bind address. Defaults to 0.0.0.0. Use 127.0.0.1 to bind loopback only. */
-  readonly host?: string;
+  /**
+   * Bind address. REQUIRED — there is no default (ADR-053). It used to default
+   * to 0.0.0.0 and every service inherited network exposure without deciding
+   * it. Callers pass `resolveHttpBindHost()` from @usrp/shared-config, which is
+   * loopback unless the deployment says otherwise.
+   */
+  readonly host: string;
   /** Default max request body size in bytes (default 64 KiB). */
   readonly maxBodyBytes?: number;
   /** Grace period before in-flight connections are force-closed (default 10s). */

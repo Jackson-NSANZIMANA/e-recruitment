@@ -204,6 +204,10 @@ run_ts "deployment hygiene (EXPOSE ↔ .env.example port map, non-root, exec-for
 # agree with it in both directions. This is the proof whose absence let
 # forensics answer INVALID_DOCUMENT_TYPE while identity called it "unavailable"
 # and the citizen was told to retry a closed door (evaluation 2026-10-29, D7).
+# D9: no process can inherit network exposure. Loopback is the default, production
+# must say where it listens, containers declare it, and the sandbox refuses to put a
+# network-reachable door in front of live SMS (evaluation 2026-10-29, D9).
+run_ts "shared-config: bind host and exposure (loopback by default, ADR-053)" packages/shared-config/selfcheck/verify-bind-exposure.ts
 run_ts "shared-types: document-door contract (producer ↔ vocabulary ↔ consumer, D7)" packages/shared-types/selfcheck/verify-document-door-contract.ts
 run_ts "edge-gateway: contract drift (registry ↔ OpenAPI ↔ upstream catalogue)" services/edge-gateway/selfcheck/verify-edge-contract.ts
 run_ts "edge-gateway: BUILD-001 live campaign HTTP/session/CSRF/idempotency boundary" services/edge-gateway/selfcheck/verify-campaign-http-boundary.ts

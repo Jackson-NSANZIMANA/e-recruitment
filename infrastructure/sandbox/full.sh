@@ -84,6 +84,7 @@ status() {
   done
   docker ps --format '{{.Names}}\t{{.Status}}' | grep -E '^usrp-' | while IFS=$'\t' read -r n s; do printf '%-28s %s\n' "$n" "$s"; done
   printf '%-28s %s\n' "SMS" "$(grep -o 'SMS: [^·]*' "$LOGS/sandbox-up.out" 2>/dev/null | tail -1)"
+  printf '%-28s %s\n' "Exposure" "$(grep -o 'Exposure: [^·]*' "$LOGS/sandbox-up.out" 2>/dev/null | tail -1 | cut -c1-90)"
   printf '%-28s %s\n' "memory available" "$(free -h | awk '/^Mem/{print $7}') of $(free -h | awk '/^Mem/{print $2}')"
 }
 
@@ -101,6 +102,9 @@ fi
 [ -n "$UI" ] || die "the frontend checkout was not found; set USRP_UI_DIR=/path/to/e-recruitment-ui"
 command -v docker >/dev/null || die "docker is required"
 docker info >/dev/null 2>&1 || die "the docker daemon is not reachable"
+if [ "${SANDBOX_EXPOSE_LAN:-}" = 1 ] && [ "$REAL_SMS" = 1 ]; then
+  die "SANDBOX_EXPOSE_LAN=1 cannot be combined with --real-sms (ADR-053): a network-reachable sandbox with live SMS behind it"
+fi
 if [ "$REAL_SMS" = 1 ]; then
   [ "$JOURNEYS" = 0 ] || die "--journeys with --real-sms would text the synthetic population; run them on the emulator"
   export SANDBOX_SMS=twilio SANDBOX_TWILIO_ENV_FILE="${SANDBOX_TWILIO_ENV_FILE:-$HOME/.config/usrp/twilio.env}"
