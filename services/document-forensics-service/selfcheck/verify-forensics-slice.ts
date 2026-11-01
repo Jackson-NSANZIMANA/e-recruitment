@@ -335,7 +335,7 @@ async function main(): Promise<void> {
   const verify = makeAuthVerifier({
     publicKeyPem: AUTH_KEYS.publicKeyPem, issuer: 'usrp', audience: 'usrp-services',
   });
-  const server = await startHttpServer({
+  const server = await startHttpServer({ host: '127.0.0.1',
     serviceName: 'document-forensics-selfcheck',
     port: 0,
     routes: [analyzeDocumentRoute(service, verify)],
@@ -465,7 +465,7 @@ async function main(): Promise<void> {
         recordStore: new PgDocumentRecordStore(),
         eventBus: downBus,
       });
-      const downServer = await startHttpServer({
+      const downServer = await startHttpServer({ host: '127.0.0.1',
         serviceName: 'forensics-down-selfcheck',
         port: 0,
         routes: [analyzeDocumentRoute(downService, verify)],

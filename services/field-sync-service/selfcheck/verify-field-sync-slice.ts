@@ -128,6 +128,8 @@ function makeRecord(
   vectorClock: Record<string, number>,
   metrics: PhysicalTestMetrics = METRICS,
   qrInvitationCode: string = ticketFor(applicationId),
+  /** The officer the DEVICE claims captured the test (D11). */
+  claimedOfficerId: string = OFFICER_ID,
 ): FieldScoreRecord {
   const payload: SignableFieldPayload = {
     applicationId,
@@ -135,7 +137,7 @@ function makeRecord(
     metrics,
     capturedAt: '2026-07-11T09:00:00.000Z',
     deviceId,
-    capturingOfficerId: OFFICER_ID,
+    capturingOfficerId: claimedOfficerId,
     vectorClock,
   };
   const sig = signFieldScoreRecord(privateKeyPem, payload);
@@ -368,9 +370,9 @@ async function main(): Promise<void> {
     console.log('\n── 5. Concurrent captures → conflict flagged + application HELD ──');
     const recA = makeRecord(APP_CONFLICT, keysA.privateKeyPem, DEV_A, { [DEV_A]: 1 });
     const recBconc = makeRecord(APP_CONFLICT, keysB.privateKeyPem, DEV_B, { [DEV_B]: 1 }, { ...METRICS, run3kmTimeSeconds: 705 });
-    const cA = await fsQuiet.syncFieldScores.sync({ records: [recA], actorAgency: 'RDF', context: { correlationId: 'c5', causationId: 'c5' } });
+    const cA = await fsQuiet.syncFieldScores.sync({ records: [recA], actorAgency: 'RDF', actorSubjectId: OFFICER_ID, context: { correlationId: 'c5', causationId: 'c5' } });
     check('devA record ACCEPTED (quiet bus, no auto-advance)', cA.results[0]?.status === 'ACCEPTED');
-    const cB = await fsQuiet.syncFieldScores.sync({ records: [recBconc], actorAgency: 'RDF', context: { correlationId: 'c5', causationId: 'c5' } });
+    const cB = await fsQuiet.syncFieldScores.sync({ records: [recBconc], actorAgency: 'RDF', actorSubjectId: OFFICER_ID, context: { correlationId: 'c5', causationId: 'c5' } });
     const bConf = cB.results[0];
     check('devB concurrent record → CONFLICT', bConf?.status === 'CONFLICT', JSON.stringify(bConf));
     const conflictCapEvents = busQuiet.published.filter((e) => e.eventType === 'FIELD_SCORE_CAPTURED' && asRecord(e)['applicationId'] === APP_CONFLICT);
@@ -445,6 +447,29 @@ async function main(): Promise<void> {
       agency: 'RDF', context: { correlationId: 'c7b', causationId: 'c7b' },
     });
     check('never admitted and no verified check-in → HOLD (identity not established)', noIdentity.kind === 'BIOMETRIC_NOT_VERIFIED', noIdentity.kind);
+
+    // ── 7d. D11: the authenticated officer is the only actor ────────
+    console.log('\n── 7d. D11 actor binding: the token decides WHO captured the test ──');
+    // A malformed claim is a caller error, not a Postgres 22P02 (the reported 500).
+    const badShape = await post(SYNC_SCORES_PATH, {
+      records: [{ ...makeRecord(APP_ACCEPT, keysA.privateKeyPem, DEV_A, { [DEV_A]: 2 }), capturingOfficerId: 'officer-1' }],
+    }, token('officer'));
+    check('non-UUID capturingOfficerId → 400 (was a 500)', badShape.status === 400, `${badShape.status} ${badShape.text}`);
+
+    // A genuine device signing a claim that names ANOTHER officer: refused, per
+    // record, and nothing stored. The device does not get to say who did the work.
+    const otherOfficer = '5f000000-0000-4000-8000-00000000ff02';
+    const actorMismatch = await syncOne(makeRecord(APP_ACCEPT, keysA.privateKeyPem, DEV_A, { [DEV_A]: 3 }, METRICS, ticketFor(APP_ACCEPT), otherOfficer));
+    check('signed claim naming another officer → REJECTED OFFICER_MISMATCH',
+      actorMismatch.result['status'] === 'REJECTED' && actorMismatch.result['reason'] === 'OFFICER_MISMATCH', JSON.stringify(actorMismatch.result));
+    const rowsAfterMismatch = await admin<{ one: number }[]>`
+      SELECT count(*)::int AS one FROM rdf_ops.physical_test_scores WHERE application_id = ${APP_ACCEPT}`;
+    check('nothing was stored for the mismatched claim', rowsAfterMismatch[0]?.one === 1, String(rowsAfterMismatch[0]?.one));
+
+    // The stored actor is the AUTHENTICATED subject, never the claim.
+    const storedActor = await admin<{ officer: string }[]>`
+      SELECT capturing_officer_id AS officer FROM rdf_ops.physical_test_scores WHERE application_id = ${APP_ACCEPT} LIMIT 1`;
+    check('stored capturing_officer_id is the token subject', storedActor[0]?.officer === OFFICER_ID, String(storedActor[0]?.officer));
 
     // ── 8. No raw PII / frames leak into events ────────────────────
     console.log('\n── 8. Events carry scores/ids only — no PII ──');

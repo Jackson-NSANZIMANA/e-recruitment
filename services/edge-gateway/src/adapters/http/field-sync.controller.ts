@@ -110,9 +110,11 @@ function scoreRecordOf(value: unknown, index: number): Record<string, unknown> {
     metrics: metricsOf(r.metrics),
     capturedAt: requireBoundedString(r.capturedAt, 'capturedAt', 64),
     deviceId: requireBoundedString(r.deviceId, 'deviceId', MAX_DEVICE_ID),
-    // Forwarded verbatim: it is part of the signed payload, and the upstream
-    // checks it against the enrolled device rather than trusting it.
-    capturingOfficerId: requireBoundedString(r.capturingOfficerId, 'capturingOfficerId', 64),
+    // Forwarded verbatim: it is part of the signed payload, so the edge must not
+    // rewrite it — but it must be the SHAPE the owning column accepts (uuid), or
+    // a malformed value becomes a 500 from Postgres (D11). Who it may name is
+    // decided by field-sync-service against the authenticated principal.
+    capturingOfficerId: requireUuid(r.capturingOfficerId, 'capturingOfficerId'),
     vectorClock: vectorClockOf(r.vectorClock),
     deviceSignature: requireBoundedString(r.deviceSignature, 'deviceSignature', MAX_SIGNATURE),
     signedPayloadHash: requireBoundedString(r.signedPayloadHash, 'signedPayloadHash', MAX_HASH),

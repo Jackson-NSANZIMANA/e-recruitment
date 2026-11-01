@@ -44,6 +44,25 @@ export function validatePhysicalInput(applicationId: string, qr: string): string
 
 const SCHEMA: Readonly<Record<string, string>> = { RDF: 'rdf_ops', RNP: 'rnp_ops', RCS: 'rcs_ops' };
 
+/**
+ * D11: the signed capturingOfficerId must be the id of the officer who is SIGNED
+ * IN. The rehearsal signs its records, so it signs the truth — the officer row for
+ * the handle it just authenticated as. The edge session does not expose the
+ * subject to the browser (it is not needed there), and the rehearsal is a local,
+ * fenced tool holding the database URL, exactly as it already does for the QR.
+ */
+async function lookupOfficerId(databaseUrl: string, loginHandle: string): Promise<string | null> {
+  const sql = postgres(databaseUrl, { max: 1, onnotice: () => undefined });
+  try {
+    const rows = await sql<{ officer_id: string }[]>`
+      SELECT officer_id FROM public_core.officer_accounts WHERE login_handle = ${loginHandle} LIMIT 1
+    `;
+    return rows[0]?.officer_id ?? null;
+  } finally {
+    await sql.end({ timeout: 5 });
+  }
+}
+
 async function lookupQr(databaseUrl: string, agency: string, applicationId: string): Promise<string | null> {
   const schema = SCHEMA[agency];
   if (schema === undefined) return null;
@@ -67,6 +86,10 @@ export async function completePhysicalTest(cfg: PhysicalConfig): Promise<readonl
   if (!(await gate.signIn(cfg.gate.loginHandle, cfg.gate.password))) return bad('gate sign-in', cfg.gate.loginHandle);
   steps.push({ step: 'gate sign-in', ok: true, detail: cfg.gate.loginHandle });
 
+  // D11: sign as the authenticated officer, not as a random id.
+  const officerId = await lookupOfficerId(cfg.databaseUrl, cfg.gate.loginHandle);
+  if (officerId === null) return bad('officer identity', `no officer row for ${cfg.gate.loginHandle}`);
+
   const keys = generateDeviceKeyPair();
   const deviceId = `reh-${cfg.agency.toLowerCase()}-score-${randomUUID().slice(0, 8)}`;
   const enrol = await gate.post('/edge/v1/field-sync/devices', { deviceId, publicKeyPem: keys.publicKeyPem });
@@ -76,7 +99,7 @@ export async function completePhysicalTest(cfg: PhysicalConfig): Promise<readonl
   const payload: SignableFieldPayload = {
     applicationId: cfg.applicationId, qrInvitationCode: qr ?? '',
     metrics: { heightCm: 178, weightKg: 72, run3kmTimeSeconds: 720, chestCm: 96, medicalFitnessStatus: 'FIT' },
-    capturedAt: cfg.now.toISOString(), deviceId, capturingOfficerId: randomUUID(), vectorClock: { [deviceId]: 1 },
+    capturedAt: cfg.now.toISOString(), deviceId, capturingOfficerId: officerId, vectorClock: { [deviceId]: 1 },
   };
   const sig = signFieldScoreRecord(keys.privateKeyPem, payload);
   const res = await gate.post('/edge/v1/field-sync/scores', { records: [{ ...payload, ...sig }] });

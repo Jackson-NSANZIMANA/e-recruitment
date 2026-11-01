@@ -90,6 +90,14 @@ export async function rehearseFleet(cfg: FleetConfig): Promise<readonly FleetSte
     if (!(await gate.signIn(cfg.gate.loginHandle, cfg.gate.password))) return bad('gate sign-in', cfg.gate.loginHandle);
     if (!(await sup.signIn(cfg.supervisor.loginHandle, cfg.supervisor.password))) return bad('supervisor sign-in', cfg.supervisor.loginHandle);
 
+    // D11: sign the scores as the officer who is signed in — the platform now
+    // refuses a signed claim naming anyone else (OFFICER_MISMATCH).
+    const officerRows = await db<{ officer_id: string }[]>`
+      SELECT officer_id FROM public_core.officer_accounts WHERE login_handle = ${cfg.gate.loginHandle} LIMIT 1
+    `;
+    const officerId = officerRows[0]?.officer_id;
+    if (officerId === undefined) return bad('officer identity', `no officer row for ${cfg.gate.loginHandle}`);
+
     const keys = generateDeviceKeyPair();
     const deviceId = `reh-${cfg.agency.toLowerCase()}-fleet-${randomUUID().slice(0, 8)}`;
     const enrol = await gate.post('/edge/v1/field-sync/devices', { deviceId, publicKeyPem: keys.publicKeyPem });
@@ -126,7 +134,7 @@ export async function rehearseFleet(cfg: FleetConfig): Promise<readonly FleetSte
       const payload: SignableFieldPayload = {
         applicationId: randomUUID(), qrInvitationCode: 'REH-NO-SUCH-TICKET',
         metrics: { heightCm: 178, weightKg: 72, run3kmTimeSeconds: 720, chestCm: 96, medicalFitnessStatus: 'FIT' },
-        capturedAt: cfg.now.toISOString(), deviceId, capturingOfficerId: randomUUID(), vectorClock: { [deviceId]: 1 },
+        capturedAt: cfg.now.toISOString(), deviceId, capturingOfficerId: officerId, vectorClock: { [deviceId]: 1 },
       };
       const sig = signFieldScoreRecord(keys.privateKeyPem, payload);
       const res = await gate.post('/edge/v1/field-sync/scores', { records: [{ ...payload, ...sig }] });

@@ -298,6 +298,8 @@ async function main(): Promise<void> {
   });
   const server = await startHttpServer({
     serviceName: 'amber-adjudication-selfcheck',
+    // ADR-053: proofs bind loopback, never the venue network.
+    host: '127.0.0.1',
     port: 0,
     routes: [
       listApplicationsRoute(appService.list, verify),

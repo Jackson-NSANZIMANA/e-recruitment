@@ -38,6 +38,18 @@ function str(v: unknown, field: string): string {
   return v;
 }
 
+/**
+ * A UUID. physical_test_scores.capturing_officer_id is `uuid NOT NULL` in
+ * rdf_ops, rnp_ops and rcs_ops; a free string reached Postgres and came back as
+ * 22P02 — a 500 (evaluation 2026-10-29, D11).
+ */
+function uuid(v: unknown, field: string): string {
+  if (typeof v !== 'string' || !UUID_RE.test(v.trim())) {
+    throw new HttpError(400, 'INVALID_RECORD', `Field "${field}" must be a UUID.`);
+  }
+  return v.trim();
+}
+
 function num(v: unknown, field: string): number {
   if (typeof v !== 'number' || !Number.isFinite(v)) {
     throw new HttpError(400, 'INVALID_RECORD', `Field "${field}" must be a finite number.`);
@@ -89,7 +101,11 @@ function parseRecord(v: unknown): FieldScoreRecord {
     metrics: parseMetrics(r['metrics']),
     capturedAt: str(r['capturedAt'], 'capturedAt'),
     deviceId: str(r['deviceId'], 'deviceId'),
-    capturingOfficerId: str(r['capturingOfficerId'], 'capturingOfficerId'),
+    // D11: the column is uuid NOT NULL in all three schemas and this value is
+    // signed by the device. A shape check makes a malformed claim a 400 for the
+    // tablet instead of a 500 from Postgres — and the claim is then BOUND to the
+    // authenticated principal in the use case, never trusted on its own.
+    capturingOfficerId: uuid(r['capturingOfficerId'], 'capturingOfficerId'),
     vectorClock: parseVectorClock(r['vectorClock']),
     deviceSignature: str(r['deviceSignature'], 'deviceSignature'),
     signedPayloadHash: str(r['signedPayloadHash'], 'signedPayloadHash'),
@@ -114,6 +130,8 @@ export function syncScoresRoute(service: SyncFieldScoresService, verify: AuthVer
       const outcome = await service.sync({
         records,
         actorAgency: principal.agency,
+        // D11: the authenticated subject, from the verified officer token.
+        actorSubjectId: principal.subjectId,
         context: { correlationId: ctx.correlationId, causationId: ctx.correlationId },
       });
 
