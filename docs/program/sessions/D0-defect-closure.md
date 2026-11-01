@@ -1,6 +1,6 @@
 # D0 — Defect closure: D2, D7, D8, D9, D10, D11
 
-**Phase 0 · backend lane · branch `fix/d0-defect-closure` (this session: `arena/74feaf2b-e-recruitment`)** · Reserved: **ADR-050** (re-drive), **ADR-051** (hold resolution), **ADR-052** (document supersession), **ADR-053** (bind/exposure); **`rls/0043`** (redrive ledger), **`rls/0044`** (document revisions).
+**Phase 0 · backend lane · branch `fix/d0-defect-closure` (this session: `arena/74feaf2b-e-recruitment`)** · Reserved: **ADR-050** (re-drive), **ADR-051** (hold resolution), **ADR-052** (document supersession), **ADR-053** (bind/exposure); **`rls/0043`** (redrive ledger), **`rls/0044`** (document revisions), **`rls/0045`** (vetting-hold resolver stamp).
 **Plan for approval:** [`defect-closure-plan-2026-11-01.md`](../defect-closure-plan-2026-11-01.md) · **Evidence:** [`evaluation-2026-10-29.md`](../evaluation-2026-10-29.md) §2
 
 ## Why
@@ -70,5 +70,5 @@ This session's workspace has **no Docker, no pnpm, Node 22 (repo requires ≥24 
 - `packages/shared-auth/src/permissions.ts` (one permission — append-only shared)
 - `packages/shared-types/**` (closed vocabularies — append-only shared)
 - `services/edge-gateway/**`, `services/identity-service/**`, `services/document-forensics-service/**`, `services/field-sync-service/**`, `services/background-vetting-service/**`, `services/application-service/**`
-- `packages/shared-database/src/rls/0043…0044`
+- `packages/shared-database/src/rls/0043…0045`
 - `infrastructure/{sandbox,docker}/**`, `scripts/run-selfchecks.sh`

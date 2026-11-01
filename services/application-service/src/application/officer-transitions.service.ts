@@ -30,7 +30,14 @@ import type {
   OfficerActor,
   OfficerTransitionOutcome,
   OfficerTransitionRepository,
+  VettingHoldOutcome,
 } from '../ports/officer-transition-repository.js';
+import {
+  VETTING_HOLD_REASONS,
+  type VettingHoldDecision,
+  type VettingHoldDimension,
+  type VettingHoldReason,
+} from '@usrp/shared-types';
 
 /**
  * An officer transition outcome plus two use-case guards:
@@ -91,6 +98,29 @@ export interface AdjudicateCommand {
 
 /** Adjudication outcome plus the non-officer defence-in-depth guard. */
 export type AdjudicateCommandOutcome = AdjudicateOutcome | { readonly kind: 'FORBIDDEN' };
+
+/**
+ * Resolve a held vetting dimension (D10, ADR-051).
+ *
+ * The reason is the verdict: it names the dimension, the decision, and the
+ * evidence value to write. A body that disagrees with the reason it chose is a
+ * caller error (`INVALID_VETTING_HOLD_REASON`) — never silently coerced, because
+ * a trail saying "REJECT, CLEARANCE_CONFIRMED" is worse than a refusal.
+ */
+export interface VettingHoldCommand {
+  readonly actor: Principal;
+  readonly applicationId: string;
+  readonly dimension: VettingHoldDimension;
+  readonly decision: VettingHoldDecision;
+  readonly reason: VettingHoldReason;
+  readonly notes: string | null;
+  readonly context: EventContext;
+}
+
+export type VettingHoldCommandOutcome =
+  | VettingHoldOutcome
+  | { readonly kind: 'FORBIDDEN' }
+  | { readonly kind: 'INVALID_VETTING_HOLD_REASON'; readonly reason: string };
 
 export interface OfficerTransitionsDeps {
   readonly repository: OfficerTransitionRepository;
@@ -237,6 +267,79 @@ export class OfficerTransitionsService {
     );
 
     if (outcome.clearedToGreen) {
+      const cleared: ApplicationEligibilityClearedEvent = {
+        ...newEnvelope(command.context),
+        eventType: 'APPLICATION_ELIGIBILITY_CLEARED',
+        applicationId: command.applicationId,
+        applicantId: outcome.applicantId,
+        agency: command.actor.agency,
+        campaignId: outcome.campaignId,
+        category: outcome.category,
+      };
+      await this.#eventBus.publish(cleared);
+    }
+    return outcome;
+  }
+
+  /**
+   * Resolve a HELD vetting dimension (D10). The queue listed the work; this is
+   * the verb that does it. When the resolution re-derives the row all the way to
+   * DOCUMENT_REVIEW_GREEN, re-emit application.cleared — the SAME reconvergence
+   * path adjudication uses (owner decision D4), so a resolved criminal or NESA
+   * hold rejoins the slot lane and scheduling-service is none the wiser.
+   */
+  async vettingHold(command: VettingHoldCommand): Promise<VettingHoldCommandOutcome> {
+    if (command.actor.kind !== 'officer') return { kind: 'FORBIDDEN' };
+
+    const spec = VETTING_HOLD_REASONS[command.reason];
+    if (spec.dimension !== command.dimension) {
+      return {
+        kind: 'INVALID_VETTING_HOLD_REASON',
+        reason: `reasonCode ${command.reason} resolves the ${spec.dimension} dimension, not ${command.dimension}`,
+      };
+    }
+    if (spec.decision !== command.decision) {
+      return {
+        kind: 'INVALID_VETTING_HOLD_REASON',
+        reason: `reasonCode ${command.reason} is a ${spec.decision} verdict, not ${command.decision}`,
+      };
+    }
+
+    const actor = toActor(command.actor, command.context);
+    const outcome = await this.#repository.vettingHold({
+      actor,
+      applicationId: command.applicationId,
+      dimension: command.dimension,
+      decision: command.decision,
+      reason: command.reason,
+      notes: command.notes,
+    });
+    if (outcome.kind !== 'APPLIED') return outcome;
+
+    // The trail names the dimension, the decision AND the reason the officer
+    // gave — the closed code, so an audit reader never re-derives a verdict
+    // from prose. Notes are the officer's words and stay on this record only.
+    const event: AuditEvent = {
+      ...newEnvelope(command.context),
+      eventType: 'AUDIT_ENTRY',
+      entityType: 'APPLICATION',
+      entityId: command.applicationId,
+      action: command.decision === 'REJECT' ? 'VETTING_HOLD_REJECTED' : 'VETTING_HOLD_RESOLVED',
+      performedBy: command.actor.subjectId,
+      agency: command.actor.agency,
+      previousStatus: outcome.fromStatus,
+      newStatus: outcome.toStatus,
+      metadata: {
+        stage: 'VETTING_HOLD',
+        dimension: command.dimension,
+        decision: command.decision,
+        reasonCode: command.reason,
+        ...(command.notes === null ? {} : { notes: command.notes }),
+      },
+    };
+    await this.#eventBus.publish(event);
+
+    if (outcome.clearedToGreen && outcome.statusChanged) {
       const cleared: ApplicationEligibilityClearedEvent = {
         ...newEnvelope(command.context),
         eventType: 'APPLICATION_ELIGIBILITY_CLEARED',

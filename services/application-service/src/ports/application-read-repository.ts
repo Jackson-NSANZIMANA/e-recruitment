@@ -10,7 +10,7 @@
 // adapter is a dumb executor that assumes the role it is told.
 // ══════════════════════════════════════════════════════════════════
 
-import type { Agency, ApplicationCategory, ApplicationStatus } from '@usrp/shared-types';
+import type { Agency, AmberQueueAction, ApplicationCategory, ApplicationStatus } from '@usrp/shared-types';
 import type { DbRole } from '@usrp/shared-auth';
 
 /** A non-PII summary row — the anonymous processing code, never a name/NID. */
@@ -56,6 +56,13 @@ export interface AmberQueueEntry {
    * come from the clearance verification and the NESA binding (ADR-048 §3).
    */
   readonly reasons: readonly string[];
+  /**
+   * D10: the officer verbs that apply to this row, as a closed set. The console
+   * renders one action per entry instead of guessing from `status` + `reasons`,
+   * which is how "Adjudicate" used to be offered on a row only a vetting-hold
+   * resolution could move. A row can need both.
+   */
+  readonly actions: readonly AmberQueueAction[];
 }
 
 /** An applicant-facing summary row — the agency joins the non-PII summary. */

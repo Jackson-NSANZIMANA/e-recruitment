@@ -21,7 +21,7 @@
 //     the UI actually asks (human or automated step).
 // ══════════════════════════════════════════════════════════════════
 
-import type { Agency } from '@usrp/shared-types';
+import type { Agency, AmberQueueAction } from '@usrp/shared-types';
 import { isRecord } from './validation.js';
 
 // ── Primitive readers. Absent / wrong-typed becomes null, never undefined
@@ -248,12 +248,21 @@ export interface EdgeAmberQueueEntry {
   readonly queuedAt: string | null;
   /** S12b: why a human must look (closed upper-case codes; document holds add none). */
   readonly reasons: readonly string[];
+  /** D10: the officer verbs that apply — so the console renders buttons, not guesses. */
+  readonly actions: readonly AmberQueueAction[];
   readonly agency: Agency;
 }
 
 /** Closed-vocabulary codes only: anything else an upstream ever adds is dropped. */
 function queueReasonCodes(value: unknown): readonly string[] {
   return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string' && /^[A-Z][A-Z0-9_]{2,47}$/.test(v)).slice(0, 8) : [];
+}
+
+/** D10: the closed action set, filtered — an unknown verb never reaches the console. */
+function queueActions(value: unknown): readonly AmberQueueAction[] {
+  return Array.isArray(value)
+    ? value.filter((v): v is AmberQueueAction => v === 'ADJUDICATE' || v === 'RESOLVE_VETTING_HOLD')
+    : [];
 }
 
 export function projectAmberQueue(body: unknown, agency: Agency): readonly EdgeAmberQueueEntry[] {
@@ -266,6 +275,7 @@ export function projectAmberQueue(body: unknown, agency: Agency): readonly EdgeA
     forensicsFlags: jsonObject(field(entry, 'forensicsFlags')),
     queuedAt: str(field(entry, 'queuedAt')),
     reasons: queueReasonCodes(field(entry, 'reasons')),
+    actions: queueActions(field(entry, 'actions')),
     agency,
   }));
 }
@@ -278,6 +288,15 @@ export interface EdgeTransitionResult {
   readonly outcome: string;
   readonly fromStatus: string | null;
   readonly status: string | null;
+  /**
+   * D10: present only on a vetting-hold resolution. `status` can legitimately
+   * EQUAL `fromStatus` there (a late hold resolved on an already-scheduled
+   * application), so the console cannot infer "something happened" from the
+   * status fields alone.
+   */
+  readonly statusChanged?: boolean;
+  /** D10: which vetting dimension moved. Closed set; anything else is dropped. */
+  readonly dimension?: 'CRIMINAL' | 'ACADEMIC';
 }
 
 /**
@@ -297,10 +316,14 @@ export function projectTransition(applicationId: string, body: unknown): EdgeTra
       status: str(field(body, 'currentStatus')),
     };
   }
+  const dimension = field(body, 'dimension');
+  const statusChanged = field(body, 'statusChanged');
   return {
     applicationId,
     outcome: 'APPLIED',
     fromStatus: str(field(body, 'fromStatus')),
     status: str(field(body, 'toStatus')),
+    ...(typeof statusChanged === 'boolean' ? { statusChanged } : {}),
+    ...(dimension === 'CRIMINAL' || dimension === 'ACADEMIC' ? { dimension } : {}),
   };
 }

@@ -185,6 +185,10 @@ export const rdfApplications = rdfOps.table(
     finalDecisionById: uuid('final_decision_by_id'),
     finalDecisionAt: timestamp('final_decision_at', { withTimezone: true }),
     finalDecisionNotes: varchar('final_decision_notes', { length: 1000 }),
+    // D10 (rls/0045): who resolved a HELD vetting dimension on this application.
+    vettingHoldResolvedBy: uuid('vetting_hold_resolved_by'),
+    vettingHoldResolvedAt: timestamp('vetting_hold_resolved_at', { withTimezone: true }),
+    vettingHoldDimension: varchar('vetting_hold_dimension', { length: 16 }),
 
     submittedAt: timestamp('submitted_at', { withTimezone: true }),
     // BUILD-002 (rls/0029): the policy version and calendar date that governed

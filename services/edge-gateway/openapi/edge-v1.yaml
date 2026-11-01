@@ -593,6 +593,44 @@ paths:
         '409':
           description: Conflict
 
+  /edge/v1/applications/vetting-hold:
+    post:
+      operationId: resolveVettingHold
+      summary: Resolve a held vetting dimension (D10, ADR-051)
+      description: >-
+        The verb for the work the amber queue lists: an application held on a
+        criminal-clearance UNDER_REVIEW or on a NESA review. The officer picks a
+        closed reasonCode, which itself names the dimension, the decision and the
+        evidence value written; a body that contradicts its own reason is 422.
+        The row is then re-derived by the same pure lifecycle that placed every
+        other status, so a resolved criminal hold rejoins the green lane exactly
+        like an autonomously cleared one. Because the reason IS the verdict, the
+        console renders the reason list from @usrp/shared-types, never a local copy.
+      tags: [officer-transitions]
+      x-usrp-session: officer
+      x-usrp-permission: vetting.hold.resolve
+      x-usrp-outcomes: { 409: [ILLEGAL_TRANSITION] }
+      x-usrp-csrf: true
+      responses:
+        '200':
+          description: >-
+            APPLIED — dimension, fromStatus, toStatus, statusChanged. The status
+            can legitimately hold (a late hold resolved on a scheduled
+            application), so statusChanged distinguishes "evidence rewritten"
+            from a no-op the way fromStatus/toStatus alone cannot. A body whose
+            reasonCode contradicts its dimension/decision never leaves the edge
+            (422 here, the same rule the service enforces) — so the 422 this
+            operation documents is the EDGE's, not the upstream's.
+        '403':
+          description: FORBIDDEN, or SEPARATION_OF_DUTIES on the accept side
+        '409':
+          description: >-
+            ILLEGAL_TRANSITION — the dimension is no longer held (resolved by
+            another officer, or never genuinely held). Nothing written; the
+            console re-reads the queue.
+        '422':
+          description: INVALID_VETTING_HOLD_REASON — reasonCode contradicts dimension/decision
+
   /edge/v1/applications/walk-in/register:
     post:
       operationId: registerWalkIn

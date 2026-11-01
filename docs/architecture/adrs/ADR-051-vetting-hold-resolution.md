@@ -3,7 +3,7 @@
 **Status:** Accepted · 2026-11-01 (defect-closure session D0) · closes evaluation 2026-10-29 defect **D10**
 **Deciders:** platform owner (2026-11-01, §2) · engineering for §3
 **Relates to:** ADR-011 amber lane and late disqualification, ADR-006 single writer, ADR-012 walk-in lane, ADR-021 read models, ADR-031 operation permissions and separation of duties, ADR-048 identity binding, ADR-049 campaign policy, ADR-050 re-drive
-**Migration:** none (writes existing columns in all three schemas)
+**Migration:** `rls/0045_vetting_hold_resolution.sql` — three columns on `applications` in **all three** ops schemas (`vetting_hold_resolved_by`/`_at`/`_dimension`), because the accept-time four-eyes read needs a durable resolver and an agency-specific column that exists in one schema and not the others is the D1 class of defect. The migration was authored as `0043` and renumbered: `0043`/`0044` are reserved for ADR-050/052.
 
 ## 1. Context
 

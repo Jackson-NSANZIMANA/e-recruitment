@@ -16,7 +16,7 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { sql } from '@usrp/shared-database';
-import type { ApplicationCategory, ApplicationStatus } from '@usrp/shared-types';
+import type { AmberQueueAction, ApplicationCategory, ApplicationStatus } from '@usrp/shared-types';
 import { AGENCIES, type Agency } from '@usrp/shared-types';
 import type {
   AmberQueueEntry,
@@ -314,7 +314,30 @@ function toQueueEntry(row: AmberQueueRow): AmberQueueEntry {
         ? null
         : new Date(row.forensics_completed_at).toISOString(),
     reasons: queueReasons(row),
+    actions: queueActions(row),
   };
+}
+
+/**
+ * D10: which officer verbs apply to this row. Derived from the SAME predicate
+ * the queue lists on — an amber/adjudication document hold is adjudicated, a
+ * held vetting dimension is RESOLVED — so the console's buttons and the verbs'
+ * preconditions cannot disagree. Both may apply to one row.
+ */
+function queueActions(row: AmberQueueRow): readonly AmberQueueAction[] {
+  const actions: AmberQueueAction[] = [];
+  if (row.status === 'DOCUMENT_REVIEW_AMBER' || row.status === 'ADJUDICATION_REVIEW') {
+    actions.push('ADJUDICATE');
+  }
+  if (
+    row.criminal_status === 'UNDER_REVIEW' ||
+    (row.academic_status === 'PENDING' &&
+      row.academic_detail !== null &&
+      row.academic_detail['failureCode'] === 'NESA_REVIEW_REQUIRED')
+  ) {
+    actions.push('RESOLVE_VETTING_HOLD');
+  }
+  return actions;
 }
 
 /** NESA review codes (eligibility-service) → the queue's closed vocabulary. */

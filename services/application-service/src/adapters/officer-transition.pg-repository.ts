@@ -26,13 +26,15 @@
 
 import { sql } from '@usrp/shared-database';
 import type { SeparationOfDutiesConfig } from '../config.js';
-import type {
-  AcademicEligibilityStatus,
-  AgeEligibilityStatus,
-  Agency,
-  ApplicationCategory,
-  ApplicationStatus,
-  CriminalClearanceStatus,
+import {
+  VETTING_HOLD_REASONS,
+  type AcademicEligibilityStatus,
+  type AgeEligibilityStatus,
+  type Agency,
+  type ApplicationCategory,
+  type ApplicationStatus,
+  type CriminalClearanceStatus,
+  type VettingHoldReasonSpec,
 } from '@usrp/shared-types';
 import type {
   AcceptInput,
@@ -43,6 +45,8 @@ import type {
   MedicalReviewInput,
   OfficerTransitionOutcome,
   OfficerTransitionRepository,
+  VettingHoldInput,
+  VettingHoldOutcome,
 } from '../ports/officer-transition-repository.js';
 import { ApplicationPersistenceError } from '../domain/application.errors.js';
 import { schemaForAgency } from '../domain/agency-schema.js';
@@ -62,6 +66,7 @@ export class PgOfficerTransitionRepository implements OfficerTransitionRepositor
     this.#sod = separationOfDuties ?? {
       finalDecisionExcludesMedicalReviewer: true,
       acceptExcludesFinalDecider: false,
+      clearanceReviewExcludesAccepter: true,
     };
   }
 
@@ -227,10 +232,12 @@ export class PgOfficerTransitionRepository implements OfficerTransitionRepositor
             campaign_id: string;
             category: ApplicationCategory;
             final_decision_by_id: string | null;
+            vetting_hold_resolved_by: string | null;
           }[]
         >`
           SELECT status, applicant_id, campaign_id, category,
-                 final_decision_by_id::text AS final_decision_by_id
+                 final_decision_by_id::text AS final_decision_by_id,
+                 vetting_hold_resolved_by::text AS vetting_hold_resolved_by
           FROM ${schema}.applications
           WHERE id = ${applicationId} FOR UPDATE
         `;
@@ -248,6 +255,21 @@ export class PgOfficerTransitionRepository implements OfficerTransitionRepositor
           current.final_decision_by_id === actor.officerId
         ) {
           return { kind: 'SEPARATION_OF_DUTIES', rule: 'ACCEPT_EXCLUDES_FINAL_DECIDER' };
+        }
+
+        // Four-eyes (D10, policy-gated): the officer who RESOLVED a vetting hold
+        // on this application may not also enlist the applicant. The clearance
+        // reader and the acceptance authority are separate posts precisely so
+        // one person cannot lift a criminal or academic hold and then accept on
+        // the strength of it. Read from the row's durable resolver stamp
+        // (rls/0045) under the same lock — not reconstructed from history, so a
+        // redelivered event can never make the answer ambiguous.
+        if (
+          this.#sod.clearanceReviewExcludesAccepter &&
+          current.vetting_hold_resolved_by !== null &&
+          current.vetting_hold_resolved_by === actor.officerId
+        ) {
+          return { kind: 'SEPARATION_OF_DUTIES', rule: 'ACCEPT_EXCLUDES_CLEARANCE_REVIEWER' };
         }
 
         // ── Cross-agency accept-lock (ADR-014) ──────────────────────
@@ -425,6 +447,126 @@ export class PgOfficerTransitionRepository implements OfficerTransitionRepositor
       throw wrap(cause, 'Failed to apply adjudication');
     }
   }
+
+  /**
+   * Resolve a held vetting dimension (D10, ADR-051).
+   *
+   * The precondition is the QUEUE'S OWN PREDICATE, restated once, under the row
+   * lock: an application is held on CRIMINAL when its clearance status is
+   * UNDER_REVIEW, and on ACADEMIC when the academic gate is still PENDING with
+   * a NESA review code. A console cannot offer work that this verb then refuses,
+   * and a race (two officers opening the same item) resolves to exactly one
+   * APPLIED — the loser sees NOT_HELD, not a silent overwrite.
+   *
+   * The evidence value written is the REASON'S (`VETTING_HOLD_REASONS`), so the
+   * trail can never say "REJECT" while writing CLEARED. Then the SAME pure
+   * lifecycle that produced every other status decides where the row goes —
+   * which is why a resolved criminal hold rejoins the green lane with no special
+   * case here, and why a resolved ACADEMIC/CRIMINAL hold that lands all-pass
+   * sets clearedToGreen for the slot lane.
+   */
+  async vettingHold(input: VettingHoldInput): Promise<VettingHoldOutcome> {
+    const { actor, applicationId, dimension, decision, reason, notes } = input;
+    const schema = sql(schemaForAgency(actor.agency));
+    const spec: VettingHoldReasonSpec = VETTING_HOLD_REASONS[reason];
+    try {
+      return await sql.begin(async (tx): Promise<VettingHoldOutcome> => {
+        await tx`SET LOCAL ROLE ${sql(actor.dbRole)}`;
+
+        const rows = await tx<VettingHoldRow[]>`
+          SELECT status, age_eligibility_status,
+                 academic_status, academic_eligibility_detail,
+                 criminal_clearance_status,
+                 applicant_id, campaign_id, category
+          FROM ${schema}.applications WHERE id = ${applicationId} FOR UPDATE
+        `;
+        const current = rows[0];
+        if (!current) return { kind: 'NOT_FOUND' };
+
+        const held =
+          dimension === 'CRIMINAL'
+            ? current.criminal_clearance_status === 'UNDER_REVIEW'
+            : current.academic_status === 'PENDING' &&
+              current.academic_eligibility_detail !== null &&
+              (current.academic_eligibility_detail as Record<string, unknown>)['failureCode'] === 'NESA_REVIEW_REQUIRED';
+        if (!held) return { kind: 'NOT_HELD', dimension, currentStatus: current.status };
+
+        // The reason is the verdict. `decision` was checked against it at the
+        // ingress; re-checked here so a future caller cannot reach the adapter
+        // with a shape the vocabulary forbids.
+        if (spec.dimension !== dimension || spec.decision !== decision) {
+          return { kind: 'NOT_HELD', dimension, currentStatus: current.status };
+        }
+
+        const nextAcademic = spec.academicStatus ?? current.academic_status;
+        const nextCriminal = spec.criminalStatus ?? current.criminal_clearance_status;
+
+        const target = deriveApplicationStatus(current.status, {
+          ageStatus: current.age_eligibility_status,
+          academicStatus: nextAcademic,
+          criminalStatus: nextCriminal,
+        });
+
+        // Write the evidence even when the status holds: the gate's answer is
+        // the substance of this command, and the queue lists on it.
+        await tx`
+          UPDATE ${schema}.applications SET
+            academic_status = ${nextAcademic}::${schema}.academic_eligibility_status,
+            criminal_clearance_status = ${nextCriminal}::${schema}.criminal_clearance_status,
+            status = ${target}::${schema}.application_status,
+            vetting_hold_resolved_by = ${actor.officerId},
+            vetting_hold_resolved_at = now(),
+            vetting_hold_dimension = ${dimension},
+            updated_at = now()
+          WHERE id = ${applicationId}
+        `;
+
+        if (target !== current.status) {
+          await tx`
+            INSERT INTO ${schema}.application_status_history
+              (application_id, from_status, to_status, reason, performed_by, correlation_id)
+            VALUES (
+              ${applicationId},
+              ${current.status}::${schema}.application_status,
+              ${target}::${schema}.application_status,
+              ${
+                // history reason is varchar(200) — keep dimension+decision, bound the notes
+                (`Vetting hold ${dimension}: ${decision} — ${notes ?? spec.assertion}`).slice(0, 200)
+              },
+              ${actor.officerId},
+              ${actor.correlationId}
+            )
+          `;
+        }
+
+        return {
+          kind: 'APPLIED',
+          dimension,
+          fromStatus: current.status,
+          toStatus: target,
+          statusChanged: target !== current.status,
+          clearedToGreen: target === 'DOCUMENT_REVIEW_GREEN',
+          applicantId: current.applicant_id,
+          campaignId: current.campaign_id,
+          category: current.category,
+        };
+      });
+    } catch (cause) {
+      throw wrap(cause, 'Failed to resolve the vetting hold');
+    }
+  }
+}
+
+/** Row shape the vetting-hold transaction reads under FOR UPDATE. */
+interface VettingHoldRow {
+  readonly status: ApplicationStatus;
+  readonly age_eligibility_status: AgeEligibilityStatus;
+  readonly academic_status: AcademicEligibilityStatus;
+  readonly academic_eligibility_detail: unknown;
+  readonly criminal_clearance_status: CriminalClearanceStatus;
+  readonly applicant_id: string;
+  readonly campaign_id: string;
+  readonly category: ApplicationCategory;
 }
 
 /** Row shape the adjudicate transaction reads under FOR UPDATE. */

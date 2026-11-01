@@ -26,12 +26,20 @@ import type {
   MedicalReviewCommand,
   OfficerCommandOutcome,
   OfficerTransitionsService,
+  VettingHoldCommand,
+  VettingHoldCommandOutcome,
 } from '../../application/officer-transitions.service.js';
+import {
+  isVettingHoldDecision,
+  isVettingHoldDimension,
+  isVettingHoldReason,
+} from '@usrp/shared-types';
 
 export const MEDICAL_REVIEW_PATH = '/v1/applications/medical-review';
 export const FINAL_DECISION_PATH = '/v1/applications/final-decision';
 export const ACCEPT_PATH = '/v1/applications/accept';
 export const ADJUDICATE_PATH = '/v1/applications/adjudicate';
+export const VETTING_HOLD_PATH = '/v1/applications/vetting-hold';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FITNESS = new Set(['FIT', 'UNFIT']);
@@ -46,6 +54,8 @@ interface TransitionBody {
   readonly certVerdict?: unknown;
   readonly physicianName?: unknown;
   readonly decision?: unknown;
+  readonly dimension?: unknown;
+  readonly reasonCode?: unknown;
   readonly notes?: unknown;
 }
 
@@ -164,7 +174,84 @@ export function officerTransitionRoutes(
         );
       }),
     },
+    {
+      // D10 (ADR-051): the verb for the work the amber queue lists. A held
+      // criminal clearance or NESA review is decided HERE, by the post that
+      // reads the evidence (`vetting.hold.resolve`), and the row re-derives
+      // through the same pure lifecycle as every other transition.
+      method: 'POST',
+      path: VETTING_HOLD_PATH,
+      handler: withAuth(verify, { kind: 'officer' }, async (ctx, principal): Promise<HttpResult> => {
+        requireOfficerPermission(principal, 'vetting.hold.resolve');
+        const body = await ctx.json<TransitionBody>();
+        const applicationId = requireApplicationId(body.applicationId);
+        if (!isVettingHoldDimension(body.dimension)) {
+          throw new HttpError(400, 'INVALID_DIMENSION', 'Field "dimension" must be "CRIMINAL" or "ACADEMIC".');
+        }
+        if (!isVettingHoldDecision(body.decision)) {
+          throw new HttpError(400, 'INVALID_DECISION', 'Field "decision" must be "CLEAR" or "REJECT".');
+        }
+        // The reason is the verdict (see @usrp/shared-types/vetting-hold). An
+        // unknown code is a caller error; a code that contradicts `dimension`
+        // or `decision` is refused by the use case as 422.
+        if (!isVettingHoldReason(body.reasonCode)) {
+          throw new HttpError(400, 'INVALID_REASON_CODE', 'Field "reasonCode" is not a known vetting-hold reason.');
+        }
+        const notes = requireNotes(body.notes);
+        const command: VettingHoldCommand = {
+          actor: principal,
+          applicationId,
+          dimension: body.dimension,
+          decision: body.decision,
+          reason: body.reasonCode,
+          notes,
+          context: { correlationId: ctx.correlationId, causationId: ctx.correlationId },
+        };
+        let outcome: VettingHoldCommandOutcome;
+        try {
+          outcome = await service.vettingHold(command);
+        } catch (err) {
+          throw mapDomainError(err);
+        }
+        // APPLIED carries the applicant/campaign identifiers the event needs —
+        // the client sees which dimension moved and whether the status did.
+        return outcome.kind === 'APPLIED'
+          ? {
+              status: 200,
+              body: {
+                status: 'APPLIED',
+                dimension: outcome.dimension,
+                fromStatus: outcome.fromStatus,
+                toStatus: outcome.toStatus,
+                statusChanged: outcome.statusChanged,
+              },
+            }
+          : mapVettingHoldOutcome(outcome);
+      }),
+    },
   ];
+}
+
+/** Vetting-hold outcomes that are not APPLIED, mapped like the other verbs. */
+function mapVettingHoldOutcome(outcome: Exclude<VettingHoldCommandOutcome, { kind: 'APPLIED' }>): HttpResult {
+  switch (outcome.kind) {
+    case 'NOT_HELD':
+      // 409: the work item the console showed is gone — resolved by someone
+      // else, or never genuinely held. Nothing written.
+      return {
+        status: 409,
+        body: { status: 'NOT_HELD', dimension: outcome.dimension, currentStatus: outcome.currentStatus },
+      };
+    case 'NOT_FOUND':
+      return { status: 404, body: { status: 'NOT_FOUND' } };
+    case 'FORBIDDEN':
+      return { status: 403, body: { error: 'FORBIDDEN' } };
+    case 'INVALID_VETTING_HOLD_REASON':
+      // The reason code contradicts the dimension/decision the caller sent.
+      return { status: 422, body: { status: 'INVALID_VETTING_HOLD_REASON', reason: outcome.reason } };
+    default:
+      return assertNever(outcome);
+  }
 }
 
 /** Validate the body's applicationId is a UUID (shape only). 400 otherwise. */

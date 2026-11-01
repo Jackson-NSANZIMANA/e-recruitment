@@ -58,7 +58,7 @@ Parallel sessions must not pick "the next number". These are reserved; use only 
 | S12a | ADR-047 G2G production sandbox | `0042_national_id_hint.sql` | — |
 | S12b | ADR-048 identity binding and Irembo clearance | `0040_clearance_certificates.sql` | — |
 | S12c | ADR-049 campaign policy v2 | `0041_campaign_policy_v2.sql` | ADR-FE-019 sandbox presentation and NIDA pre-fill |
-| D0 | ADR-050 durable event re-drive · ADR-051 vetting-hold resolution · ADR-052 document supersession · ADR-053 bind host and exposure | `0043_event_redrive_ledger.sql`, `0044_document_revisions.sql` | — (four hand-offs, no FE ADR) |
+| D0 | ADR-050 durable event re-drive · ADR-051 vetting-hold resolution · ADR-052 document supersession · ADR-053 bind host and exposure | `0043_event_redrive_ledger.sql`, `0044_document_revisions.sql`, `0045_vetting_hold_resolution.sql` | — (four hand-offs, no FE ADR) |
 
 `ADR-035` is the rehearsal ADR (backend `feat/rehearsal`, merged in S00). Drizzle migrations, if needed, use the next free `000N_*.sql` **at rebase time**. Migrations are linear by design, so the later session renumbers its migration before merging.
 

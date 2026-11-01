@@ -74,6 +74,13 @@ export interface SeparationOfDutiesConfig {
   readonly finalDecisionExcludesMedicalReviewer: boolean;
   /** The officer who signed the final decision may not also accept the applicant. */
   readonly acceptExcludesFinalDecider: boolean;
+  /**
+   * D10 (ADR-051): the officer who RESOLVED a vetting hold (a criminal-clearance
+   * review or a NESA review) may not also accept that application. Default ON:
+   * the whole point of a human review of clearance evidence is that the person
+   * who read it is not the person who enlists on the strength of it.
+   */
+  readonly clearanceReviewExcludesAccepter: boolean;
 }
 
 export function loadSeparationOfDutiesConfig(
@@ -83,12 +90,14 @@ export function loadSeparationOfDutiesConfig(
     {
       SOD_FINAL_DECISION_EXCLUDES_MEDICAL_REVIEWER: withDefault(boolean(), true),
       SOD_ACCEPT_EXCLUDES_FINAL_DECIDER: withDefault(boolean(), false),
+      SOD_CLEARANCE_REVIEW_EXCLUDES_ACCEPTER: withDefault(boolean(), true),
     },
     source,
   );
   return {
     finalDecisionExcludesMedicalReviewer: env.SOD_FINAL_DECISION_EXCLUDES_MEDICAL_REVIEWER,
     acceptExcludesFinalDecider: env.SOD_ACCEPT_EXCLUDES_FINAL_DECIDER,
+    clearanceReviewExcludesAccepter: env.SOD_CLEARANCE_REVIEW_EXCLUDES_ACCEPTER,
   };
 }
 

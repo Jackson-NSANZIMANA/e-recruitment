@@ -17,7 +17,14 @@
 // INSERT a history row, never mutate one).
 // ══════════════════════════════════════════════════════════════════
 
-import type { Agency, ApplicationCategory, ApplicationStatus } from '@usrp/shared-types';
+import type {
+  Agency,
+  ApplicationCategory,
+  ApplicationStatus,
+  VettingHoldDecision,
+  VettingHoldDimension,
+  VettingHoldReason,
+} from '@usrp/shared-types';
 import type { DbRole } from '@usrp/shared-auth';
 
 /**
@@ -120,7 +127,11 @@ export type OfficerTransitionOutcome =
  */
 export interface SeparationOfDutiesOutcome {
   readonly kind: 'SEPARATION_OF_DUTIES';
-  readonly rule: 'FINAL_DECISION_EXCLUDES_MEDICAL_REVIEWER' | 'ACCEPT_EXCLUDES_FINAL_DECIDER';
+  readonly rule:
+    | 'FINAL_DECISION_EXCLUDES_MEDICAL_REVIEWER'
+    | 'ACCEPT_EXCLUDES_FINAL_DECIDER'
+    /** D10: the officer resolved this application's vetting hold, then tried to accept it. */
+    | 'ACCEPT_EXCLUDES_CLEARANCE_REVIEWER';
 }
 
 /**
@@ -165,6 +176,49 @@ export type AdjudicateOutcome =
   | { readonly kind: 'NOT_APPLICABLE'; readonly currentStatus: ApplicationStatus }
   | { readonly kind: 'NOT_FOUND' };
 
+/**
+ * Resolve a HELD vetting dimension (D10, ADR-051). The officer answers the gate
+ * with a CLOSED reason; the reason names both the dimension and the decision, so
+ * a body that disagrees with it is a caller error refused at the ingress, never
+ * coerced here. `notes` is the officer's own words — bounded, audit-only.
+ */
+export interface VettingHoldInput {
+  readonly actor: OfficerActor;
+  readonly applicationId: string;
+  readonly dimension: VettingHoldDimension;
+  readonly decision: VettingHoldDecision;
+  readonly reason: VettingHoldReason;
+  readonly notes: string | null;
+}
+
+/**
+ * Outcome of a vetting-hold resolution.
+ *   • APPLIED   — the evidence was rewritten and the row was re-derived. The
+ *                 application may legitimately hold its status (a late hold
+ *                 resolved on an already-scheduled application): `fromStatus`
+ *                 and `toStatus` are then equal, and `statusChanged` is false.
+ *                 `clearedToGreen` is the slot lane's trigger, exactly as on
+ *                 adjudication.
+ *   • NOT_HELD  — the dimension is not (or no longer) held for a human. 409:
+ *                 the work item the console showed is gone — someone else
+ *                 resolved it, or the evidence never actually held. NO write.
+ *   • NOT_FOUND — absent from the officer's OWN agency schema (cross-agency).
+ */
+export type VettingHoldOutcome =
+  | {
+      readonly kind: 'APPLIED';
+      readonly dimension: VettingHoldDimension;
+      readonly fromStatus: ApplicationStatus;
+      readonly toStatus: ApplicationStatus;
+      readonly statusChanged: boolean;
+      readonly clearedToGreen: boolean;
+      readonly applicantId: string;
+      readonly campaignId: string;
+      readonly category: ApplicationCategory;
+    }
+  | { readonly kind: 'NOT_HELD'; readonly dimension: VettingHoldDimension; readonly currentStatus: ApplicationStatus }
+  | { readonly kind: 'NOT_FOUND' };
+
 export interface OfficerTransitionRepository {
   medicalReview(input: MedicalReviewInput): Promise<OfficerTransitionOutcome>;
   finalDecision(input: FinalDecisionInput): Promise<OfficerTransitionOutcome>;
@@ -188,4 +242,18 @@ export interface OfficerTransitionRepository {
    * guarded exactly like the other officer transitions.
    */
   adjudicate(input: AdjudicateInput): Promise<AdjudicateOutcome>;
+  /**
+   * Resolve a vetting hold as the officer's DB role, in one transaction:
+   *   • refuse unless the named dimension is genuinely held — UNDER_REVIEW for
+   *     CRIMINAL, academic PENDING + NESA_REVIEW_REQUIRED for ACADEMIC (the
+   *     same predicate the queue lists on, so the verb's precondition and the
+   *     console's work item cannot drift);
+   *   • write the reason's evidence value onto the vetting column;
+   *   • stamp who resolved it and when (`vetting_hold_resolved_by/_at/_dimension`,
+   *     rls/0045) — the durable fact the accept-time four-eyes read needs;
+   *   • RE-DERIVE the status from the row's evidence with the same pure
+   *     lifecycle every other path uses, and record the edge on the append-only
+   *     history when it moves.
+   */
+  vettingHold(input: VettingHoldInput): Promise<VettingHoldOutcome>;
 }

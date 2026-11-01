@@ -213,6 +213,12 @@ run_ts "shared-config: bind host and exposure (loopback by default, ADR-053)" pa
 # (evaluation 2026-10-29, D11). Zero infrastructure: the real use case, fake ports.
 run_ts "field-sync: actor binding — the token is the only actor (D11)" services/field-sync-service/selfcheck/verify-actor-binding.ts
 run_ts "shared-types: document-door contract (producer ↔ vocabulary ↔ consumer, D7)" packages/shared-types/selfcheck/verify-document-door-contract.ts
+# D10: the amber queue's two human holds (a criminal-clearance review, a NESA
+# review) have a VERB, its own permission, a closed reason vocabulary where the
+# reason IS the verdict, and four eyes on the accept side (evaluation 2026-10-29,
+# D10). Zero infrastructure: the real use case against a fake repository, plus
+# structural assertions on the SQL predicate and the accept transaction.
+run_ts "application-service: vetting-hold resolution + separation of duties (D10)" services/application-service/selfcheck/verify-vetting-hold.ts
 run_ts "edge-gateway: contract drift (registry ↔ OpenAPI ↔ upstream catalogue)" services/edge-gateway/selfcheck/verify-edge-contract.ts
 run_ts "edge-gateway: BUILD-001 live campaign HTTP/session/CSRF/idempotency boundary" services/edge-gateway/selfcheck/verify-campaign-http-boundary.ts
 run_ts "edge-gateway: operational reads + DPO queue/decision boundary (ADR-039)" services/edge-gateway/selfcheck/verify-operational-reads-boundary.ts

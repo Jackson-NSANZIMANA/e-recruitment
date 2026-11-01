@@ -266,6 +266,11 @@ apply_sql "${RLS_DIR}/0040_clearance_certificates.sql" "rls/0040 (clearance cert
 # S12c (ADR-049): database-level guard on the additive campaign policy v2 block.
 apply_sql "${RLS_DIR}/0041_campaign_policy_v2.sql" "rls/0041 (campaign policy v2 guard)"
 
+# D10 (ADR-051): the durable resolver stamp for a resolved vetting hold, in ALL
+# THREE ops schemas — the accept-time four-eyes read (the officer who resolved a
+# criminal or NESA hold may not also accept) reads this column, not the history.
+apply_sql "${RLS_DIR}/0045_vetting_hold_resolution.sql" "rls/0045 (vetting-hold resolver stamp)"
+
 printf '\n'
 
 ok "database bootstrapped — schema + isolation + audit immutability + processing codes + campaign reads + g2g subject hash + age columns + status-history immutability + venue reads + field-device registry + officer accounts + adjudication-review status + rnp medical-cert columns + accept-lock backstop + erasure freeze + service accounts + applicant auth + erasure requests + stored contact + edge sessions + event outbox + slot reservations + submission integrity + walk-in outbox grant + shared rate-limit buckets + required extensions + campaign control plane + functions-only command boundary + onboarding lockout + application policy binding + document venue verification + exam invitation + gate admissions + officer lifecycle + biometric identity evidence in place"
