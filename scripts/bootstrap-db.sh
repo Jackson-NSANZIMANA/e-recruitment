@@ -266,20 +266,34 @@ apply_sql "${RLS_DIR}/0040_clearance_certificates.sql" "rls/0040 (clearance cert
 # S12c (ADR-049): database-level guard on the additive campaign policy v2 block.
 apply_sql "${RLS_DIR}/0041_campaign_policy_v2.sql" "rls/0041 (campaign policy v2 guard)"
 
+# Phase-0 parity (evaluation D1/D12): the two PLATFORM-WIDE columns that rdf_ops
+# alone had while shared, agency-agnostic adapters wrote and read them — an RNP or
+# RCS invitation could be sent and never advance, and an RNP/RCS score conflict
+# could never be resolved. The divergence set is then pinned by
+# selfcheck/verify-cross-agency-column-parity.ts, so the next one cannot appear
+# unnoticed.
+apply_sql "${RLS_DIR}/0043_cross_agency_column_parity.sql" "rls/0043 (cross-agency column parity: D1/D12)"
+
+# Phase-0 terminal outcome (evaluation D2): a clearance the registry never
+# answered for may end in a HUMAN (REVIEW + CLEARANCE_UNVERIFIED) instead of a
+# PENDING row nobody looks at, and a late escalation may not supersede a verdict.
+# Replaces record_clearance_verification, so it MUST follow rls/0040.
+apply_sql "${RLS_DIR}/0044_clearance_unverified_escalation.sql" "rls/0044 (clearance escalation: D2)"
+
 # D2 (ADR-050): the durable re-drive ledger. One row per dead letter, with a
 # schedule, an attempt count and a parked state — a Kafka offset is a cursor and
 # cannot schedule, so this table IS the schedule (public_core, system-owned).
-apply_sql "${RLS_DIR}/0043_event_redrive_ledger.sql" "rls/0043 (event re-drive ledger)"
+apply_sql "${RLS_DIR}/0045_event_redrive_ledger.sql" "rls/0045 (event re-drive ledger)"
 
 # D8 (ADR-052): document supersession. document_records gains a revision counter
 # and a KEYED content digest; document_revisions is the append-only trail of what
 # passed through each slot (grants stripped + triggers, the rls/0007 idiom).
-apply_sql "${RLS_DIR}/0044_document_revisions.sql" "rls/0044 (document revisions)"
+apply_sql "${RLS_DIR}/0046_document_revisions.sql" "rls/0046 (document revisions)"
 
 # D10 (ADR-051): the durable resolver stamp for a resolved vetting hold, in ALL
 # THREE ops schemas — the accept-time four-eyes read (the officer who resolved a
 # criminal or NESA hold may not also accept) reads this column, not the history.
-apply_sql "${RLS_DIR}/0045_vetting_hold_resolution.sql" "rls/0045 (vetting-hold resolver stamp)"
+apply_sql "${RLS_DIR}/0047_vetting_hold_resolution.sql" "rls/0047 (vetting-hold resolver stamp)"
 
 printf '\n'
 

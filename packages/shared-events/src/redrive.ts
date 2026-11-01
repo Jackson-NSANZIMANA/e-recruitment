@@ -183,3 +183,32 @@ export function decideRedrive(
 export function redriveKey(entry: Pick<RedriveLedgerEntry, 'sourceTopic' | 'sourcePartition' | 'sourceOffset' | 'groupId'>): string {
   return `${entry.groupId}|${entry.sourceTopic}|${String(entry.sourcePartition)}|${entry.sourceOffset}`;
 }
+
+/** A dead letter as the intake sees it: identity and headers, never the payload. */
+export interface DeadLetterHeader {
+  readonly groupId: string;
+  readonly sourceTopic: string;
+  readonly partition: number;
+  readonly offset: string;
+  readonly reason: DeadLetterReason | 'UNKNOWN';
+  /** The event's own id, when the header carried one. */
+  readonly eventId: string | null;
+}
+
+/**
+ * When a newly registered letter is first due. `priorAttempts` is what the same
+ * event already spent on earlier letters (0 for a fresh event): inheriting it is
+ * what stops "re-drive, fail, new letter, attempts = 0" from looping for ever.
+ * Letters that can never be retried are due NOW so they are parked (and
+ * signalled) immediately rather than after a pointless wait.
+ */
+export function firstDueAtMs(
+  policy: RedrivePolicy,
+  nowMs: number,
+  reason: DeadLetterHeader['reason'],
+  priorAttempts: number,
+): number {
+  if (reason === 'NON_RETRYABLE' || reason === 'UNDECODABLE') return nowMs;
+  if (priorAttempts >= policy.delaysMs.length) return nowMs; // exhausted: park now
+  return nowMs + redriveDelayMs(policy, priorAttempts + 1);
+}

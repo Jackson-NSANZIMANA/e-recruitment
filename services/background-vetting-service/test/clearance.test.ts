@@ -2,13 +2,15 @@
 // simulator in-process, the pure ordered checks, the use case with fakes. No infra.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { InMemoryEventBus } from '@usrp/shared-events';
+import { InMemoryEventBus, newCorrelationContext, newEnvelope } from '@usrp/shared-events';
 import { createSandboxServer, DEFAULT_PROFILES, Population, silentLog, validateContract, DEV_G2G_CLIENT_TOKEN } from '@usrp/g2g-sandbox';
 import {
+  CLEARANCE_CONSUMER_GROUP,
   ClearanceRegistryUnavailableError,
   HttpIremboCertificateTransport,
   IremboCertificateGateway,
   VerifyClearanceCertificateService,
+  clearanceDeadLetterObserver,
   decideClearance,
   isoFromDdMmYyyy,
   mapIremboCertificate,
@@ -226,4 +228,81 @@ test('use case: malformed number, unknown applicant and unverified identity are 
     const unverified = new VerifyClearanceCertificateService({ gateway, identityReader: h.reader('P-CLEARANCE-VALID', 'PENDING'), repository: h.repository, eventBus: h.bus, policy: h.policy, referenceHmacKey: 'k'.repeat(32) });
     assert.equal((await unverified.verify({ ...COMMAND, clearanceCertificateNumber: 'S990000000000ZZZZ' })).kind, 'IDENTITY_NOT_VERIFIED');
   });
+});
+
+// ── the terminal word (evaluation D2) ─────────────────────────────
+//
+// The retry budget is ~15.5s by design, so a longer registry outage used to end
+// on the dead-letter topic: the PENDING row stayed the latest word, the citizen
+// kept reading "we are verifying", and no officer was ever asked. The escalation
+// is the honest end of that path — a human, not another silent attempt.
+
+test('escalation: REVIEW + CLEARANCE_UNVERIFIED, UNDER_REVIEW emitted, nothing about the certificate asserted', async () => {
+  const h = harness();
+  // A gateway that would answer is deliberate: escalation must never call it.
+  const gateway = { verify: () => { throw new Error('the registry must not be consulted again'); } };
+  const service = new VerifyClearanceCertificateService({ gateway, identityReader: h.reader('P-CLEARANCE-503'), repository: h.repository, eventBus: h.bus, policy: h.policy, referenceHmacKey: 'k'.repeat(32) });
+  const number = numberOf('P-CLEARANCE-VALID');
+
+  const outcome = await service.escalateUnverified({ ...COMMAND, clearanceCertificateNumber: number });
+  assert.equal(outcome.kind, 'REVIEW_REQUIRED');
+  assert.deepEqual(outcome.kind === 'REVIEW_REQUIRED' && outcome.reasons, ['CLEARANCE_UNVERIFIED']);
+
+  const [record] = h.records;
+  assert.ok(record);
+  assert.equal(record.outcome, 'REVIEW');
+  assert.deepEqual(record.reviewReasons, ['CLEARANCE_UNVERIFIED']);
+  // Cause-neutral: no failure code, no certificate field, no binding guesswork.
+  assert.deepEqual([record.failureCode, record.certificateType, record.issuedOn, record.binding], [null, null, null, null]);
+  // The handle is the SAME as an attempt would have written, so one certificate
+  // keeps one history (the escalation must not look like a second certificate).
+  assert.equal(record.referenceLast4, number.slice(-4));
+  assert.match(record.referenceHmac, /^[0-9a-f]{64}$/);
+
+  const vetting = h.bus.published.find((e) => e.eventType === 'RIB_VETTING_COMPLETED');
+  assert.ok(vetting && vetting.eventType === 'RIB_VETTING_COMPLETED');
+  assert.equal(vetting.clearanceStatus, 'UNDER_REVIEW');
+  assert.deepEqual(vetting.reviewReasons, ['CLEARANCE_UNVERIFIED']);
+  assert.equal(vetting.source, 'IREMBO_CERTIFICATE');
+  // The audit trail names the escalation, not a review the registry never asked for.
+  assert.ok(h.bus.published.some((e) => e.eventType === 'AUDIT_ENTRY' && e.action === 'CLEARANCE_VERIFICATION_ESCALATED'));
+
+  // Nothing identifying reaches a record, an event or a log payload.
+  const c = pop.persona('P-CLEARANCE-503');
+  const everything = JSON.stringify({ events: h.bus.published, records: h.records });
+  for (const secret of [c.surname, c.forename, c.dateOfBirth, c.nid, number]) assert.equal(everything.includes(secret), false, 'leak');
+});
+
+test('dead-letter observer: only a registry outage for OUR group is escalated; every other give-up is left alone', async () => {
+  const h = harness();
+  const service = new VerifyClearanceCertificateService({ gateway: { verify: () => { throw new Error('unused'); } }, identityReader: h.reader('P-CLEARANCE-503'), repository: h.repository, eventBus: h.bus, policy: h.policy, referenceHmacKey: 'k'.repeat(32) });
+  const observer = clearanceDeadLetterObserver(service);
+  const event = {
+    ...newEnvelope(newCorrelationContext()),
+    eventType: 'CLEARANCE_CERTIFICATE_SUBMITTED' as const,
+    applicantId: 'a1',
+    applicationId: 'app1',
+    agency: 'RDF' as const,
+    category: 'RDF_REGULAR' as const,
+    clearanceCertificateNumber: numberOf('P-CLEARANCE-VALID'),
+    referenceDate: TODAY,
+  };
+  const info = (overrides: Partial<{ groupId: string; error: unknown }> = {}): Parameters<typeof observer>[1] => ({
+    reason: 'HANDLER_FAILED', groupId: CLEARANCE_CONSUMER_GROUP, topic: 'clearance.submitted',
+    partition: 0, offset: '1', attempts: 6, error: new ClearanceRegistryUnavailableError('outage'),
+    ...overrides,
+  });
+
+  // Another consumer group on the same bus: not ours to answer.
+  await observer(event, info({ groupId: 'someone-else' }));
+  assert.equal(h.records.length, 0, 'a sibling group\'s dead letter must not touch our record');
+
+  // A terminal failure that is NOT the outage path may already have written a
+  // verdict; layering REVIEW over it would regress a cleared citizen.
+  await observer(event, info({ error: new Error('publish failed') }));
+  assert.equal(h.records.length, 0, 'only the outage path escalates');
+
+  await observer(event, info());
+  assert.equal(h.records.length, 1);
+  assert.equal(h.records[0]?.outcome, 'REVIEW');
 });

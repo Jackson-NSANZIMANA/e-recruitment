@@ -100,8 +100,6 @@ export const UPSTREAM = Object.freeze({
   finalDecision: op('finalDecision', 'application', 'POST', '/v1/applications/final-decision', 'officer-jwt'),
   accept: op('accept', 'application', 'POST', '/v1/applications/accept', 'officer-jwt'),
   adjudicate: op('adjudicate', 'application', 'POST', '/v1/applications/adjudicate', 'officer-jwt'),
-  // D10 (ADR-051): resolve a held vetting dimension the amber queue listed.
-  vettingHold: op('vettingHold', 'application', 'POST', '/v1/applications/vetting-hold', 'officer-jwt'),
 
   // application-service — document-checklist.controller.ts (ADR-032)
   documentChecklist: op('documentChecklist', 'application', 'GET', '/v1/applications/document-checklist', 'officer-jwt'),

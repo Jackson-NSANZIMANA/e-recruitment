@@ -56,6 +56,23 @@ export class ResolveConflictService {
     };
     await this.deps.eventBus.publish(captured);
 
+    // FOUR-EYES IS RECORDABLE, SO IT IS RECORDED (evaluation D11).
+    //
+    // The rule "an officer may not adjudicate a conflict their own capture
+    // created" needs three facts, and all three are already here: the resolving
+    // officer (the officer's opaque subject from the verified token), the
+    // capturing officer of the record that won (`capturing_officer_id`, written
+    // by the signed sync), and their agency. What was missing was the
+    // COMPARISON, so the trail could not answer the question after the fact.
+    //
+    // It is recorded rather than enforced on purpose: the SoD policy is the
+    // owner's to ratify (ROADMAP §6.6), and at a one-venue exam day the same
+    // officer legitimately does both. A refusal invented here would stop an
+    // honest day; a recorded fact cannot be un-recorded. When the rule is
+    // ratified it becomes a refusal at this same point, with the evidence
+    // already collected.
+    const sameOfficer = outcome.capturingOfficerId === command.resolvedBy;
+
     const audit: AuditEvent = {
       ...newEnvelope(command.context),
       eventType: 'AUDIT_ENTRY',
@@ -64,7 +81,12 @@ export class ResolveConflictService {
       action: 'FIELD_SCORE_CONFLICT_RESOLVED',
       performedBy: command.resolvedBy,
       agency: command.agency,
-      metadata: { scoreId: command.scoreId, resolution: command.resolution },
+      metadata: {
+        scoreId: command.scoreId,
+        resolution: command.resolution,
+        capturingOfficerId: outcome.capturingOfficerId,
+        resolverIsCapturingOfficer: sameOfficer,
+      },
     };
     await this.deps.eventBus.publish(audit);
 

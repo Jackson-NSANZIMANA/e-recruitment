@@ -208,7 +208,7 @@ function serviceEnv(s: Secrets): Record<string, string> {
     NODE_ENV: 'production',
     USRP_ENVIRONMENT: 'sandbox',
     // ADR-053: loopback unless this launcher was told otherwise (below, edge only).
-    HTTP_BIND_HOST: '127.0.0.1',
+    USRP_HTTP_BIND_HOST: '127.0.0.1',
     LOG_LEVEL: 'info',
     // D2: the production schedule is 1m..6h; the sandbox compresses it so a
     // journey can watch a letter be re-driven, parked and re-read in one pass.
@@ -220,6 +220,13 @@ function serviceEnv(s: Secrets): Record<string, string> {
     KAFKA_SSL: 'false',
     MINIO_USE_SSL: 'false',
     EDGE_COOKIE_SECURE: 'true',
+    // Loopback only (evaluation D9). These twelve processes carry live session
+    // credentials — the edge holds an upstream credential for every officer
+    // session — and the sandbox's own containers were ALWAYS loopback-bound
+    // (127.0.0.1:4992/4993/4995). Only the Node services listened on every
+    // interface of the developer's machine. The scripts keep their `localhost`
+    // URLs: Node connects localhost with family auto-selection (default since
+    // Node 20), so a 127.0.0.1 bind is reachable as either family.
     IDENTITY_CLIENT_ID: SANDBOX_CLIENT_ID,
     IAM_BASE_URL: local(4911),
     APPLICATION_SERVICE_BASE_URL: local(4906),
@@ -420,7 +427,7 @@ async function up(): Promise<void> {
   for (const svc of Object.keys(SERVICE_PORTS)) {
     out(`▶ ${svc} on :${String(SERVICE_PORTS[svc])}`);
     // ADR-053: ONE process may leave loopback, and only on request.
-    const svcEnv = exposedTo !== null && svc === 'edge-gateway' ? { ...env, HTTP_BIND_HOST: exposedTo } : env;
+    const svcEnv = exposedTo !== null && svc === 'edge-gateway' ? { ...env, USRP_HTTP_BIND_HOST: exposedTo } : env;
     startDetached(svc, [`services/${svc}/dist/main.js`], SMS_SERVICES.has(svc) ? svcEnv : withoutSmsCredentials(svcEnv));
   }
   for (const [svc, port] of Object.entries(SERVICE_PORTS)) await waitReady(svc, port, '/ready');

@@ -26,6 +26,7 @@
 // ══════════════════════════════════════════════════════════════════
 
 import {
+  DEAD_LETTER_TOPIC,
   decideRedrive,
   nextAttemptAtMs,
   redriveKey,
@@ -74,9 +75,34 @@ export class RedriveDeadLettersService {
     this.#deps = deps;
   }
 
+  /**
+   * Register what landed on the dead-letter topic since the last pass. This is
+   * the step that makes the ledger non-empty: before it existed the worker
+   * claimed from a table nothing wrote to. A broker hiccup here must not stop the
+   * letters already on the schedule from being re-driven, so it is logged and
+   * the tick continues.
+   */
+  async #intake(nowMs: number): Promise<void> {
+    try {
+      const cursor = await this.#deps.ledger.readCursor(DEAD_LETTER_TOPIC);
+      const scan = await this.#deps.source.scanNew(cursor, this.#deps.policy.maxPerTick * 4);
+      if (scan.letters.length === 0 && scan.next.size === 0) return;
+      const { registered } = await this.#deps.ledger.intake({
+        letters: scan.letters,
+        next: scan.next,
+        nowMs,
+        delaysMs: this.#deps.policy.delaysMs,
+      });
+      if (registered > 0) this.#deps.log({ msg: 'event_redrive_intake', registered });
+    } catch (error) {
+      this.#deps.log({ msg: 'event_redrive_intake_failed', error: error instanceof Error ? error.name : 'unknown' });
+    }
+  }
+
   /** One pass. Returns counts; never throws for a single letter's failure. */
   async tick(): Promise<RedriveTickResult> {
     const nowMs = this.#deps.now();
+    await this.#intake(nowMs);
     const due = await this.#deps.ledger.claimDue({ nowMs, limit: this.#deps.policy.maxPerTick });
     const counts = { ...ZERO, claimed: due.length };
 

@@ -58,6 +58,16 @@ function currentStatusOf(body: unknown): string | null {
   return typeof value === 'string' ? value : null;
 }
 
+/** The lanes a refusal offers, or null when it offers none (D10). */
+const ADJUDICATION_LANES: ReadonlySet<string> = new Set(['DOCUMENT', 'CRIMINAL', 'ACADEMIC']);
+
+function heldLanesOf(body: unknown): readonly string[] | null {
+  const value = field(body, 'heldLanes');
+  if (!Array.isArray(value)) return null;
+  const lanes = value.filter((v): v is string => typeof v === 'string' && ADJUDICATION_LANES.has(v));
+  return lanes.length > 0 ? lanes : null;
+}
+
 /**
  * Map a 409 from any transition-shaped upstream route.
  *
@@ -79,6 +89,21 @@ export function conflictResult(body: unknown): HttpResult {
       return { status: 409, body: { error: 'CROSS_AGENCY_ACCEPT_LOCK' } };
     case 'IDENTITY_NOT_VERIFIED':
       return { status: 409, body: { error: 'IDENTITY_NOT_VERIFIED' } };
+    case 'NOT_APPLICABLE': {
+      // D10: an adjudication on a row held in more than one lane is refused
+      // WITH the lanes, and that refusal is an INSTRUCTION — the caller must
+      // send one of them back. The default below is, by its own rule (see the
+      // comment on it), correct only for a status whose whole content is
+      // "wrong state, and here is the state"; this one carries the answer.
+      const lanes = heldLanesOf(body);
+      if (lanes !== null) {
+        return {
+          status: 409,
+          body: { error: 'ADJUDICATION_LANE_REQUIRED', status: currentStatusOf(body), heldLanes: lanes },
+        };
+      }
+      return { status: 409, body: { error: 'ILLEGAL_TRANSITION', status: currentStatusOf(body) } };
+    }
     case 'NO_WALK_IN_CAMPAIGN':
       // The upstream body names the agency; it is the officer's OWN agency, so
       // it is redundant rather than sensitive. Dropped for shape consistency.

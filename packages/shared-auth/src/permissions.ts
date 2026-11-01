@@ -75,14 +75,6 @@ export const OPERATION_PERMISSION_LIST = [
   'medical.review',
   /** Record an adjudication on an amber/red document review. */
   'adjudication.decide',
-  /**
-   * Resolve a HELD vetting dimension — a criminal-clearance UNDER_REVIEW or a
-   * NESA review — so the queue has a verb (D10, ADR-051). Same post as
-   * adjudication.decide: the officer who reads the evidence decides on it.
-   * Deliberately NOT granted to decision_authority: the accept side must be
-   * able to refuse a resolution by the same officer (CLEARANCE_REVIEW_EXCLUDES_ACCEPTER).
-   */
-  'vetting.hold.resolve',
   /** Record the final recruitment decision. */
   'decision.final',
   /** Accept (enlist) a shortlisted applicant. */
@@ -202,12 +194,7 @@ const ROLE_PERMISSIONS: Readonly<Record<KnownRole, ReadonlySet<Permission>>> = {
     ...READ,
   ]),
   medical_officer: new Set<Permission>(['medical.review', ...READ]),
-  adjudicator: new Set<Permission>([
-    'adjudication.decide',
-    'vetting.hold.resolve',
-    'biometric.evidence.read',
-    ...READ,
-  ]),
+  adjudicator: new Set<Permission>(['adjudication.decide', 'biometric.evidence.read', ...READ]),
   decision_authority: new Set<Permission>(['decision.final', 'application.accept', 'biometric.evidence.read', ...READ]),
   dpo: new Set<Permission>(['erasure.queue.read', 'erasure.decide']),
 };

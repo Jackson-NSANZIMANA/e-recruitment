@@ -18,9 +18,9 @@
 //                   It carries NO note: the upstream route has no such field.
 //   final-decision  { applicationId, decision: SHORTLIST|REJECT, notes? }
 //   accept          { applicationId }
-//   adjudicate      { applicationId, decision: CLEAR|REJECT, notes? }
-//   vetting-hold    { applicationId, dimension: CRIMINAL|ACADEMIC,
-//                     decision: CLEAR|REJECT, reasonCode, notes? }   (D10, ADR-051)
+//   adjudicate      { applicationId, decision: CLEAR|REJECT, lane?: DOCUMENT|CRIMINAL|ACADEMIC, notes? }
+//                   `lane` is the answer to an ADJUDICATION_LANE_REQUIRED refusal (D10): it MUST be
+//                   forwarded, or a row held in two lanes could never be decided from a browser.
 //
 // NONE RETURNS AN APPLICATION. The old frontend hook was typed
 // UseMutationResult<Application> and wrote the response into its detail cache,
@@ -29,7 +29,6 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { HttpError, type RouteHandler } from '@usrp/shared-http';
-import { VETTING_HOLD_REASONS, type VettingHoldReason } from '@usrp/shared-types';
 import { UPSTREAM } from '../../domain/upstream-operations.js';
 import { transitionResult } from './outcomes.js';
 import { withOfficerSession, type EdgeDeps } from './guards.js';
@@ -45,11 +44,8 @@ const FITNESS: ReadonlySet<string> = new Set(['FIT', 'UNFIT']);
 const CERT_VERDICTS: ReadonlySet<string> = new Set(['CERT_VERIFIED', 'CERT_REJECTED']);
 const DECISIONS: ReadonlySet<'SHORTLIST' | 'REJECT'> = new Set(['SHORTLIST', 'REJECT']);
 const ADJUDICATIONS: ReadonlySet<'CLEAR' | 'REJECT'> = new Set(['CLEAR', 'REJECT']);
-/** D10: the vetting-hold vocabulary, imported — never retyped on this boundary. */
-const VETTING_DIMENSIONS: ReadonlySet<'CRIMINAL' | 'ACADEMIC'> = new Set(['CRIMINAL', 'ACADEMIC']);
-const VETTING_REASON_CODES: ReadonlySet<VettingHoldReason> = new Set(
-  Object.keys(VETTING_HOLD_REASONS) as VettingHoldReason[],
-);
+/** Which hold a verdict is about (D10). The same closed vocabulary the service accepts back. */
+const ADJUDICATION_LANES: ReadonlySet<'DOCUMENT' | 'CRIMINAL' | 'ACADEMIC'> = new Set(['DOCUMENT', 'CRIMINAL', 'ACADEMIC']);
 /** final_decision_notes is varchar(1000) upstream. */
 const MAX_NOTES = 1_000;
 const MAX_PHYSICIAN = 200;
@@ -144,56 +140,25 @@ export function adjudicateApplicationHandler(deps: EdgeDeps): RouteHandler {
     const body = await readJsonBody(ctx);
     const applicationId = requireUuid(body.applicationId, 'applicationId');
     const decision = requireOneOf<'CLEAR' | 'REJECT'>(body.decision, 'decision', ADJUDICATIONS);
+    // Optional: absent means "the row's only hold". Present, it is checked here against the closed set (a
+    // wrong value is the officer's 400, not an upstream surprise) and FORWARDED: dropping it turned the
+    // edge's own "send a lane" refusal into an endless loop for any row held in two lanes.
+    const lane =
+      body.lane === undefined
+        ? undefined
+        : requireOneOf<'DOCUMENT' | 'CRIMINAL' | 'ACADEMIC'>(body.lane, 'lane', ADJUDICATION_LANES);
     const notes = optionalNote(body.notes ?? body.note, MAX_NOTES);
 
     const upstream = await deps.upstream.call({
       operation: UPSTREAM.adjudicate,
       correlationId: ctx.correlationId,
       credential: session.upstreamCredential,
-      body: { applicationId, decision, ...(notes === undefined ? {} : { notes }) },
-    });
-    return transitionResult(applicationId, upstream.status, upstream.body);
-  });
-}
-
-/**
- * D10 (ADR-051): resolve a HELD vetting dimension — the verb the amber queue
- * never had. The edge is a pass-through on the MEANING (the reason set is owned
- * by @usrp/shared-types and enforced again upstream), but it is not a
- * pass-through on SHAPE: an unknown reason code or dimension never leaves this
- * boundary, and the closed vocabulary is one import, so the console's dropdown
- * and the service's table cannot drift.
- *
- * The response says which dimension moved and whether the STATUS moved — a late
- * hold resolved on an already-scheduled application legitimately keeps its
- * status, and the console must be able to tell that apart from a no-op.
- */
-export function resolveVettingHoldHandler(deps: EdgeDeps): RouteHandler {
-  return withOfficerSession(deps, 'resolveVettingHold', async (ctx, session) => {
-    const body = await readJsonBody(ctx);
-    const applicationId = requireUuid(body.applicationId, 'applicationId');
-    const dimension = requireOneOf<'CRIMINAL' | 'ACADEMIC'>(body.dimension, 'dimension', VETTING_DIMENSIONS);
-    const decision = requireOneOf<'CLEAR' | 'REJECT'>(body.decision, 'decision', ADJUDICATIONS);
-    const reasonCode = requireOneOf<VettingHoldReason>(body.reasonCode, 'reasonCode', VETTING_REASON_CODES);
-    const notes = optionalNote(body.notes ?? body.note, MAX_NOTES);
-
-    // The reason IS the verdict. Refuse the contradiction here, with the same
-    // closed rule the service enforces (422 upstream) — so a console bug shows
-    // up in the edge's own tests rather than as a rejected officer.
-    const spec = VETTING_HOLD_REASONS[reasonCode];
-    if (spec.dimension !== dimension || spec.decision !== decision) {
-      throw new HttpError(
-        422,
-        'INVALID_VETTING_HOLD_REASON',
-        `reasonCode ${reasonCode} resolves ${spec.dimension}/${spec.decision}, not ${dimension}/${decision}.`,
-      );
-    }
-
-    const upstream = await deps.upstream.call({
-      operation: UPSTREAM.vettingHold,
-      correlationId: ctx.correlationId,
-      credential: session.upstreamCredential,
-      body: { applicationId, dimension, decision, reasonCode, ...(notes === undefined ? {} : { notes }) },
+      body: {
+        applicationId,
+        decision,
+        ...(lane === undefined ? {} : { lane }),
+        ...(notes === undefined ? {} : { notes }),
+      },
     });
     return transitionResult(applicationId, upstream.status, upstream.body);
   });

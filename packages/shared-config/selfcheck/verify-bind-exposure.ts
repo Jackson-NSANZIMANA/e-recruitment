@@ -8,7 +8,7 @@
 // This proof makes the DECISION explicit and permanent. It asserts:
 //
 //   1. THE RESOLVER'S RULES: loopback by default, production refuses to boot
-//      without HTTP_BIND_HOST, a hostname is refused (DNS must not decide which
+//      without USRP_HTTP_BIND_HOST, a hostname is refused (DNS must not decide which
 //      interface holds citizen data), and 'localhost' is not silently accepted.
 //   2. NO WILDCARD DEFAULT SURVIVES: `startHttpServer`'s host is a REQUIRED
 //      option, and no service main() omits it.
@@ -169,8 +169,8 @@ check(
 section('Compose files say where containers listen');
 const rehearsal = read('infrastructure/images/docker-compose.rehearsal.yml');
 check(
-  'the rehearsal stack sets HTTP_BIND_HOST for its services',
-  /HTTP_BIND_HOST:\s*"?0\.0\.0\.0"?/.test(rehearsal),
+  'the rehearsal stack sets USRP_HTTP_BIND_HOST for its services',
+  /USRP_HTTP_BIND_HOST:\s*"?0\.0\.0\.0"?/.test(rehearsal),
 );
 const tier1 = read('infrastructure/docker/docker-compose.tier1.yml');
 check(
@@ -198,11 +198,11 @@ check(
 section('One process may leave loopback, on request, visibly');
 check(
   'the sandbox defaults every process to loopback',
-  /HTTP_BIND_HOST:\s*'127\.0\.0\.1'/.test(launcher),
+  /USRP_HTTP_BIND_HOST:\s*'127\.0\.0\.1'/.test(launcher),
 );
 check(
   'only the edge receives the LAN address',
-  /svc === 'edge-gateway' \? \{ \.\.\.env, HTTP_BIND_HOST: exposedTo \}/.test(launcher),
+  /svc === 'edge-gateway' \? \{ \.\.\.env, USRP_HTTP_BIND_HOST: exposedTo \}/.test(launcher),
 );
 check(
   'exposure is printed on the operator surface, not buried in a log',
@@ -210,7 +210,7 @@ check(
 );
 check(
   'the environment template documents the variable',
-  /HTTP_BIND_HOST=/.test(read('.env.example')),
+  /USRP_HTTP_BIND_HOST=/.test(read('.env.example')),
 );
 
 // ── Verdict ────────────────────────────────────────────────────────

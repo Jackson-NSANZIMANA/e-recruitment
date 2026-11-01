@@ -1,5 +1,5 @@
 // ══════════════════════════════════════════════════════════════════
-// @usrp/shared-database — event_redrive_ledger model (D2, rls/0043)
+// @usrp/shared-database — event_redrive_ledger model (D2, rls/0045)
 //
 // Mirrors public_core.event_redrive_ledger. The ledger is the SCHEDULE for
 // dead letters (ADR-050): a Kafka offset is a cursor and cannot be asked "who

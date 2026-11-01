@@ -1,7 +1,7 @@
 // ══════════════════════════════════════════════════════════════════
 // event-redrive-service — RedriveLedger adapter (PostgreSQL, D2)
 //
-// public_core.event_redrive_ledger (rls/0043). Every statement runs as
+// public_core.event_redrive_ledger (rls/0045). Every statement runs as
 // usrp_system_service, the role the worker is: operational state, not case data.
 //
 // THE CLAIM IS THE CONCURRENCY CONTROL. `FOR UPDATE SKIP LOCKED` means two
@@ -15,8 +15,8 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { sql } from '@usrp/shared-database';
-import type { RedriveLedgerEntry, RedriveParkReason } from '@usrp/shared-events';
-import type { ClaimDueInput, ParkInput, RecordAttemptInput, RedriveLedger } from '../ports/redrive-ledger.js';
+import { DEAD_LETTER_TOPIC, firstDueAtMs, type RedriveLedgerEntry, type RedriveParkReason } from '@usrp/shared-events';
+import type { ClaimDueInput, IntakeInput, ParkInput, RecordAttemptInput, RedriveLedger } from '../ports/redrive-ledger.js';
 
 const SYSTEM_ROLE = 'usrp_system_service';
 
@@ -47,6 +47,59 @@ function toEntry(row: LedgerRow): RedriveLedgerEntry {
 }
 
 export class PgRedriveLedger implements RedriveLedger {
+  async readCursor(topic: string): Promise<ReadonlyMap<number, string>> {
+    return sql.begin(async (tx) => {
+      await tx`SET LOCAL ROLE ${sql(SYSTEM_ROLE)}`;
+      const rows = await tx<{ partition: number; next_offset: string }[]>`
+        SELECT partition, next_offset::text AS next_offset
+        FROM public_core.event_redrive_cursor WHERE topic = ${topic}
+      `;
+      return new Map(rows.map((r) => [r.partition, r.next_offset] as const));
+    });
+  }
+
+  async intake(input: IntakeInput): Promise<{ readonly registered: number }> {
+    return sql.begin(async (tx) => {
+      await tx`SET LOCAL ROLE ${sql(SYSTEM_ROLE)}`;
+      let registered = 0;
+      for (const l of input.letters) {
+        // prior = what the same event already spent in this group. The new row
+        // inherits it (attempts, first_seen_at); WHEN it is due is the pure
+        // schedule's call (firstDueAtMs), not a second copy of the rule in SQL.
+        const prior =
+          l.eventId === null
+            ? []
+            : await tx<{ attempts: number; first_seen: Date | null }[]>`
+                SELECT COALESCE(MAX(attempts), 0) AS attempts, MIN(first_seen_at) AS first_seen
+                FROM public_core.event_redrive_ledger
+                WHERE group_id = ${l.groupId} AND event_id = ${l.eventId}
+              `;
+        const attempts = prior[0]?.attempts ?? 0;
+        const firstSeenMs = prior[0]?.first_seen ? new Date(prior[0].first_seen).getTime() : input.nowMs;
+        const dueMs = firstDueAtMs({ delaysMs: input.delaysMs, groupFailureThreshold: 1, maxPerTick: 1 }, input.nowMs, l.reason, attempts);
+        const inserted = await tx`
+          INSERT INTO public_core.event_redrive_ledger
+            (source_topic, source_partition, source_offset, group_id, reason, event_id,
+             attempts, first_seen_at, next_attempt_at)
+          VALUES (${l.sourceTopic}, ${l.partition}, ${l.offset}::bigint, ${l.groupId}, ${l.reason}, ${l.eventId},
+                  ${attempts}, to_timestamp(${firstSeenMs / 1000}), to_timestamp(${dueMs / 1000}))
+          ON CONFLICT (source_topic, source_partition, source_offset, group_id) DO NOTHING
+        `;
+        registered += inserted.count;
+      }
+      for (const [partition, nextOffset] of input.next) {
+        await tx`
+          INSERT INTO public_core.event_redrive_cursor (topic, partition, next_offset)
+          VALUES (${DEAD_LETTER_TOPIC}, ${partition}, ${nextOffset}::bigint)
+          ON CONFLICT (topic, partition) DO UPDATE
+            SET next_offset = GREATEST(public_core.event_redrive_cursor.next_offset, EXCLUDED.next_offset),
+                updated_at = now()
+        `;
+      }
+      return { registered };
+    });
+  }
+
   async claimDue(input: ClaimDueInput): Promise<readonly RedriveLedgerEntry[]> {
     return sql.begin(async (tx) => {
       await tx`SET LOCAL ROLE ${sql(SYSTEM_ROLE)}`;

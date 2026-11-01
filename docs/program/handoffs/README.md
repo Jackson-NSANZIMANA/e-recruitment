@@ -8,7 +8,7 @@ backend/edge lane after the code shipped and the proofs passed, so each one is a
 |---|---|---|
 | [`D7-document-door-copy.md`](D7-document-door-copy.md) | D7 | one closed code set for the upload door, and copy chosen by *who must act* |
 | [`D8-document-revision.md`](D8-document-revision.md) | D8 | `revision` on upload, `409 DOCUMENT_REVIEW_CLOSED` after review, the officer's revision trail |
-| [`D10-vetting-hold-screen.md`](D10-vetting-hold-screen.md) | D10 | `POST /edge/v1/applications/vetting-hold`, the queue's `actions`, the SoD refusal |
+| [`D10-vetting-hold-screen.md`](D10-vetting-hold-screen.md) | D10 | `adjudicate` + `lane`, the queue's `heldLanes`, the SoD refusal |
 | [`D11-field-score-sync-state.md`](D11-field-score-sync-state.md) | D11 | per-record sync outcomes, `OFFICER_MISMATCH` as a supervisor event |
 
 Everything the labels need is exported from `@usrp/shared-types`; nothing here

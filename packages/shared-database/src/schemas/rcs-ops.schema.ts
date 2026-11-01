@@ -189,6 +189,10 @@ export const rcsApplications = rcsOps.table(
     qrInvitationCode: varchar('qr_invitation_code', { length: 64 }).unique(),
     qrInvitationIssuedAt: timestamp('qr_invitation_issued_at', { withTimezone: true }),
     smsNotificationSentAt: timestamp('sms_notification_sent_at', { withTimezone: true }),
+    // rls/0043 (evaluation D1): the delivery outcome the invitation projection
+    // records in the SAME transaction that advances the row. Platform-wide, so all
+    // three schemas carry it — the shared adapter writes it without an agency branch.
+    smsNotificationStatus: varchar('sms_notification_status', { length: 20 }),
 
     // ── Physical test results ─────────────────────────────────────
     physicalTestCompletedAt: timestamp('physical_test_completed_at', { withTimezone: true }),
@@ -198,10 +202,10 @@ export const rcsApplications = rcsOps.table(
     finalDecisionById: uuid('final_decision_by_id'),
     finalDecisionAt: timestamp('final_decision_at', { withTimezone: true }),
     finalDecisionNotes: varchar('final_decision_notes', { length: 1000 }),
-    // D10 (rls/0045): who resolved a HELD vetting dimension on this application.
-    vettingHoldResolvedBy: uuid('vetting_hold_resolved_by'),
+    // D10 (rls/0047): who resolved which HELD vetting dimension(s) on this application.
+    vettingHoldResolvers: uuid('vetting_hold_resolvers').array().notNull().default(sql`'{}'::uuid[]`),
+    vettingHoldResolvedDimensions: text('vetting_hold_resolved_dimensions').array().notNull().default(sql`'{}'::text[]`),
     vettingHoldResolvedAt: timestamp('vetting_hold_resolved_at', { withTimezone: true }),
-    vettingHoldDimension: varchar('vetting_hold_dimension', { length: 16 }),
 
     submittedAt: timestamp('submitted_at', { withTimezone: true }),
     // BUILD-002 (rls/0029): the policy version and calendar date that governed
@@ -276,7 +280,7 @@ export const rcsDocumentRecords = rcsOps.table(
     verifiedViaApi: boolean('verified_via_api').default(false),
     apiVerificationToken: varchar('api_verification_token', { length: 128 }),
     apiVerifiedAt: timestamp('api_verified_at', { withTimezone: true }),
-    // D8 (rls/0044, ADR-052): how many times this slot has been uploaded, and a
+    // D8 (rls/0046, ADR-052): how many times this slot has been uploaded, and a
     // KEYED digest of the bytes (never a bare hash — see the migration header).
     revision: integer('revision').default(1).notNull(),
     contentHmac: varchar('content_hmac', { length: 64 }),
@@ -320,6 +324,9 @@ export const rcsPhysicalTestScores = rcsOps.table(
     capturedAt: timestamp('captured_at', { withTimezone: true }).notNull(),
     syncedAt: timestamp('synced_at', { withTimezone: true }).defaultNow(),
     syncConflictDetected: boolean('sync_conflict_detected').default(false),
+    // rls/0043 (evaluation D12): the officer's adjudication label of a conflict.
+    // Agency-agnostic adjudication, so all three schemas carry it.
+    syncConflictResolution: varchar('sync_conflict_resolution', { length: 50 }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [

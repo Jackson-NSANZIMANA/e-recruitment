@@ -220,7 +220,7 @@ run_ts "shared-types: document-door contract (producer ↔ vocabulary ↔ consum
 # reason IS the verdict, and four eyes on the accept side (evaluation 2026-10-29,
 # D10). Zero infrastructure: the real use case against a fake repository, plus
 # structural assertions on the SQL predicate and the accept transaction.
-run_ts "application-service: vetting-hold resolution + separation of duties (D10)" services/application-service/selfcheck/verify-vetting-hold.ts
+run_ts "application-service: one hold verb, resolver set, human decision outranks machine (D10)" services/application-service/selfcheck/verify-hold-resolution.ts
 # D8: a reviewed document is EVIDENCE. A second upload supersedes (versioned,
 # keyed digest, append-only trail) only while the case is still in document
 # review and no officer has decided; otherwise 409 DOCUMENT_REVIEW_CLOSED — and
@@ -233,6 +233,7 @@ run_ts "document-forensics: supersession and the review lock (D8)" services/docu
 # stops a broken handler turning the deployment into a retry furnace
 # (evaluation 2026-10-29, D2). Zero infrastructure: pure policy, exhaustive.
 run_ts "event-redrive: dead-letter schedule, cap and circuit breaker (D2)" services/event-redrive-service/selfcheck/verify-redrive-policy.ts
+run_ts "event-redrive: ledger intake, inherited attempts and cursor on Postgres (D2)" services/event-redrive-service/selfcheck/verify-redrive-ledger-live.ts
 run_ts "edge-gateway: contract drift (registry ↔ OpenAPI ↔ upstream catalogue)" services/edge-gateway/selfcheck/verify-edge-contract.ts
 run_ts "edge-gateway: BUILD-001 live campaign HTTP/session/CSRF/idempotency boundary" services/edge-gateway/selfcheck/verify-campaign-http-boundary.ts
 run_ts "edge-gateway: operational reads + DPO queue/decision boundary (ADR-039)" services/edge-gateway/selfcheck/verify-operational-reads-boundary.ts
@@ -285,6 +286,12 @@ fi
 # database must agree. Runs early: every proof below asserts behaviour ON
 # this schema, so a silent divergence here would undermine all of them.
 run_ts "shared-database: schema drift (.ts ↔ snapshot ↔ live DB)" packages/shared-database/selfcheck/verify-schema-drift.ts
+# Cross-agency column parity (evaluation D1/D12). The drift proof above binds
+# .ts ↔ snapshot ↔ live; it says nothing about whether the three AGENCY schemas
+# agree with each other. They did not: a column present in rdf_ops alone, named
+# by an agency-agnostic adapter, is a 42703 that only RNP and RCS ever see — and
+# every proof that drives those paths is an RDF proof, so nothing went red.
+run_ts "shared-database: cross-agency column parity (D1/D12 — declared divergences only)" packages/shared-database/selfcheck/verify-cross-agency-column-parity.ts
 # BUILD-001 migration acceptance: apply the exact pre-feature migrations to a
 # disposable real PostgreSQL database, insert legacy campaign/session rows,
 # apply 0002–0004, then replay every bootstrap RLS SQL file twice and attempt
@@ -398,6 +405,10 @@ run_ts "document-forensics: bounded-real analyzer (MinIO+ClamAV)" services/docum
 # analyze/ should turn its OWN proof red first rather than surface as a
 # confusing failure in the middle of this one.
 run_ts "document-forensics: upload ingress (multipart → ClamAV → sealed MinIO → verdict)" services/document-forensics-service/selfcheck/verify-document-upload-slice.ts
+# D14 (evaluation 2026-10-29): a corrected RE-UPLOAD overwrites the same object
+# key by design, so the row must also stop claiming a human decision about bytes
+# that no longer exist — while analyze/ (a re-scan of the SAME object) must not
+# withdraw one. A pure SQL proof: no MinIO, no ClamAV, no scanner.
 run_ts "application-service: amber routing + adjudication" services/application-service/selfcheck/verify-amber-adjudication-slice.ts
 run_ts "application-service: walk-in lane (register → vet → physical → merged funnel)" services/application-service/selfcheck/verify-walk-in-slice.ts
 # The whole spine composed: one real submission → all 3 gates → DOCUMENT_REVIEW_GREEN.

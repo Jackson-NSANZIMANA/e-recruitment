@@ -88,12 +88,14 @@ const DEV_A = 'DEV-RDF-A';
 const DEV_B = 'DEV-RDF-B';
 const DEV_UNENROLLED = 'DEV-RDF-GHOST';
 const DEV_REVOKED = 'DEV-RDF-REVOKED';
-const DEVICE_IDS = [DEV_A, DEV_B, DEV_UNENROLLED, DEV_REVOKED];
+const DEV_RNP = 'DEV-RNP-A'; // enrolled under RNP: the cross-agency probe (D15)
+const DEVICE_IDS = [DEV_A, DEV_B, DEV_UNENROLLED, DEV_REVOKED, DEV_RNP];
 const OFFICER_ID = '5f000000-0000-4000-8000-00000000ff01';
 
 const keysA = generateDeviceKeyPair();
 const keysB = generateDeviceKeyPair();
 const keysRevoked = generateDeviceKeyPair();
+const keysRnp = generateDeviceKeyPair();
 
 /**
  * The exam ticket ISSUED to an application (seeded into qr_invitation_code)
@@ -386,14 +388,71 @@ async function main(): Promise<void> {
     });
     check('projector refuses to complete while conflict pending → CONFLICT_HELD', held.kind === 'CONFLICT_HELD', held.kind);
 
-    console.log('\n── 5b. Officer resolves the conflict → application advances ──');
+    // ── 5a. Every refusal changes NOTHING (evaluation: the adjudication is a
+    //      decision, so a refused decision must leave the record exactly as it
+    //      was found — no half-cleared conflict, no stray stamp).
+    console.log('\n── 5a. Refused adjudications leave the conflict untouched ──');
     const scoreAId = cA.results[0]?.scoreId as string;
+    const stateOfConflict = async () => ({
+      flagged: (await admin`SELECT count(*)::int AS n FROM rdf_ops.physical_test_scores WHERE application_id=${APP_CONFLICT} AND sync_conflict_detected=true`)[0]?.['n'] as number,
+      stampedResolutions: (await admin`SELECT count(*)::int AS n FROM rdf_ops.physical_test_scores WHERE application_id=${APP_CONFLICT} AND sync_conflict_resolution IS NOT NULL`)[0]?.['n'] as number,
+      status: await appStatus(APP_CONFLICT),
+      scoreId: await appScoreId(APP_CONFLICT),
+    });
+    const before = await stateOfConflict();
+
+    // The application lives in rdf_ops: an RNP officer cannot see it at all, so
+    // a cross-agency adjudication is indistinguishable from a nonexistent one.
+    const crossAgency = await post(RESOLVE_CONFLICT_PATH, { applicationId: APP_CONFLICT, scoreId: scoreAId, resolution: 'RNP_PICK' }, token('officer', 'RNP'));
+    check('RNP officer resolving an RDF conflict → 404 NOT_FOUND', crossAgency.status === 404 && asRecord(crossAgency.json)['status'] === 'NOT_FOUND', `${crossAgency.status} ${crossAgency.text}`);
+
+    // A real, conflicted score row — but belonging to a DIFFERENT application.
+    const foreignRow = await post(RESOLVE_CONFLICT_PATH, { applicationId: APP_CONFLICT, scoreId: storedRows[0]?.id, resolution: 'FOREIGN_PICK' }, token('officer', 'RDF'));
+    check('score row from another application → 404 SCORE_NOT_FOUND', foreignRow.status === 404 && asRecord(foreignRow.json)['status'] === 'SCORE_NOT_FOUND', `${foreignRow.status} ${foreignRow.text}`);
+
+    const ghostRow = await post(RESOLVE_CONFLICT_PATH, { applicationId: APP_CONFLICT, scoreId: '5f000000-0000-4000-8000-0000000fdead', resolution: 'GHOST_PICK' }, token('officer', 'RDF'));
+    check('nonexistent score row → 404 SCORE_NOT_FOUND', ghostRow.status === 404 && asRecord(ghostRow.json)['status'] === 'SCORE_NOT_FOUND', `${ghostRow.status} ${ghostRow.text}`);
+
+    // A decision with no recorded reason is not a record an auditor can read.
+    const noReason = await post(RESOLVE_CONFLICT_PATH, { applicationId: APP_CONFLICT, scoreId: scoreAId, resolution: '   ' }, token('officer', 'RDF'));
+    check('blank resolution → 400 INVALID_FIELD', noReason.status === 400 && asRecord(noReason.json)['error'] === 'INVALID_FIELD', `${noReason.status} ${noReason.text}`);
+
+    // A system principal is not a human adjudicator.
+    const sysTok = await post(RESOLVE_CONFLICT_PATH, { applicationId: APP_CONFLICT, scoreId: scoreAId, resolution: 'SYSTEM_PICK' }, token('system'));
+    check('system principal → 403 (officer-only adjudication)', sysTok.status === 403, `${sysTok.status} ${sysTok.text}`);
+
+    const after = await stateOfConflict();
+    check('after four refusals: both rows still flagged', after.flagged === 2, `flagged=${after.flagged}`);
+    check('after four refusals: no resolution stamped anywhere', after.stampedResolutions === before.stampedResolutions && after.stampedResolutions === 0, `stamped=${after.stampedResolutions}`);
+    check('after four refusals: application still PHYSICAL_TEST_SCHEDULED', after.status === 'PHYSICAL_TEST_SCHEDULED', after.status ?? 'null');
+    check('after four refusals: no score stamped on the application', after.scoreId === null, String(after.scoreId));
+
+    console.log('\n── 5b. Officer resolves the conflict → application advances ──');
     const rr = await post(RESOLVE_CONFLICT_PATH, { applicationId: APP_CONFLICT, scoreId: scoreAId, resolution: 'MANUAL_PICK_A' }, token('officer', 'RDF'));
     check('resolve → 200 RESOLVED', rr.status === 200 && asRecord(rr.json)['status'] === 'RESOLVED', `${rr.status} ${rr.text}`);
     check('conflict flags cleared', (await admin`SELECT count(*)::int AS n FROM rdf_ops.physical_test_scores WHERE application_id=${APP_CONFLICT} AND sync_conflict_detected=true`)[0]?.['n'] === 0);
     check('resolution recorded on chosen record', (await admin`SELECT sync_conflict_resolution AS r FROM rdf_ops.physical_test_scores WHERE id=${scoreAId}`)[0]?.['r'] === 'MANUAL_PICK_A');
     check('application advanced → PHYSICAL_TEST_COMPLETE', (await appStatus(APP_CONFLICT)) === 'PHYSICAL_TEST_COMPLETE');
     check('stamped with the officer-chosen score row', (await appScoreId(APP_CONFLICT)) === scoreAId);
+    // The adjudication is AUDITED as a human decision, not just applied
+    // (evaluation D11): who decided, which row won, why, and whether the
+    // decider was also the capturing officer (four-eyes is recordable).
+    const resolveAudit = busMain.published.find(
+      (e) => e.eventType === 'AUDIT_ENTRY' && asRecord(e)['action'] === 'FIELD_SCORE_CONFLICT_RESOLVED' && asRecord(e)['entityId'] === APP_CONFLICT,
+    );
+    const auditMeta = asRecord(asRecord(resolveAudit)['metadata']);
+    check('resolution audited as FIELD_SCORE_CONFLICT_RESOLVED', resolveAudit !== undefined);
+    check('audit names the officer who decided', asRecord(resolveAudit)['performedBy'] === OFFICER_ID, String(asRecord(resolveAudit)['performedBy']));
+    check('audit records the chosen row + reason', auditMeta['scoreId'] === scoreAId && auditMeta['resolution'] === 'MANUAL_PICK_A', JSON.stringify(auditMeta));
+    check('audit records resolver-vs-capturer (this fixture: the same officer)', auditMeta['resolverIsCapturingOfficer'] === true && typeof auditMeta['capturingOfficerId'] === 'string', JSON.stringify(auditMeta));
+
+    // A decision already taken cannot be RE-taken: replay is refused, and the
+    // original stamp survives verbatim.
+    const replay = await post(RESOLVE_CONFLICT_PATH, { applicationId: APP_CONFLICT, scoreId: scoreAId, resolution: 'SECOND_GUESS' }, token('officer', 'RDF'));
+    check('replaying the resolution → 409 NO_CONFLICT (a decision is not a button)', replay.status === 409 && asRecord(replay.json)['status'] === 'NO_CONFLICT', `${replay.status} ${replay.text}`);
+    check('the first resolution is not overwritten', (await admin`SELECT sync_conflict_resolution AS r FROM rdf_ops.physical_test_scores WHERE id=${scoreAId}`)[0]?.['r'] === 'MANUAL_PICK_A');
+    check('the application stays COMPLETE and keeps its stamped row', (await appStatus(APP_CONFLICT)) === 'PHYSICAL_TEST_COMPLETE' && (await appScoreId(APP_CONFLICT)) === scoreAId);
+
     // Resolving a clean application → NO_CONFLICT.
     const rr2 = await post(RESOLVE_CONFLICT_PATH, { applicationId: APP_ACCEPT, scoreId: storedRows[0]?.id, resolution: 'x' }, token('officer', 'RDF'));
     check('resolve on a non-conflicted app → 409 NO_CONFLICT', rr2.status === 409 && asRecord(rr2.json)['status'] === 'NO_CONFLICT', `${rr2.status} ${rr2.text}`);
@@ -410,6 +469,27 @@ async function main(): Promise<void> {
     // DEV_A is enrolled under RDF; an RNP officer syncing it → agency mismatch.
     const mismatch = await syncOne(makeRecord(APP_ACCEPT, keysA.privateKeyPem, DEV_A, { [DEV_A]: 9 }), token('officer', 'RNP'));
     check('RNP officer + RDF device → REJECTED AGENCY_MISMATCH', mismatch.result['reason'] === 'AGENCY_MISMATCH', JSON.stringify(mismatch.result));
+    // D15: ONE AGENCY PER BATCH, by construction. A batch is the caller's agency
+    // (from the token); a record whose DEVICE belongs to a sibling agency is
+    // refused per-record, so a mixed upload can never write into two ops
+    // schemas. That is what makes "an infra fault fails the whole request"
+    // acceptable — the request can only ever have been touching one agency.
+    const eRnp = await post(ENROLL_DEVICE_PATH, { deviceId: DEV_RNP, publicKeyPem: keysRnp.publicKeyPem }, token('officer', 'RNP'));
+    check('RNP officer enrolls DEV_RNP (fixture for the mixed batch)', eRnp.status === 201, `${eRnp.status} ${eRnp.text}`);
+    const mixed = await post(SYNC_SCORES_PATH, {
+      records: [
+        makeRecord(APP_ACCEPT, keysA.privateKeyPem, DEV_A, { [DEV_A]: 30 }),
+        makeRecord(APP_ACCEPT, keysRnp.privateKeyPem, DEV_RNP, { [DEV_RNP]: 1 }),
+      ],
+    }, token('officer', 'RDF'));
+    const mixedResults = asRecord(mixed.json)['results'];
+    const mixedList = Array.isArray(mixedResults) ? mixedResults.map(asRecord) : [];
+    check('mixed batch: the RDF record is judged', mixedList[0]?.['status'] === 'DUPLICATE' || mixedList[0]?.['status'] === 'ACCEPTED' || mixedList[0]?.['status'] === 'SUPERSEDED', JSON.stringify(mixedList[0]));
+    check('mixed batch: the RNP-device record is refused per-record (AGENCY_MISMATCH)',
+      mixedList[1]?.['status'] === 'REJECTED' && mixedList[1]?.['reason'] === 'AGENCY_MISMATCH', JSON.stringify(mixedList[1]));
+    check('mixed batch: nothing was written into the sibling agency schema',
+      (await admin`SELECT count(*)::int AS n FROM rnp_ops.physical_test_scores WHERE application_id = ${APP_ACCEPT}`)[0]?.['n'] === 0);
+
     // A well-formed record for an application absent from the officer's agency schema.
     const crossApp = makeRecord('5f000000-0000-4000-8000-0000dead0001', keysA.privateKeyPem, DEV_A, { [DEV_A]: 1 });
     check('unknown application in agency schema → NOT_FOUND', (await syncOne(crossApp)).result['status'] === 'NOT_FOUND');

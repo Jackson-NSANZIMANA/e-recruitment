@@ -201,9 +201,9 @@ check(
 
 // ── 4. The trail exists, in all three schemas ──────────────────────
 section('4. The revision trail is append-only, in every agency schema');
-const migration = readFileSync(join(REPO, 'packages/shared-database/src/rls/0044_document_revisions.sql'), 'utf8');
+const migration = readFileSync(join(REPO, 'packages/shared-database/src/rls/0046_document_revisions.sql'), 'utf8');
 check(
-  'rls/0044 covers all three ops schemas in one migration (no D1-class divergence)',
+  'rls/0046 covers all three ops schemas in one migration (no D1-class divergence)',
   /ARRAY\['rdf_ops', 'rnp_ops', 'rcs_ops'\]/.test(migration),
 );
 check(
@@ -223,7 +223,7 @@ check(
 );
 check(
   'the bootstrap applies it (a migration nobody runs closes nothing)',
-  /0044_document_revisions\.sql/.test(readFileSync(join(REPO, 'scripts/bootstrap-db.sh'), 'utf8')),
+  /0046_document_revisions\.sql/.test(readFileSync(join(REPO, 'scripts/bootstrap-db.sh'), 'utf8')),
 );
 const schemas = ['rdf', 'rnp', 'rcs'].map((s) =>
   readFileSync(join(REPO, `packages/shared-database/src/schemas/${s}-ops.schema.ts`), 'utf8'),

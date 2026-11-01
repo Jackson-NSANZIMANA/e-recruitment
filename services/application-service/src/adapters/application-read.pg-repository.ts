@@ -16,8 +16,8 @@
 // ══════════════════════════════════════════════════════════════════
 
 import { sql } from '@usrp/shared-database';
-import type { AmberQueueAction, ApplicationCategory, ApplicationStatus } from '@usrp/shared-types';
-import { AGENCIES, type Agency } from '@usrp/shared-types';
+import type { ApplicationCategory, ApplicationStatus } from '@usrp/shared-types';
+import { AGENCIES, CLEARANCE_REVIEW_REASON_SET, type Agency } from '@usrp/shared-types';
 import type {
   AmberQueueEntry,
   ApplicantApplicationSummary,
@@ -30,6 +30,7 @@ import type {
 } from '../ports/application-read-repository.js';
 import { ApplicationReadError } from '../domain/application.errors.js';
 import { schemaForAgency } from '../domain/agency-schema.js';
+import { adjudicationLanes, NESA_REVIEW_REQUIRED_CODE } from '../domain/adjudication-lanes.js';
 
 /** timestamptz — the shared client may surface it as a Date or an ISO string. */
 type Timestamptz = Date | string;
@@ -102,7 +103,7 @@ export class PgApplicationReadRepository implements ApplicationReadRepository {
              OR (a.status::text NOT IN ('REJECTED', 'WITHDRAWN', 'ACCEPTED', 'WALK_IN_REJECTED')
                  AND (a.criminal_clearance_status::text = 'UNDER_REVIEW'
                       OR (a.academic_status::text = 'PENDING'
-                          AND a.academic_eligibility_detail ->> 'failureCode' = 'NESA_REVIEW_REQUIRED')))
+                          AND a.academic_eligibility_detail ->> 'failureCode' = ${NESA_REVIEW_REQUIRED_CODE})))
           ORDER BY d.forensics_completed_at ASC NULLS LAST, a.updated_at ASC
           LIMIT ${input.limit}
         `;
@@ -314,30 +315,15 @@ function toQueueEntry(row: AmberQueueRow): AmberQueueEntry {
         ? null
         : new Date(row.forensics_completed_at).toISOString(),
     reasons: queueReasons(row),
-    actions: queueActions(row),
+    // The SAME predicate the adjudicate guard runs (evaluation D10): the queue
+    // can only offer a lane the operation will accept, because both read this.
+    heldLanes: adjudicationLanes({
+      status: row.status,
+      criminalStatus: row.criminal_status,
+      academicStatus: row.academic_status,
+      academicDetail: row.academic_detail,
+    }),
   };
-}
-
-/**
- * D10: which officer verbs apply to this row. Derived from the SAME predicate
- * the queue lists on — an amber/adjudication document hold is adjudicated, a
- * held vetting dimension is RESOLVED — so the console's buttons and the verbs'
- * preconditions cannot disagree. Both may apply to one row.
- */
-function queueActions(row: AmberQueueRow): readonly AmberQueueAction[] {
-  const actions: AmberQueueAction[] = [];
-  if (row.status === 'DOCUMENT_REVIEW_AMBER' || row.status === 'ADJUDICATION_REVIEW') {
-    actions.push('ADJUDICATE');
-  }
-  if (
-    row.criminal_status === 'UNDER_REVIEW' ||
-    (row.academic_status === 'PENDING' &&
-      row.academic_detail !== null &&
-      row.academic_detail['failureCode'] === 'NESA_REVIEW_REQUIRED')
-  ) {
-    actions.push('RESOLVE_VETTING_HOLD');
-  }
-  return actions;
 }
 
 /** NESA review codes (eligibility-service) → the queue's closed vocabulary. */
@@ -349,7 +335,13 @@ const NESA_REASON_TO_QUEUE: Readonly<Record<string, string>> = {
   UNKNOWN_LEVEL_TYPE: 'NESA_LEVEL_UNKNOWN',
   DIVISION_NOT_PASS: 'NESA_DIVISION_NOT_PASS',
 };
-const CLEARANCE_QUEUE_REASONS: ReadonlySet<string> = new Set(['CLEARANCE_CONTENT_REVIEW', 'IDENTITY_NAME_PARTIAL', 'IDENTITY_HOLDER_UNREADABLE']);
+/**
+ * The clearance reasons the queue may show. The vocabulary is NOT re-declared
+ * here (evaluation D2): it lives in @usrp/shared-types, because the writer, this
+ * queue and the edge's officer checklist each used to hold a copy — and a copy
+ * that falls behind does not degrade, it REJECTS the whole payload.
+ */
+const CLEARANCE_QUEUE_REASONS: ReadonlySet<string> = CLEARANCE_REVIEW_REASON_SET;
 
 /** Why an application is in the queue beyond a document hold: closed codes only. */
 export function queueReasons(row: Pick<AmberQueueRow, 'criminal_status' | 'academic_status' | 'academic_detail' | 'clearance_reasons'>): readonly string[] {
@@ -360,7 +352,7 @@ export function queueReasons(row: Pick<AmberQueueRow, 'criminal_status' | 'acade
     for (const r of known.length > 0 ? known : ['CRIMINAL_RECORD_REVIEW']) reasons.add(r);
   }
   const detail = row.academic_detail;
-  if (row.academic_status === 'PENDING' && detail !== null && detail['failureCode'] === 'NESA_REVIEW_REQUIRED') {
+  if (row.academic_status === 'PENDING' && detail !== null && detail['failureCode'] === NESA_REVIEW_REQUIRED_CODE) {
     const codes = Array.isArray(detail['reviewReasons']) ? (detail['reviewReasons'] as unknown[]) : [];
     const mapped = codes.map((c) => (typeof c === 'string' ? NESA_REASON_TO_QUEUE[c] : undefined)).filter((c): c is string => c !== undefined);
     for (const r of mapped.length > 0 ? mapped : ['NESA_RECORD_REVIEW']) reasons.add(r);

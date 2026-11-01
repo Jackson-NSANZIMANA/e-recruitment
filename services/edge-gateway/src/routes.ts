@@ -44,7 +44,6 @@ import {
   acceptApplicationHandler,
   adjudicateApplicationHandler,
   recordFinalDecisionHandler,
-  resolveVettingHoldHandler,
   recordMedicalReviewHandler,
 } from './adapters/http/officer-transitions.controller.js';
 import { registerWalkInHandler, vetWalkInHandler } from './adapters/http/walk-in.controller.js';
@@ -153,7 +152,6 @@ export function edgeHandlers(deps: EdgeDeps): Record<EdgeOperationId, RouteHandl
     recordFinalDecision: recordFinalDecisionHandler(deps),
     acceptApplication: acceptApplicationHandler(deps),
     adjudicateApplication: adjudicateApplicationHandler(deps),
-    resolveVettingHold: resolveVettingHoldHandler(deps),
 
     getDocumentChecklist: getDocumentChecklistHandler(deps),
     verifyDocumentAtVenue: verifyDocumentAtVenueHandler(deps),

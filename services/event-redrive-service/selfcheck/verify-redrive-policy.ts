@@ -32,6 +32,8 @@
 
 import {
   DEFAULT_REDRIVE_POLICY,
+  firstDueAtMs,
+  type DeadLetterHeader,
   DEAD_LETTER_TOPIC,
   PARKED_TOPIC,
   decideRedrive,
@@ -43,8 +45,8 @@ import {
   type RedrivePolicy,
 } from '@usrp/shared-events';
 import { RedriveDeadLettersService } from '../src/application/redrive-dead-letters.service.js';
-import type { DeadLetterMessage, DeadLetterSource, RawRepublisher } from '../src/ports/dead-letter-source.js';
-import type { ClaimDueInput, ParkInput, RecordAttemptInput, RedriveLedger } from '../src/ports/redrive-ledger.js';
+import type { DeadLetterMessage, DeadLetterSource, RawRepublisher, ScanResult } from '../src/ports/dead-letter-source.js';
+import type { ClaimDueInput, IntakeInput, ParkInput, RecordAttemptInput, RedriveLedger } from '../src/ports/redrive-ledger.js';
 
 let pass = 0;
 let fail = 0;
@@ -187,9 +189,34 @@ interface FakeLedgerState {
   parked: ParkInput[];
   successes: RedriveLedgerEntry[];
   failures: RecordAttemptInput[];
+  /** letter key → event id, mirroring event_redrive_ledger.event_id. */
+  eventIds?: Map<string, string | null>;
+  cursor?: Map<number, string>;
 }
 function fakeLedger(state: FakeLedgerState): RedriveLedger {
   return {
+    readCursor: (): Promise<ReadonlyMap<number, string>> => Promise.resolve(new Map(state.cursor ?? [])),
+    // Mirrors PgRedriveLedger.intake: a letter whose event id is already known
+    // INHERITS the attempts that event spent, and is dated by the pure schedule.
+    intake: (input: IntakeInput): Promise<{ readonly registered: number }> => {
+      state.eventIds ??= new Map();
+      let registered = 0;
+      for (const l of input.letters) {
+        const key = redriveKey({ groupId: l.groupId, sourceTopic: l.sourceTopic, sourcePartition: l.partition, sourceOffset: l.offset });
+        if (state.eventIds.has(key)) continue;
+        const priors = state.entries.filter((e) => l.eventId !== null && state.eventIds?.get(redriveKey(e)) === l.eventId && e.groupId === l.groupId);
+        const attempts = Math.max(0, ...priors.map((e) => e.attempts));
+        state.eventIds.set(key, l.eventId);
+        state.entries.push({
+          sourceTopic: l.sourceTopic, sourcePartition: l.partition, sourceOffset: l.offset, groupId: l.groupId,
+          reason: l.reason, attempts, state: 'RETRYING', consecutiveGroupFailures: 0,
+          nextAttemptAt: iso(firstDueAtMs({ ...POLICY, delaysMs: input.delaysMs }, input.nowMs, l.reason, attempts)),
+        });
+        registered += 1;
+      }
+      state.cursor = new Map([...(state.cursor ?? []), ...input.next]);
+      return Promise.resolve({ registered });
+    },
     claimDue: (input: ClaimDueInput): Promise<readonly RedriveLedgerEntry[]> =>
       Promise.resolve(
         state.entries
@@ -234,7 +261,10 @@ function fakes(available: ReadonlyMap<string, DeadLetterMessage>, failPublish = 
     ledger,
     replayed,
     signals,
-    source: { fetchBatch: (): Promise<ReadonlyMap<string, DeadLetterMessage>> => Promise.resolve(available) },
+    source: {
+      fetchBatch: (): Promise<ReadonlyMap<string, DeadLetterMessage>> => Promise.resolve(available),
+      scanNew: (): Promise<ScanResult> => Promise.resolve({ letters: [], next: new Map() }),
+    },
     republisher: {
       replay: (topic: string, message: DeadLetterMessage): Promise<void> => {
         if (failPublish) return Promise.reject(new Error('broker down'));
@@ -349,6 +379,56 @@ for (const reason of ['UNDECODABLE', 'NON_RETRYABLE'] as const) {
       f.ledger.entries[0]?.consecutiveGroupFailures === 1,
   );
 }
+
+// (h) THE INTAKE (the defect this file originally missed: nothing ever created a
+// ledger row, so the worker claimed from an empty table). A permanently failing
+// event is dead-lettered again at a NEW offset after every re-drive; the new
+// letter must inherit what was spent, or the cap never terminates.
+{
+  const dlq: DeadLetterHeader[] = [];
+  const f = fakes(new Map());
+  const bytes = new Map<string, DeadLetterMessage>();
+  const source: DeadLetterSource = {
+    fetchBatch: (): Promise<ReadonlyMap<string, DeadLetterMessage>> => Promise.resolve(bytes),
+    scanNew: (cursor): Promise<ScanResult> => {
+      const from = BigInt(cursor.get(0) ?? '0');
+      const fresh = dlq.filter((l) => BigInt(l.offset) >= from);
+      return Promise.resolve({ letters: fresh, next: new Map(fresh.length ? [[0, String(BigInt(fresh[fresh.length - 1]?.offset ?? '0') + 1n)]] : []) });
+    },
+  };
+  let now = T0;
+  const svc = (): RedriveDeadLettersService =>
+    new RedriveDeadLettersService({ ledger: fakeLedger(f.ledger), source, republisher: f.republisher, policy: POLICY, now: () => now, log: () => undefined });
+  const letter = (offset: number): DeadLetterHeader => ({
+    groupId: 'background-vetting-service', sourceTopic: 'clearance.submitted', partition: 0,
+    offset: String(offset), reason: 'HANDLER_FAILED', eventId: 'evt-1',
+  });
+
+  dlq.push(letter(0));
+  bytes.set(redriveKey({ groupId: 'background-vetting-service', sourceTopic: 'clearance.submitted', sourcePartition: 0, sourceOffset: '0' }), BYTES);
+  await svc().tick();
+  check('INTAKE: a letter on the topic becomes a ledger row (it used to stay invisible)', f.ledger.entries.length === 1 && f.ledger.entries[0]?.state === 'RETRYING');
+  check('INTAKE: its first re-drive is scheduled one delay away, not now', f.ledger.entries[0]?.nextAttemptAt === iso(T0 + POLICY.delaysMs[0]!));
+
+  // Forever-failing event: after each re-drive the handler fails and the DLQ gets a NEW letter.
+  let offset = 0;
+  for (let guard = 0; guard < 40; guard += 1) {
+    now += 7 * 3_600_000; // always past the longest delay
+    const before = f.replayed.length;
+    await svc().tick();
+    if (f.ledger.parked.length > 0) break;
+    if (f.replayed.length > before) {
+      offset += 1;
+      dlq.push(letter(offset));
+      bytes.set(redriveKey({ groupId: 'background-vetting-service', sourceTopic: 'clearance.submitted', sourcePartition: 0, sourceOffset: String(offset) }), BYTES);
+    }
+  }
+  check('CAP: a forever-failing event is re-driven exactly the budgeted number of times', f.replayed.length === POLICY.delaysMs.length);
+  check('CAP: it then PARKS with a closed reason and a signal (no endless loop)', f.ledger.parked.length === 1 && f.ledger.parked[0]?.reason === 'ATTEMPTS_EXHAUSTED' && f.signals.length === 1);
+  check('INTAKE: the cursor advanced, so nothing is registered twice', (f.ledger.cursor?.get(0) ?? '0') === String(offset + 1));
+}
+check('firstDueAtMs: a never-retryable reason is due now', firstDueAtMs(POLICY, T0, 'NON_RETRYABLE', 0) === T0 && firstDueAtMs(POLICY, T0, 'UNDECODABLE', 0) === T0);
+check('firstDueAtMs: an exhausted event is due now (to be parked)', firstDueAtMs(POLICY, T0, 'HANDLER_FAILED', POLICY.delaysMs.length) === T0);
 
 // (g) the byte-exact contract against the shared constants
 check('the graveyard topic is the ADR-025 one', DEAD_LETTER_TOPIC === 'events.dead-letter');

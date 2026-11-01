@@ -39,15 +39,21 @@ function str(v: unknown, field: string): string {
 }
 
 /**
- * A UUID. physical_test_scores.capturing_officer_id is `uuid NOT NULL` in
- * rdf_ops, rnp_ops and rcs_ops; a free string reached Postgres and came back as
- * 22P02 — a 500 (evaluation 2026-10-29, D11).
+ * A field whose COLUMN is `uuid` (evaluation D11). Left as a bare string, a
+ * non-UUID reaches the INSERT, PostgreSQL raises 22P02, and a malformed request
+ * is reported as a 500 — the officer's tablet retries a batch that can never
+ * succeed, and the operator gets a "server error" for a typo.
+ *
+ * It is CHECKED, never rewritten: capturingOfficerId is inside the payload the
+ * device signed, so normalising it would invalidate the signature. A shape the
+ * device signed is a shape we refuse.
  */
 function uuid(v: unknown, field: string): string {
-  if (typeof v !== 'string' || !UUID_RE.test(v.trim())) {
+  const value = str(v, field);
+  if (!UUID_RE.test(value)) {
     throw new HttpError(400, 'INVALID_RECORD', `Field "${field}" must be a UUID.`);
   }
-  return v.trim();
+  return value;
 }
 
 function num(v: unknown, field: string): number {

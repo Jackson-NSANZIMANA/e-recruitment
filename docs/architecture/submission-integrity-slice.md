@@ -177,11 +177,15 @@ then swept against the switch:
 | `IDENTITY_NOT_VERIFIED` | explicit | correct |
 | `NO_WALK_IN_CAMPAIGN` | explicit, drops redundant `agency` | correct |
 | `ALREADY_APPLIED` | **was missing** → explicit, **keeps** identifiers | fixed here |
-| `NOT_APPLICABLE` | default → `ILLEGAL_TRANSITION` + `currentStatus` | correct, and deliberate |
+| `NOT_APPLICABLE` | default → `ILLEGAL_TRANSITION` + `currentStatus`; **carve-out**: a body carrying `heldLanes` → `ADJUDICATION_LANE_REQUIRED` + the lanes (D10) | correct — a refusal with nothing to act on stays bare; one that names the lanes is an instruction |
 
 Exactly one real gap. `NOT_APPLICABLE` relies on the default but is right to:
 every one of its bodies carries `currentStatus` and nothing else the caller
-needs, and that is the single field the default preserves.
+needs, and that is the single field the default preserves — with ONE exception
+added later, the adjudication refusal that offers `heldLanes` (evaluation D10:
+the fix for a single vocabulary item the mapper dropped) and gets its own case,
+because "the row is held in CRIMINAL, send that lane" is something the caller
+must act on.
 
 The rule this produced, now recorded at the `default:` branch itself:
 

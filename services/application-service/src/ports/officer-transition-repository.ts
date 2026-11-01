@@ -17,15 +17,9 @@
 // INSERT a history row, never mutate one).
 // ══════════════════════════════════════════════════════════════════
 
-import type {
-  Agency,
-  ApplicationCategory,
-  ApplicationStatus,
-  VettingHoldDecision,
-  VettingHoldDimension,
-  VettingHoldReason,
-} from '@usrp/shared-types';
+import type { Agency, ApplicationCategory, ApplicationStatus } from '@usrp/shared-types';
 import type { DbRole } from '@usrp/shared-auth';
+import type { AdjudicationLane } from '../domain/adjudication-lanes.js';
 
 /**
  * Shared identity for an officer-driven command. `agency` + `dbRole` come from
@@ -91,6 +85,14 @@ export interface AdjudicateInput {
   readonly actor: OfficerActor;
   readonly applicationId: string;
   readonly decision: 'CLEAR' | 'REJECT';
+  /**
+   * WHICH hold this verdict is about (evaluation D10). Omitted = "the row's only
+   * hold": the queue shows rows held in up to three lanes (see
+   * domain/adjudication-lanes.ts), and only the officer can say which one they
+   * are deciding when a row is in more than one. A lane the row is not held in
+   * is refused, with `heldLanes` naming the ones that are.
+   */
+  readonly lane?: AdjudicationLane;
   readonly notes: string | null;
 }
 
@@ -114,7 +116,12 @@ export interface AdjudicateInput {
 export type OfficerTransitionOutcome =
   | { readonly kind: 'APPLIED'; readonly fromStatus: ApplicationStatus; readonly toStatus: ApplicationStatus }
   | { readonly kind: 'NO_CHANGE'; readonly currentStatus: ApplicationStatus }
-  | { readonly kind: 'NOT_APPLICABLE'; readonly currentStatus: ApplicationStatus }
+  | {
+      readonly kind: 'NOT_APPLICABLE';
+      readonly currentStatus: ApplicationStatus;
+      /** Adjudication only (evaluation D10): the lanes the row IS held in. */
+      readonly heldLanes?: readonly AdjudicationLane[];
+    }
   | { readonly kind: 'NOT_FOUND' }
   | { readonly kind: 'CROSS_AGENCY_LOCKED'; readonly lockedByAgency: Agency }
   | SeparationOfDutiesOutcome;
@@ -164,7 +171,15 @@ export type AcceptOutcome =
 export type AdjudicateOutcome =
   | {
       readonly kind: 'APPLIED';
+      /** The lane this verdict decided (whatever the row's other holds are). */
+      readonly lane: AdjudicationLane;
       readonly fromStatus: ApplicationStatus;
+      /**
+       * Where the row landed. EQUAL to `fromStatus` when the decision was
+       * recorded but another lane still holds the row: a criminal verdict does
+       * not lift a document hold, so the top-level status only moves when the
+       * decision removes the LAST hold.
+       */
       readonly toStatus: ApplicationStatus;
       /** True exactly when CLEAR restored the row to DOCUMENT_REVIEW_GREEN. */
       readonly clearedToGreen: boolean;
@@ -173,60 +188,27 @@ export type AdjudicateOutcome =
       readonly category: ApplicationCategory;
     }
   | { readonly kind: 'NO_CHANGE'; readonly currentStatus: ApplicationStatus }
-  | { readonly kind: 'NOT_APPLICABLE'; readonly currentStatus: ApplicationStatus }
-  | { readonly kind: 'NOT_FOUND' };
-
-/**
- * Resolve a HELD vetting dimension (D10, ADR-051). The officer answers the gate
- * with a CLOSED reason; the reason names both the dimension and the decision, so
- * a body that disagrees with it is a caller error refused at the ingress, never
- * coerced here. `notes` is the officer's own words — bounded, audit-only.
- */
-export interface VettingHoldInput {
-  readonly actor: OfficerActor;
-  readonly applicationId: string;
-  readonly dimension: VettingHoldDimension;
-  readonly decision: VettingHoldDecision;
-  readonly reason: VettingHoldReason;
-  readonly notes: string | null;
-}
-
-/**
- * Outcome of a vetting-hold resolution.
- *   • APPLIED   — the evidence was rewritten and the row was re-derived. The
- *                 application may legitimately hold its status (a late hold
- *                 resolved on an already-scheduled application): `fromStatus`
- *                 and `toStatus` are then equal, and `statusChanged` is false.
- *                 `clearedToGreen` is the slot lane's trigger, exactly as on
- *                 adjudication.
- *   • NOT_HELD  — the dimension is not (or no longer) held for a human. 409:
- *                 the work item the console showed is gone — someone else
- *                 resolved it, or the evidence never actually held. NO write.
- *   • NOT_FOUND — absent from the officer's OWN agency schema (cross-agency).
- */
-export type VettingHoldOutcome =
   | {
-      readonly kind: 'APPLIED';
-      readonly dimension: VettingHoldDimension;
-      readonly fromStatus: ApplicationStatus;
-      readonly toStatus: ApplicationStatus;
-      readonly statusChanged: boolean;
-      readonly clearedToGreen: boolean;
-      readonly applicantId: string;
-      readonly campaignId: string;
-      readonly category: ApplicationCategory;
+      readonly kind: 'NOT_APPLICABLE';
+      readonly currentStatus: ApplicationStatus;
+      /**
+       * The lanes the row IS held in — empty when nothing here needs a human.
+       * Carried so the refusal can be explained instead of shrugged at.
+       */
+      readonly heldLanes: readonly AdjudicationLane[];
     }
-  | { readonly kind: 'NOT_HELD'; readonly dimension: VettingHoldDimension; readonly currentStatus: ApplicationStatus }
   | { readonly kind: 'NOT_FOUND' };
+
 
 export interface OfficerTransitionRepository {
   medicalReview(input: MedicalReviewInput): Promise<OfficerTransitionOutcome>;
   finalDecision(input: FinalDecisionInput): Promise<OfficerTransitionOutcome>;
   accept(input: AcceptInput): Promise<AcceptOutcome>;
   /**
-   * Adjudicate an application held at DOCUMENT_REVIEW_AMBER (routine document
-   * review) or ADJUDICATION_REVIEW (late-disqualification hold), as the
-   * officer's DB role, in one transaction:
+   * Adjudicate an application held in ONE of the three lanes
+   * (domain/adjudication-lanes.ts), as the officer's DB role, in one
+   * transaction. DOCUMENT covers DOCUMENT_REVIEW_AMBER (routine document
+   * review) and ADJUDICATION_REVIEW (late-disqualification hold):
    *   • REJECT — → REJECTED; on an AMBER hold, stamps the un-reviewed AMBER
    *     document_records rows human_reviewed_by_id/_at/_decision.
    *   • CLEAR from DOCUMENT_REVIEW_AMBER — the document hold is lifted; the
@@ -238,22 +220,18 @@ export interface OfficerTransitionRepository {
    *   • CLEAR from ADJUDICATION_REVIEW — restores the stage the row held when
    *     the late flag arrived (last from_status into ADJUDICATION_REVIEW on
    *     the append-only history); no document stamp (not a document decision).
-   * Any other status → NOT_APPLICABLE. Idempotent/hold-safe/cross-agency
-   * guarded exactly like the other officer transitions.
+   *   • CRIMINAL (evaluation D10) — the row's criminal gate is UNDER_REVIEW:
+   *     CLEAR records `criminal_clearance_status = CLEARED` (+ `criminal_clearance_at`),
+   *     REJECT → REJECTED. ACADEMIC — the NESA hold (`academic_status = PENDING`
+   *     with `failureCode = NESA_REVIEW_REQUIRED`): CLEAR records the gate as
+   *     ELIGIBLE, REJECT → REJECTED.
+   *     A REJECT is a decision about the APPLICATION, never a verdict about the
+   *     dimension: the registry said "a human must judge", not "guilty", so the
+   *     dimension column is left as the evidence left it.
+   * A row held in no lane, or in a lane the caller did not name (and does not
+   * have exactly one of), → NOT_APPLICABLE with `heldLanes`.
+   * Idempotent/hold-safe/cross-agency guarded exactly like the other officer
+   * transitions.
    */
   adjudicate(input: AdjudicateInput): Promise<AdjudicateOutcome>;
-  /**
-   * Resolve a vetting hold as the officer's DB role, in one transaction:
-   *   • refuse unless the named dimension is genuinely held — UNDER_REVIEW for
-   *     CRIMINAL, academic PENDING + NESA_REVIEW_REQUIRED for ACADEMIC (the
-   *     same predicate the queue lists on, so the verb's precondition and the
-   *     console's work item cannot drift);
-   *   • write the reason's evidence value onto the vetting column;
-   *   • stamp who resolved it and when (`vetting_hold_resolved_by/_at/_dimension`,
-   *     rls/0045) — the durable fact the accept-time four-eyes read needs;
-   *   • RE-DERIVE the status from the row's evidence with the same pure
-   *     lifecycle every other path uses, and record the edge on the append-only
-   *     history when it moves.
-   */
-  vettingHold(input: VettingHoldInput): Promise<VettingHoldOutcome>;
 }

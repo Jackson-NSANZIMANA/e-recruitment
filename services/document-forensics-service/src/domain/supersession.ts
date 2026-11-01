@@ -40,7 +40,7 @@ export interface SlotState {
   readonly caseStatus: ApplicationStatus;
   /** `document_records.human_reviewed_at !== null` — an officer decided. */
   readonly humanReviewed: boolean;
-  /** The slot's stored digest, or null for a row predating rls/0044. */
+  /** The slot's stored digest, or null for a row predating rls/0046. */
   readonly storedHmac: string | null;
   /** True when a row already exists for this (application, object key). */
   readonly exists: boolean;

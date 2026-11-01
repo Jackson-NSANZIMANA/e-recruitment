@@ -72,6 +72,44 @@ export type VerifyClearanceCertificateOutcome =
   | { readonly kind: 'APPLICANT_NOT_FOUND'; readonly applicantId: string }
   | { readonly kind: 'IDENTITY_NOT_VERIFIED'; readonly applicantId: string };
 
+/**
+ * The terminal word on a certificate the registry never answered for.
+ *
+ * No reference date and no policy: nothing is being decided against the
+ * certificate, only the fact that it could not be read automatically.
+ */
+export interface EscalateUnverifiedClearanceCommand {
+  readonly applicantId: string;
+  readonly applicationId: string;
+  readonly agency: Agency;
+  readonly category: ApplicationCategory;
+  /** As carried by the event; only its HMAC and last 4 are ever persisted. */
+  readonly clearanceCertificateNumber: string;
+  readonly context?: EventContext;
+}
+
+/**
+ * What `conclude` may be handed: a verdict from the pure rules — which always
+ * read the certificate — or the escalation, which never did. Only the
+ * certificate fields differ, and they are nullable in the table for exactly this
+ * reason (`review_reasons` already says why a human is looking).
+ */
+type Conclusion =
+  | ClearanceDecision
+  | {
+      readonly kind: 'REVIEW';
+      readonly reasons: readonly ['CLEARANCE_UNVERIFIED'];
+      readonly certificateType: null;
+      readonly issuedOn: null;
+      readonly binding: null;
+    };
+
+/** What a conclusion needs from its command: who, which application, which lane. */
+type ConclusionSubject = Pick<
+  VerifyClearanceCertificateCommand,
+  'applicantId' | 'applicationId' | 'agency' | 'category'
+>;
+
 export interface VerifyClearanceCertificateDeps {
   readonly gateway: ClearanceCertificateGateway;
   readonly identityReader: ApplicantIdentityReader;
@@ -90,17 +128,7 @@ export class VerifyClearanceCertificateService {
   async verify(command: VerifyClearanceCertificateCommand): Promise<VerifyClearanceCertificateOutcome> {
     const context = command.context ?? newCorrelationContext();
     const number = parseClearanceNumber(command.clearanceCertificateNumber);
-    // A malformed number is still held only as an HMAC and a last-4 the table accepts:
-    // sanitised, so a bad producer cannot make a poison message the partition re-reads forever.
-    const referenceKey = number ?? command.clearanceCertificateNumber.trim().toUpperCase().replace(/[^A-Z0-9]/g, '*').slice(0, 64);
-    const base = {
-      agency: command.agency,
-      applicationId: command.applicationId,
-      applicantId: command.applicantId,
-      referenceHmac: this.hmac(referenceKey),
-      referenceLast4: referenceKey.slice(-4).padStart(4, '*'),
-      correlationId: context.correlationId,
-    };
+    const base = this.referenceOf(command, context);
 
     const applicant = await this.deps.identityReader.findBindingSubjectById(command.applicantId);
     if (applicant === null) return { kind: 'APPLICANT_NOT_FOUND', applicantId: command.applicantId };
@@ -137,6 +165,68 @@ export class VerifyClearanceCertificateService {
     return createHmac('sha256', this.deps.referenceHmacKey).update(value).digest('hex');
   }
 
+  /**
+   * The stored handle of a certificate number: an HMAC under the service key
+   * plus its last 4. One place, because the escalation below MUST reproduce the
+   * same handle as the PENDING record it supersedes — two normalisations that
+   * drifted would split one certificate's history in two.
+   *
+   * A malformed number is held the same way: sanitised, so a bad producer
+   * cannot make a poison message the partition re-reads forever.
+   */
+  private referenceOf(
+    command: Pick<VerifyClearanceCertificateCommand, 'agency' | 'applicationId' | 'applicantId' | 'clearanceCertificateNumber'>,
+    context: EventContext,
+  ): Pick<ClearanceVerificationRecord, 'agency' | 'applicationId' | 'applicantId' | 'referenceHmac' | 'referenceLast4' | 'correlationId'> {
+    const number = parseClearanceNumber(command.clearanceCertificateNumber);
+    const referenceKey = number ?? command.clearanceCertificateNumber.trim().toUpperCase().replace(/[^A-Z0-9]/g, '*').slice(0, 64);
+    return {
+      agency: command.agency,
+      applicationId: command.applicationId,
+      applicantId: command.applicantId,
+      referenceHmac: this.hmac(referenceKey),
+      referenceLast4: referenceKey.slice(-4).padStart(4, '*'),
+      correlationId: context.correlationId,
+    };
+  }
+
+  /**
+   * THE END OF THE LINE FOR A CERTIFICATE THE REGISTRY NEVER ANSWERED FOR
+   * (evaluation D2). The retry budget is deliberately short — a stuck event must
+   * not hold its partition hostage — so a registry outage longer than a few
+   * seconds parks the event on the dead-letter topic. Re-driving that call from
+   * durable state is impossible BY DESIGN: the certificate number is never
+   * stored (`clearance_certificate_verifications` holds an HMAC and a last 4),
+   * and keeping it so a timer could retry would trade a citizen's privacy for
+   * our convenience.
+   *
+   * So the terminal outcome is not another attempt, it is a HUMAN: the
+   * certificate is recorded as REVIEW with CLEARANCE_UNVERIFIED, which moves the
+   * application into the amber queue and turns the citizen's "we are verifying"
+   * into "an officer will look". Nothing is asserted about the certificate —
+   * every certificate field stays null, and no failure code is written (a
+   * REVIEW row may not carry one).
+   *
+   * Called from the bus's dead-letter observer, so it runs only after this
+   * event's bytes are safely parked, and it is idempotent: the same escalation
+   * twice is ALREADY_RECORDED.
+   */
+  async escalateUnverified(command: EscalateUnverifiedClearanceCommand): Promise<VerifyClearanceCertificateOutcome> {
+    const context = command.context ?? newCorrelationContext();
+    const base = this.referenceOf(command, context);
+    // The reason is a member of the shared vocabulary (shared-types), so the
+    // readers that rebuild the field against their allowlist accept it. Nothing
+    // is asserted about the certificate itself: every certificate field is null.
+    const decision: Conclusion = {
+      kind: 'REVIEW',
+      reasons: ['CLEARANCE_UNVERIFIED'],
+      certificateType: null,
+      issuedOn: null,
+      binding: null,
+    };
+    return this.conclude(command, context, base, decision, null, 'CLEARANCE_VERIFICATION_ESCALATED');
+  }
+
   /** Best effort: the retry matters more than the note, so a failed write is logged, not thrown. */
   private async recordPending(base: Pick<ClearanceVerificationRecord, 'agency' | 'applicationId' | 'applicantId' | 'referenceHmac' | 'referenceLast4' | 'correlationId'>, requestId: string): Promise<void> {
     try {
@@ -150,11 +240,12 @@ export class VerifyClearanceCertificateService {
   }
 
   private async conclude(
-    command: VerifyClearanceCertificateCommand,
+    command: ConclusionSubject,
     context: EventContext,
     base: Pick<ClearanceVerificationRecord, 'agency' | 'applicationId' | 'applicantId' | 'referenceHmac' | 'referenceLast4' | 'correlationId'>,
-    decision: ClearanceDecision,
+    decision: Conclusion,
     requestId: string | null,
+    auditAction?: string,
   ): Promise<VerifyClearanceCertificateOutcome> {
     const reviewReasons = decision.kind === 'REVIEW' ? decision.reasons : [];
     await this.deps.repository.record({
@@ -194,11 +285,12 @@ export class VerifyClearanceCertificateService {
       entityType: 'APPLICATION',
       entityId: command.applicationId,
       action:
-        decision.kind === 'CLEARED'
+        auditAction ??
+        (decision.kind === 'CLEARED'
           ? 'CLEARANCE_CERTIFICATE_PASSED'
           : decision.kind === 'REVIEW'
             ? 'CLEARANCE_CERTIFICATE_REVIEW_REQUIRED'
-            : 'CLEARANCE_CERTIFICATE_CORRECTION_NEEDED',
+            : 'CLEARANCE_CERTIFICATE_CORRECTION_NEEDED'),
       performedBy: 'background-vetting-service',
       agency,
       metadata: {

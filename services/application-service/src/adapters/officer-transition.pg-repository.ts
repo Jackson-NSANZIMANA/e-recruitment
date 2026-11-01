@@ -26,15 +26,13 @@
 
 import { sql } from '@usrp/shared-database';
 import type { SeparationOfDutiesConfig } from '../config.js';
-import {
-  VETTING_HOLD_REASONS,
-  type AcademicEligibilityStatus,
-  type AgeEligibilityStatus,
-  type Agency,
-  type ApplicationCategory,
-  type ApplicationStatus,
-  type CriminalClearanceStatus,
-  type VettingHoldReasonSpec,
+import type {
+  AcademicEligibilityStatus,
+  AgeEligibilityStatus,
+  Agency,
+  ApplicationCategory,
+  ApplicationStatus,
+  CriminalClearanceStatus,
 } from '@usrp/shared-types';
 import type {
   AcceptInput,
@@ -45,18 +43,11 @@ import type {
   MedicalReviewInput,
   OfficerTransitionOutcome,
   OfficerTransitionRepository,
-  VettingHoldInput,
-  VettingHoldOutcome,
 } from '../ports/officer-transition-repository.js';
 import { ApplicationPersistenceError } from '../domain/application.errors.js';
 import { schemaForAgency } from '../domain/agency-schema.js';
-import { deriveApplicationStatus } from '../domain/lifecycle.js';
-
-/** Statuses an officer may adjudicate (ADR-011). */
-const ADJUDICABLE: ReadonlySet<ApplicationStatus> = new Set<ApplicationStatus>([
-  'DOCUMENT_REVIEW_AMBER',
-  'ADJUDICATION_REVIEW',
-]);
+import { deriveApplicationStatus, type VettingEvidence } from '../domain/lifecycle.js';
+import { adjudicationLanes, type AdjudicationLane } from '../domain/adjudication-lanes.js';
 
 export class PgOfficerTransitionRepository implements OfficerTransitionRepository {
   readonly #sod: SeparationOfDutiesConfig;
@@ -232,12 +223,12 @@ export class PgOfficerTransitionRepository implements OfficerTransitionRepositor
             campaign_id: string;
             category: ApplicationCategory;
             final_decision_by_id: string | null;
-            vetting_hold_resolved_by: string | null;
+            vetting_hold_resolvers: string[];
           }[]
         >`
           SELECT status, applicant_id, campaign_id, category,
                  final_decision_by_id::text AS final_decision_by_id,
-                 vetting_hold_resolved_by::text AS vetting_hold_resolved_by
+                 vetting_hold_resolvers::text[] AS vetting_hold_resolvers
           FROM ${schema}.applications
           WHERE id = ${applicationId} FOR UPDATE
         `;
@@ -261,13 +252,13 @@ export class PgOfficerTransitionRepository implements OfficerTransitionRepositor
         // on this application may not also enlist the applicant. The clearance
         // reader and the acceptance authority are separate posts precisely so
         // one person cannot lift a criminal or academic hold and then accept on
-        // the strength of it. Read from the row's durable resolver stamp
-        // (rls/0045) under the same lock — not reconstructed from history, so a
+        // the strength of it. Read from the row's durable resolver SET
+        // (rls/0047: every officer who resolved ANY held dimension, not just the
+        // last) under the same lock — not reconstructed from history, so a
         // redelivered event can never make the answer ambiguous.
         if (
           this.#sod.clearanceReviewExcludesAccepter &&
-          current.vetting_hold_resolved_by !== null &&
-          current.vetting_hold_resolved_by === actor.officerId
+          current.vetting_hold_resolvers.includes(actor.officerId)
         ) {
           return { kind: 'SEPARATION_OF_DUTIES', rule: 'ACCEPT_EXCLUDES_CLEARANCE_REVIEWER' };
         }
@@ -340,7 +331,7 @@ export class PgOfficerTransitionRepository implements OfficerTransitionRepositor
   }
 
   async adjudicate(input: AdjudicateInput): Promise<AdjudicateOutcome> {
-    const { actor, applicationId, decision, notes } = input;
+    const { actor, applicationId, decision, notes, lane } = input;
     const schema = sql(schemaForAgency(actor.agency));
     try {
       return await sql.begin(async (tx): Promise<AdjudicateOutcome> => {
@@ -348,64 +339,125 @@ export class PgOfficerTransitionRepository implements OfficerTransitionRepositor
 
         const rows = await tx<AdjudicableRow[]>`
           SELECT status, age_eligibility_status, academic_status, criminal_clearance_status,
+                 academic_eligibility_detail,
                  applicant_id, campaign_id, category
           FROM ${schema}.applications WHERE id = ${applicationId} FOR UPDATE
         `;
         const current = rows[0];
         if (!current) return { kind: 'NOT_FOUND' };
-        if (!ADJUDICABLE.has(current.status)) {
-          return { kind: 'NOT_APPLICABLE', currentStatus: current.status };
+
+        // WHICH hold is this verdict about (evaluation D10)? Read from the row,
+        // never from the queue entry the officer was looking at: the queue is a
+        // snapshot, and a decision made against a stale copy must not silently
+        // apply to a different hold.
+        let evidence: VettingEvidence = {
+          ageStatus: current.age_eligibility_status,
+          academicStatus: current.academic_status,
+          criminalStatus: current.criminal_clearance_status,
+        };
+        const held = adjudicationLanes({
+          status: current.status,
+          criminalStatus: current.criminal_clearance_status,
+          academicStatus: current.academic_status,
+          academicDetail: current.academic_eligibility_detail,
+        });
+        const decided: AdjudicationLane | undefined =
+          lane ?? (held.length === 1 ? held[0] : undefined);
+        if (decided === undefined || !held.includes(decided)) {
+          // Nothing here needs a human, or the caller named a lane this row is
+          // not held in — and the refusal says which lanes it IS held in.
+          return { kind: 'NOT_APPLICABLE', currentStatus: current.status, heldLanes: held };
         }
 
         let target: ApplicationStatus;
         if (decision === 'REJECT') {
+          // A rejection is a decision about the APPLICATION, not a verdict
+          // about the dimension: the registry said "a human must judge", not
+          // "guilty", so the dimension column keeps the evidence it had.
           target = 'REJECTED';
-        } else if (current.status === 'DOCUMENT_REVIEW_AMBER') {
-          // CLEAR lifts the document hold; where the row lands is decided by
-          // the SAME pure lifecycle that put every other status there — from
-          // the baseline, on the row's recorded vetting evidence. All-pass →
-          // GREEN (and the use case re-emits application.cleared, so the slot
-          // lane runs exactly as for a green-lane clearance); gates still
-          // pending → the furthest justified vetting stage, never a premature
-          // green on unanswered evidence.
-          target = deriveApplicationStatus('SUBMITTED', {
-            ageStatus: current.age_eligibility_status,
-            academicStatus: current.academic_status,
-            criminalStatus: current.criminal_clearance_status,
-          });
-        } else {
-          // CLEAR from ADJUDICATION_REVIEW: the officer dismisses the late
-          // flag — restore the stage the row held when the flag arrived,
-          // recorded on the append-only history (rls/0007 guarantees it).
-          const prior = await tx<{ from_status: ApplicationStatus | null }[]>`
-            SELECT from_status FROM ${schema}.application_status_history
-            WHERE application_id = ${applicationId}
-              AND to_status = 'ADJUDICATION_REVIEW'::${schema}.application_status
-            ORDER BY performed_at DESC
-            LIMIT 1
-          `;
-          const restored = prior[0]?.from_status;
-          if (!restored) {
-            // No recorded entry into the hold — nothing trustworthy to restore.
-            return { kind: 'NOT_APPLICABLE', currentStatus: current.status };
+        } else if (decided === 'DOCUMENT') {
+          if (current.status === 'DOCUMENT_REVIEW_AMBER') {
+            // CLEAR lifts the document hold; where the row lands is decided by
+            // the SAME pure lifecycle that put every other status there — from
+            // the baseline, on the row's recorded vetting evidence. All-pass →
+            // GREEN (and the use case re-emits application.cleared, so the slot
+            // lane runs exactly as for a green-lane clearance); gates still
+            // pending → the furthest justified vetting stage, never a premature
+            // green on unanswered evidence.
+            target = deriveApplicationStatus('SUBMITTED', evidence);
+          } else {
+            // CLEAR from ADJUDICATION_REVIEW: the officer dismisses the late
+            // flag — restore the stage the row held when the flag arrived,
+            // recorded on the append-only history (rls/0007 guarantees it).
+            const prior = await tx<{ from_status: ApplicationStatus | null }[]>`
+              SELECT from_status FROM ${schema}.application_status_history
+              WHERE application_id = ${applicationId}
+                AND to_status = 'ADJUDICATION_REVIEW'::${schema}.application_status
+              ORDER BY performed_at DESC
+              LIMIT 1
+            `;
+            const restored = prior[0]?.from_status;
+            if (!restored) {
+              // No recorded entry into the hold — nothing trustworthy to restore.
+              return { kind: 'NOT_APPLICABLE', currentStatus: current.status, heldLanes: held };
+            }
+            target = restored;
           }
-          target = restored;
+        } else {
+          // CRIMINAL / ACADEMIC (evaluation D10): a human decides a dimension
+          // the automatic gate could not settle. CLEAR records the verdict the
+          // gate would have recorded; the lifecycle then places the row exactly
+          // as it would for an automatic pass.
+          if (decided === 'CRIMINAL') {
+            await tx`
+              UPDATE ${schema}.applications SET
+                criminal_clearance_status = 'CLEARED'::${schema}.criminal_clearance_status,
+                criminal_clearance_at = now(),
+                ${stampResolution(actor.officerId, 'CRIMINAL')},
+                updated_at = now()
+              WHERE id = ${applicationId}
+            `;
+            evidence = { ...evidence, criminalStatus: 'CLEARED' };
+          } else {
+            await tx`
+              UPDATE ${schema}.applications SET
+                academic_status = 'ELIGIBLE'::${schema}.academic_eligibility_status,
+                ${stampResolution(actor.officerId, 'ACADEMIC')},
+                updated_at = now()
+              WHERE id = ${applicationId}
+            `;
+            evidence = { ...evidence, academicStatus: 'ELIGIBLE' };
+          }
+          // A verdict on ONE dimension never lifts a hold in ANOTHER: if a
+          // document hold (or a second lane) is still open, the top-level status
+          // does not move — otherwise a criminal CLEAR would walk a row past a
+          // document review no human has performed.
+          target = held.some((other) => other !== decided)
+            ? current.status
+            : deriveApplicationStatus(current.status, evidence);
         }
 
-        if (target === current.status) return { kind: 'NO_CHANGE', currentStatus: current.status };
+        // The DOCUMENT lane keeps its idempotent no-op; the dimension lanes
+        // always report APPLIED, because the verdict itself is the write (the
+        // status may legitimately stay put while another hold is pending).
+        if (target === current.status && decided === 'DOCUMENT') {
+          return { kind: 'NO_CHANGE', currentStatus: current.status };
+        }
 
-        await tx`
-          UPDATE ${schema}.applications SET
-            status = ${target}::${schema}.application_status,
-            updated_at = now()
-          WHERE id = ${applicationId}
-        `;
+        if (target !== current.status) {
+          await tx`
+            UPDATE ${schema}.applications SET
+              status = ${target}::${schema}.application_status,
+              updated_at = now()
+            WHERE id = ${applicationId}
+          `;
+        }
 
         // A decision on an AMBER document hold is a HUMAN document review —
         // stamp the flagged rows with the reviewing officer (UUID sub) and the
-        // decision. A late-disqualification hold is not a document decision,
-        // so ADJUDICATION_REVIEW clears stamp nothing.
-        if (current.status === 'DOCUMENT_REVIEW_AMBER') {
+        // decision. No other lane is a document decision, so nothing else stamps
+        // document_records.
+        if (decided === 'DOCUMENT' && current.status === 'DOCUMENT_REVIEW_AMBER') {
           await tx`
             UPDATE ${schema}.document_records SET
               human_reviewed_by_id = ${actor.officerId},
@@ -417,24 +469,32 @@ export class PgOfficerTransitionRepository implements OfficerTransitionRepositor
           `;
         }
 
-        await tx`
-          INSERT INTO ${schema}.application_status_history
-            (application_id, from_status, to_status, reason, performed_by, correlation_id)
-          VALUES (
-            ${applicationId},
-            ${current.status}::${schema}.application_status,
-            ${target}::${schema}.application_status,
-            ${
-              // history reason is varchar(200) — keep the decision, bound the notes
-              (notes === null ? `Adjudication: ${decision}` : `Adjudication: ${decision} — ${notes}`).slice(0, 200)
-            },
-            ${actor.officerId},
-            ${actor.correlationId}
-          )
-        `;
+        if (target !== current.status) {
+          await tx`
+            INSERT INTO ${schema}.application_status_history
+              (application_id, from_status, to_status, reason, performed_by, correlation_id)
+            VALUES (
+              ${applicationId},
+              ${current.status}::${schema}.application_status,
+              ${target}::${schema}.application_status,
+              ${
+                // history reason is varchar(200) — keep the decision AND the
+                // lane (an officer reading the trail must know which hold the
+                // decision was about), and bound the notes.
+                (notes === null
+                  ? `Adjudication: ${decision} (${decided})`
+                  : `Adjudication: ${decision} (${decided}) — ${notes}`
+                ).slice(0, 200)
+              },
+              ${actor.officerId},
+              ${actor.correlationId}
+            )
+          `;
+        }
 
         return {
           kind: 'APPLIED',
+          lane: decided,
           fromStatus: current.status,
           toStatus: target,
           clearedToGreen: decision === 'CLEAR' && target === 'DOCUMENT_REVIEW_GREEN',
@@ -448,125 +508,24 @@ export class PgOfficerTransitionRepository implements OfficerTransitionRepositor
     }
   }
 
-  /**
-   * Resolve a held vetting dimension (D10, ADR-051).
-   *
-   * The precondition is the QUEUE'S OWN PREDICATE, restated once, under the row
-   * lock: an application is held on CRIMINAL when its clearance status is
-   * UNDER_REVIEW, and on ACADEMIC when the academic gate is still PENDING with
-   * a NESA review code. A console cannot offer work that this verb then refuses,
-   * and a race (two officers opening the same item) resolves to exactly one
-   * APPLIED — the loser sees NOT_HELD, not a silent overwrite.
-   *
-   * The evidence value written is the REASON'S (`VETTING_HOLD_REASONS`), so the
-   * trail can never say "REJECT" while writing CLEARED. Then the SAME pure
-   * lifecycle that produced every other status decides where the row goes —
-   * which is why a resolved criminal hold rejoins the green lane with no special
-   * case here, and why a resolved ACADEMIC/CRIMINAL hold that lands all-pass
-   * sets clearedToGreen for the slot lane.
-   */
-  async vettingHold(input: VettingHoldInput): Promise<VettingHoldOutcome> {
-    const { actor, applicationId, dimension, decision, reason, notes } = input;
-    const schema = sql(schemaForAgency(actor.agency));
-    const spec: VettingHoldReasonSpec = VETTING_HOLD_REASONS[reason];
-    try {
-      return await sql.begin(async (tx): Promise<VettingHoldOutcome> => {
-        await tx`SET LOCAL ROLE ${sql(actor.dbRole)}`;
-
-        const rows = await tx<VettingHoldRow[]>`
-          SELECT status, age_eligibility_status,
-                 academic_status, academic_eligibility_detail,
-                 criminal_clearance_status,
-                 applicant_id, campaign_id, category
-          FROM ${schema}.applications WHERE id = ${applicationId} FOR UPDATE
-        `;
-        const current = rows[0];
-        if (!current) return { kind: 'NOT_FOUND' };
-
-        const held =
-          dimension === 'CRIMINAL'
-            ? current.criminal_clearance_status === 'UNDER_REVIEW'
-            : current.academic_status === 'PENDING' &&
-              current.academic_eligibility_detail !== null &&
-              (current.academic_eligibility_detail as Record<string, unknown>)['failureCode'] === 'NESA_REVIEW_REQUIRED';
-        if (!held) return { kind: 'NOT_HELD', dimension, currentStatus: current.status };
-
-        // The reason is the verdict. `decision` was checked against it at the
-        // ingress; re-checked here so a future caller cannot reach the adapter
-        // with a shape the vocabulary forbids.
-        if (spec.dimension !== dimension || spec.decision !== decision) {
-          return { kind: 'NOT_HELD', dimension, currentStatus: current.status };
-        }
-
-        const nextAcademic = spec.academicStatus ?? current.academic_status;
-        const nextCriminal = spec.criminalStatus ?? current.criminal_clearance_status;
-
-        const target = deriveApplicationStatus(current.status, {
-          ageStatus: current.age_eligibility_status,
-          academicStatus: nextAcademic,
-          criminalStatus: nextCriminal,
-        });
-
-        // Write the evidence even when the status holds: the gate's answer is
-        // the substance of this command, and the queue lists on it.
-        await tx`
-          UPDATE ${schema}.applications SET
-            academic_status = ${nextAcademic}::${schema}.academic_eligibility_status,
-            criminal_clearance_status = ${nextCriminal}::${schema}.criminal_clearance_status,
-            status = ${target}::${schema}.application_status,
-            vetting_hold_resolved_by = ${actor.officerId},
-            vetting_hold_resolved_at = now(),
-            vetting_hold_dimension = ${dimension},
-            updated_at = now()
-          WHERE id = ${applicationId}
-        `;
-
-        if (target !== current.status) {
-          await tx`
-            INSERT INTO ${schema}.application_status_history
-              (application_id, from_status, to_status, reason, performed_by, correlation_id)
-            VALUES (
-              ${applicationId},
-              ${current.status}::${schema}.application_status,
-              ${target}::${schema}.application_status,
-              ${
-                // history reason is varchar(200) — keep dimension+decision, bound the notes
-                (`Vetting hold ${dimension}: ${decision} — ${notes ?? spec.assertion}`).slice(0, 200)
-              },
-              ${actor.officerId},
-              ${actor.correlationId}
-            )
-          `;
-        }
-
-        return {
-          kind: 'APPLIED',
-          dimension,
-          fromStatus: current.status,
-          toStatus: target,
-          statusChanged: target !== current.status,
-          clearedToGreen: target === 'DOCUMENT_REVIEW_GREEN',
-          applicantId: current.applicant_id,
-          campaignId: current.campaign_id,
-          category: current.category,
-        };
-      });
-    } catch (cause) {
-      throw wrap(cause, 'Failed to resolve the vetting hold');
-    }
-  }
 }
 
-/** Row shape the vetting-hold transaction reads under FOR UPDATE. */
-interface VettingHoldRow {
-  readonly status: ApplicationStatus;
-  readonly age_eligibility_status: AgeEligibilityStatus;
-  readonly academic_status: AcademicEligibilityStatus;
-  readonly academic_eligibility_detail: unknown;
-  readonly criminal_clearance_status: CriminalClearanceStatus;
-  readonly applicant_id: string;
-  readonly campaign_id: string;
-  readonly category: ApplicationCategory;
+/**
+ * The durable fact that THIS officer resolved THIS held dimension (rls/0047).
+ * Appended, never replaced: a row held in two dimensions can be resolved by two
+ * officers, and the accept-time four-eyes read must see both. Idempotent — a
+ * repeated resolution adds nothing. The all-or-nothing CHECK on the table
+ * requires resolvers, dimensions and the timestamp to move together.
+ */
+function stampResolution(officerId: string, dimension: 'CRIMINAL' | 'ACADEMIC'): ReturnType<typeof sql> {
+  return sql`
+    vetting_hold_resolvers = CASE WHEN ${officerId}::uuid = ANY(vetting_hold_resolvers)
+                                  THEN vetting_hold_resolvers
+                                  ELSE array_append(vetting_hold_resolvers, ${officerId}::uuid) END,
+    vetting_hold_resolved_dimensions = CASE WHEN ${dimension} = ANY(vetting_hold_resolved_dimensions)
+                                            THEN vetting_hold_resolved_dimensions
+                                            ELSE array_append(vetting_hold_resolved_dimensions, ${dimension}::text) END,
+    vetting_hold_resolved_at = now()`;
 }
 
 /** Row shape the adjudicate transaction reads under FOR UPDATE. */
@@ -575,6 +534,8 @@ interface AdjudicableRow {
   readonly age_eligibility_status: AgeEligibilityStatus;
   readonly academic_status: AcademicEligibilityStatus;
   readonly criminal_clearance_status: CriminalClearanceStatus;
+  /** jsonb; only `failureCode` is read (the NESA human-review hold). */
+  readonly academic_eligibility_detail: Record<string, unknown> | null;
   readonly applicant_id: string;
   readonly campaign_id: string;
   readonly category: ApplicationCategory;

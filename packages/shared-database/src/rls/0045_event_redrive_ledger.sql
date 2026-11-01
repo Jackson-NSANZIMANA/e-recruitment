@@ -1,5 +1,5 @@
 -- ══════════════════════════════════════════════════════════════════
--- 0043 — Durable event re-drive ledger · D0 (Phase 0), ADR-050
+-- 0045 — Durable event re-drive ledger · D0 (Phase 0), ADR-050
 --
 -- THE DEFECT THIS CLOSES (evaluation 2026-10-29, D2). ADR-025 parked what a
 -- handler could not process on `events.dead-letter`, which stopped one poison
@@ -23,7 +23,7 @@
 -- No payload is stored. The bytes stay on `events.dead-letter`, which is what
 -- the worker re-publishes from; this table only decides WHEN and WHETHER.
 --
--- Number: 0043, reserved for ADR-050 in the programme README. Fully re-runnable.
+-- Number: 0045 (renumbered from 0043 at rebase onto rls/0043-0044), reserved for ADR-050 in the programme README. Fully re-runnable.
 -- ══════════════════════════════════════════════════════════════════
 BEGIN;
 
@@ -33,6 +33,11 @@ CREATE TABLE IF NOT EXISTS public_core.event_redrive_ledger (
   source_partition          integer NOT NULL CHECK (source_partition >= 0),
   source_offset             bigint NOT NULL CHECK (source_offset >= 0),
   group_id                  varchar(128) NOT NULL,
+  -- The event's own id (x-usrp-dlq-event-id). A re-driven event that fails again is
+  -- dead-lettered at a NEW offset; this is what lets the new row INHERIT the
+  -- attempts already spent, so the cap actually terminates. Nullable: a letter
+  -- whose event id could not be read is treated as a fresh chain.
+  event_id                  varchar(64),
   -- The dead-letter reason the letter arrived with (ADR-025 vocabulary).
   reason                    varchar(24) NOT NULL,
   -- Completed re-drives. 0 = never attempted.
@@ -65,6 +70,20 @@ CREATE INDEX IF NOT EXISTS idx_event_redrive_due
   ON public_core.event_redrive_ledger (next_attempt_at)
   WHERE state = 'RETRYING';
 
+-- Chain lookup at intake: "have we already spent attempts on this event?"
+CREATE INDEX IF NOT EXISTS idx_event_redrive_chain
+  ON public_core.event_redrive_ledger (group_id, event_id) WHERE event_id IS NOT NULL;
+
+-- The intake cursor: how far into each dead-letter partition the worker has
+-- REGISTERED letters. Without it nothing ever creates a ledger row.
+CREATE TABLE IF NOT EXISTS public_core.event_redrive_cursor (
+  topic        varchar(128) NOT NULL,
+  partition    integer NOT NULL CHECK (partition >= 0),
+  next_offset  bigint NOT NULL CHECK (next_offset >= 0),
+  updated_at   timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (topic, partition)
+);
+
 -- The circuit breaker's read: consecutive failures per (group, topic).
 CREATE INDEX IF NOT EXISTS idx_event_redrive_group
   ON public_core.event_redrive_ledger (group_id, source_topic, state);
@@ -72,6 +91,7 @@ CREATE INDEX IF NOT EXISTS idx_event_redrive_group
 -- The platform's system role owns the worker. No officer role can see this
 -- table at all: it is operational state, not case data.
 GRANT SELECT, INSERT, UPDATE ON public_core.event_redrive_ledger TO usrp_system_service;
+GRANT SELECT, INSERT, UPDATE ON public_core.event_redrive_cursor TO usrp_system_service;
 
 -- FORCE'd RLS like every other system-owned store (rls/0020). The policy is
 -- trivial today — one system role, one concern — but it means a future role
@@ -81,6 +101,12 @@ ALTER TABLE public_core.event_redrive_ledger FORCE  ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS pc_event_redrive_system ON public_core.event_redrive_ledger;
 CREATE POLICY pc_event_redrive_system ON public_core.event_redrive_ledger
+  FOR ALL TO usrp_system_service USING (true) WITH CHECK (true);
+
+ALTER TABLE public_core.event_redrive_cursor ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public_core.event_redrive_cursor FORCE  ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS pc_event_redrive_cursor_system ON public_core.event_redrive_cursor;
+CREATE POLICY pc_event_redrive_cursor_system ON public_core.event_redrive_cursor
   FOR ALL TO usrp_system_service USING (true) WITH CHECK (true);
 
 COMMIT;

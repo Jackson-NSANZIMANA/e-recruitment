@@ -18,6 +18,7 @@
 import { HttpError, type HttpResult, type Route } from '@usrp/shared-http';
 import { requireOfficerPermission, withAuth, type AuthVerifier } from '@usrp/shared-auth';
 import { ApplicationPersistenceError } from '../../domain/application.errors.js';
+import type { AdjudicationLane } from '../../domain/adjudication-lanes.js';
 import type {
   AcceptCommand,
   AdjudicateCommand,
@@ -26,36 +27,29 @@ import type {
   MedicalReviewCommand,
   OfficerCommandOutcome,
   OfficerTransitionsService,
-  VettingHoldCommand,
-  VettingHoldCommandOutcome,
 } from '../../application/officer-transitions.service.js';
-import {
-  isVettingHoldDecision,
-  isVettingHoldDimension,
-  isVettingHoldReason,
-} from '@usrp/shared-types';
 
 export const MEDICAL_REVIEW_PATH = '/v1/applications/medical-review';
 export const FINAL_DECISION_PATH = '/v1/applications/final-decision';
 export const ACCEPT_PATH = '/v1/applications/accept';
 export const ADJUDICATE_PATH = '/v1/applications/adjudicate';
-export const VETTING_HOLD_PATH = '/v1/applications/vetting-hold';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FITNESS = new Set(['FIT', 'UNFIT']);
 const CERT_VERDICTS = new Set(['CERT_VERIFIED', 'CERT_REJECTED']);
 const DECISIONS = new Set(['SHORTLIST', 'REJECT']);
 const ADJUDICATIONS = new Set(['CLEAR', 'REJECT']);
+/** The closed lane vocabulary — the three holds an officer may decide (D10). */
+const ADJUDICATION_LANES = new Set(['DOCUMENT', 'CRIMINAL', 'ACADEMIC']);
 const MAX_NOTES = 1000; // final_decision_notes is varchar(1000); history reason is varchar(200) — service truncates
 
 interface TransitionBody {
   readonly applicationId?: unknown;
+  readonly lane?: unknown;
   readonly fitnessStatus?: unknown;
   readonly certVerdict?: unknown;
   readonly physicianName?: unknown;
   readonly decision?: unknown;
-  readonly dimension?: unknown;
-  readonly reasonCode?: unknown;
   readonly notes?: unknown;
 }
 
@@ -152,10 +146,12 @@ export function officerTransitionRoutes(
           throw new HttpError(400, 'INVALID_DECISION', 'Field "decision" must be "CLEAR" or "REJECT".');
         }
         const notes = requireNotes(body.notes);
+        const lane = requireLane(body.lane);
         const command: AdjudicateCommand = {
           actor: principal,
           applicationId,
           decision: decision as 'CLEAR' | 'REJECT',
+          ...(lane === undefined ? {} : { lane }),
           notes,
           context: { correlationId: ctx.correlationId, causationId: ctx.correlationId },
         };
@@ -174,84 +170,7 @@ export function officerTransitionRoutes(
         );
       }),
     },
-    {
-      // D10 (ADR-051): the verb for the work the amber queue lists. A held
-      // criminal clearance or NESA review is decided HERE, by the post that
-      // reads the evidence (`vetting.hold.resolve`), and the row re-derives
-      // through the same pure lifecycle as every other transition.
-      method: 'POST',
-      path: VETTING_HOLD_PATH,
-      handler: withAuth(verify, { kind: 'officer' }, async (ctx, principal): Promise<HttpResult> => {
-        requireOfficerPermission(principal, 'vetting.hold.resolve');
-        const body = await ctx.json<TransitionBody>();
-        const applicationId = requireApplicationId(body.applicationId);
-        if (!isVettingHoldDimension(body.dimension)) {
-          throw new HttpError(400, 'INVALID_DIMENSION', 'Field "dimension" must be "CRIMINAL" or "ACADEMIC".');
-        }
-        if (!isVettingHoldDecision(body.decision)) {
-          throw new HttpError(400, 'INVALID_DECISION', 'Field "decision" must be "CLEAR" or "REJECT".');
-        }
-        // The reason is the verdict (see @usrp/shared-types/vetting-hold). An
-        // unknown code is a caller error; a code that contradicts `dimension`
-        // or `decision` is refused by the use case as 422.
-        if (!isVettingHoldReason(body.reasonCode)) {
-          throw new HttpError(400, 'INVALID_REASON_CODE', 'Field "reasonCode" is not a known vetting-hold reason.');
-        }
-        const notes = requireNotes(body.notes);
-        const command: VettingHoldCommand = {
-          actor: principal,
-          applicationId,
-          dimension: body.dimension,
-          decision: body.decision,
-          reason: body.reasonCode,
-          notes,
-          context: { correlationId: ctx.correlationId, causationId: ctx.correlationId },
-        };
-        let outcome: VettingHoldCommandOutcome;
-        try {
-          outcome = await service.vettingHold(command);
-        } catch (err) {
-          throw mapDomainError(err);
-        }
-        // APPLIED carries the applicant/campaign identifiers the event needs —
-        // the client sees which dimension moved and whether the status did.
-        return outcome.kind === 'APPLIED'
-          ? {
-              status: 200,
-              body: {
-                status: 'APPLIED',
-                dimension: outcome.dimension,
-                fromStatus: outcome.fromStatus,
-                toStatus: outcome.toStatus,
-                statusChanged: outcome.statusChanged,
-              },
-            }
-          : mapVettingHoldOutcome(outcome);
-      }),
-    },
   ];
-}
-
-/** Vetting-hold outcomes that are not APPLIED, mapped like the other verbs. */
-function mapVettingHoldOutcome(outcome: Exclude<VettingHoldCommandOutcome, { kind: 'APPLIED' }>): HttpResult {
-  switch (outcome.kind) {
-    case 'NOT_HELD':
-      // 409: the work item the console showed is gone — resolved by someone
-      // else, or never genuinely held. Nothing written.
-      return {
-        status: 409,
-        body: { status: 'NOT_HELD', dimension: outcome.dimension, currentStatus: outcome.currentStatus },
-      };
-    case 'NOT_FOUND':
-      return { status: 404, body: { status: 'NOT_FOUND' } };
-    case 'FORBIDDEN':
-      return { status: 403, body: { error: 'FORBIDDEN' } };
-    case 'INVALID_VETTING_HOLD_REASON':
-      // The reason code contradicts the dimension/decision the caller sent.
-      return { status: 422, body: { status: 'INVALID_VETTING_HOLD_REASON', reason: outcome.reason } };
-    default:
-      return assertNever(outcome);
-  }
 }
 
 /** Validate the body's applicationId is a UUID (shape only). 400 otherwise. */
@@ -264,6 +183,18 @@ function requireApplicationId(value: unknown): string {
     throw new HttpError(400, 'INVALID_APPLICATION_ID', 'Field "applicationId" must be a UUID.');
   }
   return trimmed;
+}
+
+/**
+ * Optional `lane` (evaluation D10): which hold the verdict is about. Absent is
+ * meaningful — it means "the row's only hold" — so it is not defaulted here.
+ */
+function requireLane(value: unknown): AdjudicationLane | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string' || !ADJUDICATION_LANES.has(value)) {
+    throw new HttpError(400, 'INVALID_LANE', 'Field "lane" must be "DOCUMENT", "CRIMINAL" or "ACADEMIC".');
+  }
+  return value as AdjudicationLane;
 }
 
 /** Optional notes: a string within the column bound, or null when absent. */
@@ -300,7 +231,20 @@ function mapOutcome(outcome: OfficerCommandOutcome): HttpResult {
     case 'NO_CHANGE':
       return { status: 200, body: { status: 'NO_CHANGE', currentStatus: outcome.currentStatus } };
     case 'NOT_APPLICABLE':
-      return { status: 409, body: { status: 'NOT_APPLICABLE', currentStatus: outcome.currentStatus } };
+      return {
+        status: 409,
+        body: {
+          status: 'NOT_APPLICABLE',
+          currentStatus: outcome.currentStatus,
+          // An adjudication refusal that HAS lanes to offer is an instruction,
+          // not a shrug: the officer is looking at a row the queue showed them,
+          // and the answer says which button would work (evaluation D10). A row
+          // held in no lane carries none, and the refusal stays bare.
+          ...(outcome.heldLanes !== undefined && outcome.heldLanes.length > 0
+            ? { heldLanes: outcome.heldLanes }
+            : {}),
+        },
+      };
     case 'NOT_FOUND':
       return { status: 404, body: { status: 'NOT_FOUND' } };
     case 'FORBIDDEN':

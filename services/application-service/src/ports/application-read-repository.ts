@@ -10,7 +10,8 @@
 // adapter is a dumb executor that assumes the role it is told.
 // ══════════════════════════════════════════════════════════════════
 
-import type { Agency, AmberQueueAction, ApplicationCategory, ApplicationStatus } from '@usrp/shared-types';
+import type { Agency, ApplicationCategory, ApplicationStatus } from '@usrp/shared-types';
+import type { AdjudicationLane } from '../domain/adjudication-lanes.js';
 import type { DbRole } from '@usrp/shared-auth';
 
 /** A non-PII summary row — the anonymous processing code, never a name/NID. */
@@ -57,12 +58,12 @@ export interface AmberQueueEntry {
    */
   readonly reasons: readonly string[];
   /**
-   * D10: the officer verbs that apply to this row, as a closed set. The console
-   * renders one action per entry instead of guessing from `status` + `reasons`,
-   * which is how "Adjudicate" used to be offered on a row only a vetting-hold
-   * resolution could move. A row can need both.
+   * WHICH hold(s) this row is in (evaluation D10), in the vocabulary the
+   * `adjudicate` operation expects back in `lane`. Empty is impossible for a
+   * queued row, but the type says "could be" because the predicate is the
+   * authority, not the queue.
    */
-  readonly actions: readonly AmberQueueAction[];
+  readonly heldLanes: readonly AdjudicationLane[];
 }
 
 /** An applicant-facing summary row — the agency joins the non-PII summary. */

@@ -30,6 +30,7 @@ import {
   backoffMs,
   describeError,
   resolveDeadLetterPolicy,
+  type DeadLetterObserver,
   type DeadLetterPolicy,
   type DeadLetterReason,
 } from './dead-letter.js';
@@ -43,6 +44,13 @@ export interface KafkaBusOptions {
   readonly serializer?: EventSerializer;
   /** Retry + dead-letter policy for consumed messages. Defaults are the contract. */
   readonly deadLetter?: Partial<DeadLetterPolicy>;
+  /**
+   * Called once per event the policy gives up on, AFTER its bytes are parked on
+   * the dead-letter topic (see DeadLetterObserver). The consumer uses it to
+   * record what a permanent failure means for the business fact the event
+   * carried. Absent: dead-lettering stays a log-and-park alarm.
+   */
+  readonly onDeadLetter?: DeadLetterObserver;
 }
 
 /**
@@ -73,6 +81,7 @@ export class KafkaEventBus implements EventBus {
   private readonly consumers: Consumer[] = [];
   private readonly serializer: EventSerializer;
   private readonly deadLetterPolicy: DeadLetterPolicy;
+  private readonly onDeadLetter: DeadLetterObserver | undefined;
   private producerConnected = false;
 
   constructor(options: KafkaBusOptions) {
@@ -85,6 +94,7 @@ export class KafkaEventBus implements EventBus {
     this.producer = this.kafka.producer({ allowAutoTopicCreation: false });
     this.serializer = options.serializer ?? new JsonEventSerializer();
     this.deadLetterPolicy = resolveDeadLetterPolicy(options.deadLetter ?? {});
+    this.onDeadLetter = options.onDeadLetter;
   }
 
   async connect(): Promise<void> {
@@ -161,7 +171,7 @@ export class KafkaEventBus implements EventBus {
           //    retrying them only extends the outage. Park them now.
           const decoded = this.decode(message.value);
           if (!decoded.ok) {
-            await this.deadLetter(source, 'UNDECODABLE', 0, decoded.error, null);
+            await this.deadLetter(source, 'UNDECODABLE', 0, decoded.error, null, null);
             return;
           }
 
@@ -206,11 +216,11 @@ export class KafkaEventBus implements EventBus {
         return;
       } catch (error) {
         if (error instanceof NonRetryableEventError) {
-          await this.deadLetter(source, 'NON_RETRYABLE', attempt, error, event.eventId);
+          await this.deadLetter(source, 'NON_RETRYABLE', attempt, error, event.eventId, event);
           return;
         }
         if (attempt >= policy.maxHandlerAttempts) {
-          await this.deadLetter(source, 'HANDLER_FAILED', attempt, error, event.eventId);
+          await this.deadLetter(source, 'HANDLER_FAILED', attempt, error, event.eventId, event);
           return;
         }
         const delayMs = backoffMs(policy, attempt);
@@ -246,6 +256,7 @@ export class KafkaEventBus implements EventBus {
     attempts: number,
     error: unknown,
     eventId: string | null,
+    event: USRPEvent | null,
   ): Promise<void> {
     const errorText = describeError(error);
     const headers: IHeaders = {
@@ -277,6 +288,34 @@ export class KafkaEventBus implements EventBus {
       deadLetterTopic: this.deadLetterPolicy.topic,
       error: errorText,
     });
+
+    // The last word belongs to the consumer that owns the business record, and
+    // it comes AFTER the park: the bytes are already recoverable, so nothing the
+    // observer does — including throwing — can lose the event. A booted service
+    // without an observer keeps the old behaviour exactly.
+    if (event !== null && this.onDeadLetter !== undefined) {
+      try {
+        await this.onDeadLetter(event, {
+          reason,
+          groupId: source.groupId,
+          topic: source.topic,
+          partition: source.partition,
+          offset: source.offset,
+          attempts,
+          error,
+        });
+      } catch (observerError) {
+        logWarn('event_dead_letter_observer_failed', {
+          groupId: source.groupId,
+          topic: source.topic,
+          partition: source.partition,
+          offset: source.offset,
+          eventType: event.eventType,
+          eventId: event.eventId,
+          error: describeError(observerError),
+        });
+      }
+    }
   }
 }
 

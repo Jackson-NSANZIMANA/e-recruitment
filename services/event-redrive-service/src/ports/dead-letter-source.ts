@@ -10,7 +10,7 @@
 // row for. That keeps a re-drive's cost independent of the backlog.
 // ══════════════════════════════════════════════════════════════════
 
-import type { RedriveLedgerEntry } from '@usrp/shared-events';
+import type { DeadLetterHeader, RedriveLedgerEntry } from '@usrp/shared-events';
 
 /** The original bytes of one dead letter. */
 export interface DeadLetterMessage {
@@ -20,7 +20,23 @@ export interface DeadLetterMessage {
   readonly headers: Readonly<Record<string, string>>;
 }
 
+/** One intake pass: the letters registered and where each DLQ partition now stands. */
+export interface ScanResult {
+  readonly letters: readonly DeadLetterHeader[];
+  /** partition → next offset to read. Advanced past letters with unreadable headers too. */
+  readonly next: ReadonlyMap<number, string>;
+}
+
 export interface DeadLetterSource {
+  /**
+   * Read the dead-letter topic FORWARD from `cursor` (partition → next offset;
+   * absent = from the beginning), up to `limit` letters and a snapshot of the
+   * topic's end. Returns identity and headers only — the bytes are fetched later,
+   * and only for letters that are actually re-driven. Without this pass nothing
+   * ever creates a ledger row and the worker has nothing to claim.
+   */
+  scanNew(cursor: ReadonlyMap<number, string>, limit: number): Promise<ScanResult>;
+
   /**
    * The original bytes for each of `entries`, keyed by `redriveKey()`.
    *

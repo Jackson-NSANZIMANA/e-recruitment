@@ -15,7 +15,7 @@
 // Conflating them is how a circuit breaker either never trips or never resets.
 // ══════════════════════════════════════════════════════════════════
 
-import type { RedriveLedgerEntry, RedriveParkReason } from '@usrp/shared-events';
+import type { DeadLetterHeader, RedriveLedgerEntry, RedriveParkReason } from '@usrp/shared-events';
 
 export interface ClaimDueInput {
   readonly nowMs: number;
@@ -38,7 +38,26 @@ export interface ParkInput {
   readonly errorCode?: string;
 }
 
+export interface IntakeInput {
+  readonly letters: readonly DeadLetterHeader[];
+  /** partition → next offset, persisted in the SAME transaction as the rows. */
+  readonly next: ReadonlyMap<number, string>;
+  readonly nowMs: number;
+  /** The schedule, so a letter that is a RETURN of a known event is dated from what it already spent. */
+  readonly delaysMs: readonly number[];
+}
+
 export interface RedriveLedger {
+  /** partition → next offset to read, for the intake pass. */
+  readCursor(topic: string): Promise<ReadonlyMap<number, string>>;
+  /**
+   * Register letters and advance the cursor atomically. Idempotent on the letter
+   * identity. A letter whose event id the ledger already knows INHERITS the
+   * attempts that event spent, so a re-driven event that fails again continues
+   * its schedule instead of starting over — the cap must terminate.
+   */
+  intake(input: IntakeInput): Promise<{ readonly registered: number }>;
+
   /**
    * Every RETRYING letter whose next_attempt_at has passed, oldest first, up to
    * `limit`, claimed under a row lock (`FOR UPDATE SKIP LOCKED`) so a second

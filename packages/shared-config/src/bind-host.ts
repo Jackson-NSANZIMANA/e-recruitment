@@ -16,7 +16,7 @@
 // SO THE RULE IS: loopback unless someone says otherwise, and saying so must be
 // explicit, visible and refused in combination with real citizen traffic.
 //
-//   HTTP_BIND_HOST set      → validated IP literal, used verbatim
+//   USRP_HTTP_BIND_HOST set      → validated IP literal, used verbatim
 //   production, unset       → BOOT FAILS naming the variable (a container that
 //                             binds loopback is a service nobody can call, and
 //                             failing loudly beats a silent black hole)
@@ -28,7 +28,7 @@
 
 import type { EnvSource } from './env.js';
 
-export const BIND_HOST_VAR = 'HTTP_BIND_HOST';
+export const BIND_HOST_VAR = 'USRP_HTTP_BIND_HOST';
 
 /** The loopback literal every service falls back to. */
 export const LOOPBACK = '127.0.0.1';

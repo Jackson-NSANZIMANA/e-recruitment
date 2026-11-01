@@ -22,9 +22,10 @@ import {
   DLQ_HEADERS,
   PARKED_TOPIC,
   redriveKey,
+  type DeadLetterHeader,
   type RedriveLedgerEntry,
 } from '@usrp/shared-events';
-import type { DeadLetterMessage, DeadLetterSource, RawRepublisher } from '../ports/dead-letter-source.js';
+import type { DeadLetterMessage, DeadLetterSource, RawRepublisher, ScanResult } from '../ports/dead-letter-source.js';
 
 /** Upper bound on one pass: a huge graveyard must not stall the tick forever. */
 const PASS_TIMEOUT_MS = 20_000;
@@ -46,6 +47,79 @@ export class KafkaDeadLetterSource implements DeadLetterSource {
       ssl: options.ssl ?? false,
       logLevel: logLevel.ERROR,
     });
+  }
+
+  async scanNew(cursor: ReadonlyMap<number, string>, limit: number): Promise<ScanResult> {
+    const letters: DeadLetterHeader[] = [];
+    const next = new Map<number, string>();
+
+    const admin = this.#kafka.admin();
+    await admin.connect();
+    const ends = new Map<number, bigint>();
+    try {
+      for (const p of await admin.fetchTopicOffsets(DEAD_LETTER_TOPIC)) ends.set(p.partition, BigInt(p.high));
+    } finally {
+      await admin.disconnect();
+    }
+    // Only partitions with something unread.
+    const pending = new Set<number>();
+    for (const [partition, high] of ends) {
+      if (high > BigInt(cursor.get(partition) ?? '0')) pending.add(partition);
+    }
+    if (pending.size === 0) return { letters, next };
+
+    const consumer: Consumer = this.#kafka.consumer({ groupId: `usrp-redrive-scan-${randomUUID()}` });
+    await consumer.connect();
+    try {
+      await consumer.subscribe({ topics: [DEAD_LETTER_TOPIC], fromBeginning: true });
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, PASS_TIMEOUT_MS);
+        const finish = (): void => {
+          clearTimeout(timer);
+          resolve();
+        };
+        consumer
+          .run({
+            eachMessage: ({ partition, message }): Promise<void> => {
+              const end = ends.get(partition) ?? 0n;
+              const offset = BigInt(message.offset);
+              if (pending.has(partition) && offset < end && offset >= BigInt(cursor.get(partition) ?? '0')) {
+                if (letters.length < limit) {
+                  const reason = headerValue(message.headers, DLQ_HEADERS.REASON);
+                  const groupId = headerValue(message.headers, DLQ_HEADERS.GROUP);
+                  const sourceTopic = headerValue(message.headers, DLQ_HEADERS.SOURCE_TOPIC);
+                  if (groupId !== undefined && sourceTopic !== undefined) {
+                    letters.push({
+                      groupId,
+                      sourceTopic,
+                      partition,
+                      offset: message.offset,
+                      reason: (reason ?? 'UNKNOWN') as DeadLetterHeader['reason'],
+                      eventId: headerValue(message.headers, DLQ_HEADERS.EVENT_ID) ?? null,
+                    });
+                  }
+                  next.set(partition, String(offset + 1n));
+                }
+                if (offset + 1n >= end || letters.length >= limit) pending.delete(partition);
+              }
+              if (pending.size === 0) finish();
+              return Promise.resolve();
+            },
+          })
+          .catch(() => {
+            finish();
+          });
+        // Resume each partition where the ledger's cursor says; kafkajs requires
+        // seek() after run().
+        for (const partition of pending) {
+          const from = cursor.get(partition);
+          if (from !== undefined) consumer.seek({ topic: DEAD_LETTER_TOPIC, partition, offset: from });
+        }
+      });
+    } finally {
+      await consumer.disconnect();
+    }
+    return { letters, next };
   }
 
   async fetchBatch(entries: readonly RedriveLedgerEntry[]): Promise<ReadonlyMap<string, DeadLetterMessage>> {

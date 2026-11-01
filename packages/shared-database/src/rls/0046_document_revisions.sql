@@ -1,5 +1,5 @@
 -- ══════════════════════════════════════════════════════════════════
--- 0044 — Document supersession and the review lock · D0 (Phase 0), ADR-052
+-- 0046 — Document supersession and the review lock · D0 (Phase 0), ADR-052
 --
 -- THE DEFECT THIS CLOSES (evaluation 2026-10-29, D8). The document door keeps
 -- ONE object per (agency, application, document type) under a derived, stable
@@ -33,7 +33,7 @@
 -- All three agencies, one migration: an agency-specific table is the D1 class
 -- of defect, and verify-cross-agency-columns.ts asserts the shape is identical.
 --
--- Number: 0044, reserved for ADR-052 in the programme README. Fully re-runnable.
+-- Number: 0046 (renumbered from 0044 at rebase onto rls/0043-0044), reserved for ADR-052 in the programme README. Fully re-runnable.
 -- ══════════════════════════════════════════════════════════════════
 BEGIN;
 

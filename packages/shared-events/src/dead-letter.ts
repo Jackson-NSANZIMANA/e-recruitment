@@ -28,6 +28,8 @@
 // unmodified so scripts/replay-dead-letters.ts can re-publish them byte-exact.
 // ══════════════════════════════════════════════════════════════════
 
+import type { USRPEvent } from '@usrp/shared-types';
+
 /** One shared parking topic. Headers say which consumer group failed. */
 export const DEAD_LETTER_TOPIC = 'events.dead-letter' as const;
 
@@ -102,6 +104,45 @@ export function resolveDeadLetterPolicy(overrides: Partial<DeadLetterPolicy> = {
 export function backoffMs(policy: DeadLetterPolicy, attempt: number): number {
   return Math.min(policy.maxBackoffMs, policy.baseBackoffMs * 2 ** (attempt - 1));
 }
+
+/**
+ * What a consumer learns when the policy gives up on one of its events.
+ *
+ * DEAD-LETTERING IS NOT THE END OF THE STORY (ADR-025 addendum). Parking the
+ * bytes keeps the event recoverable by an operator, but the BUSINESS fact the
+ * event was carrying can still be stranded: a citizen waits on a verdict that
+ * will now never be produced automatically, and every reader of the durable
+ * record keeps saying "in progress". The consumer that owns that record is the
+ * only party that can decide what a permanent failure means for it — so the bus
+ * tells it, once, after the bytes are safely parked.
+ *
+ * The observer runs AFTER the park succeeds, and its failure never un-parks
+ * anything: it is a best-effort last word, logged and swallowed. If it throws,
+ * the event is still dead-lettered and the offset still commits, exactly as
+ * before — the invariant stays "dead-lettered or redelivered, never dropped".
+ *
+ * `error` is the throw that exhausted the budget, so a consumer can distinguish
+ * the cases it knows (an upstream outage) from the ones it does not. It is the
+ * ORIGINAL error object, never serialised: this callback is in-process.
+ */
+export interface DeadLetterInfo {
+  readonly reason: DeadLetterReason;
+  /** The consumer group whose handler failed — i.e. which reaction gave up. */
+  readonly groupId: string;
+  readonly topic: string;
+  readonly partition: number;
+  readonly offset: string;
+  /** Handler invocations made before giving up (0 for an undecodable message). */
+  readonly attempts: number;
+  readonly error: unknown;
+}
+
+/**
+ * A consumer's last word on an event it will never process. Must be idempotent:
+ * a replay or a second dead-lettering of the same event may call it again.
+ * Must never throw for a business reason — throw only to be logged as a bug.
+ */
+export type DeadLetterObserver = (event: USRPEvent, info: DeadLetterInfo) => Promise<void>;
 
 /**
  * Operator-facing error text: name + message only, truncated. Never a stack

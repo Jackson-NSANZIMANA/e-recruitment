@@ -105,11 +105,6 @@ export const EDGE_OPERATIONS = Object.freeze({
   recordFinalDecision: { operationId: 'recordFinalDecision', method: 'POST', path: '/edge/v1/applications/final-decision', session: 'officer', permission: 'decision.final', csrf: true, maxBodyBytes: SMALL_BODY, retryOnG2G: false, publicAllowlist: false, upstream: [UPSTREAM.finalDecision], composition: 'single' },
   acceptApplication: { operationId: 'acceptApplication', method: 'POST', path: '/edge/v1/applications/accept', session: 'officer', permission: 'application.accept', csrf: true, maxBodyBytes: SMALL_BODY, retryOnG2G: false, publicAllowlist: false, upstream: [UPSTREAM.accept], composition: 'single' },
   adjudicateApplication: { operationId: 'adjudicateApplication', method: 'POST', path: '/edge/v1/applications/adjudicate', session: 'officer', permission: 'adjudication.decide', csrf: true, maxBodyBytes: SMALL_BODY, retryOnG2G: false, publicAllowlist: false, upstream: [UPSTREAM.adjudicate], composition: 'single' },
-  // D10 (ADR-051): the verb for a HELD vetting dimension — a criminal-clearance
-  // UNDER_REVIEW or a NESA review. Same post as adjudication (the officer who
-  // reads the evidence decides on it), but a different permission, because the
-  // accept side must be able to hold the resolver to four eyes.
-  resolveVettingHold: { operationId: 'resolveVettingHold', method: 'POST', path: '/edge/v1/applications/vetting-hold', session: 'officer', permission: 'vetting.hold.resolve', csrf: true, maxBodyBytes: SMALL_BODY, retryOnG2G: false, publicAllowlist: false, upstream: [UPSTREAM.vettingHold], composition: 'single' },
   // ADR-032 advisory checklist + venue verification by the check-in post.
   getDocumentChecklist: { operationId: 'getDocumentChecklist', method: 'GET', path: '/edge/v1/applications/document-checklist', session: 'officer', permission: 'application.read', csrf: false, maxBodyBytes: SMALL_BODY, retryOnG2G: true, publicAllowlist: false, upstream: [UPSTREAM.documentChecklist], composition: 'single' },
   verifyDocumentAtVenue: { operationId: 'verifyDocumentAtVenue', method: 'POST', path: '/edge/v1/applications/documents/verify-at-venue', session: 'officer', permission: 'document.verify.venue', csrf: true, maxBodyBytes: SMALL_BODY, retryOnG2G: false, publicAllowlist: false, upstream: [UPSTREAM.verifyDocumentAtVenue], composition: 'single' },

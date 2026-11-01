@@ -185,10 +185,10 @@ export const rdfApplications = rdfOps.table(
     finalDecisionById: uuid('final_decision_by_id'),
     finalDecisionAt: timestamp('final_decision_at', { withTimezone: true }),
     finalDecisionNotes: varchar('final_decision_notes', { length: 1000 }),
-    // D10 (rls/0045): who resolved a HELD vetting dimension on this application.
-    vettingHoldResolvedBy: uuid('vetting_hold_resolved_by'),
+    // D10 (rls/0047): who resolved which HELD vetting dimension(s) on this application.
+    vettingHoldResolvers: uuid('vetting_hold_resolvers').array().notNull().default(sql`'{}'::uuid[]`),
+    vettingHoldResolvedDimensions: text('vetting_hold_resolved_dimensions').array().notNull().default(sql`'{}'::text[]`),
     vettingHoldResolvedAt: timestamp('vetting_hold_resolved_at', { withTimezone: true }),
-    vettingHoldDimension: varchar('vetting_hold_dimension', { length: 16 }),
 
     submittedAt: timestamp('submitted_at', { withTimezone: true }),
     // BUILD-002 (rls/0029): the policy version and calendar date that governed
@@ -278,7 +278,7 @@ export const rdfDocumentRecords = rdfOps.table(
     apiVerificationToken: varchar('api_verification_token', { length: 128 }),
     apiVerifiedAt: timestamp('api_verified_at', { withTimezone: true }),
 
-    // D8 (rls/0044, ADR-052): how many times this slot has been uploaded, and a
+    // D8 (rls/0046, ADR-052): how many times this slot has been uploaded, and a
     // KEYED digest of the bytes (never a bare hash — see the migration header).
     revision: integer('revision').default(1).notNull(),
     contentHmac: varchar('content_hmac', { length: 64 }),
