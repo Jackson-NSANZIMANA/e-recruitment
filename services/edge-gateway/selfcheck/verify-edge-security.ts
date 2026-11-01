@@ -387,20 +387,21 @@ async function stubHandler(
     case "POST /v1/applications/documents/verify-at-venue":
       return send(res, 200, { status: "RECORDED", checklist: LEAKY_CHECKLIST, officerId: "leak" });
 
-    case "POST /v1/applicants/me/applications/documents":
+    case "POST /v1/applicants/me/applications/documents": {
       // The stub answers with internal verdict and revision data on purpose:
       // only the approved revision-bearing shape may cross to the browser.
-      return send(res, 201, {
+      const answer = {
         status: "UPLOADED",
         documentId: "11111111-2222-4333-8444-555555555555",
         documentType: "NATIONAL_ID_COPY",
-        ...(state.malformedUploadSuccess ? {} : { revision: 1 }),
         lane: "GREEN",
         score: 0.97,
         flags: ["INTERNAL_FLAG"],
         contentHmac: "a".repeat(64),
         history: [{ revision: 1, contentHmac: "b".repeat(64) }],
-      });
+      };
+      return send(res, 201, state.malformedUploadSuccess ? answer : { ...answer, revision: 1 });
+    }
 
     case "POST /v1/applicants/auth/logout":
       return send(res, 204, undefined);
