@@ -7,9 +7,10 @@
 // the opaque session, derives the subject itself, and forwards on the
 // citizen's behalf — exactly the posture of the submit bridge (ADR-027).
 //
-// The verdict (lane, score, flags) is NEVER relayed: a score handed to the
-// uploader is a forgery-tuning oracle. Only the identifiers and a closed
-// set of refusal codes cross this port.
+// The verdict (lane, score, flags) and keyed content HMAC are NEVER relayed:
+// either handed to the uploader would disclose internal forensic state. Only
+// the document identifiers, validated revision, and closed refusal vocabulary
+// (including D8's two closed-review reasons) cross this port.
 // ══════════════════════════════════════════════════════════════════
 
 import type { DocumentDoorCode } from '@usrp/shared-types';
@@ -49,9 +50,33 @@ export type DocumentRefusal = Extract<
   | 'SCANNER_UNAVAILABLE'
 >;
 
+/** D8: closed explanation for why a document slot cannot be replaced. */
+export const DOCUMENT_REVIEW_CLOSED_REASONS = ['HUMAN_REVIEWED', 'CASE_ADVANCED'] as const;
+export type DocumentReviewClosedReason = (typeof DOCUMENT_REVIEW_CLOSED_REASONS)[number];
+
+export function isDocumentReviewClosedReason(value: unknown): value is DocumentReviewClosedReason {
+  return DOCUMENT_REVIEW_CLOSED_REASONS.some((reason) => reason === value);
+}
+
 export type DocumentUploadResult =
-  | { readonly kind: 'UPLOADED'; readonly documentId: string; readonly documentType: string }
-  | { readonly kind: 'REFUSED'; readonly httpStatus: number; readonly code: DocumentRefusal }
+  | {
+      readonly kind: 'UPLOADED';
+      readonly documentId: string;
+      readonly documentType: string;
+      /** Positive safe integer, validated at the HTTP gateway boundary (D8). */
+      readonly revision: number;
+    }
+  | {
+      readonly kind: 'REFUSED';
+      readonly httpStatus: number;
+      readonly code: Exclude<DocumentRefusal, 'DOCUMENT_REVIEW_CLOSED'>;
+    }
+  | {
+      readonly kind: 'REFUSED';
+      readonly httpStatus: 409;
+      readonly code: 'DOCUMENT_REVIEW_CLOSED';
+      readonly reason: DocumentReviewClosedReason;
+    }
   /** Nothing was stored (object store/forensics down, or token refused). */
   | { readonly kind: 'DEPENDENCY_UNAVAILABLE' };
 

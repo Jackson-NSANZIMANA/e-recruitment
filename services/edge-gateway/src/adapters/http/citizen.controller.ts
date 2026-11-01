@@ -28,6 +28,7 @@ import {
   buildMultipartFormData,
   parseMultipartFormData,
   rawContentType,
+  type HttpResult,
   type RouteHandler,
 } from '@usrp/shared-http';
 import { ALL_CATEGORIES } from '@usrp/shared-types';
@@ -55,14 +56,80 @@ const ALLOWED_UPLOAD_TYPES: ReadonlySet<string> = new Set([
   'image/png',
   'application/pdf',
 ]);
+const DOCUMENT_REVIEW_CLOSED_REASONS: ReadonlySet<string> = new Set(['HUMAN_REVIEWED', 'CASE_ADVANCED']);
+const SAFE_UPLOAD_REFUSALS: ReadonlySet<string> = new Set([
+  'APPLICATION_NOT_FOUND',
+  'NOT_ACCEPTING_DOCUMENTS',
+  'UNSUPPORTED_DOCUMENT_TYPE',
+  'UNSUPPORTED_FILE_CONTENT',
+  'CONTENT_TYPE_MISMATCH',
+  'DOCUMENT_REJECTED_MALWARE',
+  'FILE_TOO_LARGE',
+  'UNSUPPORTED_FILE_TYPE',
+]);
+
+function uploadContractMismatch(): HttpResult {
+  return { status: 502, body: { error: 'UPSTREAM_CONTRACT_MISMATCH' } };
+}
+
+/**
+ * Project Identity's answer onto the citizen upload contract. This is an
+ * explicit allowlist: success carries the four approved D8 fields, while the
+ * D8 closed-review refusal keeps only its closed reason. Upstream bodies are
+ * never relayed.
+ */
+export function projectMyDocumentUploadAnswer(
+  upstreamStatus: number,
+  upstreamBody: unknown,
+  expectedDocumentType: string,
+): HttpResult {
+  if (upstreamStatus === 201) {
+    const status = field(upstreamBody, 'status');
+    const documentId = field(upstreamBody, 'documentId');
+    const documentType = field(upstreamBody, 'documentType');
+    const revision = field(upstreamBody, 'revision');
+    if (
+      status !== 'UPLOADED' ||
+      typeof documentId !== 'string' || !UUID_RE.test(documentId) ||
+      documentType !== expectedDocumentType ||
+      typeof revision !== 'number' || !Number.isSafeInteger(revision) || revision < 1
+    ) {
+      return uploadContractMismatch();
+    }
+    return {
+      status: 201,
+      body: { status: 'UPLOADED', documentId, documentType: expectedDocumentType, revision },
+    };
+  }
+
+  if (upstreamStatus === 409 && field(upstreamBody, 'error') === 'DOCUMENT_REVIEW_CLOSED') {
+    const reason = field(upstreamBody, 'reason');
+    if (field(upstreamBody, 'status') !== 'REFUSED' || typeof reason !== 'string' || !DOCUMENT_REVIEW_CLOSED_REASONS.has(reason)) {
+      return uploadContractMismatch();
+    }
+    return { status: 409, body: { error: 'DOCUMENT_REVIEW_CLOSED', reason } };
+  }
+
+  if (upstreamStatus >= 400 && upstreamStatus < 500) {
+    const code = field(upstreamBody, 'error');
+    // DOCUMENT_REVIEW_CLOSED is deliberately NOT in this generic list: its
+    // required reason is projected only by the explicit 409 branch above.
+    if (typeof code === 'string' && SAFE_UPLOAD_REFUSALS.has(code)) {
+      return { status: upstreamStatus, body: { error: code } };
+    }
+    return uploadContractMismatch();
+  }
+  return { status: 503, body: { error: 'UPSTREAM_UNAVAILABLE' } };
+}
 
 /**
  * The citizen's document upload (BUILD-002).
  *
  * The browser's multipart is PARSED here under hard structural limits and a
  * NEW body is composed from the three validated parts — it is never forwarded.
- * A browser-supplied `applicantId` part is refused. The 201 carries only
- * { documentId, documentType }: no lane, score or flag ever crosses.
+ * A browser-supplied `applicantId` part is refused. The 201 projects only
+ * { status, documentId, documentType, revision }; a D8 409 carries only its
+ * approved `DOCUMENT_REVIEW_CLOSED` reason. No verdict, digest or history crosses.
  *
  * Not retryable at this tier: a failed upload is re-attempted by the citizen.
  */
@@ -116,33 +183,7 @@ export function uploadMyDocumentHandler(deps: EdgeDeps): RouteHandler {
     });
 
     if (upstream.status === 401) return { status: 401, body: { reason: 'revoked' } };
-    if (upstream.status === 201) {
-      const documentId = field(upstream.body, 'documentId');
-      const echoedType = field(upstream.body, 'documentType');
-      if (typeof documentId !== 'string' || typeof echoedType !== 'string') {
-        return { status: 502, body: { error: 'UPSTREAM_CONTRACT_MISMATCH' } };
-      }
-      return { status: 201, body: { status: 'UPLOADED', documentId, documentType: echoedType } };
-    }
-    if (upstream.status >= 400 && upstream.status < 500) {
-      const code = field(upstream.body, 'error');
-      // A closed set of refusal codes; anything else is a contract problem.
-      const SAFE = new Set([
-        'APPLICATION_NOT_FOUND',
-        'NOT_ACCEPTING_DOCUMENTS',
-        'UNSUPPORTED_DOCUMENT_TYPE',
-        'UNSUPPORTED_FILE_CONTENT',
-        'CONTENT_TYPE_MISMATCH',
-        'DOCUMENT_REJECTED_MALWARE',
-        'FILE_TOO_LARGE',
-        'UNSUPPORTED_FILE_TYPE',
-      ]);
-      if (typeof code === 'string' && SAFE.has(code)) {
-        return { status: upstream.status === 404 ? 404 : upstream.status, body: { error: code } };
-      }
-      return { status: 502, body: { error: 'UPSTREAM_CONTRACT_MISMATCH' } };
-    }
-    return { status: 503, body: { error: 'UPSTREAM_UNAVAILABLE' } };
+    return projectMyDocumentUploadAnswer(upstream.status, upstream.body, documentType);
   });
 }
 

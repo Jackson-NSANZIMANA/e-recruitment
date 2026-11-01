@@ -332,7 +332,7 @@ run_ts "application-service: front-door submit"   services/application-service/s
 # DUPLICATED submission does not quietly become a second application. Its
 # section 0 is a zero-infrastructure completeness manifest — the guard against
 # this slice ever shipping as its SQL migration alone again.
-run_ts "identity-service: citizen document door LIVE (iam -> forensics -> ClamAV -> MinIO -> PostgreSQL)" services/identity-service/selfcheck/verify-applicant-document-door.ts
+run_ts "identity-service: LIVE Identity → Forensics document door (IAM token → ClamAV → MinIO → PostgreSQL; Edge not included)" services/identity-service/selfcheck/verify-applicant-document-door.ts
 run_ts "application-service: document checklist + venue verification (advisory, attributed, write-once)" services/application-service/selfcheck/verify-document-checklist.ts
 run_ts "application-service: citizen exam QR (persisted, owner-scoped, verifies offline, write-once)" services/application-service/selfcheck/verify-exam-invitation.ts
 run_ts "application-service: stalled clearances re-offered to scheduling (bounded, outbox-staged)" services/application-service/selfcheck/verify-slot-retry.ts

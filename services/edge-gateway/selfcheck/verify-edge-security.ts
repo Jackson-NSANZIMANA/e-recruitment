@@ -104,6 +104,8 @@ interface StubState {
   readonly calls: string[];
   /** Set to make final-decision answer 503 so a retry would be visible. */
   finalDecisionUnavailable: boolean;
+  /** Omit revision from the document-upload 201 to exercise Edge's fail-closed contract check. */
+  malformedUploadSuccess: boolean;
   /** Every body the edge forwarded to POST /v1/applications/adjudicate (D10: did the lane arrive?). */
   adjudicateBodies: { applicationId?: unknown; decision?: unknown; lane?: unknown; notes?: unknown }[];
   /** The Authorization header the last officer-route call carried. */
@@ -140,6 +142,7 @@ const state: StubState = {
   calls: [],
   adjudicateBodies: [],
   finalDecisionUnavailable: false,
+  malformedUploadSuccess: false,
   lastAuthorization: undefined,
   sawCookieHeader: false,
   submitAnswer: "first",
@@ -384,16 +387,21 @@ async function stubHandler(
     case "POST /v1/applications/documents/verify-at-venue":
       return send(res, 200, { status: "RECORDED", checklist: LEAKY_CHECKLIST, officerId: "leak" });
 
-    case "POST /v1/applicants/me/applications/documents":
-      // The stub answers with a verdict on purpose: if the edge ever relayed
-      // it, the proof below would see it.
-      return send(res, 201, {
+    case "POST /v1/applicants/me/applications/documents": {
+      // The stub answers with internal verdict and revision data on purpose:
+      // only the approved revision-bearing shape may cross to the browser.
+      const answer = {
         status: "UPLOADED",
         documentId: "11111111-2222-4333-8444-555555555555",
         documentType: "NATIONAL_ID_COPY",
         lane: "GREEN",
         score: 0.97,
-      });
+        flags: ["INTERNAL_FLAG"],
+        contentHmac: "a".repeat(64),
+        history: [{ revision: 1, contentHmac: "b".repeat(64) }],
+      };
+      return send(res, 201, state.malformedUploadSuccess ? answer : { ...answer, revision: 1 });
+    }
 
     case "POST /v1/applicants/auth/logout":
       return send(res, 204, undefined);
@@ -1415,14 +1423,37 @@ async function main(): Promise<void> {
       file: pdf,
     });
     check("a valid upload is 201", uploaded.status === 201, uploaded.text);
+    const uploadedBody = JSON.parse(uploaded.text) as Record<string, unknown>;
     check(
-      "only { status, documentId, documentType } crosses (no lane, no score)",
-      uploaded.text.includes("documentId") &&
-        !uploaded.text.includes("lane") &&
-        !uploaded.text.includes("score") &&
-        !uploaded.text.includes("GREEN"),
+      "the public success response has exactly { status, documentId, documentType, revision }",
+      Object.keys(uploadedBody).sort().join(",") === "documentId,documentType,revision,status" &&
+        uploadedBody["status"] === "UPLOADED" &&
+        uploadedBody["documentType"] === "NATIONAL_ID_COPY",
       uploaded.text,
     );
+    check("the public upload response preserves revision 1", uploadedBody["revision"] === 1, uploaded.text);
+    check(
+      "lane, score, flags, contentHmac, and history are absent from the public response",
+      ["lane", "score", "flags", "contentHmac", "history"].every((field) => !Object.hasOwn(uploadedBody, field)),
+      uploaded.text,
+    );
+
+    state.malformedUploadSuccess = true;
+    const malformedUpload = await upload({
+      applicationId: goodApplicationId,
+      documentType: "NATIONAL_ID_COPY",
+      file: pdf,
+    });
+    state.malformedUploadSuccess = false;
+    const malformedUploadBody = JSON.parse(malformedUpload.text) as Record<string, unknown>;
+    check(
+      "an Identity 201 missing revision fails closed as UPSTREAM_CONTRACT_MISMATCH",
+      malformedUpload.status === 502 &&
+        Object.keys(malformedUploadBody).join(",") === "error" &&
+        malformedUploadBody["error"] === "UPSTREAM_CONTRACT_MISMATCH",
+      malformedUpload.text,
+    );
+
     const upstreamBody = lastRawBody.toString("latin1");
     check(
       "the upstream multipart was COMPOSED by the edge (its own boundary)",

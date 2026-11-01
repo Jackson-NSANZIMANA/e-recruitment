@@ -18,6 +18,7 @@ let nextResult: DocumentUploadResult = {
   kind: 'UPLOADED',
   documentId: '33333333-3333-4333-8333-333333333333',
   documentType: 'NATIONAL_ID',
+  revision: 1,
 };
 
 const auth = {
@@ -70,10 +71,75 @@ const pdf = (): Blob => new Blob([Buffer.from('%PDF-1.4 test')], { type: 'applic
 
 test('the subject is the SESSION, never the form', async () => {
   calls.length = 0;
+  nextResult = {
+    kind: 'UPLOADED',
+    documentId: '33333333-3333-4333-8333-333333333333',
+    documentType: 'NATIONAL_ID',
+    revision: 1,
+  };
   const r = await post({ applicationId: APPLICATION, documentType: 'NATIONAL_ID', file: pdf() });
   assert.equal(r.status, 201);
   assert.equal(calls[0]?.applicantId, APPLICANT);
-  assert.equal(r.json['documentId'], '33333333-3333-4333-8333-333333333333');
+  assert.deepEqual(r.json, {
+    status: 'UPLOADED',
+    documentId: '33333333-3333-4333-8333-333333333333',
+    documentType: 'NATIONAL_ID',
+    revision: 1,
+  });
+});
+
+test('the Identity 201 response is an exact revision projection, with no upstream extras', async () => {
+  nextResult = {
+    kind: 'UPLOADED',
+    documentId: '33333333-3333-4333-8333-333333333333',
+    documentType: 'NATIONAL_ID',
+    revision: 4,
+    lane: 'RED',
+    score: 99,
+    flags: ['LEAK'],
+    contentHmac: 'a'.repeat(64),
+  } as unknown as DocumentUploadResult;
+  const r = await post({ applicationId: APPLICATION, documentType: 'NATIONAL_ID', file: pdf() });
+  assert.equal(r.status, 201);
+  assert.deepEqual(r.json, {
+    status: 'UPLOADED',
+    documentId: '33333333-3333-4333-8333-333333333333',
+    documentType: 'NATIONAL_ID',
+    revision: 4,
+  });
+  assert.doesNotMatch(JSON.stringify(r.json), /RED|99|LEAK|contentHmac/);
+});
+
+test('the Identity 409 response preserves only the two approved D8 reasons', async () => {
+  for (const reason of ['HUMAN_REVIEWED', 'CASE_ADVANCED'] as const) {
+    nextResult = { kind: 'REFUSED', httpStatus: 409, code: 'DOCUMENT_REVIEW_CLOSED', reason };
+    const r = await post({ applicationId: APPLICATION, documentType: 'NATIONAL_ID', file: pdf() });
+    assert.equal(r.status, 409);
+    assert.deepEqual(r.json, { status: 'REFUSED', error: 'DOCUMENT_REVIEW_CLOSED', reason });
+  }
+});
+
+test('an invalid D8 reason or success revision fails closed at the Identity controller', async () => {
+  nextResult = {
+    kind: 'REFUSED', httpStatus: 409, code: 'DOCUMENT_REVIEW_CLOSED', reason: 'ARBITRARY_UPSTREAM_TEXT',
+  } as unknown as DocumentUploadResult;
+  const refused = await post({ applicationId: APPLICATION, documentType: 'NATIONAL_ID', file: pdf() });
+  assert.equal(refused.status, 502);
+  assert.deepEqual(refused.json, {
+    status: 'DEPENDENCY_UNAVAILABLE', reason: 'A dependent service is unavailable.',
+  });
+
+  nextResult = {
+    kind: 'UPLOADED',
+    documentId: '33333333-3333-4333-8333-333333333333',
+    documentType: 'NATIONAL_ID',
+    revision: Number.MAX_SAFE_INTEGER + 1,
+  };
+  const malformed = await post({ applicationId: APPLICATION, documentType: 'NATIONAL_ID', file: pdf() });
+  assert.equal(malformed.status, 502);
+  assert.deepEqual(malformed.json, {
+    status: 'DEPENDENCY_UNAVAILABLE', reason: 'A dependent service is unavailable.',
+  });
 });
 
 test('a client applicantId part is refused, nothing forwarded', async () => {

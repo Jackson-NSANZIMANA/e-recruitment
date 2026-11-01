@@ -1,15 +1,16 @@
 // ══════════════════════════════════════════════════════════════════
 // identity-service — Citizen document door, LIVE (ADR-030)
 //
-// The unit/edge proofs use a fake forensics service. This one does not: it
-// drives the real chain a browser upload takes after the edge —
+// This live integration proof does NOT include Edge. It drives Identity's HTTP
+// document door directly and its real downstream chain:
 //
-//   citizen session → identity-service /me/applications/documents
+//   test caller → identity-service /me/applications/documents
 //        → (iam client-credentials token) → document-forensics-service
 //        → REAL ClamAV scan → AES-GCM envelope → REAL MinIO → document_records
 //
 // and asserts the properties that matter at the seam: the subject comes from
-// the session, a stranger's application is a 404, malware is refused with
+// the Identity session, a stranger's application is a 404, D8 revisions and
+// review refusals preserve their exact contract, malware is refused with
 // nothing stored, and no verdict ever reaches the citizen.
 //
 //   Tier-1 + ClamAV up, DB bootstrapped:
@@ -72,8 +73,10 @@ const STRANGER = 'b3000000-0000-4000-8000-000000000002';
 const CITIZEN_HASH = 'b3'.repeat(32);
 const STRANGER_HASH = 'b4'.repeat(32);
 const CAMPAIGN = 'b3000000-0000-4000-8000-0000000000c1';
+const CAMPAIGN_ADVANCED = 'b3000000-0000-4000-8000-0000000000c2';
 const APP_MINE = 'b3000000-0000-4000-8000-00000000a001';
 const APP_THEIRS = 'b3000000-0000-4000-8000-00000000a002';
+const APP_ADVANCED = 'b3000000-0000-4000-8000-00000000a003';
 const CLIENT_ID = 'selfcheck.doc-door';
 const CLIENT_SECRET = 'S3lfcheck#DocDoor!';
 const SERVICE_ID = 'b3000000-0000-4000-8000-00000000c001';
@@ -98,6 +101,8 @@ function jpeg(scanPayload: Buffer): Buffer {
   ]);
 }
 const CLEAN = jpeg(Buffer.alloc(64, 0x55));
+const CLEAN_REPLACEMENT = jpeg(Buffer.alloc(64, 0x56));
+const CLEAN_THIRD = jpeg(Buffer.alloc(64, 0x57));
 // ClamAV flags the EICAR test string when it is the file, or inside a PDF
 // stream — NOT when it is merely embedded in a JPEG scan or after a header.
 // (Measured against the live clamd; the earlier JPEG-wrapped form passed as
@@ -109,18 +114,21 @@ const EICAR_PDF = Buffer.concat([
 ]);
 
 async function cleanup(): Promise<void> {
-  const ids = [APP_MINE, APP_THEIRS];
+  const ids = [APP_MINE, APP_THEIRS, APP_ADVANCED];
   await admin.begin(async (tx) => {
     await tx`SET LOCAL session_replication_role = replica`;
+    // The live proof writes real append-only history; remove its isolated rows
+    // with the same trigger suspension used for the other seeded fixture data.
+    await tx`DELETE FROM rdf_ops.document_revisions WHERE application_id IN ${tx(ids)}`;
     await tx`DELETE FROM rdf_ops.document_records WHERE application_id IN ${tx(ids)}`;
     await tx`DELETE FROM rdf_ops.application_status_history WHERE application_id IN ${tx(ids)}`;
     await tx`DELETE FROM rdf_ops.applications WHERE id IN ${tx(ids)}`;
     await tx`DELETE FROM public_core.applicant_sessions WHERE applicant_id IN ${tx([CITIZEN, STRANGER])}`;
-    await tx`DELETE FROM public_core.recruitment_campaigns WHERE id = ${CAMPAIGN}`;
+    await tx`DELETE FROM public_core.recruitment_campaigns WHERE id IN ${tx([CAMPAIGN, CAMPAIGN_ADVANCED])}`;
     await tx`DELETE FROM public_core.applicant_identities WHERE id IN ${tx([CITIZEN, STRANGER])}`;
     await tx`DELETE FROM public_core.service_accounts WHERE client_id = ${CLIENT_ID}`;
   });
-  for (const app of [APP_MINE, APP_THEIRS]) {
+  for (const app of [APP_MINE, APP_THEIRS, APP_ADVANCED]) {
     for (const type of ['NATIONAL_ID', 'GOOD_CONDUCT_CERTIFICATE', 'OLEVEL_CERTIFICATE']) {
       await forensics
         .s3Request(MINIO, 'DELETE', forensics.encodeObjectPath(BUCKET, forensics.deriveObjectKey('RDF', app, type as never)), Buffer.alloc(0))
@@ -148,11 +156,15 @@ async function seed(): Promise<void> {
          examination_end_date, examination_reporting_hour)
       VALUES (${CAMPAIGN}, ${`LEGACY-${CAMPAIGN.replaceAll('-', '').toUpperCase()}`},
               'doc door', 'RDF', 'REGISTRATION_OPEN', '["GENERAL_ENLISTMENT"]',
+              now() - interval '1 day', now() + interval '30 days', '2026-12-01', '2026-12-10', 7),
+             (${CAMPAIGN_ADVANCED}, ${`LEGACY-${CAMPAIGN_ADVANCED.replaceAll('-', '').toUpperCase()}`},
+              'doc door advanced', 'RDF', 'REGISTRATION_OPEN', '["GENERAL_ENLISTMENT"]',
               now() - interval '1 day', now() + interval '30 days', '2026-12-01', '2026-12-10', 7)`;
     await tx`
       INSERT INTO rdf_ops.applications (id, processing_code, applicant_id, campaign_id, category, status)
       VALUES (${APP_MINE}, 'RDF-97201', ${CITIZEN}, ${CAMPAIGN}, 'GENERAL_ENLISTMENT', 'SUBMITTED'::rdf_ops.application_status),
-             (${APP_THEIRS}, 'RDF-97202', ${STRANGER}, ${CAMPAIGN}, 'GENERAL_ENLISTMENT', 'SUBMITTED'::rdf_ops.application_status)`;
+             (${APP_THEIRS}, 'RDF-97202', ${STRANGER}, ${CAMPAIGN}, 'GENERAL_ENLISTMENT', 'SUBMITTED'::rdf_ops.application_status),
+             (${APP_ADVANCED}, 'RDF-97203', ${CITIZEN}, ${CAMPAIGN_ADVANCED}, 'GENERAL_ENLISTMENT', 'SUBMITTED'::rdf_ops.application_status)`;
   });
   await admin.begin(async (tx) => {
     await tx`SET LOCAL ROLE ${sql('usrp_iam_service')}`;
@@ -237,27 +249,104 @@ async function main(): Promise<void> {
     try { json = text ? (JSON.parse(text) as Record<string, unknown>) : {}; } catch { json = {}; }
     return { status: res.status, text, json };
   }
-  const docRows = (app: string): Promise<{ id: string; document_type: string; virus_scan_status: string | null }[]> =>
-    admin`SELECT id, document_type::text, virus_scan_status FROM rdf_ops.document_records WHERE application_id = ${app}`;
+  const docRows = (app: string): Promise<{
+    id: string;
+    document_type: string;
+    revision: number;
+    virus_scan_status: string | null;
+    human_reviewed_at: Date | null;
+  }[]> => admin`
+    SELECT id, document_type::text, revision, virus_scan_status, human_reviewed_at
+    FROM rdf_ops.document_records WHERE application_id = ${app}`;
+  const revisionHistory = (documentId: string): Promise<{
+    revision: number;
+    file_size_bytes: number;
+    mime_type: string;
+    uploaded_at: Date;
+  }[]> => admin`
+    SELECT revision, file_size_bytes, mime_type, uploaded_at
+    FROM rdf_ops.document_revisions WHERE document_id = ${documentId} ORDER BY revision`;
+  const documentSnapshot = async (app: string, documentType: string) => {
+    const row = (await docRows(app)).find((candidate) => candidate.document_type === documentType);
+    const history = row === undefined ? [] : await revisionHistory(row.id);
+    const key = forensics.deriveObjectKey('RDF', app, documentType as never);
+    const object = await forensics.s3Request(MINIO, 'GET', forensics.encodeObjectPath(BUCKET, key), Buffer.alloc(0));
+    return {
+      documentId: row?.id ?? null,
+      revision: row?.revision ?? null,
+      humanReviewedAt: row?.human_reviewed_at?.toISOString() ?? null,
+      history: history.map((entry) => ({
+        revision: entry.revision,
+        fileSizeBytes: entry.file_size_bytes,
+        mimeType: entry.mime_type,
+        uploadedAt: entry.uploaded_at.toISOString(),
+      })),
+      objectStatus: object.status,
+      objectBytes: object.body,
+    };
+  };
+  const sameDocumentSnapshot = (before: Awaited<ReturnType<typeof documentSnapshot>>, after: Awaited<ReturnType<typeof documentSnapshot>>): boolean =>
+    before.documentId === after.documentId &&
+    before.revision === after.revision &&
+    before.humanReviewedAt === after.humanReviewedAt &&
+    JSON.stringify(before.history) === JSON.stringify(after.history) &&
+    before.objectStatus === after.objectStatus &&
+    before.objectBytes.equals(after.objectBytes);
   const jpg = (b: Buffer): Blob => new Blob([b], { type: 'image/jpeg' });
   const pdf = (b: Buffer): Blob => new Blob([b], { type: 'application/pdf' });
 
   try {
-    console.log('\n── 1. A clean document, through the real scanner and store ──');
+    console.log('\n── 1. First upload, replacement and identical retry (D8) ──');
     const ok = await upload({ applicationId: APP_MINE, documentType: 'NATIONAL_ID', file: jpg(CLEAN) });
-    check('clean JPEG → 201 UPLOADED', ok.status === 201 && ok.json['status'] === 'UPLOADED', ok.text);
-    check('response is { status, documentId, documentType } only',
-      Object.keys(ok.json).sort().join(',') === 'documentId,documentType,status', ok.text);
-    check('no lane / score / flags / verdict reached the citizen',
-      !/lane|score|flag|forensic|verdict|GREEN|AMBER|RED/i.test(ok.text), ok.text);
-    const rows = await docRows(APP_MINE);
-    check('one document_records row, scanned by ClamAV', rows.length === 1 && rows[0]?.virus_scan_status !== null, JSON.stringify(rows));
+    check('clean JPEG → 201 UPLOADED revision 1',
+      ok.status === 201 && ok.json['status'] === 'UPLOADED' && ok.json['revision'] === 1, ok.text);
+    check('response is exactly { status, documentId, documentType, revision }',
+      Object.keys(ok.json).sort().join(',') === 'documentId,documentType,revision,status', ok.text);
+    check('no lane / score / flags / verdict / digest reached the citizen',
+      !/lane|score|flag|forensic|verdict|GREEN|AMBER|RED|contentHmac/i.test(ok.text), ok.text);
+    let rows = await docRows(APP_MINE);
+    check('one revision-1 document_records row, scanned by ClamAV',
+      rows.length === 1 && rows[0]?.revision === 1 && rows[0]?.virus_scan_status !== null, JSON.stringify(rows));
+    const documentId = typeof ok.json['documentId'] === 'string' ? ok.json['documentId'] : '';
+    const initialHistory = documentId === '' ? [] : await revisionHistory(documentId);
+    check('first upload appends revision 1 to the internal history',
+      initialHistory.length === 1 && initialHistory[0]?.revision === 1);
     const key = forensics.deriveObjectKey('RDF', APP_MINE, 'NATIONAL_ID');
     const stored = await forensics.s3Request(MINIO, 'GET', forensics.encodeObjectPath(BUCKET, key), Buffer.alloc(0));
     check('the object is at rest in MinIO and SEALED (not the plaintext JPEG)',
       stored.status === 200 && forensics.isSealed(stored.body) && !stored.body.includes(CLEAN));
 
-    console.log('\n── 2. Malware is refused by the real scanner; nothing is stored ──');
+    const replaced = await upload({ applicationId: APP_MINE, documentType: 'NATIONAL_ID', file: jpg(CLEAN_REPLACEMENT) });
+    check('different replacement bytes → same documentId, revision 2',
+      replaced.status === 201 && replaced.json['documentId'] === documentId && replaced.json['revision'] === 2, replaced.text);
+    rows = await docRows(APP_MINE);
+    const replacedHistory = documentId === '' ? [] : await revisionHistory(documentId);
+    check('different bytes update the slot to revision 2 and append revision history [1, 2]',
+      rows.length === 1 && rows[0]?.revision === 2 && replacedHistory.map((entry) => entry.revision).join(',') === '1,2');
+
+    const retry = await upload({ applicationId: APP_MINE, documentType: 'NATIONAL_ID', file: jpg(CLEAN_REPLACEMENT) });
+    const retryHistory = documentId === '' ? [] : await revisionHistory(documentId);
+    check('identical bytes are a retry at revision 2, not revision 3',
+      retry.status === 201 && retry.json['documentId'] === documentId && retry.json['revision'] === 2 &&
+      retryHistory.map((entry) => entry.revision).join(',') === '1,2', retry.text);
+
+    console.log('\n── 2. A reviewed document refuses replacement without changing evidence ──');
+    await admin`
+      UPDATE rdf_ops.document_records SET human_reviewed_at = now()
+      WHERE application_id = ${APP_MINE} AND document_type = 'NATIONAL_ID'::rdf_ops.document_type`;
+    const beforeReviewedRefusal = await documentSnapshot(APP_MINE, 'NATIONAL_ID');
+    const reviewed = await upload({ applicationId: APP_MINE, documentType: 'NATIONAL_ID', file: jpg(CLEAN_THIRD) });
+    check('reviewed document → 409 DOCUMENT_REVIEW_CLOSED / HUMAN_REVIEWED',
+      reviewed.status === 409 && reviewed.json['error'] === 'DOCUMENT_REVIEW_CLOSED' &&
+      reviewed.json['reason'] === 'HUMAN_REVIEWED', reviewed.text);
+    check('closed-review response has only the approved fields',
+      Object.keys(reviewed.json).sort().join(',') === 'error,reason,status', reviewed.text);
+    const afterReviewedRefusal = await documentSnapshot(APP_MINE, 'NATIONAL_ID');
+    check('HUMAN_REVIEWED refusal leaves stored bytes, revision 2 and history unchanged',
+      sameDocumentSnapshot(beforeReviewedRefusal, afterReviewedRefusal),
+      `before revision=${String(beforeReviewedRefusal.revision)} history=${String(beforeReviewedRefusal.history.length)}; after revision=${String(afterReviewedRefusal.revision)} history=${String(afterReviewedRefusal.history.length)}`);
+
+    console.log('\n── 3. Malware is refused by the real scanner; nothing is stored ──');
     const bad = await upload({ applicationId: APP_MINE, documentType: 'GOOD_CONDUCT_CERTIFICATE', file: pdf(EICAR_PDF) });
     check('EICAR in a PDF stream → 422 DOCUMENT_REJECTED_MALWARE (real clamd)', bad.status === 422 && bad.json['error'] === 'DOCUMENT_REJECTED_MALWARE', bad.text);
     check('no row written for it', (await docRows(APP_MINE)).length === 1);
@@ -265,7 +354,7 @@ async function main(): Promise<void> {
     check('nothing at rest for it',
       (await forensics.s3Request(MINIO, 'GET', forensics.encodeObjectPath(BUCKET, badKey), Buffer.alloc(0))).status === 404);
 
-    console.log('\n── 3. The subject is the session ──');
+    console.log('\n── 4. The subject is the session ──');
     const theirs = await upload({ applicationId: APP_THEIRS, documentType: 'NATIONAL_ID', file: jpg(CLEAN) });
     check("another citizen's application → 404 APPLICATION_NOT_FOUND", theirs.status === 404 && theirs.json['error'] === 'APPLICATION_NOT_FOUND', theirs.text);
     check('…and nothing was written under it', (await docRows(APP_THEIRS)).length === 0);
@@ -274,7 +363,26 @@ async function main(): Promise<void> {
     check('no session → 401', (await upload({ applicationId: APP_MINE, documentType: 'NATIONAL_ID', file: jpg(CLEAN) }, null)).status === 401);
     check('a garbage session → 401', (await upload({ applicationId: APP_MINE, documentType: 'NATIONAL_ID', file: jpg(CLEAN) }, 'nope')).status === 401);
 
-    console.log('\n── 4. Business refusals stay closed and specific ──');
+    console.log('\n── 5. An advanced case refuses replacement without changing evidence (D8) ──');
+    const advancedFirst = await upload({
+      applicationId: APP_ADVANCED, documentType: 'GOOD_CONDUCT_CERTIFICATE', file: jpg(CLEAN),
+    });
+    check('first upload on the advanced-case fixture is revision 1',
+      advancedFirst.status === 201 && advancedFirst.json['revision'] === 1, advancedFirst.text);
+    await admin`UPDATE rdf_ops.applications SET status = 'SLOT_ASSIGNED'::rdf_ops.application_status WHERE id = ${APP_ADVANCED}`;
+    const beforeAdvancedRefusal = await documentSnapshot(APP_ADVANCED, 'GOOD_CONDUCT_CERTIFICATE');
+    const advanced = await upload({
+      applicationId: APP_ADVANCED, documentType: 'GOOD_CONDUCT_CERTIFICATE', file: jpg(CLEAN_REPLACEMENT),
+    });
+    check('advanced case → 409 DOCUMENT_REVIEW_CLOSED / CASE_ADVANCED',
+      advanced.status === 409 && advanced.json['error'] === 'DOCUMENT_REVIEW_CLOSED' &&
+      advanced.json['reason'] === 'CASE_ADVANCED', advanced.text);
+    const afterAdvancedRefusal = await documentSnapshot(APP_ADVANCED, 'GOOD_CONDUCT_CERTIFICATE');
+    check('CASE_ADVANCED refusal leaves stored bytes, revision 1 and history unchanged',
+      sameDocumentSnapshot(beforeAdvancedRefusal, afterAdvancedRefusal),
+      `before revision=${String(beforeAdvancedRefusal.revision)} history=${String(beforeAdvancedRefusal.history.length)}; after revision=${String(afterAdvancedRefusal.revision)} history=${String(afterAdvancedRefusal.history.length)}`);
+
+    console.log('\n── 6. Other business refusals stay closed and specific ──');
     const wrongType = await upload({ applicationId: APP_MINE, documentType: 'CELIBACY_CERTIFICATE', file: jpg(CLEAN) });
     check("a type the agency does not accept → 422 UNSUPPORTED_DOCUMENT_TYPE", wrongType.status === 422 && wrongType.json['error'] === 'UNSUPPORTED_DOCUMENT_TYPE', wrongType.text);
     await admin`UPDATE rdf_ops.applications SET status = 'WITHDRAWN'::rdf_ops.application_status WHERE id = ${APP_MINE}`;
@@ -287,7 +395,7 @@ async function main(): Promise<void> {
   }
 
   console.log('\n───────────────────────────────────────────────');
-  if (failures === 0) console.log('CITIZEN DOCUMENT DOOR PROVEN (live: iam → forensics → ClamAV → MinIO → PostgreSQL) ✓');
+  if (failures === 0) console.log('IDENTITY → FORENSICS DOCUMENT DOOR PROVEN (live: Identity → IAM token → Forensics → ClamAV → MinIO → PostgreSQL; Edge not included) ✓');
   else {
     console.error(`${String(failures)} assertion(s) FAILED`);
     process.exit(1);
