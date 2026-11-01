@@ -112,6 +112,9 @@ services:
         done
         kafka-topics --create --if-not-exists --topic audit.immutable --partitions 3 --replication-factor 1 --config retention.ms=-1 --config cleanup.policy=delete --bootstrap-server kafka:9092
         kafka-topics --create --if-not-exists --topic events.dead-letter --partitions 3 --replication-factor 1 --config retention.ms=2592000000 --bootstrap-server kafka:9092
+        # D2 (ADR-050): where the re-drive worker parks a letter it gave up on.
+        # Infinite retention: a parked letter is evidence of a failed recovery.
+        kafka-topics --create --if-not-exists --topic events.dead-letter-parked --partitions 3 --replication-factor 1 --config retention.ms=-1 --bootstrap-server kafka:9092
         echo 'All USRP topics created successfully.'
         kafka-topics --list --bootstrap-server kafka:9092
     restart: on-failure

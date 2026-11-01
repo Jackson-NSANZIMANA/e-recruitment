@@ -266,6 +266,11 @@ apply_sql "${RLS_DIR}/0040_clearance_certificates.sql" "rls/0040 (clearance cert
 # S12c (ADR-049): database-level guard on the additive campaign policy v2 block.
 apply_sql "${RLS_DIR}/0041_campaign_policy_v2.sql" "rls/0041 (campaign policy v2 guard)"
 
+# D2 (ADR-050): the durable re-drive ledger. One row per dead letter, with a
+# schedule, an attempt count and a parked state — a Kafka offset is a cursor and
+# cannot schedule, so this table IS the schedule (public_core, system-owned).
+apply_sql "${RLS_DIR}/0043_event_redrive_ledger.sql" "rls/0043 (event re-drive ledger)"
+
 # D8 (ADR-052): document supersession. document_records gains a revision counter
 # and a KEYED content digest; document_revisions is the append-only trail of what
 # passed through each slot (grants stripped + triggers, the rls/0007 idiom).

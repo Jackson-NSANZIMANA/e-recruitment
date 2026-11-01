@@ -33,6 +33,7 @@ export * from './schemas/public-core.schema.js';
 export * from './schemas/edge-sessions.schema.js';
 export * from './schemas/edge-rate-limit-buckets.schema.js';
 export * from './schemas/event-outbox.schema.js';
+export * from './schemas/event-redrive.schema.js';
 export * from './schemas/slot-reservations.schema.js';
 export * from './schemas/submission-requests.schema.js';
 export * from './schemas/rdf-ops.schema.js';

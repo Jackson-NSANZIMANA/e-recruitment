@@ -174,6 +174,10 @@ services:
     <<: *service
     image: ${USRP_IMAGE_PREFIX:-usrp-s03/}iam-service:${USRP_IMAGE_TAG:-dev}
     environment: *env
+  event-redrive-service:
+    <<: *service
+    image: ${USRP_IMAGE_PREFIX:-usrp-s03/}event-redrive-service:${USRP_IMAGE_TAG:-dev}
+    environment: *env
   edge-gateway:
     <<: *service
     image: ${USRP_IMAGE_PREFIX:-usrp-s03/}edge-gateway:${USRP_IMAGE_TAG:-dev}

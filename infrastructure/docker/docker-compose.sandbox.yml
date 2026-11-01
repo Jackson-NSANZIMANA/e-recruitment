@@ -74,6 +74,10 @@ services:
         done
         kafka-topics --create --if-not-exists --topic audit.immutable --partitions 3 --replication-factor 1 --config retention.ms=-1 --bootstrap-server sandbox-kafka:9092
         kafka-topics --create --if-not-exists --topic events.dead-letter --partitions 3 --replication-factor 1 --bootstrap-server sandbox-kafka:9092
+        # D2 (ADR-050): the parked signal. Pre-created like every topic — broker
+        # auto-create is disabled by design. retention.ms=-1: a parked letter is
+        # evidence of a failed recovery, not a transient message.
+        kafka-topics --create --if-not-exists --topic events.dead-letter-parked --partitions 3 --replication-factor 1 --config retention.ms=-1 --bootstrap-server sandbox-kafka:9092
         echo 'sandbox topics ready'
     restart: "no"
 

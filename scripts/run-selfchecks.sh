@@ -227,6 +227,12 @@ run_ts "application-service: vetting-hold resolution + separation of duties (D10
 # the refusal never touches the reviewed bytes (evaluation 2026-10-29, D8).
 # Zero infrastructure: the pure decision is swept exhaustively, then the wiring.
 run_ts "document-forensics: supersession and the review lock (D8)" services/document-forensics-service/selfcheck/verify-document-supersession.ts
+# D2: a dead letter is re-driven on a SCHEDULE (1m..6h, six attempts), then
+# PARKED with a closed reason and a signal — never retried forever, never
+# silently. UNDECODABLE/NON_RETRYABLE are never re-driven and a per-group breaker
+# stops a broken handler turning the deployment into a retry furnace
+# (evaluation 2026-10-29, D2). Zero infrastructure: pure policy, exhaustive.
+run_ts "event-redrive: dead-letter schedule, cap and circuit breaker (D2)" services/event-redrive-service/selfcheck/verify-redrive-policy.ts
 run_ts "edge-gateway: contract drift (registry ↔ OpenAPI ↔ upstream catalogue)" services/edge-gateway/selfcheck/verify-edge-contract.ts
 run_ts "edge-gateway: BUILD-001 live campaign HTTP/session/CSRF/idempotency boundary" services/edge-gateway/selfcheck/verify-campaign-http-boundary.ts
 run_ts "edge-gateway: operational reads + DPO queue/decision boundary (ADR-039)" services/edge-gateway/selfcheck/verify-operational-reads-boundary.ts

@@ -73,6 +73,9 @@ const SERVICE_PORTS: Readonly<Record<string, number>> = {
   'notification-service': 4908,
   'field-sync-service': 4909,
   'audit-service': 4910,
+  // D2: the dead-letter re-drive worker. No business routes; it holds no case
+  // state, so it is started with the rest and probed on /ready like the sink.
+  'event-redrive-service': 4912,
   'iam-service': 4911,
   'edge-gateway': EDGE_PORT,
   // Opt-in, see FORENSICS below: without its object store and scanner it is not started.
@@ -207,6 +210,11 @@ function serviceEnv(s: Secrets): Record<string, string> {
     // ADR-053: loopback unless this launcher was told otherwise (below, edge only).
     HTTP_BIND_HOST: '127.0.0.1',
     LOG_LEVEL: 'info',
+    // D2: the production schedule is 1m..6h; the sandbox compresses it so a
+    // journey can watch a letter be re-driven, parked and re-read in one pass.
+    REDRIVE_TICK_INTERVAL_MS: '5000',
+    REDRIVE_DELAYS_MS: '5000,10000,20000,30000,60000,120000',
+    REDRIVE_GROUP_FAILURE_THRESHOLD: '3',
     DATABASE_URL: `postgresql://usrp_app:app_pw@localhost:5432/${DB}`,
     KAFKA_BROKERS: 'localhost:4992',
     KAFKA_SSL: 'false',
