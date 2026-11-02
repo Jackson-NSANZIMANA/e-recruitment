@@ -121,7 +121,8 @@ docker compose -f infrastructure/docker/docker-compose.tier1.yml up -d --wait po
   || die "tier1 did not come up; see $LOGS/full-tier1.out"
 
 # ── 2. build ──────────────────────────────────────────────────────
-if [ ! -d node_modules ]; then say "installing backend dependencies"; pnpm install --frozen-lockfile --prefer-offline > "$LOGS/full-install.out" 2>&1 || die "pnpm install failed"; fi
+# Always, not only when node_modules is absent: a pull can add a workspace package that needs linking.
+say "backend dependencies"; pnpm install --frozen-lockfile --prefer-offline > "$LOGS/full-install.out" 2>&1 || die "pnpm install failed"
 if [ "$REBUILD" = 1 ] || ! node scripts/check-workspace-build.mjs > /dev/null 2>&1; then
   say "building the services"
   pnpm exec turbo run build > "$LOGS/full-build.out" 2>&1 || die "the build failed; see $LOGS/full-build.out"
