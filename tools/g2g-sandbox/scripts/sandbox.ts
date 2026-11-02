@@ -385,8 +385,9 @@ async function up(): Promise<void> {
     const composeEnv = { ...process.env, SANDBOX_MINIO_ROOT_PASSWORD: s['MINIO_ROOT_PASSWORD'] ?? '' };
     execFileSync('docker', [...COMPOSE, 'up', '-d', '--wait', 'sandbox-minio', 'sandbox-clamav'], { env: composeEnv, stdio: ['ignore', 'pipe', 'pipe'] });
     const bucket = (templateEnv()['MINIO_BUCKET_DOCUMENTS'] ?? '').trim() || 'usrp-documents';
-    execFileSync('docker', ['exec', '-e', `P=${s['MINIO_ROOT_PASSWORD'] ?? ''}`, 'usrp-sandbox-minio', 'sh', '-c',
-      `mc alias set local http://127.0.0.1:9000 usrp_sandbox_minio "$P" >/dev/null && mc mb --ignore-existing local/${bucket} >/dev/null`], { stdio: ['ignore', 'pipe', 'pipe'] });
+    // MC_HOST_local, not `mc alias set`: a base64url password can start with `-`, which mc parses as a flag.
+    execFileSync('docker', ['exec', '-e', `MC_HOST_local=http://usrp_sandbox_minio:${s['MINIO_ROOT_PASSWORD'] ?? ''}@127.0.0.1:9000`, 'usrp-sandbox-minio', 'sh', '-c',
+      `mc mb --ignore-existing local/${bucket} >/dev/null`], { stdio: ['ignore', 'pipe', 'pipe'] });
   }
 
   out(`▶ database: ${DB} (shared Postgres server, own database)`);
