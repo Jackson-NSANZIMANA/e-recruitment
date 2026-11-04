@@ -45,7 +45,7 @@
 // is written by this script.
 // ══════════════════════════════════════════════════════════════════
 
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { networkInterfaces } from 'node:os';
 import { generateKeyPairSync, randomBytes } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -111,6 +111,72 @@ const EXPOSE_LAN = (process.env['SANDBOX_EXPOSE_LAN'] ?? '') === '1';
 
 function sh(cmd: string, args: readonly string[], input?: string): string {
   return execFileSync(cmd, args, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], ...(input === undefined ? {} : { input }) });
+}
+
+/** The document door's object store image: built from pinned source unless SANDBOX_MINIO_IMAGE names a mirror. */
+const MINIO_IMAGE = (process.env['SANDBOX_MINIO_IMAGE'] ?? '').trim() || 'usrp-minio:RELEASE.2025-10-15T17-29-55Z';
+
+/**
+ * Make sure the MinIO image exists BEFORE compose starts it, and say which one it is. A mirror
+ * (SANDBOX_MINIO_IMAGE) is pulled; the default tag is built once from infrastructure/docker/minio, whose
+ * build verifies the pinned commits against sum.golang.org. Output goes to a log, not a buffer: a source
+ * build prints for minutes.
+ */
+/**
+ * What this machine's network needs for the source build, and nothing more: a proxy's CA as a build
+ * secret (SANDBOX_BUILD_EXTRA_CA; it never becomes a layer), the proxy variables, and host networking
+ * only when that proxy listens on loopback (a container cannot reach the host's 127.0.0.1 otherwise).
+ */
+function minioBuildFlags(): string[] {
+  const flags: string[] = [];
+  const ca = (process.env['SANDBOX_BUILD_EXTRA_CA'] ?? '').trim();
+  if (ca !== '') {
+    if (!existsSync(ca)) fail(`SANDBOX_BUILD_EXTRA_CA=${ca} does not exist`);
+    flags.push('--secret', `id=extra_ca,src=${ca}`);
+  }
+  let loopbackProxy = false;
+  for (const key of ['HTTPS_PROXY', 'HTTP_PROXY', 'NO_PROXY', 'https_proxy', 'http_proxy', 'no_proxy']) {
+    const value = process.env[key];
+    if (value === undefined || value === '') continue;
+    flags.push('--build-arg', `${key}=${value}`);
+    if (/proxy$/i.test(key) && !/^no_/i.test(key) && /\/\/(localhost|127\.\d+\.\d+\.\d+|\[::1\])(:|\/|$)/.test(value)) loopbackProxy = true;
+  }
+  if (loopbackProxy) flags.push('--network', 'host');
+  return flags;
+}
+
+function ensureMinioImage(): void {
+  if (spawnSync('docker', ['image', 'inspect', MINIO_IMAGE], { stdio: 'ignore' }).status === 0) {
+    out(`  MinIO image ${MINIO_IMAGE} (present)`);
+    return;
+  }
+  const log = join(STATE, 'logs', 'sandbox-minio-image.out');
+  const mirrored = (process.env['SANDBOX_MINIO_IMAGE'] ?? '').trim() !== '';
+  out(mirrored ? `  pulling MinIO image ${MINIO_IMAGE}` : `  building MinIO ${MINIO_IMAGE} from pinned source (one time, ~5 min; log ${log})`);
+  const fd = openSync(log, 'w');
+  const r = mirrored
+    ? spawnSync('docker', ['pull', MINIO_IMAGE], { stdio: ['ignore', fd, fd] })
+    : spawnSync('docker', ['build', ...minioBuildFlags(), '-t', MINIO_IMAGE, join(REPO, 'infrastructure/docker/minio')], { stdio: ['ignore', fd, fd] });
+  if (r.status !== 0) {
+    fail(
+      mirrored
+        ? `the MinIO image ${MINIO_IMAGE} could not be pulled (see ${log}). Unset SANDBOX_MINIO_IMAGE to build it from source instead.`
+        : `the MinIO image could not be built from source (see ${log}). It needs the Go module proxy (proxy.golang.org) and checksum database (sum.golang.org); behind a TLS-intercepting proxy set SANDBOX_BUILD_EXTRA_CA to its CA certificate, or set SANDBOX_MINIO_IMAGE to a mirror.`,
+    );
+  }
+}
+
+/**
+ * ClamAV's signature volume is shared with tier2 (declared `external` so a sandbox boot does not
+ * download ~300 MB again). Compose refuses to start a service whose external volume does not exist, so a
+ * machine that never ran tier2 could not start the document door. Create it when missing: Docker seeds
+ * an empty named volume from the image's bundled database, and freshclam updates it in place.
+ */
+function ensureClamavVolume(): void {
+  const volume = 'usrp-tier2_clamav-data';
+  if (spawnSync('docker', ['volume', 'inspect', volume], { stdio: 'ignore' }).status === 0) return;
+  out(`  creating the ClamAV signature volume ${volume} (shared with tier2)`);
+  sh('docker', ['volume', 'create', volume]);
 }
 
 function psqlAdmin(database: string, sqlText: string): string {
@@ -382,12 +448,15 @@ async function up(): Promise<void> {
   sh('docker', [...COMPOSE, 'up', '--exit-code-from', 'sandbox-kafka-init', 'sandbox-kafka-init']);
   if (FORENSICS) {
     out('▶ document door: own MinIO (:4993) and ClamAV (:4995)');
+    ensureMinioImage();
+    ensureClamavVolume();
     const composeEnv = { ...process.env, SANDBOX_MINIO_ROOT_PASSWORD: s['MINIO_ROOT_PASSWORD'] ?? '' };
-    execFileSync('docker', [...COMPOSE, 'up', '-d', '--wait', 'sandbox-minio', 'sandbox-clamav'], { env: composeEnv, stdio: ['ignore', 'pipe', 'pipe'] });
+    execFileSync('docker', [...COMPOSE, 'up', '-d', '--wait', '--pull', 'never', 'sandbox-minio', 'sandbox-clamav'], { env: composeEnv, stdio: ['ignore', 'pipe', 'pipe'] });
     const bucket = (templateEnv()['MINIO_BUCKET_DOCUMENTS'] ?? '').trim() || 'usrp-documents';
     // MC_HOST_local, not `mc alias set`: a base64url password can start with `-`, which mc parses as a flag.
-    execFileSync('docker', ['exec', '-e', `MC_HOST_local=http://usrp_sandbox_minio:${s['MINIO_ROOT_PASSWORD'] ?? ''}@127.0.0.1:9000`, 'usrp-sandbox-minio', 'sh', '-c',
-      `mc mb --ignore-existing local/${bucket} >/dev/null`], { stdio: ['ignore', 'pipe', 'pipe'] });
+    // mc directly, no shell: the source-built image is `scratch`, and nothing here needs one.
+    execFileSync('docker', ['exec', '-e', `MC_HOST_local=http://usrp_sandbox_minio:${s['MINIO_ROOT_PASSWORD'] ?? ''}@127.0.0.1:9000`, 'usrp-sandbox-minio',
+      'mc', 'mb', '--ignore-existing', `local/${bucket}`], { stdio: ['ignore', 'pipe', 'pipe'] });
   }
 
   out(`▶ database: ${DB} (shared Postgres server, own database)`);

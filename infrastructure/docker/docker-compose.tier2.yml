@@ -67,7 +67,10 @@ services:
     networks:
       - usrp-internal
     healthcheck:
-      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      # Its own small heap: Kafka's CLIs read KAFKA_HEAP_OPTS, and the probe would otherwise start every
+      # interval with the broker's -Xmx512M -Xms256M inside the broker's own memory limit (see the
+      # sandbox broker in docker-compose.sandbox.yml, where that was measured and OOM-killed).
+      test: ["CMD-SHELL", "KAFKA_HEAP_OPTS='-Xms16m -Xmx48m' KAFKA_JVM_PERFORMANCE_OPTS='-XX:+UseSerialGC -XX:TieredStopAtLevel=1' kafka-broker-api-versions --bootstrap-server localhost:9092 > /dev/null"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -75,7 +78,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 640M
+          memory: 896M  # 512 MiB heap + ~250 MiB non-heap + probe + page cache
 
   # ── Kafka Topic Initializer ──────────────────────────────────────
   kafka-init:

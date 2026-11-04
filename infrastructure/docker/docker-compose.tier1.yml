@@ -61,25 +61,19 @@ services:
           memory: 512M
 
   # ── MinIO Object Store ──────────────────────────────────────────
-  # Image source changed 2026-09-15: `minio/minio` and `minio/mc` were
-  # removed from Docker Hub entirely between 2026-09-09 and 2026-09-14
-  # (repo returns 404 — not a rate limit, not a login problem, even
-  # though Docker's own error message reads like an auth failure).
-  # MinIO's community edition has been source-only since it was
-  # archived upstream, so there is no new Docker Hub build coming.
+  # `minio/minio` and `minio/mc` were removed from Docker Hub between 2026-09-09 and 2026-09-14 (the
+  # repo 404s; Docker's error reads like an auth failure, it is not one). MinIO's community edition is
+  # source-only, so no new image is coming. This file pins a mirror of the last official build,
+  # RELEASE.2025-09-07T16-13-09Z, in our own registry, by digest so it can never change silently.
   #
-  # Fix: pull the same official image from Quay instead, where MinIO
-  # still publishes it. Pinned to an exact tag on purpose, not
-  # `:latest` — the last community release was RELEASE.2025-09-07,
-  # so `:latest` on Quay already points at this same frozen build.
-  # Pinning costs nothing and stops a silent, unnoticed image change
-  # later. `mc` still ships inside this image, so the healthcheck
-  # below does not need to change.
-  #
-  # Caution for later: Quay is not guaranteed forever either — Red
-  # Hat hosts it but does not maintain MinIO's content there. If this
-  # pull ever 404s too, the next move is mirroring the image to our
-  # own registry (e.g. GHCR) rather than chasing a third registry.
+  # KNOWN ISSUE in that build: RELEASE.2025-10-15T17-29-55Z, the final community release, carries
+  # upstream c1a4949 "fix: check sub-policy properly when present" (a service account could create
+  # service accounts outside its inline policy). infrastructure/docker/minio/Dockerfile builds that
+  # release from pinned, checksum-verified source (the sandbox already uses it). To move this file to it:
+  #   docker build -t ghcr.io/jackson-nsanzimana/usrp-minio:RELEASE.2025-10-15T17-29-55Z infrastructure/docker/minio
+  #   docker push ghcr.io/jackson-nsanzimana/usrp-minio:RELEASE.2025-10-15T17-29-55Z
+  # and pin the digest the push prints. The image is `scratch`-based: `mc` is present (healthcheck
+  # unchanged), a shell is not.
   minio:
     image: ghcr.io/jackson-nsanzimana/usrp-minio@sha256:52dfd5c0bbd38d3219f2058c7af216d9f9a27a994b7b5baad09bbd38866015ff
     container_name: usrp-minio
