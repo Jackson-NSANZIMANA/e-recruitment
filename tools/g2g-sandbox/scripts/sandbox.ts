@@ -145,6 +145,19 @@ function minioBuildFlags(): string[] {
   return flags;
 }
 
+/**
+ * `pnpm sandbox prepare`: the slow, one-time work (building the MinIO image from source, the ClamAV
+ * volume) in the FOREGROUND, before up.sh starts the launcher detached and gives it a fixed time to
+ * report "sandbox up". A first boot's build no longer runs inside that window. `up` repeats both
+ * checks, which cost nothing once done.
+ */
+function prepare(): void {
+  if (!FORENSICS) return;
+  mkdirSync(join(STATE, 'logs'), { recursive: true });
+  ensureMinioImage();
+  ensureClamavVolume();
+}
+
 function ensureMinioImage(): void {
   if (spawnSync('docker', ['image', 'inspect', MINIO_IMAGE], { stdio: 'ignore' }).status === 0) {
     out(`  MinIO image ${MINIO_IMAGE} (present)`);
@@ -545,7 +558,8 @@ function status(): void {
 
 // `pnpm sandbox --status` arrives as `up --status` (the root script names `up`), so a flag wins over the word.
 const command = process.argv.includes('--status') ? 'status' : (process.argv[2] ?? 'up');
-if (command === 'up') await up();
+if (command === 'prepare') prepare();
+else if (command === 'up') await up();
 else if (command === 'down') down();
 else if (command === 'reset') reset();
 else if (command === '--status' || command === 'status') status();

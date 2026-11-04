@@ -388,3 +388,16 @@ function gone(pid) {
   }
   return false;
 }
+
+test('the one-time document-door work runs before the timed sandbox launch, untimed and visible', (t) => {
+  const fx = fixture(t);
+  writeFileSync(join(fx.repo, 'infrastructure/sandbox/up.sh'), '#!/usr/bin/env bash\necho "UP|" >> "$STUB_LOG"\n');
+  const { status, out, calls } = run(fx);
+  assert.equal(status, 0, out);
+  const prepare = calls.findIndex((c) => c.includes('--filter @usrp/g2g-sandbox sandbox prepare|'));
+  assert.ok(prepare >= 0, 'full.sh runs the launcher\'s prepare step itself');
+  assert.ok(prepare < calls.indexOf('UP|'), 'before up.sh starts the launcher with its 5-minute window');
+  assert.match(out, /document door: MinIO image and ClamAV volume \(a first boot builds MinIO from source/);
+  const up = readFileSync(join(ROOT, 'infrastructure/sandbox/up.sh'), 'utf8');
+  assert.ok(up.indexOf('sandbox prepare') < up.indexOf('setsid nohup pnpm sandbox'), 'up.sh prepares before the timed launch too');
+});

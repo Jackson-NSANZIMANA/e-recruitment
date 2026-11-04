@@ -273,6 +273,10 @@ if [ "$(code "$EDGE/edge/v1/session")" = 000 ]; then
   # A reboot leaves PID files behind; the launcher only stops what still runs from here.
   pnpm -s sandbox:down > /dev/null 2>&1 || true
 fi
+# The document door's one-time work, visibly and untimed: a first boot builds MinIO from pinned source.
+say "document door: MinIO image and ClamAV volume (a first boot builds MinIO from source: 3-10 min)"
+pnpm -s --filter @usrp/g2g-sandbox sandbox prepare 2>&1 | tee "$LOGS/full-prepare.out" | sed 's/^/  /' 
+[ "${PIPESTATUS[0]}" = 0 ] || die "the document door could not be prepared; see $LOGS/full-prepare.out"
 say "sandbox: broker, simulators, 12 services, document door, six campaigns (database $SANDBOX_DB)"
 bash infrastructure/sandbox/up.sh > "$LOGS/full-up.out" 2>&1 || { tail -5 "$LOGS/full-up.out" >&2; die "sandbox:up failed; see $LOGS/full-up.out"; }
 [ "$(code http://localhost:4904/ready)" = 200 ] \
