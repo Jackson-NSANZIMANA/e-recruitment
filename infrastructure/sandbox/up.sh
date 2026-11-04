@@ -39,14 +39,25 @@ else
     echo "✗ :4900 is busy but no sandbox edge answers on :4921: another sandbox is starting or half-stopped. Wait, or run its own pnpm sandbox:down." >&2
     exit 1
   fi
+  # One-time work first, in the foreground and untimed: a first boot builds the MinIO image from source
+  # (minutes on a slow machine), which must not count against the boot window below.
+  pnpm --silent --filter @usrp/g2g-sandbox sandbox prepare || exit 1
   say "starting the sandbox (database $SANDBOX_DB)"
   setsid nohup pnpm sandbox > "$STATE/logs/sandbox-up.out" 2>&1 &
+  launcher=$!
   for _ in $(seq 1 150); do
     if grep -q 'sandbox up ·' "$STATE/logs/sandbox-up.out" 2>/dev/null; then break; fi
     if grep -q '^✗' "$STATE/logs/sandbox-up.out" 2>/dev/null; then cat "$STATE/logs/sandbox-up.out" >&2; exit 1; fi
     sleep 2
   done
-  edge_up || { echo "✗ the sandbox did not come up in time; see $STATE/logs/sandbox-up.out" >&2; exit 1; }
+  if ! edge_up; then
+    if kill -0 "$launcher" 2>/dev/null; then
+      echo "✗ the sandbox did not come up in 5 minutes and is STILL starting (pid $launcher); see $STATE/logs/sandbox-up.out (tail -f it), then run this again" >&2
+    else
+      echo "✗ the sandbox did not come up in time; see $STATE/logs/sandbox-up.out" >&2
+    fi
+    exit 1
+  fi
 fi
 
 for scenario in "${SCENARIOS[@]}"; do
