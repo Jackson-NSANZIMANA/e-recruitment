@@ -40,22 +40,29 @@ services:
       KAFKA_DEFAULT_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
       KAFKA_LOG_DIRS: /var/lib/kafka/data
+      # The BROKER's heap. Every Kafka CLI in this container reads KAFKA_HEAP_OPTS too, which is why the
+      # healthcheck below sets its own.
       KAFKA_HEAP_OPTS: "-Xmx384M -Xms192M"
       CLUSTER_ID: "U2FuZGJveFVTUlBLYWZrYQ"
     volumes:
       - sandbox-kafka-data:/var/lib/kafka/data
     ports:
       - "127.0.0.1:4992:4992"
+    # The probe is a JVM in the broker's cgroup. Left to inherit KAFKA_HEAP_OPTS it started every 10 s
+    # with -Xmx384M -Xms192M (measured peak 87 MiB RSS) next to a broker already at ~320 MiB, and the
+    # kernel OOM-killed the container (exit 137) within minutes of a boot. It gets its own small heap.
     healthcheck:
-      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      test: ["CMD-SHELL", "KAFKA_HEAP_OPTS='-Xms16m -Xmx48m' KAFKA_JVM_PERFORMANCE_OPTS='-XX:+UseSerialGC -XX:TieredStopAtLevel=1' kafka-broker-api-versions --bootstrap-server localhost:9092 > /dev/null"]
       interval: 10s
       timeout: 10s
       retries: 12
       start_period: 30s
+    # Budget: 384 MiB heap + ~200 MiB JVM non-heap (metaspace, code cache, threads, network buffers)
+    # + one probe (~50 MiB) + page cache. 512M was smaller than the broker alone at steady state.
     deploy:
       resources:
         limits:
-          memory: 512M
+          memory: 768M
 
   # The same topic set as docker-compose.tier2.yml's kafka-init (keep in step).
   sandbox-kafka-init:
@@ -83,8 +90,20 @@ services:
 
   # Opt-in (SANDBOX_FORENSICS=1): the document door. Its own object store with the
   # freshly minted sandbox password (never the committed dev one) and a real ClamAV.
+  #
+  # The image is built from pinned upstream source (infrastructure/docker/minio/Dockerfile): MinIO's
+  # community edition has no published images any more, and a build from source both removes the
+  # dependency on one mirrored registry blob and carries RELEASE.2025-10-15T17-29-55Z, the release with
+  # the service-account sub-policy fix that the mirrored RELEASE.2025-09-07 build lacks. `pnpm sandbox`
+  # builds it once when the tag is missing (~5 min; Docker caches it after). SANDBOX_MINIO_IMAGE uses a
+  # mirror instead (it is pulled, not built).
   sandbox-minio:
-    image: ghcr.io/jackson-nsanzimana/usrp-minio@sha256:52dfd5c0bbd38d3219f2058c7af216d9f9a27a994b7b5baad09bbd38866015ff
+    image: ${SANDBOX_MINIO_IMAGE:-usrp-minio:RELEASE.2025-10-15T17-29-55Z}
+    # `docker compose build sandbox-minio` works as is; `pnpm sandbox` runs the equivalent `docker build`
+    # itself, adding a proxy CA (SANDBOX_BUILD_EXTRA_CA, as a build secret) or host networking (a
+    # loopback proxy) only when needed: compose's bake builder refuses both without interactive --allow.
+    build:
+      context: ./minio
     container_name: usrp-sandbox-minio
     command: server /data
     environment:

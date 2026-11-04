@@ -16,6 +16,20 @@ pnpm sandbox:reset   # stop and drop the sandbox database and state ONLY (never 
 
 **What `sandbox:up` is not yet.** The sandbox services run as detached processes in production mode (`NODE_ENV=production`, `USRP_ENVIRONMENT=sandbox`, freshly minted secrets), not as container images behind a local TLS edge. Compose images, the three SPA-serving images and a Caddy internal-CA edge (ports 51xx) are the remaining part of S12c kit item C; see the PR hand-off.
 
+## What `sandbox:full --status` tells you about the apps
+
+The three apps are built by the frontend's own `pnpm build` (Turbo) and served by each app's own `preview`. Each line names the build being served, Turbo's task hash, and checks it again:
+
+| Line | Meaning |
+|---|---|
+| `✓ serving build 10c69dfc, current` | the preview this sandbox started serves exactly the build the current sources produce |
+| `⚠ serving build …; the sources now build …` | the frontend changed since; `pnpm sandbox:full` rebuilds that app only |
+| `⚠ dist/ changed outside the sandbox` | something else rewrote `apps/<app>/dist` (e.g. a direct `pnpm build` in the frontend); the next start rebuilds it |
+| `✗ not serving: the last build failed (log)` | the build failed, so nothing is served: the previous bundle is not this source |
+| `⚠ answering, but not a server this sandbox started` | another process holds the port; the sandbox will not take it over |
+
+A preview is stopped before its `dist/` is rebuilt and started again only on success, so a page is never served half-written.
+
 ## The whole system on your network (HTTPS)
 
 `pnpm sandbox:full` runs everything on this machine and serves the three apps on `http://localhost:4930` (applicant portal), `:4931` (officer console) and `:4932` (Field Station). To open them from a phone, a tablet or another laptop on the same Wi-Fi or LAN:
@@ -42,7 +56,35 @@ The apps are then at `https://<this-machine's-LAN-IP>:4930`, `:4931` and `:4932`
 
 The server certificate in `.sandbox/tls` is reissued automatically when the machine's address changes; devices keep trusting the same CA. Typing `http://` on one of the three ports redirects to `https://`.
 
+**Verifying from a real device** (the part no automated check here can do):
+
+1. On this machine: `pnpm sandbox:full --lan`; `pnpm sandbox:full --status` shows the three `(LAN)` lines as `✓ https://<ip>:…`. If they are `✗` here, no device will do better.
+2. On the device, on the same Wi-Fi: open `http://<ip>:4930/usrp-sandbox-ca.crt`; the SHA-256 fingerprint shown when installing must equal the one `--lan` printed. Install and trust it (table above).
+3. Open `https://<ip>:4931`: no certificate warning, the red SANDBOX banner, the officer sign-in. Sign in as `rdf.admin` / `RehearsalAdmin#2026`: the dashboard loads.
+4. Open `https://<ip>:4930`: the citizen portal; headings in Atlassian Sans, not the device's system font.
+5. A failure that names the certificate (rather than "cannot connect") means the CA is not trusted on that device; "cannot connect" means firewall, a different network, or Wi-Fi client isolation.
+
 **If a device cannot connect**, allow the three ports in this machine's firewall (Ubuntu: `sudo ufw allow 4930:4932/tcp`) and check that both devices are on the same network. Guest and "client isolation" Wi-Fi blocks device-to-device traffic. `--lan` refuses a public address, and refuses `--real-sms` (ADR-053): a network-reachable sandbox with live SMS behind it. Real SMS runs on a local `pnpm sandbox:full --real-sms`.
+
+## The document door (MinIO, ClamAV, document-forensics)
+
+`pnpm sandbox:full` starts it (`SANDBOX_FORENSICS=1`): its own MinIO on `127.0.0.1:4993` with a freshly minted password, a real ClamAV on `127.0.0.1:4995`, and `document-forensics-service` on `:4904`.
+
+- **MinIO is built from source**, `infrastructure/docker/minio/Dockerfile`: MinIO publishes no community images any more. The build pins `RELEASE.2025-10-15T17-29-55Z` (the final community release, with the service-account sub-policy security fix) and `mc RELEASE.2025-08-13T08-35-41Z` by commit, fetches them through the Go module proxy, verifies them against `sum.golang.org`, and fails if a module does not resolve to its pinned commit. The first boot builds it once (about 3-5 minutes); Docker keeps it after.
+- `SANDBOX_MINIO_IMAGE=<image>` uses a mirror instead (pulled, not built). Behind a TLS-intercepting proxy, `SANDBOX_BUILD_EXTRA_CA=/path/to/ca.crt` gives the build that proxy's CA as a build secret (never an image layer).
+- ClamAV keeps its signatures in the volume `usrp-tier2_clamav-data`, shared with tier2; the launcher creates it when missing and Docker seeds it from the image's bundled database.
+- Proof against the sandbox's own door (EICAR refused by the real ClamAV, clean and stripped JPEGs classified, idempotent re-analysis, fail-closed when the scanner is down), with tier1 Postgres bootstrapped (`pnpm bootstrap:db`):
+
+```bash
+MINIO_ENDPOINT=127.0.0.1 MINIO_PORT=4993 MINIO_ROOT_USER=usrp_sandbox_minio \
+MINIO_ROOT_PASSWORD="$(node -p "require('./.sandbox/secrets.json').MINIO_ROOT_PASSWORD")" \
+CLAMAV_HOST=127.0.0.1 CLAMAV_PORT=4995 DATABASE_URL=postgresql://usrp_app:app_pw@localhost:5432/usrp_db \
+pnpm --filter @usrp/document-forensics-service exec tsx selfcheck/verify-forensics-slice.ts
+```
+
+## The sandbox broker's memory
+
+The sandbox Kafka (`:4992`) runs a 384 MiB heap in a 768 MiB container. Measured under the six journeys it settles at about 545 MiB, peaking at 605 MiB including page cache, so the earlier 512 MiB limit was below the broker's own working set. Its healthcheck is a second JVM in the same container; it now runs with its own 48 MiB heap instead of inheriting the broker's `KAFKA_HEAP_OPTS`, which made every probe start with `-Xmx384M -Xms192M` and got the broker OOM-killed (exit 137) within minutes of a boot. `scripts/test/infra-budgets.test.mjs` keeps both rules for the sandbox and tier2 brokers.
 
 ## The six campaigns
 
