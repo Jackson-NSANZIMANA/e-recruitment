@@ -440,6 +440,7 @@ function stopProcesses(): void {
 }
 
 async function up(): Promise<void> {
+  rmSync(join(STATE, 'running.json'), { force: true });
   // ADR-053 §3.3: the two flags that must never coexist. A synthetic-population
   // identity door reachable from venue Wi-Fi, with the owner's live Twilio account
   // behind it, is the one accident this project could not recover from. It is
@@ -515,6 +516,14 @@ async function up(): Promise<void> {
   }
   for (const [svc, port] of Object.entries(SERVICE_PORTS)) await waitReady(svc, port, '/ready');
   out('');
+  // What is running, written only once EVERY unit answered: up.sh reuses a running sandbox only when this
+  // record says it is complete and serves the database asked for (a half-started or other-database
+  // sandbox answering on :4921 used to be reused silently, and staging then failed against it).
+  writeFileSync(
+    join(STATE, 'running.json'),
+    JSON.stringify({ db: DB, forensics: FORENSICS, simulator: SIMULATOR_PORT, ports: Object.values(SERVICE_PORTS), startedAt: new Date().toISOString() }),
+    { mode: 0o600 },
+  );
   out(`✓ sandbox up · edge http://localhost:${String(EDGE_PORT)} · simulators :${String(SIMULATOR_PORT)} · database ${DB} · broker :4992`);
   out(`  SMS: ${(process.env['SANDBOX_SMS'] ?? '').toLowerCase() === 'twilio' ? 'REAL Twilio (owner opt-in)' : 'Twilio emulator'} · inbox .sandbox/sms/inbox.jsonl · logs: .sandbox/logs/ · rehearse: pnpm rehearse --sandbox <scenario>`);
   out(
@@ -525,6 +534,7 @@ async function up(): Promise<void> {
 }
 
 function down(): void {
+  rmSync(join(STATE, 'running.json'), { force: true });
   stopProcesses();
   try {
     sh('docker', [...COMPOSE, 'down']);
@@ -535,6 +545,7 @@ function down(): void {
 }
 
 function reset(): void {
+  rmSync(join(STATE, 'running.json'), { force: true });
   stopProcesses();
   try {
     sh('docker', [...COMPOSE, 'down', '-v']); // this project's own volume only

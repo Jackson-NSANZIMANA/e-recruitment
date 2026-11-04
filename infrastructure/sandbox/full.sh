@@ -181,6 +181,7 @@ status() {
     done
   fi
   docker ps --format '{{.Names}}\t{{.Status}}' | grep -E '^usrp-' | while IFS=$'\t' read -r n s; do printf '%-28s %s\n' "$n" "$s"; done
+  printf '%-28s %s\n' "database" "$(node -e 'try { const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); console.log(r.db + " (complete boot " + r.startedAt + ")"); } catch { console.log("no complete boot recorded"); }' "$STATE/running.json")"
   printf '%-28s %s\n' "SMS" "$(grep -o 'SMS: [^·]*' "$LOGS/sandbox-up.out" 2>/dev/null | tail -1)"
   if [ -f "$PIDS/web-tls" ] && [ -s "$TLS/address" ]; then
     printf '%-28s %s\n' "Exposure" "⚠ the three apps on https://$(cat "$TLS/address"):4930-4932; edge, services, data on loopback"
