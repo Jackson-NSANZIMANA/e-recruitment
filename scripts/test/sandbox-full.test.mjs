@@ -8,7 +8,7 @@
 // sleeping process whose port the curl stub then reports as 200.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -33,8 +33,11 @@ if [ "$1 $2" = "run preview" ]; then touch "$STUB_STATE/up-$4"; exec sleep 300; 
 exit 0
 `,
   curl: `#!/usr/bin/env bash
-url="\${*: -1}"; port="\${url#http://localhost:}"; port="\${port%%/*}"
-[ -f "$STUB_STATE/up-$port" ] && printf 200 || printf 000
+url="\${*: -1}"
+case "$url" in
+  https://*) [[ " $* " == *" --cacert "* ]] && [ -f "$STUB_STATE/tls-up" ] && printf 200 || printf 000 ;;
+  *) port="\${url#http://localhost:}"; port="\${port%%/*}"; [ -f "$STUB_STATE/up-$port" ] && printf 200 || printf 000 ;;
+esac
 `,
   ss: `#!/usr/bin/env bash
 port="\${*: -1}"; port="\${port##*:}"
@@ -53,6 +56,17 @@ function fixture(t, { scripts = { build: 'tsc -p tsconfig.json --noEmit && vite 
   for (const d of [join(repo, 'infrastructure/sandbox'), join(repo, 'scripts'), join(repo, '.sandbox'), bin, state]) mkdirSync(d, { recursive: true });
   copyFileSync(FULL, join(repo, 'infrastructure/sandbox/full.sh'));
   writeFileSync(join(repo, 'infrastructure/sandbox/up.sh'), '#!/usr/bin/env bash\nexit 0\n');
+  // The real certificate script; a stand-in HTTPS front that records how it was started.
+  copyFileSync(join(ROOT, 'infrastructure/sandbox/lan-certs.sh'), join(repo, 'infrastructure/sandbox/lan-certs.sh'));
+  writeFileSync(
+    join(repo, 'infrastructure/sandbox/tls-proxy.mjs'),
+    `import { appendFileSync, writeFileSync } from 'node:fs';
+appendFileSync(process.env.STUB_LOG, 'TLS|' + process.argv.slice(2).join(' ') + '\\n');
+writeFileSync(process.env.STUB_STATE + '/tls-up', '');
+console.log('tls-proxy ready');
+setInterval(() => {}, 1000);
+`,
+  );
   writeFileSync(join(repo, 'scripts/check-workspace-build.mjs'), 'process.exit(0);\n');
   writeFileSync(join(repo, '.sandbox/secrets.json'), JSON.stringify({ QR_INVITATION_PUBLIC_KEY_B64: 'cHVibGljLWtleQ==' }));
   mkdirSync(ui, { recursive: true });
@@ -70,7 +84,7 @@ function fixture(t, { scripts = { build: 'tsc -p tsconfig.json --noEmit && vite 
 }
 
 function stopPreviews(fx) {
-  for (const app of Object.keys(APPS)) {
+  for (const app of [...Object.keys(APPS), 'tls']) {
     const file = join(fx.repo, '.sandbox/pids', `web-${app}`);
     if (!existsSync(file)) continue;
     try { process.kill(-Number(readFileSync(file, 'utf8')), 'SIGKILL'); } catch { /* already gone */ }
@@ -90,6 +104,8 @@ function run(fx, args = [], env = {}) {
       STUB_LOG: fx.log,
       STUB_STATE: fx.state,
       SANDBOX_EXPOSE_LAN: '',
+      SANDBOX_LAN_ADDRESS: '',
+      SANDBOX_CA_DIR: join(fx.root, 'ca'),
       ...env,
     },
   });
@@ -210,3 +226,72 @@ test('a failed frontend install or build stops the boot and points at its log', 
   assert.match(r.out, /the officer-console build failed; see .*full-build-officer-console\.out/);
   assert.equal(r.calls.filter((c) => c.includes('|run preview --port 4931')).length, 0, 'a failed build is not served');
 });
+
+// ── --lan: the three apps over HTTPS on the network ─────────────────
+const LAN_IP = '192.168.50.10';
+
+test('--lan builds each app for its https LAN origin and keeps the previews and the edge on loopback', (t) => {
+  const fx = fixture(t);
+  const { status, out, calls } = run(fx, ['--lan'], { SANDBOX_LAN_ADDRESS: LAN_IP });
+  assert.equal(status, 0, out);
+  for (const [app, port] of Object.entries(APPS)) {
+    const build = uiCalls(fx, calls, '|run build').find((c) => c.includes(`--filter=@usrp/${app}...`));
+    assert.ok(build.includes(`|EDGE=https://${LAN_IP}:${port}|SANDBOX=1|FIELD=https://${LAN_IP}:4932|`), build);
+    const preview = calls.find((c) => c.startsWith(`${join(fx.ui, 'apps', app)}|run preview`));
+    assert.ok(preview.includes(`|run preview --port ${port} --strictPort|EDGE=http://localhost:4921|`), 'the preview is unchanged');
+  }
+  const tls = calls.find((c) => c.startsWith('TLS|'));
+  assert.ok(tls, 'the HTTPS front is started');
+  for (const port of Object.values(APPS)) assert.ok(tls.includes(` ${LAN_IP}:${port}=${port}`), tls);
+  assert.match(tls, /--cert \S+\/\.sandbox\/tls\/server\.crt --key \S+\/\.sandbox\/tls\/server\.key --ca \S+\/ca\/ca\.crt/);
+  assert.ok(existsSync(join(fx.repo, '.sandbox/pids/web-tls')));
+  assert.equal(statSync(join(fx.root, 'ca/ca.key')).mode & 0o077, 0, 'the CA key is private to its owner');
+  assert.match(out, new RegExp(`applicant portal +https://${LAN_IP.replaceAll('.', '\\.')}:4930`));
+  assert.match(out, /SHA-256 fingerprint +([0-9A-F]{2}:){31}[0-9A-F]{2}/);
+  assert.match(out, new RegExp(`http://${LAN_IP.replaceAll('.', '\\.')}:4930/usrp-sandbox-ca\\.crt`));
+});
+
+test('--lan is SANDBOX_EXPOSE_LAN=1, and the launcher never receives it (the edge stays loopback)', (t) => {
+  const fx = fixture(t);
+  writeFileSync(join(fx.repo, 'infrastructure/sandbox/up.sh'), '#!/usr/bin/env bash\necho "UP|SANDBOX_EXPOSE_LAN=${SANDBOX_EXPOSE_LAN:-}" >> "$STUB_LOG"\n');
+  const { status, out, calls } = run(fx, [], { SANDBOX_EXPOSE_LAN: '1', SANDBOX_LAN_ADDRESS: LAN_IP });
+  assert.equal(status, 0, out);
+  assert.ok(calls.includes('UP|SANDBOX_EXPOSE_LAN='), calls.join('\n'));
+  assert.ok(calls.some((c) => c.startsWith('TLS|')));
+});
+
+test('--lan refuses real SMS, a public address, and leaves nothing started', (t) => {
+  const fx = fixture(t);
+  let r = run(fx, ['--lan', '--real-sms'], { SANDBOX_LAN_ADDRESS: LAN_IP });
+  assert.equal(r.status, 1);
+  assert.match(r.out, /cannot be combined with --real-sms \(ADR-053\)/);
+  r = run(fx, ['--lan'], { SANDBOX_LAN_ADDRESS: '203.0.113.7' });
+  assert.equal(r.status, 1);
+  assert.match(r.out, /203\.0\.113\.7 is not a private address/);
+  assert.equal(r.calls.length, 0);
+});
+
+test('a later start without --lan stops the HTTPS front and builds for localhost again; --down stops it too', (t) => {
+  const fx = fixture(t);
+  assert.equal(run(fx, ['--lan'], { SANDBOX_LAN_ADDRESS: LAN_IP }).status, 0);
+  const pid = Number(readFileSync(join(fx.repo, '.sandbox/pids/web-tls'), 'utf8'));
+  writeFileSync(fx.log, '');
+  const { status, out, calls } = run(fx);
+  assert.equal(status, 0, out);
+  assert.equal(existsSync(join(fx.repo, '.sandbox/pids/web-tls')), false);
+  assert.equal(calls.filter((c) => c.startsWith('TLS|')).length, 0);
+  assert.ok(uiCalls(fx, calls, '|run build').every((c) => /\|EDGE=http:\/\/localhost:493[0-2]\|/.test(c)));
+  assert.equal(gone(pid), true, 'the HTTPS front is stopped');
+  assert.equal(run(fx, ['--lan'], { SANDBOX_LAN_ADDRESS: LAN_IP }).status, 0);
+  const again = Number(readFileSync(join(fx.repo, '.sandbox/pids/web-tls'), 'utf8'));
+  assert.equal(run(fx, ['--down']).status, 0);
+  assert.equal(gone(again), true, '--down stops the HTTPS front');
+});
+
+function gone(pid) {
+  for (let i = 0; i < 50; i++) {
+    try { process.kill(pid, 0); } catch { return true; }
+    spawnSync('sleep', ['0.1']);
+  }
+  return false;
+}
