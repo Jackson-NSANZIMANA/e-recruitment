@@ -401,3 +401,33 @@ test('the one-time document-door work runs before the timed sandbox launch, unti
   const up = readFileSync(join(ROOT, 'infrastructure/sandbox/up.sh'), 'utf8');
   assert.ok(up.indexOf('sandbox prepare') < up.indexOf('setsid nohup pnpm sandbox'), 'up.sh prepares before the timed launch too');
 });
+
+test('--no-staging boots without staging campaigns, rehearsal staff or personas, and refuses --journeys', (t) => {
+  const fx = fixture(t);
+  writeFileSync(join(fx.repo, 'infrastructure/sandbox/up.sh'), '#!/usr/bin/env bash\necho "UP|SANDBOX_STAGE=${SANDBOX_STAGE:-}" >> "$STUB_LOG"\n');
+  const { status, out, calls } = run(fx, ['--no-staging']);
+  assert.equal(status, 0, out);
+  assert.ok(calls.includes('UP|SANDBOX_STAGE=0'), 'up.sh is told not to stage the campaigns');
+  assert.equal(calls.filter((c) => c.includes('rehearse')).length, 0, 'no clearance matrix, no personas');
+  assert.match(out, /no staging \(--no-staging\)/);
+  const staged = run(fx);
+  assert.ok(staged.calls.includes('UP|SANDBOX_STAGE=1'), 'a normal boot still stages');
+  const r = run(fx, ['--no-staging', '--journeys']);
+  assert.equal(r.status, 1);
+  assert.match(r.out, /--journeys plays the staged rehearsal scenarios; it cannot run with --no-staging/);
+});
+
+test('sandbox:clean never touches a database that is not a sandbox one, not even through docker', (t) => {
+  const bin = mkdtempSync(join(tmpdir(), 'usrp-clean-'));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  writeFileSync(join(bin, 'docker'), `#!/usr/bin/env bash\necho "$*" >> "${join(bin, 'docker-calls')}"\nexit 0\n`);
+  chmodSync(join(bin, 'docker'), 0o755);
+  for (const db of ['usrp_db', 'postgres', 'usrp_sandbox;drop', 'prod_usrp_sandbox']) {
+    const r = spawnSync('bash', [join(ROOT, 'infrastructure/sandbox/clean.sh'), '--yes'], { encoding: 'utf8', env: { ...process.env, SANDBOX_DB: db, PATH: `${bin}:${process.env.PATH}` } });
+    assert.equal(r.status, 1, db);
+    assert.match(r.stderr, /is not a sandbox database \(usrp_sandbox\*\); this tool never touches any other/, db);
+  }
+  assert.equal(existsSync(join(bin, 'docker-calls')), false, 'refused before any docker call');
+  const unknown = spawnSync('bash', [join(ROOT, 'infrastructure/sandbox/clean.sh'), '--force'], { encoding: 'utf8' });
+  assert.equal(unknown.status, 2);
+});

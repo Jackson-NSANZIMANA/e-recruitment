@@ -85,12 +85,17 @@ else
   fi
 fi
 
-for scenario in "${SCENARIOS[@]}"; do
-  say "staging $scenario (policy v2 as printed)"
-  pnpm --silent rehearse --sandbox "$scenario" > "$STATE/logs/stage-$scenario.out" 2>&1 \
-    || { echo "✗ staging $scenario failed; see $STATE/logs/stage-$scenario.out" >&2; exit 1; }
-  grep -q 'REHEARSAL STAGED' "$STATE/logs/stage-$scenario.out" || { echo "✗ $scenario was not staged; see $STATE/logs/stage-$scenario.out" >&2; exit 1; }
-done
+# SANDBOX_STAGE=0 (full.sh --no-staging): boot the system only, without the six campaigns.
+if [ "${SANDBOX_STAGE:-1}" = 0 ]; then
+  say "not staging the campaigns (SANDBOX_STAGE=0)"
+else
+  for scenario in "${SCENARIOS[@]}"; do
+    say "staging $scenario (policy v2 as printed)"
+    pnpm --silent rehearse --sandbox "$scenario" > "$STATE/logs/stage-$scenario.out" 2>&1 \
+      || { echo "✗ staging $scenario failed; see $STATE/logs/stage-$scenario.out" >&2; exit 1; }
+    grep -q 'REHEARSAL STAGED' "$STATE/logs/stage-$scenario.out" || { echo "✗ $scenario was not staged; see $STATE/logs/stage-$scenario.out" >&2; exit 1; }
+  done
+fi
 
 cat <<EOF
 
