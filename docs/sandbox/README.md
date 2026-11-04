@@ -47,7 +47,7 @@ The apps are then at `https://<this-machine's-LAN-IP>:4930`, `:4931` and `:4932`
 
 | Device | Install |
 |---|---|
-| Android | Settings → Security → Encryption & credentials → Install a certificate → CA certificate |
+| Android | the link saves `usrp-sandbox-ca.crt` to Downloads; then Settings → search "Install a certificate" → CA certificate → pick it. Use Chrome (some browsers ignore user CAs) |
 | iPhone / iPad | open the file, Settings → General → VPN & Device Management → install the profile, then Settings → General → About → Certificate Trust Settings → turn it on |
 | Windows | double-click → Install Certificate → Local Machine → Trusted Root Certification Authorities |
 | macOS | Keychain Access → System → import, then set it to Always Trust |
@@ -85,6 +85,17 @@ pnpm --filter @usrp/document-forensics-service exec tsx selfcheck/verify-forensi
 ## The sandbox broker's memory
 
 The sandbox Kafka (`:4992`) runs a 384 MiB heap in a 768 MiB container. Measured under the six journeys it settles at about 545 MiB, peaking at 605 MiB including page cache, so the earlier 512 MiB limit was below the broker's own working set. Its healthcheck is a second JVM in the same container; it now runs with its own 48 MiB heap instead of inheriting the broker's `KAFKA_HEAP_OPTS`, which made every probe start with `-Xmx384M -Xms192M` and got the broker OOM-killed (exit 137) within minutes of a boot. `scripts/test/infra-budgets.test.mjs` keeps both rules for the sandbox and tier2 brokers.
+
+## Starting from an empty database (only the administrators)
+
+```bash
+pnpm sandbox:full --down
+SANDBOX_DB=usrp_sandbox_eval pnpm sandbox:clean          # dry run: what would go
+SANDBOX_DB=usrp_sandbox_eval pnpm sandbox:clean --yes    # do it (a pg_dump backup is written first)
+SANDBOX_DB=usrp_sandbox_eval pnpm sandbox:full --no-staging --lan
+```
+
+`sandbox:clean` keeps the agency administrators (the `agency_admin` role), the platform service account and the schema, and removes everything else: rehearsal staff, citizens, campaigns, applications, documents, sessions, events, the audit log, the sandbox broker's and object store's volumes, and the personas, SMS inbox and logs on disk. It only accepts `usrp_sandbox*` databases, refuses while the sandbox runs, and changes the database in one transaction. The evidence tables are append-only by law (N° 058/2021); their 27 `TRUNCATE` guards are disabled only inside that transaction and verified enabled afterwards. `--no-staging` boots without the six campaigns, rehearsal staff and personas, so the database stays as you leave it; create campaigns in the officer console. Restore with the `pg_restore` command the tool prints.
 
 ## The six campaigns
 

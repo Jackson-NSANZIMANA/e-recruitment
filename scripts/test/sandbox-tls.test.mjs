@@ -123,6 +123,13 @@ test('plain HTTP on the same port serves only the CA certificate and redirects e
   const caPem = await request(`http://127.0.0.1:${port}/usrp-sandbox-ca.crt`);
   assert.equal(caPem.status, 200);
   assert.equal(caPem.text, readFileSync(c.ca, 'utf8'));
+  assert.equal(caPem.headers['content-type'], 'application/x-x509-ca-cert', 'iOS and Windows: the install prompt');
+  const android = await request(`http://127.0.0.1:${port}/usrp-sandbox-ca.crt`, {
+    headers: { 'user-agent': 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/141.0 Mobile Safari/537.36' },
+  });
+  assert.equal(android.text, readFileSync(c.ca, 'utf8'));
+  assert.equal(android.headers['content-type'], 'application/octet-stream', 'Android: a file saved to Downloads');
+  assert.match(android.headers['content-disposition'], /attachment; filename="usrp-sandbox-ca\.crt"/);
   const redirect = await request(`http://127.0.0.1:${port}/apply?step=2`);
   assert.equal(redirect.status, 308);
   assert.equal(redirect.headers.location, `https://127.0.0.1:${port}/apply?step=2`);

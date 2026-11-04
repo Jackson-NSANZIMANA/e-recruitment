@@ -32,8 +32,33 @@ if [ ! -f "$REPO/packages/shared-types/dist/index.js" ] || [ -n "${SANDBOX_REBUI
 
 edge_up() { [ "$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 "$EDGE/edge/v1/session" 2>/dev/null)" != "000" ]; }
 
+# A running sandbox is reused only when it is provably whole and serves the database asked for: its boot
+# record (.sandbox/running.json, written once every unit answered) names SANDBOX_DB and the document door
+# setting, every unit it started still answers /ready, and its broker container runs. Anything less (a boot
+# interrupted half-way, another database, a dead broker) is refused rather than staged against.
+reusable() {
+  local why
+  why="$(node -e '
+    const [file, db, forensics] = process.argv.slice(1);
+    let r; try { r = JSON.parse(require("fs").readFileSync(file, "utf8")); } catch { console.log("it has no complete boot record (an interrupted or older boot)"); process.exit(1); }
+    if (r.db !== db) { console.log(`it serves database ${r.db}, not ${db}`); process.exit(1); }
+    if (String(r.forensics) !== String(forensics === "1")) { console.log(`it was started with SANDBOX_FORENSICS=${r.forensics ? 1 : 0}`); process.exit(1); }
+    console.log([r.simulator + "/health", ...r.ports.map((p) => p + "/ready")].join(" "));' "$STATE/running.json" "$SANDBOX_DB" "${SANDBOX_FORENSICS:-}")" \
+    || { echo "$why"; return 1; }
+  local probe
+  for probe in $why; do
+    [ "$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 "http://localhost:${probe%%/*}/${probe#*/}" 2>/dev/null)" = 200 ] \
+      || { echo "its unit on :${probe%%/*} does not answer /${probe#*/}"; return 1; }
+  done
+  [ "$(docker inspect -f '{{.State.Running}}' usrp-sandbox-kafka 2>/dev/null)" = true ] || { echo "its broker (usrp-sandbox-kafka) is not running"; return 1; }
+}
+
 if edge_up; then
-  say "a sandbox edge is already answering on :4921 — reusing it (nothing is restarted)"
+  if ! why="$(reusable)"; then
+    echo "✗ a sandbox is answering on :4921, but $why. Stop it with \`pnpm sandbox:full --down\` (data is kept), then run this again." >&2
+    exit 1
+  fi
+  say "a complete sandbox for database $SANDBOX_DB is already running — reusing it (nothing is restarted)"
 else
   if ss -H -ltn 'sport = :4900' | grep -q .; then
     echo "✗ :4900 is busy but no sandbox edge answers on :4921: another sandbox is starting or half-stopped. Wait, or run its own pnpm sandbox:down." >&2
@@ -60,12 +85,17 @@ else
   fi
 fi
 
-for scenario in "${SCENARIOS[@]}"; do
-  say "staging $scenario (policy v2 as printed)"
-  pnpm --silent rehearse --sandbox "$scenario" > "$STATE/logs/stage-$scenario.out" 2>&1 \
-    || { echo "✗ staging $scenario failed; see $STATE/logs/stage-$scenario.out" >&2; exit 1; }
-  grep -q 'REHEARSAL STAGED' "$STATE/logs/stage-$scenario.out" || { echo "✗ $scenario was not staged; see $STATE/logs/stage-$scenario.out" >&2; exit 1; }
-done
+# SANDBOX_STAGE=0 (full.sh --no-staging): boot the system only, without the six campaigns.
+if [ "${SANDBOX_STAGE:-1}" = 0 ]; then
+  say "not staging the campaigns (SANDBOX_STAGE=0)"
+else
+  for scenario in "${SCENARIOS[@]}"; do
+    say "staging $scenario (policy v2 as printed)"
+    pnpm --silent rehearse --sandbox "$scenario" > "$STATE/logs/stage-$scenario.out" 2>&1 \
+      || { echo "✗ staging $scenario failed; see $STATE/logs/stage-$scenario.out" >&2; exit 1; }
+    grep -q 'REHEARSAL STAGED' "$STATE/logs/stage-$scenario.out" || { echo "✗ $scenario was not staged; see $STATE/logs/stage-$scenario.out" >&2; exit 1; }
+  done
+fi
 
 cat <<EOF
 

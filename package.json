@@ -23,6 +23,7 @@
     "sandbox:full": "bash infrastructure/sandbox/full.sh",
     "sandbox:down": "pnpm --filter @usrp/g2g-sandbox sandbox down",
     "sandbox:reset": "pnpm --filter @usrp/g2g-sandbox sandbox reset",
+    "sandbox:clean": "bash infrastructure/sandbox/clean.sh",
     "test": "turbo run test",
     "test:scripts": "node --test scripts/test/*.test.mjs",
     "test:e2e": "turbo run test:e2e",

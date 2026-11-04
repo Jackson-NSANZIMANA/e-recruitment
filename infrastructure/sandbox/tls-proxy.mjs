@@ -69,8 +69,12 @@ function plainHttp(caPem) {
   return http.createServer((req, res) => {
     const path = (req.url ?? '/').split('?')[0];
     if (req.method === 'GET' && path === CA_PATH) {
+      // iOS and Windows need the certificate type to offer the install. Android (11+) is the opposite:
+      // Chrome hands that type to the system, which refuses CA certificates outside Settings and saves
+      // NOTHING to Downloads. Android gets a plain download, installed from Settings > Install a certificate.
+      const android = /Android/i.test(req.headers['user-agent'] ?? '');
       res.writeHead(200, {
-        'content-type': 'application/x-x509-ca-cert',
+        'content-type': android ? 'application/octet-stream' : 'application/x-x509-ca-cert',
         'content-disposition': 'attachment; filename="usrp-sandbox-ca.crt"',
         'cache-control': 'no-store',
       });

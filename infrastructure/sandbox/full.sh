@@ -7,6 +7,8 @@
 #   pnpm sandbox:full --kafka-ui          also a Kafka UI on the sandbox broker (:4994, +256 MB)
 #   pnpm sandbox:full --rebuild           rebuild the services, and the three apps past the turbo cache (--force)
 #   pnpm sandbox:full --lan               the three apps also over HTTPS on this machine's LAN address (below)
+#   pnpm sandbox:full --no-staging        boot without staging the campaigns, rehearsal staff and personas
+#                                         (an empty database stays empty; see pnpm sandbox:clean)
 #   pnpm sandbox:full --status            what is running
 #   pnpm sandbox:full --down              stop what this script started (data kept)
 #
@@ -64,11 +66,11 @@ EDGE="http://localhost:4921"
 CA_DIR="${SANDBOX_CA_DIR:-$HOME/.config/usrp/sandbox-ca}"; TLS="$STATE/tls"
 APPS=("applicant-portal:4930" "officer-console:4931" "field-station:4932")
 
-REAL_SMS=0; JOURNEYS=0; KAFKA_UI=0; REBUILD=0; LAN=0; ACTION=up
+REAL_SMS=0; JOURNEYS=0; KAFKA_UI=0; REBUILD=0; LAN=0; STAGE=1; ACTION=up
 [ "${SANDBOX_EXPOSE_LAN:-}" = 1 ] && LAN=1
 for arg in "$@"; do
   case "$arg" in
-    --real-sms) REAL_SMS=1 ;; --journeys) JOURNEYS=1 ;; --kafka-ui) KAFKA_UI=1 ;; --rebuild) REBUILD=1 ;; --lan) LAN=1 ;;
+    --real-sms) REAL_SMS=1 ;; --journeys) JOURNEYS=1 ;; --kafka-ui) KAFKA_UI=1 ;; --rebuild) REBUILD=1 ;; --lan) LAN=1 ;; --no-staging) STAGE=0 ;;
     --down) ACTION=down ;; --status) ACTION=status ;;
     *) echo "✗ unknown option $arg (see the header of $0)" >&2; exit 2 ;;
   esac
@@ -181,6 +183,7 @@ status() {
     done
   fi
   docker ps --format '{{.Names}}\t{{.Status}}' | grep -E '^usrp-' | while IFS=$'\t' read -r n s; do printf '%-28s %s\n' "$n" "$s"; done
+  printf '%-28s %s\n' "database" "$(node -e 'try { const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); console.log(r.db + " (complete boot " + r.startedAt + ")"); } catch { console.log("no complete boot recorded"); }' "$STATE/running.json")"
   printf '%-28s %s\n' "SMS" "$(grep -o 'SMS: [^·]*' "$LOGS/sandbox-up.out" 2>/dev/null | tail -1)"
   if [ -f "$PIDS/web-tls" ] && [ -s "$TLS/address" ]; then
     printf '%-28s %s\n' "Exposure" "⚠ the three apps on https://$(cat "$TLS/address"):4930-4932; edge, services, data on loopback"
@@ -231,6 +234,8 @@ for a in "${APPS[@]}"; do
 done
 command -v docker >/dev/null || die "docker is required"
 docker info >/dev/null 2>&1 || die "the docker daemon is not reachable"
+[ "$STAGE" = 1 ] || [ "$JOURNEYS" = 0 ] || die "--journeys plays the staged rehearsal scenarios; it cannot run with --no-staging"
+export SANDBOX_STAGE="$STAGE"
 if [ "$LAN" = 1 ] && [ "$REAL_SMS" = 1 ]; then
   die "SANDBOX_EXPOSE_LAN=1 (--lan) cannot be combined with --real-sms (ADR-053): a network-reachable sandbox with live SMS behind it"
 fi
@@ -281,12 +286,19 @@ say "sandbox: broker, simulators, 12 services, document door, six campaigns (dat
 bash infrastructure/sandbox/up.sh > "$LOGS/full-up.out" 2>&1 || { tail -5 "$LOGS/full-up.out" >&2; die "sandbox:up failed; see $LOGS/full-up.out"; }
 [ "$(code http://localhost:4904/ready)" = 200 ] \
   || printf '\033[0;33m! the running sandbox was started without the document door; run --down, then again\033[0m\n'
-say "clearance matrix and personas"
-USRP_SANDBOX=1 USRP_SANDBOX_STATE="$STATE" pnpm -s rehearse --sandbox clearance-matrix > "$LOGS/full-stage-clearance.out" 2>&1 || true
-for scenario in rdf-2026 rnp-basic-2025 rcs-junior-2025 rcs-officer-2026-4y clearance-matrix; do
-  USRP_SANDBOX=1 USRP_SANDBOX_STATE="$STATE" pnpm -s rehearse --sandbox "$scenario" --journey --export-personas > "$LOGS/full-personas-$scenario.out" 2>&1 \
-    || printf '\033[0;33m! could not export the %s personas; see %s\033[0m\n' "$scenario" "$LOGS/full-personas-$scenario.out"
-done
+if [ "$STAGE" = 1 ]; then
+  say "clearance matrix and personas"
+  USRP_SANDBOX=1 USRP_SANDBOX_STATE="$STATE" pnpm -s rehearse --sandbox clearance-matrix > "$LOGS/full-stage-clearance.out" 2>&1 || true
+  for scenario in rdf-2026 rnp-basic-2025 rcs-junior-2025 rcs-officer-2026-4y clearance-matrix; do
+    USRP_SANDBOX=1 USRP_SANDBOX_STATE="$STATE" pnpm -s rehearse --sandbox "$scenario" --journey --export-personas > "$LOGS/full-personas-$scenario.out" 2>&1 \
+      || printf '\033[0;33m! could not export the %s personas; see %s\033[0m\n' "$scenario" "$LOGS/full-personas-$scenario.out"
+  done
+else
+  say "no staging (--no-staging): no campaigns, rehearsal staff or personas are added"
+  admins="$(docker exec usrp-postgres psql -U usrp_admin -d "$SANDBOX_DB" -tAc "SELECT string_agg(login_handle, ' ' ORDER BY login_handle) FROM public_core.officer_accounts WHERE 'agency_admin' = ANY(roles)" 2>/dev/null)"
+  if [ -n "$admins" ]; then printf '  agency administrators: %s\n' "$admins"
+  else printf '\033[0;33m! %s has no agency administrator, so nobody can sign in to the officer console: boot once without --no-staging to provision them\033[0m\n' "$SANDBOX_DB"; fi
+fi
 
 # ── 4. the three apps: the frontend's own build, served by its own preview ──
 # Always, like the backend install above: a pull of the frontend can add a workspace package that needs linking.
