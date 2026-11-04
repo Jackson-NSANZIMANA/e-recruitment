@@ -16,6 +16,34 @@ pnpm sandbox:reset   # stop and drop the sandbox database and state ONLY (never 
 
 **What `sandbox:up` is not yet.** The sandbox services run as detached processes in production mode (`NODE_ENV=production`, `USRP_ENVIRONMENT=sandbox`, freshly minted secrets), not as container images behind a local TLS edge. Compose images, the three SPA-serving images and a Caddy internal-CA edge (ports 51xx) are the remaining part of S12c kit item C; see the PR hand-off.
 
+## The whole system on your network (HTTPS)
+
+`pnpm sandbox:full` runs everything on this machine and serves the three apps on `http://localhost:4930` (applicant portal), `:4931` (officer console) and `:4932` (Field Station). To open them from a phone, a tablet or another laptop on the same Wi-Fi or LAN:
+
+```bash
+pnpm sandbox:full --lan                                   # or SANDBOX_EXPOSE_LAN=1 pnpm sandbox:full
+SANDBOX_LAN_ADDRESS=192.168.1.20 pnpm sandbox:full --lan  # when the machine has several addresses
+```
+
+The apps are then at `https://<this-machine's-LAN-IP>:4930`, `:4931` and `:4932`. Use those addresses on this machine too: the bundles are built for that origin. A later `pnpm sandbox:full` without `--lan` goes back to `http://localhost` (both builds stay in Turbo's cache, so switching costs seconds).
+
+**What reaches the network.** Exactly three ports, each over TLS (`infrastructure/sandbox/tls-proxy.mjs`). The apps' previews, the edge, the twelve services, Postgres and Kafka stay on `127.0.0.1`. Every API call goes to the app's own origin and through its `/edge` proxy to the edge, so the session cookies keep their production form (`__Host-`, `Secure`, `HttpOnly`, `SameSite=Strict`). `--status` shows the three `https://` addresses and an `Exposure` line saying so.
+
+**Trusting the certificate, once per device.** The first `--lan` run makes a sandbox certificate authority in `~/.config/usrp/sandbox-ca` (`SANDBOX_CA_DIR`) and prints its SHA-256 fingerprint. The CA is name-constrained to private addresses (10/8, 172.16/12, 192.168/16, 100.64/10, 127/8) and `localhost`, so a device that trusts it trusts nothing on the internet. On each device, open `http://<LAN-IP>:4930/usrp-sandbox-ca.crt`, check that the fingerprint matches, and install it:
+
+| Device | Install |
+|---|---|
+| Android | Settings → Security → Encryption & credentials → Install a certificate → CA certificate |
+| iPhone / iPad | open the file, Settings → General → VPN & Device Management → install the profile, then Settings → General → About → Certificate Trust Settings → turn it on |
+| Windows | double-click → Install Certificate → Local Machine → Trusted Root Certification Authorities |
+| macOS | Keychain Access → System → import, then set it to Always Trust |
+| Linux (Chrome/Chromium) | `certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n usrp-sandbox -i ca.crt` |
+| Firefox (any OS) | Settings → Privacy & Security → Certificates → View Certificates → Authorities → Import |
+
+The server certificate in `.sandbox/tls` is reissued automatically when the machine's address changes; devices keep trusting the same CA. Typing `http://` on one of the three ports redirects to `https://`.
+
+**If a device cannot connect**, allow the three ports in this machine's firewall (Ubuntu: `sudo ufw allow 4930:4932/tcp`) and check that both devices are on the same network. Guest and "client isolation" Wi-Fi blocks device-to-device traffic. `--lan` refuses a public address, and refuses `--real-sms` (ADR-053): a network-reachable sandbox with live SMS behind it. Real SMS runs on a local `pnpm sandbox:full --real-sms`.
+
 ## The six campaigns
 
 Facts come only from `docs/product/recruitment-announcements-2025-2026.md` (never the English translations).
