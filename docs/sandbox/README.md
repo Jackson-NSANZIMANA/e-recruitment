@@ -16,6 +16,20 @@ pnpm sandbox:reset   # stop and drop the sandbox database and state ONLY (never 
 
 **What `sandbox:up` is not yet.** The sandbox services run as detached processes in production mode (`NODE_ENV=production`, `USRP_ENVIRONMENT=sandbox`, freshly minted secrets), not as container images behind a local TLS edge. Compose images, the three SPA-serving images and a Caddy internal-CA edge (ports 51xx) are the remaining part of S12c kit item C; see the PR hand-off.
 
+## What `sandbox:full --status` tells you about the apps
+
+The three apps are built by the frontend's own `pnpm build` (Turbo) and served by each app's own `preview`. Each line names the build being served, Turbo's task hash, and checks it again:
+
+| Line | Meaning |
+|---|---|
+| `✓ serving build 10c69dfc, current` | the preview this sandbox started serves exactly the build the current sources produce |
+| `⚠ serving build …; the sources now build …` | the frontend changed since; `pnpm sandbox:full` rebuilds that app only |
+| `⚠ dist/ changed outside the sandbox` | something else rewrote `apps/<app>/dist` (e.g. a direct `pnpm build` in the frontend); the next start rebuilds it |
+| `✗ not serving: the last build failed (log)` | the build failed, so nothing is served: the previous bundle is not this source |
+| `⚠ answering, but not a server this sandbox started` | another process holds the port; the sandbox will not take it over |
+
+A preview is stopped before its `dist/` is rebuilt and started again only on success, so a page is never served half-written.
+
 ## The whole system on your network (HTTPS)
 
 `pnpm sandbox:full` runs everything on this machine and serves the three apps on `http://localhost:4930` (applicant portal), `:4931` (officer console) and `:4932` (Field Station). To open them from a phone, a tablet or another laptop on the same Wi-Fi or LAN:

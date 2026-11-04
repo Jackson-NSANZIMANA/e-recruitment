@@ -38,6 +38,11 @@
 #            origin, so every /edge request is same-origin
 #   preview  the real edge (:4921), read by the app's vite.config.ts as the /edge proxy target
 #
+# What is served is always a build this script can name. Before building, Turbo's dry run gives each app's
+# task hash; a preview this script started is kept only while it serves that exact hash and the same
+# dist/index.html. Otherwise the preview is stopped BEFORE dist/ is rebuilt (never serving it half-written)
+# and started again only on success; a failed build leaves that app NOT served, and --status says so.
+#
 # On the network (--lan, or SANDBOX_EXPOSE_LAN=1): the apps are built for https://<lan-ip>:4930/4931/4932
 # and infrastructure/sandbox/tls-proxy.mjs serves them there, from this machine and from any phone, tablet or
 # laptop on the same network. ONLY those three ports leave loopback: the previews, the edge, the twelve
@@ -96,16 +101,67 @@ if [ -z "$UI" ]; then
   done
 fi
 
-# A recorded PID is stopped only while it still runs from one of our checkouts (a reboot reuses PIDs).
+# Is this PID still a process of ours? It must be alive and run from one of our checkouts (a reboot reuses
+# PIDs). The command line may be relative (vite, pnpm): the working directory decides, the command line otherwise.
+ours() { # pid
+  [ -n "$1" ] && kill -0 "$1" 2>/dev/null \
+    && { readlink "/proc/$1/cwd" 2>/dev/null; ps -o command= -p "$1" 2>/dev/null; } | grep -qF -e "$REPO" -e "${UI:-/nonexistent}"
+}
+# A recorded PID is stopped only while it is still ours.
 stop_recorded() { # name
   local file="$PIDS/$1" pid
   [ -f "$file" ] || return 0
   pid="$(cat "$file")"
-  # The command line may be relative (vite, pnpm): the working directory decides, the command line otherwise.
-  if { readlink "/proc/$pid/cwd" 2>/dev/null; ps -o command= -p "$pid" 2>/dev/null; } | grep -qF -e "$REPO" -e "${UI:-/nonexistent}"; then
+  if ours "$pid"; then
     kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+    for _ in $(seq 1 50); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
   fi
   rm -f "$file"
+}
+# Is the app's port served by the preview this script recorded? Answering HTTP 200 is not proof: the recorded
+# PID must be ours AND lead the process group of a process listening on that port (the PID is pnpm under
+# setsid; the listener is the `vite preview` node process below it).
+serving_ours() { # app port
+  local pid listener
+  pid="$(cat "$PIDS/web-$1" 2>/dev/null)"; ours "$pid" || return 1
+  for listener in $(ss -H -ltnp "sport = :$2" 2>/dev/null | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u); do
+    [ "$(ps -o pgid= -p "$listener" 2>/dev/null | tr -d ' ')" = "$pid" ] && return 0
+  done
+  return 1
+}
+# The build the app's preview serves, as recorded when it was started: Turbo's task hash, the sha256 of the
+# dist/index.html it served, and the environment it was built with (so --status can ask Turbo again).
+state_get() { sed -n "s/^$2=//p" "$PIDS/web-$1.build" 2>/dev/null | head -1; }
+index_sha() { sha256sum "$UI/apps/$1/dist/index.html" 2>/dev/null | cut -c1-64; }
+# Turbo's hash for the app's build task under the given environment, from the frontend's own build script
+# (`turbo run build --dry=json`): the same key Turbo uses to decide hit or miss. Empty when it cannot be had.
+build_hash() { # pkg NAME=value...
+  local pkg="$1"; shift
+  (cd "$UI" && env "$@" pnpm -s run build --filter="$pkg..." --dry=json 2>/dev/null) | node -e '
+    let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
+      try { const t = JSON.parse(s.slice(s.indexOf("{"))).tasks.find((x) => x.taskId === process.argv[1] + "#build");
+            if (t) process.stdout.write(t.hash); } catch {} });' "$pkg"
+}
+
+# One line on what an app's port really serves.
+app_state() { # app port
+  local app="$1" port="$2" served pkg now benv=()
+  if [ -f "$PIDS/web-$app.failed" ]; then
+    echo "✗ not serving: the last build failed ($(sed -n 's/^log=//p' "$PIDS/web-$app.failed"))"; return
+  fi
+  if ! serving_ours "$app" "$port"; then
+    [ "$(code "http://localhost:$port/")" = 200 ] && echo "⚠ answering, but not a server this sandbox started" || echo "✗ down"
+    return
+  fi
+  served="$(state_get "$app" hash)"
+  [ "$(index_sha "$app")" = "$(state_get "$app" index)" ] \
+    || { echo "⚠ dist/ changed outside the sandbox since build ${served:0:8} (pnpm sandbox:full rebuilds it)"; return; }
+  pkg="$(node -p "require('$UI/apps/$app/package.json').name" 2>/dev/null)"
+  mapfile -t benv < <(sed -n 's/^env=//p' "$PIDS/web-$app.build" 2>/dev/null)
+  now="$( [ -n "$pkg" ] && [ "${#benv[@]}" -gt 0 ] && build_hash "$pkg" "${benv[@]}")"
+  if [ -z "$now" ]; then echo "✓ serving build ${served:0:8} (freshness unknown: turbo dry-run failed)"
+  elif [ "$now" = "$served" ]; then echo "✓ serving build ${served:0:8}, current"
+  else echo "⚠ serving build ${served:0:8}; the sources now build ${now:0:8} (pnpm sandbox:full)"; fi
 }
 
 status() {
@@ -117,9 +173,7 @@ status() {
     local path=/ready; [ "${p##*:}" = 4900 ] && path=/health
     printf '%-28s %s\n' "${p%%:*} :${p##*:}" "$([ "$(code "http://localhost:${p##*:}$path")" = 200 ] && echo "✓ ready" || echo "✗ down")"
   done
-  for a in "${APPS[@]}"; do
-    printf '%-28s %s\n' "${a%%:*} :${a##*:}" "$([ "$(code "http://localhost:${a##*:}/")" = 200 ] && echo "✓ production bundle" || echo "✗ down")"
-  done
+  for a in "${APPS[@]}"; do printf '%-28s %s\n' "${a%%:*} :${a##*:}" "$(app_state "${a%%:*}" "${a##*:}")"; done
   if [ -f "$PIDS/web-tls" ] && [ -s "$TLS/address" ]; then
     local ip; ip="$(cat "$TLS/address")"
     for a in "${APPS[@]}"; do
@@ -145,7 +199,7 @@ if [ "$ACTION" = status ]; then status; exit 0; fi
 
 if [ "$ACTION" = down ]; then
   stop_recorded web-tls
-  for a in "${APPS[@]}"; do stop_recorded "web-${a%%:*}"; done
+  for a in "${APPS[@]}"; do stop_recorded "web-${a%%:*}"; rm -f "$PIDS/web-${a%%:*}.build" "$PIDS/web-${a%%:*}.failed"; done
   docker rm -f usrp-sandbox-kafka-ui >/dev/null 2>&1 || true
   pnpm -s sandbox:down
   echo "✓ the apps, the services and the sandbox broker are stopped (database and state kept; tier1 Postgres left running)"
@@ -243,29 +297,46 @@ app_origin() { if [ "$LAN" = 1 ]; then printf 'https://%s:%s' "$LAN_IP" "$1"; el
 # a preview that has to be started again never finds its port held by it.
 stop_recorded web-tls
 [ -d "$STATE/web" ] && printf '\033[0;33m! %s holds bundles from the previous launcher and is no longer used; it can be deleted\033[0m\n' "$STATE/web"
+failed=(); started=()
 for a in "${APPS[@]}"; do
   app="${a%%:*}"; port="${a##*:}"; pkg="${UI_PKG[$app]}"
   # One turbo run per app, because each app is built for its own origin: a single `pnpm build` would give
   # all three the same VITE_EDGE_URL. `--filter=$pkg...` is the app and every workspace package it depends on.
-  say "building $app: pnpm build --filter=$pkg... ${force:+$force }(the frontend's own build, sandbox banner on)"
-  ( cd "$UI" && VITE_EDGE_URL="$(app_origin "$port")" VITE_USRP_SANDBOX=1 VITE_FIELD_STATION_URL="$(app_origin 4932)" \
-      VITE_SLOT_TRUST_ANCHOR_B64="$anchor" pnpm run build --filter="$pkg..." --ui=stream --no-daemon ${force:+"$force"} ) \
-      > "$LOGS/full-build-$app.out" 2>&1 \
-    || { tail -15 "$LOGS/full-build-$app.out" >&2; die "the $app build failed; see $LOGS/full-build-$app.out"; }
-  [ -f "$UI/apps/$app/dist/index.html" ] || die "the $app build succeeded but left no apps/$app/dist/index.html; see $LOGS/full-build-$app.out"
-  printf '  %s\n' "$(grep -E '^ *Cached:' "$LOGS/full-build-$app.out" | tail -1 | sed 's/^ *//')"
-  # A preview this script started keeps serving: vite preview reads dist/ on every request, so it serves the
-  # build that just finished. Anything else on the port is not ours to replace.
-  if [ "$(code "http://localhost:$port/")" = 200 ] && [ -f "$PIDS/web-$app" ]; then continue; fi
+  benv=("VITE_EDGE_URL=$(app_origin "$port")" VITE_USRP_SANDBOX=1 "VITE_FIELD_STATION_URL=$(app_origin 4932)" "VITE_SLOT_TRUST_ANCHOR_B64=$anchor")
+  hash="$(build_hash "$pkg" "${benv[@]}")"
+  [ -n "$hash" ] || die "turbo could not plan the $app build (pnpm run build --filter=$pkg... --dry=json in $UI)"
+  # Nothing to do only when it is provably the same: our own preview, started for this exact build, still
+  # serving the dist/index.html it was started with (a developer's own `pnpm build` rewrites dist/ in place).
+  if [ "$REBUILD" = 0 ] && serving_ours "$app" "$port" && [ "$(state_get "$app" hash)" = "$hash" ] \
+     && [ -n "$(index_sha "$app")" ] && [ "$(index_sha "$app")" = "$(state_get "$app" index)" ]; then
+    say "$app: serving build ${hash:0:8}, current"
+    continue
+  fi
+  # Stop the preview BEFORE the build touches dist/: vite empties it and writes it again, and a preview kept
+  # running through that serves pages without their entry script. A closed port says what is happening.
+  stop_recorded "web-$app"; rm -f "$PIDS/web-$app.build"
   busy "$port" && die ":$port is busy with a server this script did not start; stop it first"
+  say "building $app (${hash:0:8}): pnpm build --filter=$pkg... ${force:+$force }(the frontend's own build, sandbox banner on)"
+  if ! ( cd "$UI" && env "${benv[@]}" pnpm run build --filter="$pkg..." --ui=stream --no-daemon ${force:+"$force"} ) \
+      > "$LOGS/full-build-$app.out" 2>&1 || [ ! -f "$UI/apps/$app/dist/index.html" ]; then
+    # A failed build serves nothing: the previous bundle is not this source, and calling it current would lie.
+    tail -15 "$LOGS/full-build-$app.out" >&2
+    printf 'hash=%s\nlog=%s\n' "$hash" "$LOGS/full-build-$app.out" > "$PIDS/web-$app.failed"
+    printf '\033[0;31m✗ the %s build failed; it is not served. See %s\033[0m\n' "$app" "$LOGS/full-build-$app.out" >&2
+    failed+=("$app"); continue
+  fi
+  rm -f "$PIDS/web-$app.failed"
+  printf '  %s\n' "$(grep -E '^ *Cached:' "$LOGS/full-build-$app.out" | tail -1 | sed 's/^ *//')"
   # exec setsid: the recorded PID IS the server's session leader (pnpm, then the app's `vite preview`), and
   # nothing keeps this script's stdout open.
   ( cd "$UI/apps/$app" || exit 1; VITE_EDGE_URL="$EDGE" exec setsid pnpm run preview --port "$port" --strictPort ) \
     > "$LOGS/full-web-$app.out" 2>&1 < /dev/null &
   echo $! > "$PIDS/web-$app"
+  { printf 'hash=%s\nindex=%s\n' "$hash" "$(index_sha "$app")"; printf 'env=%s\n' "${benv[@]}"; } > "$PIDS/web-$app.build"
+  started+=("$a")
 done
-for a in "${APPS[@]}"; do
-  for _ in $(seq 1 30); do [ "$(code "http://localhost:${a##*:}/")" = 200 ] && break; sleep 1; done
+for a in ${started[@]+"${started[@]}"}; do
+  for _ in $(seq 1 30); do serving_ours "${a%%:*}" "${a##*:}" && [ "$(code "http://localhost:${a##*:}/")" = 200 ] && break; sleep 1; done
   [ "$(code "http://localhost:${a##*:}/")" = 200 ] \
     || printf '\033[0;33m! %s did not answer on :%s; see %s\033[0m\n' "${a%%:*}" "${a##*:}" "$LOGS/full-web-${a%%:*}.out"
 done
@@ -282,6 +353,11 @@ if [ "$LAN" = 1 ]; then
     [ "$(tls_code "https://$LAN_IP:${a##*:}/")" = 200 ] \
       || printf '\033[0;33m! https://%s:%s does not answer with a certificate the sandbox CA verifies; see %s\033[0m\n' "$LAN_IP" "${a##*:}" "$LOGS/full-web-tls.out"
   done
+fi
+
+if [ "${#failed[@]}" -gt 0 ]; then
+  status
+  die "not every app is served: the ${failed[*]} build failed (see .sandbox/logs/full-build-<app>.out); the others are up"
 fi
 
 # ── 5. optional ───────────────────────────────────────────────────

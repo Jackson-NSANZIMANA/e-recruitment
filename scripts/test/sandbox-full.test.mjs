@@ -20,28 +20,44 @@ const APPS = { 'applicant-portal': 4930, 'officer-console': 4931, 'field-station
 
 const STUBS = {
   pnpm: `#!/usr/bin/env bash
-printf '%s|%s|EDGE=%s|SANDBOX=%s|FIELD=%s|ANCHOR=%s\\n' "$PWD" "$*" "\${VITE_EDGE_URL:-}" "\${VITE_USRP_SANDBOX:-}" \\
+tag=""; [[ " $* " == *" --dry=json "* ]] && tag="DRY"
+printf '%s%s|%s|EDGE=%s|SANDBOX=%s|FIELD=%s|ANCHOR=%s\\n' "$tag" "$PWD" "$*" "\${VITE_EDGE_URL:-}" "\${VITE_USRP_SANDBOX:-}" \\
   "\${VITE_FIELD_STATION_URL:-}" "\${VITE_SLOT_TRUST_ANCHOR_B64:-}" >> "$STUB_LOG"
 if [ "$PWD" = "$STUB_UI" ] && [ "$1" = install ] && [ -n "\${STUB_FAIL_UI_INSTALL:-}" ]; then echo "ERR_PNPM_OUTDATED_LOCKFILE"; exit 1; fi
+[ "$1" = -s ] && shift
 if [ "$PWD" = "$STUB_UI" ] && [ "$1 $2" = "run build" ]; then
   pkg="\${3#--filter=}"; pkg="\${pkg%...}"; app="\${pkg#@usrp/}"
+  # The task hash: a per-app value the test can change (a source change), else one derived from the origin.
+  hash="$(cat "$STUB_STATE/hash-$app" 2>/dev/null || printf 'h-%s' "\${VITE_EDGE_URL//[^a-z0-9]/}")"
+  if [[ " $* " == *" --dry=json "* ]]; then
+    printf '{"tasks":[{"taskId":"%s#build","hash":"%s"}]}' "$pkg" "$hash"; exit 0
+  fi
   [ "$app" = "\${STUB_FAIL_BUILD:-}" ] && { echo "error TS2322: probe"; exit 2; }
-  mkdir -p "apps/$app/dist" && echo "<!doctype html>" > "apps/$app/dist/index.html"
+  mkdir -p "apps/$app/dist" && echo "<!doctype html><!-- $hash -->" > "apps/$app/dist/index.html"
   echo "Cached:    0 cached, 1 total"; exit 0
 fi
-if [ "$1 $2" = "run preview" ]; then touch "$STUB_STATE/up-$4"; exec sleep 300; fi
+if [ "$1 $2" = "run preview" ]; then echo $$ > "$STUB_STATE/up-$4"; exec sleep 300; fi
 exit 0
 `,
   curl: `#!/usr/bin/env bash
 url="\${*: -1}"
 case "$url" in
   https://*) [[ " $* " == *" --cacert "* ]] && [ -f "$STUB_STATE/tls-up" ] && printf 200 || printf 000 ;;
-  *) port="\${url#http://localhost:}"; port="\${port%%/*}"; [ -f "$STUB_STATE/up-$port" ] && printf 200 || printf 000 ;;
+  *) port="\${url#http://localhost:}"; port="\${port%%/*}"
+     if [ -f "$STUB_STATE/up-$port" ] && kill -0 "$(cat "$STUB_STATE/up-$port")" 2>/dev/null; then printf 200
+     elif [ -f "$STUB_STATE/foreign-$port" ]; then printf 200; else printf 000; fi ;;
 esac
 `,
+  // A port is listened on by the stub preview while its recorded process lives (ss -p names that pid), or
+  // by a "foreign" server the test declares (STUB_BUSY, or a foreign-<port> file), whose pid is 1.
   ss: `#!/usr/bin/env bash
 port="\${*: -1}"; port="\${port##*:}"
-case " \${STUB_BUSY:-} " in *" $port "*) echo "LISTEN 0 511 127.0.0.1:$port 0.0.0.0:*" ;; esac
+if [ -f "$STUB_STATE/up-$port" ] && kill -0 "$(cat "$STUB_STATE/up-$port")" 2>/dev/null; then
+  echo "LISTEN 0 511 127.0.0.1:$port 0.0.0.0:* users:((\"node\",pid=$(cat "$STUB_STATE/up-$port"),fd=3))"
+fi
+case " \${STUB_BUSY:-} " in *" $port "*) echo "LISTEN 0 511 127.0.0.1:$port 0.0.0.0:* users:((\"python3\",pid=1,fd=3))" ;; esac
+[ -f "$STUB_STATE/foreign-$port" ] && echo "LISTEN 0 511 127.0.0.1:$port 0.0.0.0:* users:((\"python3\",pid=1,fd=3))"
+exit 0
 `,
   docker: '#!/usr/bin/env bash\nexit 0\n',
   free: '#!/usr/bin/env bash\necho "               total used free shared buff/cache available"\necho "Mem: 16000 1000 14000 0 1000 8000"\n',
@@ -152,16 +168,71 @@ test('each app is served by its own preview script with the real edge as the pro
   }
 });
 
-test('a second start rebuilds through turbo and reuses the servers it started', (t) => {
+const pidOf = (fx, app) => readFileSync(join(fx.repo, '.sandbox/pids', `web-${app}`), 'utf8').trim();
+const dryCalls = (fx, calls) => calls.filter((c) => c.startsWith(`DRY${fx.ui}|`));
+
+test('a second start asks turbo for each hash and keeps a preview that serves exactly that build', (t) => {
   const fx = fixture(t);
   assert.equal(run(fx).status, 0);
-  const pids = Object.keys(APPS).map((app) => readFileSync(join(fx.repo, '.sandbox/pids', `web-${app}`), 'utf8'));
+  const pids = Object.keys(APPS).map((app) => pidOf(fx, app));
   writeFileSync(fx.log, '');
   const { status, out, calls } = run(fx);
   assert.equal(status, 0, out);
-  assert.equal(uiCalls(fx, calls, '|run build').length, 3, 'turbo decides what is cached, not an HTTP 200');
+  assert.equal(dryCalls(fx, calls).length, 6, 'turbo plans every app, and the closing status asks it again');
+  assert.equal(uiCalls(fx, calls, '|run build').length, 0, 'nothing to build: same hash, same dist/index.html');
   assert.equal(calls.filter((c) => c.includes('|run preview')).length, 0);
-  assert.deepEqual(Object.keys(APPS).map((app) => readFileSync(join(fx.repo, '.sandbox/pids', `web-${app}`), 'utf8')), pids);
+  assert.deepEqual(Object.keys(APPS).map((app) => pidOf(fx, app)), pids);
+  for (const app of Object.keys(APPS)) assert.match(out, new RegExp(`${app}: serving build h-httplo, current`));
+});
+
+test('a source change rebuilds only that app, with its preview stopped first and started again', (t) => {
+  const fx = fixture(t);
+  assert.equal(run(fx).status, 0);
+  const before = Object.fromEntries(Object.keys(APPS).map((app) => [app, pidOf(fx, app)]));
+  writeFileSync(join(fx.state, 'hash-officer-console'), 'changed-source-hash');
+  writeFileSync(fx.log, '');
+  const { status, out, calls } = run(fx);
+  assert.equal(status, 0, out);
+  const builds = uiCalls(fx, calls, '|run build');
+  assert.equal(builds.length, 1, calls.join('\n'));
+  assert.ok(builds[0].includes('--filter=@usrp/officer-console...'));
+  assert.notEqual(pidOf(fx, 'officer-console'), before['officer-console'], 'a new preview for the new build');
+  assert.equal(gone(Number(before['officer-console'])), true, 'the old preview was stopped');
+  assert.equal(pidOf(fx, 'applicant-portal'), before['applicant-portal']);
+  assert.match(readFileSync(join(fx.repo, '.sandbox/pids/web-officer-console.build'), 'utf8'), /^hash=changed-source-hash$/m);
+});
+
+test('a dist/ rewritten outside the sandbox (a developer build) is rebuilt, not served as ours', (t) => {
+  const fx = fixture(t);
+  assert.equal(run(fx).status, 0);
+  writeFileSync(join(fx.ui, 'apps/field-station/dist/index.html'), '<!doctype html><!-- someone else -->');
+  assert.match(run(fx, ['--status']).out, /field-station :4932 +⚠ dist\/ changed outside the sandbox/);
+  writeFileSync(fx.log, '');
+  const { status, calls } = run(fx);
+  assert.equal(status, 0);
+  assert.equal(uiCalls(fx, calls, '|run build').filter((c) => c.includes('field-station')).length, 1);
+  assert.match(run(fx, ['--status']).out, /field-station :4932 +✓ serving build h-httplo, current/);
+});
+
+test('--status says when the sources have moved on from what is served', (t) => {
+  const fx = fixture(t);
+  assert.equal(run(fx).status, 0);
+  writeFileSync(join(fx.state, 'hash-applicant-portal'), 'newer-source');
+  const { out } = run(fx, ['--status']);
+  assert.match(out, /applicant-portal :4930 +⚠ serving build h-httplo; the sources now build newer-so/);
+  assert.match(out, /officer-console :4931 +✓ serving build h-httplo/);
+});
+
+test('a server answering on the port is not ours just because a PID file exists', (t) => {
+  const fx = fixture(t);
+  assert.equal(run(fx).status, 0);
+  process.kill(-Number(pidOf(fx, 'officer-console')), 'SIGKILL');
+  gone(Number(pidOf(fx, 'officer-console')));
+  writeFileSync(join(fx.state, 'foreign-4931'), '');
+  assert.match(run(fx, ['--status']).out, /officer-console :4931 +⚠ answering, but not a server this sandbox started/);
+  const { status, out } = run(fx);
+  assert.equal(status, 1);
+  assert.match(out, /:4931 is busy with a server this script did not start/);
 });
 
 test('--rebuild forces the frontend build through turbo --force', (t) => {
@@ -171,6 +242,11 @@ test('--rebuild forces the frontend build through turbo --force', (t) => {
   const builds = uiCalls(fx, calls, '|run build');
   assert.equal(builds.length, 3);
   for (const call of builds) assert.match(call, / --ui=stream --no-daemon --force\|/);
+  const pids = Object.keys(APPS).map((app) => pidOf(fx, app));
+  const again = run(fx, ['--rebuild']);
+  assert.equal(again.status, 0, again.out);
+  assert.equal(uiCalls(fx, again.calls, '|run build').length, 6, '--rebuild builds even when nothing changed');
+  for (const [i, app] of Object.keys(APPS).entries()) assert.notEqual(pidOf(fx, app), pids[i], `${app} restarted`);
 });
 
 test('--down stops the previews this script started', (t) => {
@@ -223,8 +299,25 @@ test('a failed frontend install or build stops the boot and points at its log', 
   r = run(fx, [], { STUB_FAIL_BUILD: 'officer-console' });
   assert.equal(r.status, 1);
   assert.match(r.out, /error TS2322: probe/, 'the build output is shown, not suppressed');
-  assert.match(r.out, /the officer-console build failed; see .*full-build-officer-console\.out/);
+  assert.match(r.out, /the officer-console build failed; it is not served\. See .*full-build-officer-console\.out/);
+  assert.match(r.out, /not every app is served: the officer-console build failed/);
   assert.equal(r.calls.filter((c) => c.includes('|run preview --port 4931')).length, 0, 'a failed build is not served');
+  assert.equal(r.calls.filter((c) => c.includes('|run preview --port 4930')).length, 1, 'the other apps still come up');
+  assert.match(run(fx, ['--status']).out, /officer-console :4931 +✗ not serving: the last build failed/);
+});
+
+test('a failed rebuild stops the old preview instead of passing the previous bundle off as current', (t) => {
+  const fx = fixture(t);
+  assert.equal(run(fx).status, 0);
+  const old = Number(pidOf(fx, 'field-station'));
+  writeFileSync(join(fx.state, 'hash-field-station'), 'broken-source');
+  const r = run(fx, [], { STUB_FAIL_BUILD: 'field-station' });
+  assert.equal(r.status, 1);
+  assert.equal(gone(old), true, 'the preview of the previous build is stopped');
+  assert.equal(existsSync(join(fx.repo, '.sandbox/pids/web-field-station')), false);
+  assert.match(run(fx, ['--status']).out, /field-station :4932 +✗ not serving: the last build failed/);
+  assert.equal(run(fx).status, 0, 'the next good build serves again');
+  assert.match(run(fx, ['--status']).out, /field-station :4932 +✓ serving build broken-s/);
 });
 
 // ── --lan: the three apps over HTTPS on the network ─────────────────
