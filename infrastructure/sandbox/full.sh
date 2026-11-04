@@ -5,7 +5,7 @@
 #   pnpm sandbox:full --real-sms          the owner's real Twilio, guarded to TWILIO_TO (see below)
 #   pnpm sandbox:full --journeys          also play every citizen journey through the real edge
 #   pnpm sandbox:full --kafka-ui          also a Kafka UI on the sandbox broker (:4994, +256 MB)
-#   pnpm sandbox:full --rebuild           rebuild the services and the three app bundles
+#   pnpm sandbox:full --rebuild           rebuild the services, and the three apps past the turbo cache (--force)
 #   pnpm sandbox:full --status            what is running
 #   pnpm sandbox:full --down              stop what this script started (data kept)
 #
@@ -17,8 +17,10 @@
 #                               ClamAV (:4995), the edge (:4921)
 #   3. data                     the six real campaigns (policy v2 as printed) and the clearance matrix;
 #                               synthetic personas exported to .sandbox/personas
-#   4. the three apps           PRODUCTION bundles (vite build), each served on its own origin with /edge
-#                               proxied to the edge, as one deployed domain would be:
+#   4. the three apps           PRODUCTION builds made by the frontend's own build (its root `pnpm build`,
+#                               i.e. turbo, filtered to one app and its workspace dependencies), each served
+#                               by the app's own `preview` script on its own origin with /edge proxied to the
+#                               edge, as one deployed domain would be:
 #                               applicant portal :4930, officer console :4931, Field Station :4932
 #
 # The frontend checkout: USRP_UI_DIR, else ../e-recruitment-ui next to this repository (or next to the
@@ -27,12 +29,20 @@
 # from ~/.config/usrp/persona when present. Every destination except TWILIO_TO is refused before Twilio is
 # called, and --journeys is refused with --real-sms (the synthetic population has real-looking numbers).
 #
+# The frontend repository owns how its apps are built: this script never calls vite itself, never picks an
+# output directory and keeps no build stamp of its own. The bundles are the apps' ordinary dist/ folders and
+# Turbo's cache decides what is rebuilt (sources, workspace packages, lockfile and every VITE_* variable are
+# in its hash). Build time and serve time get different VITE_EDGE_URLs, on purpose:
+#   build    the app's OWN origin (http://localhost:4930 ...), baked into the bundle as the browser's API
+#            origin, so every /edge request is same-origin
+#   preview  the real edge (:4921), read by the app's vite.config.ts as the /edge proxy target
+#
 # It stops nothing it did not start: processes are recorded in .sandbox/pids and stopped only while they
 # still run from this repository or the frontend checkout.
 set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO"
-STATE="$REPO/.sandbox"; LOGS="$STATE/logs"; PIDS="$STATE/pids"; WEB="$STATE/web"
+STATE="$REPO/.sandbox"; LOGS="$STATE/logs"; PIDS="$STATE/pids"
 export SANDBOX_DB="${SANDBOX_DB:-usrp_sandbox}" SANDBOX_FORENSICS=1 REHEARSAL_COEXIST=1
 EDGE="http://localhost:4921"
 APPS=("applicant-portal:4930" "officer-console:4931" "field-station:4932")
@@ -98,8 +108,29 @@ if [ "$ACTION" = down ]; then
   exit 0
 fi
 
+# The package an app directory holds, provided the frontend still gives it the two scripts this file relies
+# on (`build` for turbo to run, `preview` to serve dist/). Prints the package name; fails with the reason.
+ui_app_package() { # app
+  node -e '
+    const [dir, app] = process.argv.slice(1);
+    let pkg;
+    try { pkg = JSON.parse(require("fs").readFileSync(dir + "/apps/" + app + "/package.json", "utf8")); }
+    catch { console.error("apps/" + app + "/package.json is missing or unreadable"); process.exit(1); }
+    const missing = ["build", "preview"].filter((s) => !pkg.scripts?.[s]);
+    if (missing.length) { console.error(pkg.name + " has no " + missing.join(" or ") + " script"); process.exit(1); }
+    process.stdout.write(pkg.name);' "$UI" "$1"
+}
+
 # ── preflight ─────────────────────────────────────────────────────
 [ -n "$UI" ] || die "the frontend checkout was not found; set USRP_UI_DIR=/path/to/e-recruitment-ui"
+[ -d "$UI" ] || die "USRP_UI_DIR=$UI does not exist; point it at the frontend checkout (e-recruitment-ui)"
+for f in package.json pnpm-lock.yaml turbo.json; do
+  [ -f "$UI/$f" ] || die "$UI has no $f: it is not the frontend workspace; set USRP_UI_DIR=/path/to/e-recruitment-ui"
+done
+declare -A UI_PKG
+for a in "${APPS[@]}"; do
+  UI_PKG[${a%%:*}]="$(ui_app_package "${a%%:*}" 2>&1)" || die "the frontend checkout $UI cannot build ${a%%:*}: ${UI_PKG[${a%%:*}]}"
+done
 command -v docker >/dev/null || die "docker is required"
 docker info >/dev/null 2>&1 || die "the docker daemon is not reachable"
 if [ "${SANDBOX_EXPOSE_LAN:-}" = 1 ] && [ "$REAL_SMS" = 1 ]; then
@@ -111,7 +142,7 @@ if [ "$REAL_SMS" = 1 ]; then
   [ -f "$SANDBOX_TWILIO_ENV_FILE" ] || die "--real-sms needs $SANDBOX_TWILIO_ENV_FILE"
   if [ -z "${SANDBOX_PRIVATE_PERSONA_DIR:-}" ] && [ -d "$HOME/.config/usrp/persona" ]; then export SANDBOX_PRIVATE_PERSONA_DIR="$HOME/.config/usrp/persona"; fi
 fi
-mkdir -p "$LOGS" "$PIDS" "$WEB"; chmod 700 "$STATE"
+mkdir -p "$LOGS" "$PIDS"; chmod 700 "$STATE"
 avail_mb="$(free -m | awk '/^Mem/{print $7}')"
 [ "$avail_mb" -ge 2500 ] || printf '\033[0;33m! only %s MB available: the full system wants ~4 GB (ClamAV alone ~1.3 GB). Close heavy apps for honest timings.\033[0m\n' "$avail_mb"
 
@@ -144,29 +175,39 @@ for scenario in rdf-2026 rnp-basic-2025 rcs-junior-2025 rcs-officer-2026-4y clea
     || printf '\033[0;33m! could not export the %s personas; see %s\033[0m\n' "$scenario" "$LOGS/full-personas-$scenario.out"
 done
 
-# ── 4. the three apps as production bundles ───────────────────────
-if [ ! -d "$UI/node_modules" ]; then say "installing frontend dependencies"; (cd "$UI" && pnpm install --frozen-lockfile --prefer-offline) > "$LOGS/full-ui-install.out" 2>&1 || die "frontend install failed"; fi
+# ── 4. the three apps: the frontend's own build, served by its own preview ──
+# Always, like the backend install above: a pull of the frontend can add a workspace package that needs linking.
+say "frontend dependencies ($UI)"
+(cd "$UI" && pnpm install --frozen-lockfile --prefer-offline) > "$LOGS/full-ui-install.out" 2>&1 \
+  || die "the frontend install (pnpm install --frozen-lockfile in $UI) failed; see $LOGS/full-ui-install.out"
 anchor="$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).QR_INVITATION_PUBLIC_KEY_B64 ?? '')" "$STATE/secrets.json" 2>/dev/null)"
-ui_rev="$(git -C "$UI" rev-parse HEAD)$(git -C "$UI" status --porcelain | sha1sum | cut -c1-8)"
+force=""; [ "$REBUILD" = 1 ] && force="--force"
+[ -d "$STATE/web" ] && printf '\033[0;33m! %s holds bundles from the previous launcher and is no longer used; it can be deleted\033[0m\n' "$STATE/web"
 for a in "${APPS[@]}"; do
-  app="${a%%:*}"; port="${a##*:}"; out="$WEB/$app"
-  stamp="$ui_rev:$port:$(printf '%s' "$anchor" | sha1sum | cut -c1-8)"
-  if [ "$REBUILD" = 1 ] || [ "$(cat "$out/.usrp-build" 2>/dev/null)" != "$stamp" ]; then
-    say "building $app (production bundle, sandbox banner on)"
-    ( cd "$UI/apps/$app" && VITE_EDGE_URL="http://localhost:$port" VITE_USRP_SANDBOX=1 VITE_FIELD_STATION_URL="http://localhost:4932" \
-        VITE_SLOT_TRUST_ANCHOR_B64="$anchor" pnpm exec vite build --outDir "$out" --emptyOutDir ) > "$LOGS/full-build-$app.out" 2>&1 \
-      || die "the $app build failed; see $LOGS/full-build-$app.out"
-    echo "$stamp" > "$out/.usrp-build"
-  fi
+  app="${a%%:*}"; port="${a##*:}"; pkg="${UI_PKG[$app]}"
+  # One turbo run per app, because each app is built for its own origin: a single `pnpm build` would give
+  # all three the same VITE_EDGE_URL. `--filter=$pkg...` is the app and every workspace package it depends on.
+  say "building $app: pnpm build --filter=$pkg... ${force:+$force }(the frontend's own build, sandbox banner on)"
+  ( cd "$UI" && VITE_EDGE_URL="http://localhost:$port" VITE_USRP_SANDBOX=1 VITE_FIELD_STATION_URL="http://localhost:4932" \
+      VITE_SLOT_TRUST_ANCHOR_B64="$anchor" pnpm run build --filter="$pkg..." --ui=stream --no-daemon ${force:+"$force"} ) \
+      > "$LOGS/full-build-$app.out" 2>&1 \
+    || { tail -15 "$LOGS/full-build-$app.out" >&2; die "the $app build failed; see $LOGS/full-build-$app.out"; }
+  [ -f "$UI/apps/$app/dist/index.html" ] || die "the $app build succeeded but left no apps/$app/dist/index.html; see $LOGS/full-build-$app.out"
+  printf '  %s\n' "$(grep -E '^ *Cached:' "$LOGS/full-build-$app.out" | tail -1 | sed 's/^ *//')"
+  # A preview this script started keeps serving: vite preview reads dist/ on every request, so it serves the
+  # build that just finished. Anything else on the port is not ours to replace.
   if [ "$(code "http://localhost:$port/")" = 200 ] && [ -f "$PIDS/web-$app" ]; then continue; fi
   busy "$port" && die ":$port is busy with a server this script did not start; stop it first"
-  # exec setsid: the recorded PID IS the server and its session leader, and nothing keeps this script's stdout open.
-  ( cd "$UI/apps/$app" || exit 1; VITE_EDGE_URL="$EDGE" exec setsid pnpm exec vite preview --outDir "$out" --port "$port" --strictPort ) \
+  # exec setsid: the recorded PID IS the server's session leader (pnpm, then the app's `vite preview`), and
+  # nothing keeps this script's stdout open.
+  ( cd "$UI/apps/$app" || exit 1; VITE_EDGE_URL="$EDGE" exec setsid pnpm run preview --port "$port" --strictPort ) \
     > "$LOGS/full-web-$app.out" 2>&1 < /dev/null &
   echo $! > "$PIDS/web-$app"
 done
 for a in "${APPS[@]}"; do
   for _ in $(seq 1 30); do [ "$(code "http://localhost:${a##*:}/")" = 200 ] && break; sleep 1; done
+  [ "$(code "http://localhost:${a##*:}/")" = 200 ] \
+    || printf '\033[0;33m! %s did not answer on :%s; see %s\033[0m\n' "${a%%:*}" "${a##*:}" "$LOGS/full-web-${a%%:*}.out"
 done
 
 # ── 5. optional ───────────────────────────────────────────────────
