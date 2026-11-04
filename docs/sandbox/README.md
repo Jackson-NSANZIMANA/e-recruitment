@@ -47,7 +47,7 @@ The apps are then at `https://<this-machine's-LAN-IP>:4930`, `:4931` and `:4932`
 
 | Device | Install |
 |---|---|
-| Android | Settings → Security → Encryption & credentials → Install a certificate → CA certificate |
+| Android | the link saves `usrp-sandbox-ca.crt` to Downloads; then Settings → search "Install a certificate" → CA certificate → pick it. Use Chrome (some browsers ignore user CAs) |
 | iPhone / iPad | open the file, Settings → General → VPN & Device Management → install the profile, then Settings → General → About → Certificate Trust Settings → turn it on |
 | Windows | double-click → Install Certificate → Local Machine → Trusted Root Certification Authorities |
 | macOS | Keychain Access → System → import, then set it to Always Trust |
