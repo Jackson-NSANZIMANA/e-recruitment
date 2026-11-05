@@ -64,7 +64,30 @@ The server certificate in `.sandbox/tls` is reissued automatically when the mach
 4. Open `https://<ip>:4930`: the citizen portal; headings in Atlassian Sans, not the device's system font.
 5. A failure that names the certificate (rather than "cannot connect") means the CA is not trusted on that device; "cannot connect" means firewall, a different network, or Wi-Fi client isolation.
 
-**If a device cannot connect**, allow the three ports in this machine's firewall (Ubuntu: `sudo ufw allow 4930:4932/tcp`) and check that both devices are on the same network. Guest and "client isolation" Wi-Fi blocks device-to-device traffic. `--lan` refuses a public address, and refuses `--real-sms` (ADR-053): a network-reachable sandbox with live SMS behind it. Real SMS runs on a local `pnpm sandbox:full --real-sms`.
+**If a device cannot connect**, allow the three ports in this machine's firewall (Ubuntu: `sudo ufw allow 4930:4932/tcp`) and check that both devices are on the same network. Guest and "client isolation" Wi-Fi blocks device-to-device traffic. `--lan` refuses a public address, and refuses `--real-sms` (ADR-053) unless you acknowledge the pair — see below. Real SMS otherwise runs on a local `pnpm sandbox:full --real-sms`.
+
+### Real SMS on the network (`--lan-real-sms`)
+
+To go through the citizen journey from a phone on the venue network *and* receive the OTP on that phone, acknowledge the pair ADR-053 §3.3 refuses by default:
+
+```bash
+SANDBOX_LAN_ADDRESS=192.168.1.20 pnpm sandbox:full --lan-real-sms
+```
+
+It implies `--lan` and `--real-sms`, and changes two things:
+
+- **only the applicant portal leaves loopback** (`:4930`). The officer console and field station stay on `http://localhost` with their staff credentials, so create campaigns on the laptop, not from the network;
+- a yellow banner states what is exposed and that Twilio is live.
+
+Safe because the destination allowlist is built from `TWILIO_TO` and applied *before* the provider is called (`AllowlistSmsChannel`), so nobody else on that network can be texted by this sandbox — they would never receive an OTP. They can still spend `SMS_DAILY_CAP` and ring your number, so do not leave it unattended. The raw-edge form (`SANDBOX_EXPOSE_LAN=1` with `SANDBOX_SMS=twilio`) stays barred in the launcher with no flag that lifts it.
+
+Pair it with your own identity by pointing the overlay at a directory **outside every git work tree**:
+
+```bash
+SANDBOX_PRIVATE_PERSONA_DIR=~/path/to/persona SANDBOX_LAN_ADDRESS=192.168.1.20 pnpm sandbox:full --lan-real-sms
+```
+
+`pnpm sandbox:full --status` now prints a `private persona` line — presence only, never values — so a boot that silently fell back to the synthetic population is visible.
 
 ## The document door (MinIO, ClamAV, document-forensics)
 
