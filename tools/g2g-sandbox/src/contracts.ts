@@ -8,7 +8,10 @@
 //
 // The validator implements the JSON Schema subset those files use: type
 // (single or list), const, enum, pattern, minLength, minimum, maximum,
-// integer, properties, required, additionalProperties:false, items.
+// integer, properties, required, additionalProperties:false, items, oneOf.
+// `oneOf` exists because a registry may answer one endpoint in more than one
+// shape — Irembo withholds the holder's details for a certificate that is not
+// in force — and exactly one branch must match, so neither shape is a drift.
 // Its messages name PATHS only, never values.
 // ══════════════════════════════════════════════════════════════════
 
@@ -18,6 +21,8 @@ import { fileURLToPath } from 'node:url';
 
 export interface JsonSchema {
   readonly type?: string | readonly string[];
+  /** Exactly one branch must validate — how a registry's two answer shapes are captured. */
+  readonly oneOf?: readonly JsonSchema[];
   readonly const?: unknown;
   readonly enum?: readonly unknown[];
   readonly pattern?: string;
@@ -66,6 +71,10 @@ export function validate(schema: JsonSchema, value: unknown, path = '$'): string
   if (schema.type !== undefined) {
     const types = typeof schema.type === 'string' ? [schema.type] : schema.type;
     if (!types.some((t) => typeMatches(value, t))) return [`${path}: expected ${types.join('|')}, got ${typeOf(value)}`];
+  }
+  if (schema.oneOf !== undefined) {
+    const matching = schema.oneOf.filter((branch) => validate(branch, value, path).length === 0).length;
+    if (matching !== 1) errors.push(`${path}: matched ${String(matching)} of ${String(schema.oneOf.length)} captured shapes, expected exactly 1`);
   }
   if (schema.const !== undefined && value !== schema.const) errors.push(`${path}: not the required constant`);
   if (schema.enum !== undefined && !schema.enum.includes(value)) errors.push(`${path}: not an allowed value`);

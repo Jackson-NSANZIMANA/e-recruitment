@@ -306,3 +306,45 @@ test('dead-letter observer: only a registry outage for OUR group is escalated; e
   assert.equal(h.records.length, 1);
   assert.equal(h.records[0]?.outcome, 'REVIEW');
 });
+
+// ── ADR-048 §2.3 amendment: a certificate that is NOT in force ────────────
+// Irembo answers STATUS + APPLICATION_CODE alone and withholds the holder's
+// details. A clearance is valid for three months, so this is the common case.
+
+test('mapping: a not-in-force answer is a real outcome, not a truncated body', () => {
+  const env = (data: unknown) => ({ status: true, data, responseCode: '3104', message: 'Dosiye yabonetse', responseEncrypted: false, traceId: 't' });
+
+  const expired = mapIremboCertificate(env({ STATUS: false, APPLICATION_CODE: NO_RECORD }));
+  assert.equal(expired.kind, 'FOUND', 'an expired certificate used to be a FAULT, which retried for ever');
+  assert.equal(expired.kind === 'FOUND' && expired.certificate.authentic, false);
+  // The holder fields must not merely be blank — they must not exist.
+  assert.equal(expired.kind === 'FOUND' && 'holderName' in expired.certificate, false);
+  assert.equal(expired.kind === 'FOUND' && 'issuedOn' in expired.certificate, false);
+
+  // A body truncated while CLAIMING to be in force is still a fault.
+  assert.equal(mapIremboCertificate(env({ STATUS: true, APPLICATION_CODE: NO_RECORD })).kind, 'FAULT');
+});
+
+test('decision: a not-in-force certificate is correctable and names nothing about it', () => {
+  const decision = decideClearance(
+    { status: 'FOUND', certificate: { authentic: false, type: NO_RECORD }, requestId: 'r' },
+    identityOf('P-CLEARANCE-VALID'),
+    POLICY,
+    TODAY,
+  );
+  assert.equal(decision.kind, 'CORRECTION_NEEDED');
+  assert.equal(decision.kind === 'CORRECTION_NEEDED' && decision.code, 'CERTIFICATE_NOT_VALID');
+  // Disclosure: a prober learns only valid-versus-not, which Irembo's own public
+  // endpoint already tells any caller holding the number.
+  assert.equal(decision.certificateType, null, 'the type must not leak for a certificate that was never bound');
+  assert.equal(decision.issuedOn, null);
+  assert.equal(decision.kind === 'CORRECTION_NEEDED' && decision.binding, null);
+});
+
+test('decision: an in-force certificate still goes through the binding first', () => {
+  const inForce = { authentic: true as const, type: NO_RECORD, issuedOn: TODAY, holderName: 'SOMEONE Else', holderDob: '1990-01-01', reference: 'R1' };
+  const decision = decideClearance({ status: 'FOUND', certificate: inForce, requestId: 'r' }, identityOf('P-CLEARANCE-VALID'), POLICY, TODAY);
+  assert.equal(decision.kind, 'CORRECTION_NEEDED');
+  assert.equal(decision.kind === 'CORRECTION_NEEDED' && decision.code, 'CERTIFICATE_NOT_BOUND',
+    'someone else’s in-force certificate must still stop at the binding, not reveal its type or age');
+});

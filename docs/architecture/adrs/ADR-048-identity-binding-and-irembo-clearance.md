@@ -90,6 +90,31 @@ Until policy v2 (S12c, ADR-049) the allowlist, no-record set and window are proc
 
 **The ordered checks are one pure function** (`decideClearance`). Security review refinement of the order in §2.3: found, then `bindCredential` on name and date of birth (no NID hint is printed on a certificate, so that field is `NOT_COMPARED`), then authentic (in force), allowed type and validity window, so a citizen who is not the holder learns only "not found" or "not yours" and never the type, validity or age of someone else's certificate; then content (a no-record type is conclusive; any other allowed type is `REVIEW`). A partial name adds `IDENTITY_NAME_PARTIAL`.
 
+**Amendment, 2026-11-05 (owner decision): "not in force" is checked BEFORE the binding.**
+Irembo answers this endpoint in two shapes, which the original capture did not show. A
+certificate in force carries all seven fields; one that is **not** in force — expired or
+withdrawn — carries `STATUS` and `APPLICATION_CODE` alone, the holder's name, date of
+birth, issue date and reference withheld. A criminal clearance certificate is valid for
+three months, so the reduced shape is the *common* case, not an edge case.
+
+The order above could not survive it: `bindCredential` compares a name and a date of
+birth that are simply not in the payload. The mapper therefore rejected the body as
+truncated, which raises `ClearanceRegistryUnavailableError` — defined as an
+infrastructure fault, "NEVER a statement about the applicant". The event was redelivered
+for ever and the citizen was never told to request a new certificate.
+
+`decideClearance` now answers `CERTIFICATE_NOT_VALID` first when `authentic` is false,
+with `certificateType: null`, `issuedOn: null` and `binding: null`. The disclosure
+question §2.3 settled is respected: the answer names no holder, no date and no type, so
+a prober learns only valid-versus-not — exactly what Irembo's own public endpoint tells
+any caller who has the number, with no session and no authorisation. Everything the
+binding protected (type, validity window, age, whose it is) stays behind the binding for
+certificates that are in force.
+
+The captured contract models both shapes as `oneOf`, and the simulator emits the reduced
+one, so the common case is exercised in the sandbox instead of only in production. A
+body that is truncated *while claiming to be in force* is still a fault.
+
 **Outcomes and what each emits.**
 
 | Outcome | Examples | Criminal gate | Events | Citizen sees |

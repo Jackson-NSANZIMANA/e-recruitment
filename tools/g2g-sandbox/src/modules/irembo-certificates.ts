@@ -76,6 +76,13 @@ export const iremboCertificatesModule: SimulatorModule = {
     const hit = world.population.findByCertificate(number);
     if (hit === null || subject === null) return { status: 200, json: envelope(CERT_CODES.NOT_FOUND, false, null) };
     const c = hit.certificate;
+    // A certificate NOT in force answers with STATUS and APPLICATION_CODE alone: Irembo
+    // withholds the holder's details, so nothing identifies the subject. Observed on a
+    // real expired clearance; the simulator must reproduce it or the common case —
+    // these expire after three months — is never exercised here.
+    if (!c.status) {
+      return { status: 200, json: envelope(CERT_CODES.FOUND, true, { STATUS: false, APPLICATION_CODE: c.applicationCode }) };
+    }
     return {
       status: 200,
       json: envelope(CERT_CODES.FOUND, true, {
