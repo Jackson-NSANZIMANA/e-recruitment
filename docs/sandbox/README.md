@@ -162,7 +162,19 @@ Each scenario provisions its station staff through the officer lifecycle (handle
 
 Catalogue ids look like `A-RDF-PILOT-S3-ELIGIBLE`, `A-RDF-PILOT-OVER-AGE-1D`, `A-RDF-PILOT-NESA-MISMATCH`, `P-UR-SCI-69`, `P-CLEARANCE-VALID`. Each scenario file lists its personas with what each rehearses and the expected outcome. Ages are relative to today.
 
-The owner's own record may join **locally only** through `SANDBOX_PRIVATE_PERSONA_DIR`; it is never committed and its values are never printed (pass or fail only).
+Real people's records may join **locally only** through `SANDBOX_PRIVATE_PERSONA_DIR`; they are never committed and their values are never printed (pass or fail only).
+
+The directory may hold **several** subjects. Each person needs one Irembo identity capture (a JSON with `data.identityInfo`), optionally one SDMS results capture (a JSON with `studentIndexNumber` and `rawMark`), and an entry in `consent.json`:
+
+```json
+{
+  "subjects": [
+    { "nid": "16 digits", "basis": "why this person's data may be processed", "recordedOn": "YYYY-MM-DD" }
+  ]
+}
+```
+
+Results are paired to their owner by the `studentNationalIdHint` SDMS returns, so filenames do not matter. **A capture whose NID is not in `consent.json` refuses the boot** — the simulator never serves a person's record because their file happened to be in the folder (Law N° 058/2021). Refusals report counts only, never a NID or a name.
 
 ## Behaviour switches
 

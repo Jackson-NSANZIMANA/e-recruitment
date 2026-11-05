@@ -85,7 +85,7 @@ export function createSandboxServer(options: SandboxServerOptions): Promise<Http
   // process inside to listen on 0.0.0.0; that is opt-in via SANDBOX_BIND_HOST and
   // the compose publish rule keeps the HOST side loopback.
   const requested = options.host ?? process.env['SANDBOX_BIND_HOST'] ?? '127.0.0.1';
-  const bindHost = world.overlay !== null || options.environment === 'sandbox' ? '127.0.0.1' : requested;
+  const bindHost = world.overlay !== null || world.overlays.size > 0 || options.environment === 'sandbox' ? '127.0.0.1' : requested;
 
   async function dispatch(ctx: RequestContext): Promise<HttpResult | null> {
     const module = modules.find((m) => m.matches(ctx.method.toUpperCase(), ctx.path));

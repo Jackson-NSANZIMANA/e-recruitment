@@ -126,7 +126,8 @@ export const nidaIremboModule: SimulatorModule = {
   },
   subject(req, world): Subject | null {
     const nid = req.header(SUBJECT_HEADER)?.trim() ?? '';
-    if (world.overlay !== null && world.overlay.nid === nid) return { kind: 'private', persona: world.overlay };
+    const subject = world.overlays.get(nid);
+    if (subject !== undefined) return { kind: 'private', persona: subject };
     const citizen = world.population.findByNid(nid);
     return citizen === null ? null : { kind: 'synthetic', citizen };
   },
