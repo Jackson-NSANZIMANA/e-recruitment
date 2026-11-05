@@ -203,8 +203,18 @@ check(
   /ALLOW_LAN_SMS=0/.test(full) && /--lan-real-sms\) LAN=1; REAL_SMS=1; ALLOW_LAN_SMS=1/.test(full),
 );
 check(
-  'live SMS on the LAN narrows the surface to the applicant portal alone',
+  'live SMS on the LAN narrows the surface to the applicant portal by default',
   /LAN_APPS=\("applicant-portal:4930"\)/.test(full) && /maps\+=\("\$LAN_IP:\$\{a##\*:\}=\$\{a##\*:\}"\)/.test(full),
+);
+// Widening that default is allowed (a two-machine rehearsal needs it), but only by naming each app:
+// an unknown name is refused rather than silently dropped, and the wider surface announces itself.
+check(
+  'SANDBOX_LAN_APPS widens the surface only by naming apps, and refuses an unknown one',
+  /SANDBOX_LAN_APPS: unknown app/.test(full) && /SANDBOX_LAN_APPS is empty/.test(full),
+);
+check(
+  'a surface wider than one app warns that staff credentials are on the network',
+  /STAFF CREDENTIALS ARE ON THIS NETWORK/.test(full) && /\$\{#LAN_APPS\[@\]\}" -gt 1/.test(full),
 );
 check(
   'the narrowed exception never reaches the launcher (the edge stays off the LAN)',

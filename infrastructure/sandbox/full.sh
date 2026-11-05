@@ -9,6 +9,9 @@
 #   pnpm sandbox:full --lan               the three apps also over HTTPS on this machine's LAN address (below)
 #   pnpm sandbox:full --lan-real-sms      --lan AND --real-sms together: the APPLICANT PORTAL ONLY on the
 #                                         network, live Twilio behind it, guarded to TWILIO_TO (ADR-053 §3.5)
+#   SANDBOX_LAN_APPS=...                  which apps leave loopback under --lan: a comma-separated list of
+#                                         applicant-portal, officer-console, field-station, or 'all'.
+#                                         Defaults to all three; to the applicant portal alone with live SMS.
 #   pnpm sandbox:full --no-staging        boot without staging the campaigns, rehearsal staff and personas
 #                                         (an empty database stays empty; see pnpm sandbox:clean)
 #   pnpm sandbox:full --status            what is running
@@ -264,9 +267,25 @@ docker info >/dev/null 2>&1 || die "the docker daemon is not reachable"
 [ "$STAGE" = 1 ] || [ "$JOURNEYS" = 0 ] || die "--journeys plays the staged rehearsal scenarios; it cannot run with --no-staging"
 export SANDBOX_STAGE="$STAGE"
 if [ "$LAN" = 1 ] && [ "$REAL_SMS" = 1 ] && [ "$ALLOW_LAN_SMS" != 1 ]; then
-  die "SANDBOX_EXPOSE_LAN=1 (--lan) cannot be combined with --real-sms (ADR-053): a network-reachable sandbox with live SMS behind it. The owner-acknowledged exception is --lan-real-sms, which serves the applicant portal ALONE on the network."
+  die "SANDBOX_EXPOSE_LAN=1 (--lan) cannot be combined with --real-sms (ADR-053): a network-reachable sandbox with live SMS behind it. The owner-acknowledged exception is --lan-real-sms, which serves the applicant portal alone on the network (widen it deliberately with SANDBOX_LAN_APPS)."
 fi
-if [ "$LAN" = 1 ] && [ "$REAL_SMS" = 1 ]; then LAN_APPS=("applicant-portal:4930"); fi
+# Which apps leave loopback. Default: all three under --lan; the applicant portal ALONE when live SMS is
+# behind it (ADR-053 §3.5). SANDBOX_LAN_APPS overrides either default with a comma-separated list of app
+# names, or "all". Widening it under live SMS puts staff credentials on the network, so it says so loudly.
+if [ -n "${SANDBOX_LAN_APPS:-}" ]; then
+  wanted="${SANDBOX_LAN_APPS//,/ }"
+  [ "$wanted" = all ] && wanted="$(printf '%s ' "${APPS[@]%%:*}")"
+  LAN_APPS=()
+  for want in $wanted; do
+    match=""
+    for a in "${APPS[@]}"; do [ "${a%%:*}" = "$want" ] && match="$a"; done
+    [ -n "$match" ] || die "SANDBOX_LAN_APPS: unknown app '$want' (choose from ${APPS[*]%%:*}, or 'all')"
+    LAN_APPS+=("$match")
+  done
+  [ "${#LAN_APPS[@]}" -gt 0 ] || die "SANDBOX_LAN_APPS is empty: name at least one app, or unset it for the default"
+elif [ "$LAN" = 1 ] && [ "$REAL_SMS" = 1 ]; then
+  LAN_APPS=("applicant-portal:4930")
+fi
 # Here the APPS are what the network reaches, over TLS, and the edge stays on loopback behind their /edge
 # proxies. The launcher's own SANDBOX_EXPOSE_LAN binds the edge (plain http) to the LAN address instead,
 # where neither those proxies nor any readiness check (127.0.0.1) can reach it, so it is not passed on.
@@ -424,14 +443,21 @@ status
 if [ "$LAN" = 1 ] && [ "$REAL_SMS" = 1 ]; then
   printf '\033[0;33m
   ⚠ LIVE SMS BEHIND A NETWORK-REACHABLE SANDBOX (ADR-053 §3.5, acknowledged by --lan-real-sms)
-    On the network   the applicant portal ALONE (https://%s:4930); officer console and field station
-                     stay on loopback, and the edge, services and data never leave it.
+    On the network   %s
+                     The edge, the services and the data never leave loopback.
     Twilio           every destination except TWILIO_TO is refused before the provider is called, so
                      nobody else on this network can be texted by this sandbox. They CAN still spend
                      your daily SMS cap and ring your number: do not leave this up unattended.
     When you are done  pnpm sandbox:full --down
 \033[0m
-' "$LAN_IP"
+' "$(printf '%s ' "${LAN_APPS[@]%%:*}" | sed 's/ $//') on https://$LAN_IP"
+  # Widening past the portal puts officer and station credentials on the network: say so separately,
+  # so it can never be mistaken for the vetted default.
+  if [ "${#LAN_APPS[@]}" -gt 1 ]; then
+    printf '\033[0;31m    ⚠ STAFF CREDENTIALS ARE ON THIS NETWORK: SANDBOX_LAN_APPS widened the surface past the
+      applicant portal. Anyone on this Wi-Fi can reach the officer console and/or field station
+      sign-in. Use it on a network you control, never at a venue.\033[0m\n'
+  fi
 fi
 cat <<EOF
 

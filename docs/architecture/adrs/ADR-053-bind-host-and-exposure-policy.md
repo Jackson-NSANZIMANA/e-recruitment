@@ -87,12 +87,17 @@ the pair, under three conditions:
 
 1. **Only the app proxy.** The exception applies to `--lan`. `SANDBOX_EXPOSE_LAN=1` with `SANDBOX_SMS=twilio`
    stays refused in the launcher (`sandbox.ts`), unconditionally and with no flag that lifts it.
-2. **The applicant portal alone leaves loopback.** `LAN_APPS` narrows to `applicant-portal:4930`; the officer
-   console and field station keep staff credentials on loopback. Only the citizen journey needs a phone.
+2. **The applicant portal alone leaves loopback, by default.** `LAN_APPS` narrows to `applicant-portal:4930`;
+   the officer console and field station keep staff credentials on loopback. Only the citizen journey needs a
+   phone. A two-machine rehearsal (console on a second laptop, portal on a handset) is a real need, so
+   `SANDBOX_LAN_APPS` may widen the surface — explicitly, by naming each app, never by a bare "off" switch —
+   and a boot that does so prints a second, red warning that staff sign-ins are on the network. The default
+   is what an unthinking `--lan-real-sms` gets; widening is a sentence the owner has to write.
 3. **It announces itself.** A yellow banner states what is exposed, that Twilio is live and allowlisted, and
    that a bystander can still spend the daily cap and ring the owner's number.
 
-**Residual risk, accepted knowingly:** anyone on that network can reach the portal, consume `SMS_DAILY_CAP`
+**Residual risk, accepted knowingly:** anyone on that network can reach the exposed apps (the officer console
+and field station too, where `SANDBOX_LAN_APPS` names them), consume `SMS_DAILY_CAP`
 and trigger texts to the owner's own number within `PerNumberLimiter`'s window; and the owner's private
 persona (ADR-047 §3.5) is in a population reachable from it. The mitigation is operational — do not leave
 this boot unattended — because the alternative is the 2 a.m. undocumented flag §1 warns about.

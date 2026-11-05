@@ -76,7 +76,7 @@ SANDBOX_LAN_ADDRESS=192.168.1.20 pnpm sandbox:full --lan-real-sms
 
 It implies `--lan` and `--real-sms`, and changes two things:
 
-- **only the applicant portal leaves loopback** (`:4930`). The officer console and field station stay on `http://localhost` with their staff credentials, so create campaigns on the laptop, not from the network;
+- **only the applicant portal leaves loopback** (`:4930`) by default. The officer console and field station stay on `http://localhost` with their staff credentials, so create campaigns on the laptop, not from the network;
 - a yellow banner states what is exposed and that Twilio is live.
 
 Safe because the destination allowlist is built from `TWILIO_TO` and applied *before* the provider is called (`AllowlistSmsChannel`), so nobody else on that network can be texted by this sandbox — they would never receive an OTP. They can still spend `SMS_DAILY_CAP` and ring your number, so do not leave it unattended. The raw-edge form (`SANDBOX_EXPOSE_LAN=1` with `SANDBOX_SMS=twilio`) stays barred in the launcher with no flag that lifts it.
@@ -85,6 +85,25 @@ Pair it with your own identity by pointing the overlay at a directory **outside 
 
 ```bash
 SANDBOX_PRIVATE_PERSONA_DIR=~/path/to/persona SANDBOX_LAN_ADDRESS=192.168.1.20 pnpm sandbox:full --lan-real-sms
+```
+
+#### A second machine on the console (`SANDBOX_LAN_APPS`)
+
+For a two-machine rehearsal — the officer console on a second laptop, the portal on a handset — name the apps that should leave loopback:
+
+```bash
+SANDBOX_LAN_APPS=applicant-portal,officer-console \
+SANDBOX_LAN_ADDRESS=192.168.1.20 pnpm sandbox:full --lan-real-sms
+```
+
+Accepts `applicant-portal`, `officer-console`, `field-station` or `all`; an unknown name is refused rather than ignored. It overrides both defaults (all three under plain `--lan`, the portal alone under live SMS).
+
+This puts **officer sign-in on the network**, so a boot wider than one app prints a red warning saying exactly that. Use it on a network you control. At a venue, keep the default and drive the console from the host machine.
+
+Open the extra ports on the host, e.g.:
+
+```bash
+sudo ufw allow 4930,4931/tcp
 ```
 
 `pnpm sandbox:full --status` now prints a `private persona` line — presence only, never values — so a boot that silently fell back to the synthetic population is visible.
