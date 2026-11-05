@@ -4,29 +4,39 @@
 // ══════════════════════════════════════════════════════════════════
 
 /**
- * What the registry says about a certificate. The holder fields are TRANSIENT:
- * compared in the binding rule, then discarded; never stored, logged or emitted.
- *
- * Irembo answers in TWO shapes. In force: every field. NOT in force (expired or
- * withdrawn): only STATUS and APPLICATION_CODE — the registry withholds the
- * holder's name, date of birth, issue date and reference, so nothing identifies
- * the subject. The holder fields are therefore optional, and present exactly
- * when `authentic` is true.
+ * A certificate IN FORCE: Irembo returns every field.
+ * The holder fields are TRANSIENT: compared in the binding rule, then discarded;
+ * never stored, logged or emitted.
  */
-export interface ClearanceCertificate {
-  /** The certificate is in force (Irembo STATUS true). */
-  readonly authentic: boolean;
-  /** The certificate type (Irembo APPLICATION_CODE). Always returned. */
+export interface ClearanceCertificateInForce {
+  readonly authentic: true;
+  /** The certificate type (Irembo APPLICATION_CODE). */
   readonly type: string;
-  /** ISO YYYY-MM-DD. Absent when the certificate is not in force. */
-  readonly issuedOn?: string;
-  /** Absent when the certificate is not in force. */
-  readonly holderName?: string;
-  /** ISO YYYY-MM-DD. Absent when the certificate is not in force. */
-  readonly holderDob?: string;
-  /** The registry's own reference (REFERENCE_NUMBER). Absent when not in force. */
-  readonly reference?: string;
+  /** ISO YYYY-MM-DD. */
+  readonly issuedOn: string;
+  readonly holderName: string;
+  /** ISO YYYY-MM-DD. */
+  readonly holderDob: string;
+  /** The registry's own reference (REFERENCE_NUMBER). */
+  readonly reference: string;
 }
+
+/**
+ * A certificate that is NOT in force (expired or withdrawn). Irembo returns
+ * STATUS and APPLICATION_CODE alone and withholds the holder's name, date of
+ * birth, issue date and reference, so nothing here identifies the subject.
+ * A clearance certificate is valid for three months, so this is the COMMON case.
+ */
+export interface ClearanceCertificateNotInForce {
+  readonly authentic: false;
+  readonly type: string;
+}
+
+/**
+ * The two shapes the registry answers in, discriminated by `authentic`, so a
+ * holder field can never be read off a certificate that does not carry one.
+ */
+export type ClearanceCertificate = ClearanceCertificateInForce | ClearanceCertificateNotInForce;
 
 export type ClearanceLookup =
   | { readonly status: 'FOUND'; readonly certificate: ClearanceCertificate; readonly requestId: string }
