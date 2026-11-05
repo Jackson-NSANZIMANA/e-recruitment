@@ -82,21 +82,32 @@ export function decideClearance(
     return { kind: 'CORRECTION_NEEDED', code: 'CERTIFICATE_NOT_FOUND', certificateType: null, issuedOn: null, binding: null };
   }
   const c = lookup.certificate;
-  const known = { certificateType: c.type, issuedOn: c.issuedOn };
 
-  // Binding FIRST among the checks that can reach the citizen's screen: whoever is not
-  // the holder learns only "not found" or "not yours", never the type, validity or
+  // NOT IN FORCE comes first, because Irembo returns NOTHING to bind to in that case —
+  // no name, no date of birth, no issue date (ADR-048 §2.3 amendment). The answer names
+  // no holder and no date, so it discloses nothing the registry's own public endpoint
+  // does not already tell any caller, while the citizen is finally told the truth:
+  // request a new certificate. Treating this as a malformed body retried for ever.
+  if (!c.authentic) {
+    return { kind: 'CORRECTION_NEEDED', code: 'CERTIFICATE_NOT_VALID', certificateType: null, issuedOn: null, binding: null };
+  }
+
+  // In force, so every field is present; the type says so.
+  const issuedOn = c.issuedOn ?? null;
+  const known = { certificateType: c.type, issuedOn };
+
+  // Binding FIRST among the remaining checks: whoever is not the holder learns only
+  // "not found", "not yours" or "not in force", never the type, validity window or
   // age of someone else's certificate (the security review, S12b finding 1).
-  // A certificate always prints a date of birth: a binding that did not compare it can never be BOUND on name alone.
-  const binding = bindCredential(identity, { holderName: c.holderName, dateOfBirth: c.holderDob }, { requiredFields: ['dateOfBirth'] });
+  // A certificate in force always prints a date of birth: a binding that did not compare it can never be BOUND on name alone.
+  const binding = bindCredential(identity, { holderName: c.holderName ?? '', dateOfBirth: c.holderDob ?? '' }, { requiredFields: ['dateOfBirth'] });
   if (binding.outcome === 'NOT_BOUND') {
     return { kind: 'CORRECTION_NEEDED', code: 'CERTIFICATE_NOT_BOUND', ...known, binding: binding.fields };
   }
 
-  if (!c.authentic) return { kind: 'CORRECTION_NEEDED', code: 'CERTIFICATE_NOT_VALID', ...known, binding: binding.fields };
   if (!policy.allowedTypes.has(c.type)) return { kind: 'CORRECTION_NEEDED', code: 'CERTIFICATE_WRONG_TYPE', ...known, binding: binding.fields };
 
-  const age = daysBetween(c.issuedOn, referenceDate);
+  const age = issuedOn === null ? null : daysBetween(issuedOn, referenceDate);
   // A future-dated or unreadable issue date cannot be inside a window that ends today.
   if (age === null || age < 0 || age > policy.validityDays) {
     return { kind: 'CORRECTION_NEEDED', code: 'CERTIFICATE_EXPIRED', ...known, binding: binding.fields };

@@ -55,6 +55,11 @@ export function mapIremboCertificate(body: unknown): CertificateMapping {
   const dob = isoFromDdMmYyyy(data['DATE_OF_BIRTH']);
   if (typeof data['STATUS'] !== 'boolean') return { kind: 'FAULT', reason: 'STATUS is not a boolean' };
   if (typeof type !== 'string' || !/^[A-Z0-9_]+$/.test(type)) return { kind: 'FAULT', reason: 'APPLICATION_CODE is unusable' };
+  // A certificate that is NOT in force comes back as STATUS + APPLICATION_CODE alone: the
+  // registry withholds the holder's details. That is a complete answer about a real
+  // certificate, NOT a truncated body — treating it as a fault retried an expired
+  // certificate for ever and never told the citizen to request a new one.
+  if (data['STATUS'] === false) return { kind: 'FOUND', certificate: { authentic: false, type } };
   if (typeof name !== 'string' || name.trim() === '') return { kind: 'FAULT', reason: 'NAME is unusable' };
   if (typeof reference !== 'string') return { kind: 'FAULT', reason: 'REFERENCE_NUMBER is unusable' };
   if (issuedOn === null) return { kind: 'FAULT', reason: 'ISSUED_ON is not a date' };

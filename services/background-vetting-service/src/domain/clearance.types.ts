@@ -6,19 +6,26 @@
 /**
  * What the registry says about a certificate. The holder fields are TRANSIENT:
  * compared in the binding rule, then discarded; never stored, logged or emitted.
+ *
+ * Irembo answers in TWO shapes. In force: every field. NOT in force (expired or
+ * withdrawn): only STATUS and APPLICATION_CODE — the registry withholds the
+ * holder's name, date of birth, issue date and reference, so nothing identifies
+ * the subject. The holder fields are therefore optional, and present exactly
+ * when `authentic` is true.
  */
 export interface ClearanceCertificate {
   /** The certificate is in force (Irembo STATUS true). */
   readonly authentic: boolean;
-  /** The certificate type (Irembo APPLICATION_CODE). */
+  /** The certificate type (Irembo APPLICATION_CODE). Always returned. */
   readonly type: string;
-  /** ISO YYYY-MM-DD. */
-  readonly issuedOn: string;
-  readonly holderName: string;
-  /** ISO YYYY-MM-DD. */
-  readonly holderDob: string;
-  /** The registry's own reference (REFERENCE_NUMBER). */
-  readonly reference: string;
+  /** ISO YYYY-MM-DD. Absent when the certificate is not in force. */
+  readonly issuedOn?: string;
+  /** Absent when the certificate is not in force. */
+  readonly holderName?: string;
+  /** ISO YYYY-MM-DD. Absent when the certificate is not in force. */
+  readonly holderDob?: string;
+  /** The registry's own reference (REFERENCE_NUMBER). Absent when not in force. */
+  readonly reference?: string;
 }
 
 export type ClearanceLookup =
