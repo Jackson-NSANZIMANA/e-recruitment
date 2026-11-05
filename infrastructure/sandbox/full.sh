@@ -190,19 +190,27 @@ status() {
   for a in "${APPS[@]}"; do printf '%-28s %s\n' "${a%%:*} :${a##*:}" "$(app_state "${a%%:*}" "${a##*:}")"; done
   if [ -f "$PIDS/web-tls" ] && [ -s "$TLS/address" ]; then
     local ip; ip="$(cat "$TLS/address")"
-    for a in "${APPS[@]}"; do
+    # Only the apps on the LAN surface: under --lan-real-sms the other two are deliberately
+    # loopback-only, and a ✗ row for them reads as a fault rather than as the decision it is.
+    for a in "${LAN_APPS[@]}"; do
       printf '%-28s %s\n' "${a%%:*} (LAN)" "$([ "$(tls_code "https://$ip:${a##*:}/")" = 200 ] && echo "✓ https://$ip:${a##*:}" || echo "✗ https://$ip:${a##*:} not answering")"
+    done
+    for a in "${APPS[@]}"; do
+      on_lan "${a##*:}" || printf '%-28s %s\n' "${a%%:*} (LAN)" "— loopback only by choice: http://localhost:${a##*:}"
     done
   fi
   docker ps --format '{{.Names}}\t{{.Status}}' | grep -E '^usrp-' | while IFS=$'\t' read -r n s; do printf '%-28s %s\n' "$n" "$s"; done
   printf '%-28s %s\n' "database" "$(node -e 'try { const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); console.log(r.db + " (complete boot " + r.startedAt + ")"); } catch { console.log("no complete boot recorded"); }' "$STATE/running.json")"
   printf '%-28s %s\n' "SMS" "$(grep -o 'SMS: [^·]*' "$LOGS/sandbox-up.out" 2>/dev/null | tail -1)"
-  # ADR-047 §3.5: presence only, never the directory's contents or the identity's values.
-  if [ -n "${SANDBOX_PRIVATE_PERSONA_DIR:-}" ]; then
-    printf '%-28s %s\n' "private persona" "$(grep -qi 'private persona' "$LOGS/sandbox-up.out" 2>/dev/null && echo 'overlaid (PRIVATE)' || echo '⚠ directory set but no capture was loaded; see .sandbox/logs/sandbox-up.out')"
-  else
-    printf '%-28s %s\n' "private persona" "none (synthetic population only; set SANDBOX_PRIVATE_PERSONA_DIR to overlay yours)"
-  fi
+  # ADR-047 §3.5: presence only, never the directory's contents or the identity's values. The simulator
+  # reports it as a boolean on its own `sandbox_listening` line; a refused directory never gets this far
+  # (loadPrivatePersona throws and :4900 does not come up at all).
+  local overlay; overlay="$(grep -o '"overlay":[a-z]*' "$LOGS/g2g-sandbox.log" 2>/dev/null | tail -1)"
+  case "$overlay" in
+    '"overlay":true')  printf '%-28s %s\n' "private persona" "overlaid (PRIVATE)" ;;
+    '"overlay":false') printf '%-28s %s\n' "private persona" "none (synthetic population only; set SANDBOX_PRIVATE_PERSONA_DIR to overlay yours)" ;;
+    *)                 printf '%-28s %s\n' "private persona" "unknown (no sandbox_listening line yet in .sandbox/logs/g2g-sandbox.log)" ;;
+  esac
   if [ -f "$PIDS/web-tls" ] && [ -s "$TLS/address" ]; then
     local served; served="$(cat "$TLS/ports" 2>/dev/null)"; [ -n "$served" ] || served="4930-4932"
     printf '%-28s %s\n' "Exposure" "⚠ on https://$(cat "$TLS/address") ports $served; edge, services, data on loopback"
@@ -378,8 +386,8 @@ for a in ${started[@]+"${started[@]}"}; do
     || printf '\033[0;33m! %s did not answer on :%s; see %s\033[0m\n' "${a%%:*}" "${a##*:}" "$LOGS/full-web-${a%%:*}.out"
 done
 if [ "$LAN" = 1 ]; then
-  lan_ports=""; for a in "${LAN_APPS[@]}"; do lan_ports="$lan_ports :${a##*:}"; done
-  say "HTTPS on the network: $LAN_IP, ports$lan_ports (only these leave loopback)"
+  lan_ports="$(printf '%s ' "${LAN_APPS[@]##*:}" | sed 's/ $//')"
+  say "HTTPS on the network: $LAN_IP, port(s) $lan_ports (only these leave loopback)"
   maps=(); for a in "${LAN_APPS[@]}"; do maps+=("$LAN_IP:${a##*:}=${a##*:}"); done
   printf '%s' "$(printf '%s ' "${LAN_APPS[@]##*:}" | sed 's/ $//')" > "$TLS/ports"
   ( exec setsid node "$REPO/infrastructure/sandbox/tls-proxy.mjs" --cert "$TLS/server.crt" --key "$TLS/server.key" \
@@ -442,6 +450,6 @@ if [ "$LAN" = 1 ]; then
   ON THE NETWORK (this machine and every device on it; open the https addresses above, not localhost)
   trust the CA once per device   http://$LAN_IP:4930/usrp-sandbox-ca.crt  (or $CA_DIR/ca.crt)
     SHA-256 fingerprint          $CA_FINGERPRINT
-  a device that cannot connect   allow 4930-4932/tcp in this machine's firewall (ufw: sudo ufw allow 4930:4932/tcp)
+  a device that cannot connect   allow$(printf ' %s' "${LAN_APPS[@]##*:}")/tcp in this machine's firewall (ufw: sudo ufw allow $(printf '%s ' "${LAN_APPS[@]##*:}" | sed 's/ $//' | tr ' ' ',')/tcp)
 EOF
 fi
