@@ -20,6 +20,7 @@ import type { Population } from './population/population.js';
 import type { Authority, BehaviourName, SdmsResultsRecord, SyntheticCitizen } from './population/model.js';
 import type { PrivatePersona } from './overlay.js';
 import type { LiveNesaPassthrough } from './live-nesa.js';
+import type { LiveIremboCertificates } from './live-irembo-certificates.js';
 import type { SandboxLog } from './log.js';
 
 export type SimulatorId = 'nida-irembo' | 'nesa-sdms' | 'irembo-certificates' | 'sms-twilio';
@@ -56,6 +57,8 @@ export interface SandboxWorld {
   /** Every consented private subject, by NID (ADR-047 §3.5). Values must never be logged. */
   readonly overlays: ReadonlyMap<string, PrivatePersona>;
   readonly live: LiveNesaPassthrough | null;
+  /** SANDBOX_IREMBO_LIVE: numbers the synthetic population does not hold are asked of real IremboGov. */
+  readonly liveCertificates?: LiveIremboCertificates | null;
   readonly now: () => Date;
   readonly log: SandboxLog;
   /** G2G client tokens accepted by authenticated simulators. */

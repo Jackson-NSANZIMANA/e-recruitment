@@ -70,10 +70,21 @@ export const iremboCertificatesModule: SimulatorModule = {
     if (kind === 'maintenance') return { status: 503, json: envelope(CERT_CODES.UNAVAILABLE, false, null) };
     return { status: 200, json: envelope(CERT_CODES.FAILED, false, null) };
   },
-  handle(req, subject, world): SimResponse {
+  async handle(req, subject, world): Promise<SimResponse> {
     const number = req.header(APPLICATION_NUMBER_HEADER)?.trim() ?? '';
     if (!APPLICATION_NUMBER_PATTERN.test(number)) return { status: 400, json: envelope(CERT_CODES.BAD_NUMBER, false, null) };
     const hit = world.population.findByCertificate(number);
+    // SANDBOX_IREMBO_LIVE: a number no synthetic citizen holds is the owner's REAL
+    // certificate; ask the public IremboGov endpoint and pass its answer through.
+    if (hit === null && world.liveCertificates != null) {
+      const live = await world.liveCertificates.fetch(number);
+      switch (live.kind) {
+        case 'OK': return { status: 200, json: live.body };
+        case 'THROTTLED': return { status: 429, json: envelope(CERT_CODES.TOO_MANY, false, null), headers: { 'retry-after': String(live.retryAfterSeconds) } };
+        case 'DRIFT': return { status: 502, json: envelope(CERT_CODES.FAILED, false, null) };
+        case 'UNAVAILABLE': return { status: 503, json: envelope(CERT_CODES.UNAVAILABLE, false, null) };
+      }
+    }
     if (hit === null || subject === null) return { status: 200, json: envelope(CERT_CODES.NOT_FOUND, false, null) };
     const c = hit.certificate;
     // A certificate NOT in force answers with STATUS and APPLICATION_CODE alone: Irembo
