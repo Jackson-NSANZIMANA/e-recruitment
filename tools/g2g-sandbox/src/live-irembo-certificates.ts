@@ -1,9 +1,12 @@
 // ══════════════════════════════════════════════════════════════════
 // g2g-sandbox — the opt-in LIVE IremboGov certificate passthrough
 //
-// SANDBOX_IREMBO_LIVE=1 (set locally, never committed): a well-formed
-// certificate application number that the SYNTHETIC population does not hold is
-// asked of the real public IremboGov endpoint instead of answered "not found":
+// SANDBOX_IREMBO_LIVE=1 plus SANDBOX_IREMBO_LIVE_NUMBERS (set locally, never
+// committed): ONLY the certificate application numbers listed there — one per
+// consented private subject (ADR-047 §3.5), like the single owner index of the
+// live-NESA passthrough (§3.6) — are asked of the real public IremboGov endpoint.
+// Every other number is answered by the simulator, so a sandbox reachable on a
+// network can never be used to query Irembo about anyone else:
 //
 //   GET https://irembo.gov.rw/irembo/rest/public/request/verify-certificate-by-application-number
 //   applicationnumber: <letter, 12 digits, 4 letters>
@@ -18,9 +21,9 @@
 //   • a found answer is re-validated against the captured contract; a drift is
 //     502 and a log line naming paths only;
 //   • a status:false answer is passed through VERBATIM, so the gateway's own
-//     mapping decides (3105 → not found; anything else → retryable fault). Its
-//     responseCode — a closed code, never a value — is logged so the owner can
-//     capture the real "not found" code, which is still a sandbox assumption.
+//     mapping decides (3103 → not found, as captured; anything else → retryable
+//     fault). Its responseCode — a closed code, never a value — is logged, so a
+//     new upstream code shows up in the log instead of silently retrying.
 // No body value (name, date of birth, number) is ever logged.
 // ══════════════════════════════════════════════════════════════════
 
@@ -44,10 +47,14 @@ export type LiveCertificateAnswer =
   | { readonly kind: 'UNAVAILABLE' };
 
 export interface LiveIremboCertificates {
+  /** True only for a number on the owner's allowlist. */
+  appliesTo(applicationNumber: string): boolean;
   fetch(applicationNumber: string): Promise<LiveCertificateAnswer>;
 }
 
 export interface LiveIremboCertificatesOptions {
+  /** The allowlisted certificate application numbers (SANDBOX_IREMBO_LIVE_NUMBERS). */
+  readonly numbers: ReadonlySet<string>;
   readonly baseUrl?: string;
   readonly timeoutMs?: number;
   readonly fetchImpl?: typeof fetch;
@@ -67,7 +74,10 @@ export function createLiveIremboCertificates(options: LiveIremboCertificatesOpti
   const replay = new Map<string, { readonly at: number; readonly body: unknown }>();
 
   return {
+    appliesTo: (applicationNumber) => options.numbers.has(applicationNumber),
     async fetch(applicationNumber): Promise<LiveCertificateAnswer> {
+      // Belt and braces: the module asks appliesTo first, but this never calls out for an unlisted number.
+      if (!options.numbers.has(applicationNumber)) return { kind: 'UNAVAILABLE' };
       const now = clock();
       const cached = replay.get(applicationNumber);
       if (cached !== undefined && now - cached.at < REPLAY_MS) return { kind: 'OK', body: cached.body };
