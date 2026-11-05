@@ -59,3 +59,25 @@ test('AllowlistSmsChannel: only allowlisted destinations reach the provider, in 
   assert.equal(await channel.send({ destination: 'not a number', body: 'x' }), 'FAILED');
   assert.deepEqual(sent, ['0788000001']);
 });
+
+test('AllowlistSmsChannel: a refused destination is logged (masked), since callers answer "sent" either way', async () => {
+  const lines = [];
+  const outWrite = process.stdout.write.bind(process.stdout);
+  const errWrite = process.stderr.write.bind(process.stderr);
+  process.stdout.write = (c) => { lines.push(String(c)); return true; };
+  process.stderr.write = (c) => { lines.push(String(c)); return true; };
+  try {
+    const inner = { send: async () => 'ACCEPTED' };
+    const channel = new AllowlistSmsChannel(inner, new Set(['+250788000001']));
+    assert.equal(await channel.send({ destination: '0788006543', body: 'code 123456' }), 'FAILED');
+    assert.equal(await channel.send({ destination: 'not a number', body: 'x' }), 'FAILED');
+    const text = lines.join('');
+    assert.equal(text.split('sms_destination_not_allowed').length - 1, 2);
+    // The number typed, the allowed number and the body never appear.
+    for (const secret of ['788006543', '788000001', '123456']) assert.equal(text.includes(secret), false, `leaked ${secret.slice(0, 4)}`);
+  } finally {
+    process.stdout.write = outWrite;
+    process.stderr.write = errWrite;
+  }
+});
+

@@ -69,6 +69,10 @@ test('live NESA: one upstream call per minute, cache replay, drift detected', as
   assert.equal((await cold.fetch('X1234567')).kind, 'THROTTLED');
 });
 
+test('logger redaction keeps the subject COUNT the boot line reports, never a subject', () => {
+  assert.deepEqual(redact({ subjects: 2, overlay: true, nid: '1200389990001000' }), { subjects: 2, overlay: true });
+});
+
 test('logger redaction is an allowlist', () => {
   assert.deepEqual(redact({ module: 'nida-irembo', nid: '1200389990001000', name: 'X', status: 200, persona: '1200389990001000' }), { module: 'nida-irembo', status: 200 });
 });

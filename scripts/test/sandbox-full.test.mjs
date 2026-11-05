@@ -383,6 +383,17 @@ test('--lan builds each app for its https LAN origin and keeps the previews and 
   assert.match(out, new RegExp(`http://${LAN_IP.replaceAll('.', '\\.')}:4930/usrp-sandbox-ca\\.crt`));
 });
 
+test('--status after --lan reads the LAN surface without a shell error', (t) => {
+  const fx = fixture(t);
+  assert.equal(run(fx, ['--lan'], { SANDBOX_LAN_ADDRESS: LAN_IP }).status, 0);
+  const { status, out } = run(fx, ['--status'], { SANDBOX_LAN_ADDRESS: LAN_IP });
+  assert.equal(status, 0, out);
+  // on_lan was defined after status() ran, so --status printed "command not found" and marked
+  // every app "loopback only by choice" even when all three were on the network.
+  assert.doesNotMatch(out, /command not found/);
+  assert.doesNotMatch(out, /loopback only by choice/);
+});
+
 test('--lan is SANDBOX_EXPOSE_LAN=1, and the launcher never receives it (the edge stays loopback)', (t) => {
   const fx = fixture(t);
   writeFileSync(join(fx.repo, 'infrastructure/sandbox/up.sh'), '#!/usr/bin/env bash\necho "UP|SANDBOX_EXPOSE_LAN=${SANDBOX_EXPOSE_LAN:-}" >> "$STUB_LOG"\n');

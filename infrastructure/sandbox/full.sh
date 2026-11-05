@@ -215,6 +215,8 @@ app_state() { # app port
   else echo "⚠ serving build ${served:0:8}; the sources now build ${now:0:8} (pnpm sandbox:full)"; fi
 }
 
+# Is this app port on the LAN surface? Defined before status(): --status runs and exits before the boot section.
+on_lan() { local p; for p in "${LAN_APPS[@]}"; do [ "${p##*:}" = "$1" ] && return 0; done; return 1; }
 status() {
   printf '\n%-28s %s\n' "UNIT" "STATE"
   local p
@@ -389,7 +391,6 @@ say "frontend dependencies ($UI)"
 anchor="$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).QR_INVITATION_PUBLIC_KEY_B64 ?? '')" "$STATE/secrets.json" 2>/dev/null)"
 force=""; [ "$REBUILD" = 1 ] && force="--force"
 # The origin each app is built for: where the browser loads it. --lan bakes the https LAN address.
-on_lan() { local p; for p in "${LAN_APPS[@]}"; do [ "${p##*:}" = "$1" ] && return 0; done; return 1; }
 app_origin() { if [ "$LAN" = 1 ] && on_lan "$1"; then printf 'https://%s:%s' "$LAN_IP" "$1"; else printf 'http://localhost:%s' "$1"; fi; }
 # The TLS front shares the app ports (LAN address vs loopback); it is restarted after the previews below, so
 # a preview that has to be started again never finds its port held by it.
