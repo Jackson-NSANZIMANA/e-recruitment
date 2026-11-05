@@ -54,7 +54,7 @@ The rule never sees raw registry payloads beyond the fields above. The compared 
 
 ### 2.3 Criminal clearance by Irembo certificate
 
-1. **Collecting the number.** For categories whose policy requires criminal clearance, the application carries a `clearanceCertificateNumber`. Its observed shape is a letter, 12 digits, then 4 letters. It's optional at submission, and the checklist shows it as outstanding until supplied.
+1. **Collecting the number.** For categories whose policy requires criminal clearance, the application carries a `clearanceCertificateNumber`. Its observed shape is a letter, 12 digits, then 4 characters that are letters **or digits** (amended 2026-11-05: the first capture, `…TCMO`, showed letters only; a second real certificate number ends in a digit followed by letters, so a letters-only suffix refused a genuine number). The 12 digits appear to be the request's date and time (`YYMMDD` `HHMMSS`); nothing relies on that. It's optional at submission, and the checklist shows it as outstanding until supplied.
 2. **Verifying it.** The new port `ClearanceCertificateGateway.verify(number)` returns `{ authentic, type, issuedOn, holderName, holderDob, reference }` or `NOT_FOUND`. Infrastructure faults throw a retryable error. **A registry outage is never a negative verdict.**
 3. **The checks, in order:**
    1. `authentic`;

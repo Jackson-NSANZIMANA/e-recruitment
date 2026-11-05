@@ -437,8 +437,8 @@ export function withdrawMyApplicationHandler(deps: EdgeDeps): RouteHandler {
   });
 }
 
-/** The observed shape of an Irembo application number: a letter, 12 digits, 4 letters. */
-const CLEARANCE_NUMBER_RE = /^[A-Z][0-9]{12}[A-Z]{4}$/;
+/** The observed shape of an Irembo application number: a letter, 12 digits, 4 letters or digits. */
+const CLEARANCE_NUMBER_RE = /^[A-Z][0-9]{12}[A-Z0-9]{4}$/;
 
 /**
  * Give the number of one's own Irembo criminal-record certificate (ADR-048

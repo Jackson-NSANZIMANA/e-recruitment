@@ -47,9 +47,12 @@ async function withGateway(run: (gateway: IremboCertificateGateway) => Promise<v
   }
 }
 
-test('number shape: a letter, 12 digits, 4 letters; spaces, hyphens and case are forgiven', () => {
+test('number shape: a letter, 12 digits, 4 letters or digits; spaces, hyphens and case are forgiven', () => {
   assert.equal(parseClearanceNumber(' s990000000001-abcd '), 'S990000000001ABCD');
-  for (const bad of ['', 'S99000000000ABCD', '1990000000001ABCD', 'S990000000001ABC', 'S990000000001ABCDE', 'not a number']) assert.equal(parseClearanceNumber(bad), null, bad);
+  // A real number can end in a digit followed by letters (ADR-048 §2.3 amendment); synthetic values here.
+  assert.equal(parseClearanceNumber('S9900000000013ZZL'), 'S9900000000013ZZL');
+  assert.equal(parseClearanceNumber('s990000000001-9a8b'), 'S9900000000019A8B');
+  for (const bad of ['', 'S99000000000ABCD', '1990000000001ABCD', 'S990000000001ABC', 'S990000000001ABCDE', 'S990000000001AB-', 'S99000000000AABCD', 'not a number']) assert.equal(parseClearanceNumber(bad), null, bad);
 });
 
 test('mapping: found, not found (3103, data null, as captured) and every other shape is a fault', () => {

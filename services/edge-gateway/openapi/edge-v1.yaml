@@ -1219,7 +1219,7 @@ paths:
       summary: |
         Give the application number of my Irembo criminal-record certificate
         (ADR-048 section 2.3). The subject is the applicant session. The edge
-        checks the shape only (a letter, 12 digits, 4 letters); verification is
+        checks the shape only (a letter, 12 digits, 4 letters or digits); verification is
         asynchronous and its state appears on the document checklist. The number
         is never echoed. Not retried by this tier.
       tags: [citizen]
@@ -1242,7 +1242,7 @@ paths:
                 clearanceCertificateNumber:
                   type: string
                   maxLength: 64
-                  description: A letter, 12 digits and 4 letters; spaces and hyphens are ignored.
+                  description: A letter, 12 digits and 4 letters or digits; spaces and hyphens are ignored.
       responses:
         '202':
           description: Accepted; verification is under way

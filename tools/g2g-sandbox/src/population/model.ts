@@ -74,7 +74,7 @@ export type CertificateKind = keyof typeof CERTIFICATE_APPLICATION_CODES;
 
 /** One Irembo certificate as the sandbox holds it (ISO dates; the module prints DD/MM/YYYY). */
 export interface SandboxCertificate {
-  /** The citizen-held application number: letter, 12 digits, 4 letters. The certificate's REFERENCE_NUMBER is the same value (the captured schema gives both the one shape). */
+  /** The citizen-held application number: letter, 12 digits, 4 letters or digits. The certificate's REFERENCE_NUMBER is the same value (the captured schema gives both the one shape). */
   readonly applicationNumber: string;
   readonly kind: CertificateKind;
   readonly applicationCode: string;
