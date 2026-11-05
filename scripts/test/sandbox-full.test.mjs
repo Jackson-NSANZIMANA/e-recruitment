@@ -36,7 +36,15 @@ if [ "$PWD" = "$STUB_UI" ] && [ "$1 $2" = "run build" ]; then
   mkdir -p "apps/$app/dist" && echo "<!doctype html><!-- $hash -->" > "apps/$app/dist/index.html"
   echo "Cached:    0 cached, 1 total"; exit 0
 fi
-if [ "$1 $2" = "run preview" ]; then echo $$ > "$STUB_STATE/up-$4"; exec sleep 300; fi
+if [ "$1 $2" = "run preview" ]; then
+  if [ -n "\${STUB_SLOW_LISTENER:-}" ]; then
+    # Like real pnpm: the listener is a CHILD (vite preview), and it outlives pnpm on SIGTERM for a moment
+    # while it closes its server. pnpm itself, waiting, dies at once.
+    bash -c 'trap "sleep 1; exit 0" TERM; echo $$ > "$STUB_STATE/up-$1"; while :; do sleep 0.1; done' _ "$4" &
+    wait; exit 0
+  fi
+  echo $$ > "$STUB_STATE/up-$4"; exec sleep 300
+fi
 exit 0
 `,
   curl: `#!/usr/bin/env bash
@@ -247,6 +255,18 @@ test('--rebuild forces the frontend build through turbo --force', (t) => {
   assert.equal(again.status, 0, again.out);
   assert.equal(uiCalls(fx, again.calls, '|run build').length, 6, '--rebuild builds even when nothing changed');
   for (const [i, app] of Object.keys(APPS).entries()) assert.notEqual(pidOf(fx, app), pids[i], `${app} restarted`);
+});
+
+test('a restart waits for the whole preview, not only pnpm, to let go of the port', (t) => {
+  // Real `pnpm run preview` is a parent; the port belongs to its vite child, which exits a moment after
+  // pnpm. Waiting for the recorded PID alone found the port still held and refused it as someone else's.
+  const fx = fixture(t);
+  const first = run(fx, [], { STUB_SLOW_LISTENER: '1' });
+  assert.equal(first.status, 0, first.out);
+  const again = run(fx, ['--rebuild'], { STUB_SLOW_LISTENER: '1' });
+  assert.doesNotMatch(again.out, /is busy with a server this script did not start/);
+  assert.equal(again.status, 0, again.out);
+  for (const app of Object.keys(APPS)) assert.match(again.out, new RegExp(`${app} :\\d+ +✓ serving build`));
 });
 
 test('--down stops the previews this script started', (t) => {

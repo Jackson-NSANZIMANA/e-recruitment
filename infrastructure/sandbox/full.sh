@@ -124,14 +124,31 @@ ours() { # pid
   [ -n "$1" ] && kill -0 "$1" 2>/dev/null \
     && { readlink "/proc/$1/cwd" 2>/dev/null; ps -o command= -p "$1" 2>/dev/null; } | grep -qF -e "$REPO" -e "${UI:-/nonexistent}"
 }
-# A recorded PID is stopped only while it is still ours.
+# Is anything left of the process group this recorded PID leads (or of the PID itself)?
+group_alive() { kill -0 -- "-$1" 2>/dev/null || kill -0 "$1" 2>/dev/null; }
+# The recorded PID leads a group (setsid). It is ours while the leader is ours, or, once the leader has
+# exited first (pnpm dies on SIGTERM before its `vite preview` child has closed the port), while a process
+# still in that group is ours.
+group_ours() { # pid
+  [ -n "$1" ] || return 1
+  ours "$1" && return 0
+  local member
+  for member in $(ps -eo pid=,pgid= 2>/dev/null | awk -v g="$1" '$2 == g { print $1 }'); do ours "$member" && return 0; done
+  return 1
+}
+# A recorded PID is stopped only while it is still ours, and the WHOLE group is waited for: the port belongs
+# to the vite child, so waiting for pnpm alone found the port still held and refused it as someone else's.
 stop_recorded() { # name
   local file="$PIDS/$1" pid
   [ -f "$file" ] || return 0
   pid="$(cat "$file")"
-  if ours "$pid"; then
+  if group_ours "$pid"; then
     kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
-    for _ in $(seq 1 50); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
+    for _ in $(seq 1 100); do group_alive "$pid" || break; sleep 0.1; done
+    if group_alive "$pid"; then
+      kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+      for _ in $(seq 1 20); do group_alive "$pid" || break; sleep 0.1; done
+    fi
   fi
   rm -f "$file"
 }
