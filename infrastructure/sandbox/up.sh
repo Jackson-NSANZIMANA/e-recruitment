@@ -39,11 +39,15 @@ edge_up() { [ "$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 "$EDGE/edge
 reusable() {
   local why
   why="$(node -e '
-    const [file, db, forensics] = process.argv.slice(1);
+    const [file, db, forensics, sms, persona] = process.argv.slice(1);
     let r; try { r = JSON.parse(require("fs").readFileSync(file, "utf8")); } catch { console.log("it has no complete boot record (an interrupted or older boot)"); process.exit(1); }
     if (r.db !== db) { console.log(`it serves database ${r.db}, not ${db}`); process.exit(1); }
     if (String(r.forensics) !== String(forensics === "1")) { console.log(`it was started with SANDBOX_FORENSICS=${r.forensics ? 1 : 0}`); process.exit(1); }
-    console.log([r.simulator + "/health", ...r.ports.map((p) => p + "/ready")].join(" "));' "$STATE/running.json" "$SANDBOX_DB" "${SANDBOX_FORENSICS:-}")" \
+    // A record from before these fields were kept was an emulator boot without a persona.
+    const wantSms = sms.trim().toLowerCase() === "twilio" ? "twilio" : "emulator";
+    if ((r.sms ?? "emulator") !== wantSms) { console.log(`it sends SMS through the ${r.sms ?? "emulator"}, and this boot asks for ${wantSms === "twilio" ? "real Twilio" : "the emulator"}`); process.exit(1); }
+    if (Boolean(r.persona) !== (persona.trim() !== "")) { console.log(r.persona ? "it was started with a private persona, and this boot has none" : "it was started without the private persona this boot asks for"); process.exit(1); }
+    console.log([r.simulator + "/health", ...r.ports.map((p) => p + "/ready")].join(" "));' "$STATE/running.json" "$SANDBOX_DB" "${SANDBOX_FORENSICS:-}" "${SANDBOX_SMS:-}" "${SANDBOX_PRIVATE_PERSONA_DIR:-}")" \
     || { echo "$why"; return 1; }
   local probe
   for probe in $why; do
