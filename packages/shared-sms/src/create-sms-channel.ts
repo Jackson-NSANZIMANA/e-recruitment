@@ -36,7 +36,8 @@ import {
   type EnvSource,
 } from '@usrp/shared-config';
 import { LogSmsChannel } from './log-sms.channel.js';
-import { normaliseToE164 } from './phone.js';
+import { logWarn } from '@usrp/shared-logging';
+import { maskDestination, normaliseToE164 } from './phone.js';
 import type { OutboundSms, SmsChannel, SmsDeliveryOutcome } from './sms-channel.js';
 import { DailyCostCap, PerNumberLimiter } from './twilio-guards.js';
 import { TwilioSmsChannel } from './twilio-sms.channel.js';
@@ -140,7 +141,17 @@ export class AllowlistSmsChannel implements SmsChannel {
 
   async send(message: OutboundSms): Promise<SmsDeliveryOutcome> {
     const destination = normaliseToE164(message.destination);
-    if (destination === null || !this.#allowed.has(destination)) return 'FAILED';
+    if (destination === null || !this.#allowed.has(destination)) {
+      // Callers answer the citizen the same way whatever the channel says (an OTP request is
+      // CHALLENGED either way), so this line is the ONLY trace of a refused send. Masked, like
+      // every other SMS log: it tells the operator the number typed is not TWILIO_TO.
+      logWarn('sms_destination_not_allowed', {
+        channel: 'TWILIO',
+        destinationMasked: destination === null ? 'unreadable' : maskDestination(destination),
+        allowedCount: this.#allowed.size,
+      });
+      return 'FAILED';
+    }
     return this.#inner.send(message);
   }
 }
