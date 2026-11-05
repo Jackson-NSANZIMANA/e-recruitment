@@ -10,7 +10,7 @@
 
 const ALLOWED_FIELDS: ReadonlySet<string> = new Set([
   'module', 'status', 'persona', 'behaviour', 'durationMs', 'reason', 'port', 'environment',
-  'citizens', 'personas', 'overlay', 'live', 'seed', 'modules', 'method',
+  'citizens', 'personas', 'overlay', 'subjects', 'live', 'seed', 'modules', 'method',
 ]);
 
 export type LogFields = Readonly<Record<string, string | number | boolean | null>>;
