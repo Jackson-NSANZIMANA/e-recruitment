@@ -53,6 +53,8 @@ export type Subject =
 export interface SandboxWorld {
   readonly population: Population;
   readonly overlay: PrivatePersona | null;
+  /** Every consented private subject, by NID (ADR-047 §3.5). Values must never be logged. */
+  readonly overlays: ReadonlyMap<string, PrivatePersona>;
   readonly live: LiveNesaPassthrough | null;
   readonly now: () => Date;
   readonly log: SandboxLog;

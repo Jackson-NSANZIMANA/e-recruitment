@@ -23,7 +23,7 @@ The defect is therefore not "the edge listens on all interfaces". It is **"expos
 | Default | **Loopback**, everywhere, for every process. |
 | Opening it | **Explicit**, edge-only, and it announces itself on screen and in the log. |
 | Production | `HTTP_BIND_HOST` is **required**; absent, the process refuses to boot (naming the variable) rather than silently binding a loopback nobody can reach inside a container. |
-| The dangerous pair | LAN exposure **cannot** be combined with real SMS. Enforced in the launcher, not in a runbook. |
+| The dangerous pair | LAN exposure **cannot** be combined with real SMS. Enforced in the launcher, not in a runbook. Narrowed by the 2026-11-05 amendment (§3.5): one acknowledged exception for the app-proxy `--lan`, never for the raw edge. |
 
 ## 3. Decision
 
@@ -57,8 +57,50 @@ Every entrypoint passes `host` explicitly. `shared-http`'s `'0.0.0.0'` default i
 1. enumerate every listening TCP socket of the sandbox PIDs; assert **loopback only** unless the flag is set;
 2. with the flag, assert exactly one non-loopback listener and that it is the edge's port;
 3. assert both compose files set `HTTP_BIND_HOST` for every service;
-4. assert `SANDBOX_EXPOSE_LAN=1` + real SMS exits non-zero;
+4. assert `SANDBOX_EXPOSE_LAN=1` + real SMS exits non-zero, that `--lan --real-sms` is refused without the
+   acknowledgement, and that the acknowledged path narrows `LAN_APPS` to the applicant portal (§3.5);
 5. assert a production boot without `HTTP_BIND_HOST` fails with the right message.
+
+### 3.5 Amendment, 2026-11-05 — the acknowledged `--lan-real-sms` exception
+
+**Decider:** platform owner, 2026-11-05. **Status:** accepted, narrows §3.3's last bullet.
+
+§3.3 was written when `SANDBOX_EXPOSE_LAN=1` was the only way to reach the sandbox from the venue, and it
+binds **the edge itself** — the identity door, in plain HTTP. `--lan` is a later and different mechanism:
+`full.sh` serves the three apps over TLS from a private-IP-only CA and `unset`s `SANDBOX_EXPOSE_LAN`, so the
+edge, the services and the data never leave loopback. The blanket refusal treated the two as one thing, and
+so forbade a combination whose stated danger does not apply to it.
+
+The danger §3.3 names — "live Twilio behind a door on venue Wi-Fi" — is in any case already unrepresentable
+one layer down, and not by this flag. `create-sms-channel.ts` wraps the real channel in
+`AllowlistSmsChannel`, whose allowlist is built from `TWILIO_TO` (`sandbox.ts`, `SANDBOX_SMS_ALLOWED_TO`):
+
+```ts
+if (destination === null || !this.#allowed.has(destination)) return 'FAILED';
+```
+
+The refusal happens **before the provider is called**. A stranger on the venue network cannot cause this
+sandbox to text them, so they cannot receive an OTP and cannot onboard.
+
+**What is decided.** `--lan-real-sms` (or `SANDBOX_I_ACCEPT_LAN_SMS=1` alongside `--lan --real-sms`) permits
+the pair, under three conditions:
+
+1. **Only the app proxy.** The exception applies to `--lan`. `SANDBOX_EXPOSE_LAN=1` with `SANDBOX_SMS=twilio`
+   stays refused in the launcher (`sandbox.ts`), unconditionally and with no flag that lifts it.
+2. **The applicant portal alone leaves loopback, by default.** `LAN_APPS` narrows to `applicant-portal:4930`;
+   the officer console and field station keep staff credentials on loopback. Only the citizen journey needs a
+   phone. A two-machine rehearsal (console on a second laptop, portal on a handset) is a real need, so
+   `SANDBOX_LAN_APPS` may widen the surface — explicitly, by naming each app, never by a bare "off" switch —
+   and a boot that does so prints a second, red warning that staff sign-ins are on the network. The default
+   is what an unthinking `--lan-real-sms` gets; widening is a sentence the owner has to write.
+3. **It announces itself.** A yellow banner states what is exposed, that Twilio is live and allowlisted, and
+   that a bystander can still spend the daily cap and ring the owner's number.
+
+**Residual risk, accepted knowingly:** anyone on that network can reach the exposed apps (the officer console
+and field station too, where `SANDBOX_LAN_APPS` names them), consume `SMS_DAILY_CAP`
+and trigger texts to the owner's own number within `PerNumberLimiter`'s window; and the owner's private
+persona (ADR-047 §3.5) is in a population reachable from it. The mitigation is operational — do not leave
+this boot unattended — because the alternative is the 2 a.m. undocumented flag §1 warns about.
 
 ## 4. Rejected alternatives
 

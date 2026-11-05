@@ -15,8 +15,10 @@
 //   3. CONTAINERS SAY SO: every compose file that runs a USRP service or the
 //      simulator sets the variable (a loopback bind inside a container is a
 //      service nobody can call — a CI failure, not a staging surprise).
-//   4. THE DANGEROUS PAIR IS IMPOSSIBLE: the launcher, and the full-system
-//      script, refuse SANDBOX_EXPOSE_LAN with real SMS.
+//   4. THE DANGEROUS PAIR IS IMPOSSIBLE: the launcher refuses SANDBOX_EXPOSE_LAN
+//      with real SMS unconditionally (the raw edge on the LAN). The full-system
+//      script refuses --lan with --real-sms unless the owner acknowledges it
+//      (ADR-053 §3.5), and that path exposes the applicant portal alone.
 //   5. THE EDGE IS THE ONLY ESCAPE HATCH: the sandbox exposes one process, on
 //      request, and prints it.
 //
@@ -189,9 +191,34 @@ check(
   'the launcher refuses SANDBOX_EXPOSE_LAN with SANDBOX_SMS=twilio',
   launcher.includes('EXPOSE_LAN &&') && launcher.includes("=== 'twilio'") && /cannot be combined with SANDBOX_SMS=twilio/.test(launcher),
 );
+const full = read('infrastructure/sandbox/full.sh');
 check(
-  'the full-system script refuses the same pair',
-  /SANDBOX_EXPOSE_LAN[\s\S]{0,120}--real-sms/.test(read('infrastructure/sandbox/full.sh')),
+  'the full-system script refuses the same pair unless it is acknowledged',
+  /SANDBOX_EXPOSE_LAN[\s\S]{0,160}--real-sms/.test(full) && /ALLOW_LAN_SMS" != 1/.test(full),
+);
+// ADR-053 §3.5: the exception is narrow. It exists only for the app proxy, it is never implicit,
+// and when taken it leaves exactly one app — the applicant portal — reachable from the network.
+check(
+  'the acknowledgement is explicit (--lan-real-sms / SANDBOX_I_ACCEPT_LAN_SMS), never a default',
+  /ALLOW_LAN_SMS=0/.test(full) && /--lan-real-sms\) LAN=1; REAL_SMS=1; ALLOW_LAN_SMS=1/.test(full),
+);
+check(
+  'live SMS on the LAN narrows the surface to the applicant portal by default',
+  /LAN_APPS=\("applicant-portal:4930"\)/.test(full) && /maps\+=\("\$LAN_IP:\$\{a##\*:\}=\$\{a##\*:\}"\)/.test(full),
+);
+// Widening that default is allowed (a two-machine rehearsal needs it), but only by naming each app:
+// an unknown name is refused rather than silently dropped, and the wider surface announces itself.
+check(
+  'SANDBOX_LAN_APPS widens the surface only by naming apps, and refuses an unknown one',
+  /SANDBOX_LAN_APPS: unknown app/.test(full) && /SANDBOX_LAN_APPS is empty/.test(full),
+);
+check(
+  'a surface wider than one app warns that staff credentials are on the network',
+  /STAFF CREDENTIALS ARE ON THIS NETWORK/.test(full) && /\$\{#LAN_APPS\[@\]\}" -gt 1/.test(full),
+);
+check(
+  'the narrowed exception never reaches the launcher (the edge stays off the LAN)',
+  /unset SANDBOX_EXPOSE_LAN/.test(full),
 );
 
 // ── 5. The edge is the only escape hatch ───────────────────────────

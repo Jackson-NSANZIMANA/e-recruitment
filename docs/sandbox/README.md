@@ -64,7 +64,49 @@ The server certificate in `.sandbox/tls` is reissued automatically when the mach
 4. Open `https://<ip>:4930`: the citizen portal; headings in Atlassian Sans, not the device's system font.
 5. A failure that names the certificate (rather than "cannot connect") means the CA is not trusted on that device; "cannot connect" means firewall, a different network, or Wi-Fi client isolation.
 
-**If a device cannot connect**, allow the three ports in this machine's firewall (Ubuntu: `sudo ufw allow 4930:4932/tcp`) and check that both devices are on the same network. Guest and "client isolation" Wi-Fi blocks device-to-device traffic. `--lan` refuses a public address, and refuses `--real-sms` (ADR-053): a network-reachable sandbox with live SMS behind it. Real SMS runs on a local `pnpm sandbox:full --real-sms`.
+**If a device cannot connect**, allow the three ports in this machine's firewall (Ubuntu: `sudo ufw allow 4930:4932/tcp`) and check that both devices are on the same network. Guest and "client isolation" Wi-Fi blocks device-to-device traffic. `--lan` refuses a public address, and refuses `--real-sms` (ADR-053) unless you acknowledge the pair — see below. Real SMS otherwise runs on a local `pnpm sandbox:full --real-sms`.
+
+### Real SMS on the network (`--lan-real-sms`)
+
+To go through the citizen journey from a phone on the venue network *and* receive the OTP on that phone, acknowledge the pair ADR-053 §3.3 refuses by default:
+
+```bash
+SANDBOX_LAN_ADDRESS=192.168.1.20 pnpm sandbox:full --lan-real-sms
+```
+
+It implies `--lan` and `--real-sms`, and changes two things:
+
+- **only the applicant portal leaves loopback** (`:4930`) by default. The officer console and field station stay on `http://localhost` with their staff credentials, so create campaigns on the laptop, not from the network;
+- a yellow banner states what is exposed and that Twilio is live.
+
+Safe because the destination allowlist is built from `TWILIO_TO` and applied *before* the provider is called (`AllowlistSmsChannel`), so nobody else on that network can be texted by this sandbox — they would never receive an OTP. They can still spend `SMS_DAILY_CAP` and ring your number, so do not leave it unattended. The raw-edge form (`SANDBOX_EXPOSE_LAN=1` with `SANDBOX_SMS=twilio`) stays barred in the launcher with no flag that lifts it.
+
+Pair it with your own identity by pointing the overlay at a directory **outside every git work tree**:
+
+```bash
+SANDBOX_PRIVATE_PERSONA_DIR=~/path/to/persona SANDBOX_LAN_ADDRESS=192.168.1.20 pnpm sandbox:full --lan-real-sms
+```
+
+#### A second machine on the console (`SANDBOX_LAN_APPS`)
+
+For a two-machine rehearsal — the officer console on a second laptop, the portal on a handset — name the apps that should leave loopback:
+
+```bash
+SANDBOX_LAN_APPS=applicant-portal,officer-console \
+SANDBOX_LAN_ADDRESS=192.168.1.20 pnpm sandbox:full --lan-real-sms
+```
+
+Accepts `applicant-portal`, `officer-console`, `field-station` or `all`; an unknown name is refused rather than ignored. It overrides both defaults (all three under plain `--lan`, the portal alone under live SMS).
+
+This puts **officer sign-in on the network**, so a boot wider than one app prints a red warning saying exactly that. Use it on a network you control. At a venue, keep the default and drive the console from the host machine.
+
+Open the extra ports on the host, e.g.:
+
+```bash
+sudo ufw allow 4930,4931/tcp
+```
+
+`pnpm sandbox:full --status` now prints a `private persona` line — presence only, never values — so a boot that silently fell back to the synthetic population is visible.
 
 ## The document door (MinIO, ClamAV, document-forensics)
 
@@ -120,7 +162,19 @@ Each scenario provisions its station staff through the officer lifecycle (handle
 
 Catalogue ids look like `A-RDF-PILOT-S3-ELIGIBLE`, `A-RDF-PILOT-OVER-AGE-1D`, `A-RDF-PILOT-NESA-MISMATCH`, `P-UR-SCI-69`, `P-CLEARANCE-VALID`. Each scenario file lists its personas with what each rehearses and the expected outcome. Ages are relative to today.
 
-The owner's own record may join **locally only** through `SANDBOX_PRIVATE_PERSONA_DIR`; it is never committed and its values are never printed (pass or fail only).
+Real people's records may join **locally only** through `SANDBOX_PRIVATE_PERSONA_DIR`; they are never committed and their values are never printed (pass or fail only).
+
+The directory may hold **several** subjects. Each person needs one Irembo identity capture (a JSON with `data.identityInfo`), optionally one SDMS results capture (a JSON with `studentIndexNumber` and `rawMark`), and an entry in `consent.json`:
+
+```json
+{
+  "subjects": [
+    { "nid": "16 digits", "basis": "why this person's data may be processed", "recordedOn": "YYYY-MM-DD" }
+  ]
+}
+```
+
+Results are paired to their owner by the `studentNationalIdHint` SDMS returns, so filenames do not matter. **A capture whose NID is not in `consent.json` refuses the boot** — the simulator never serves a person's record because their file happened to be in the folder (Law N° 058/2021). Refusals report counts only, never a NID or a name.
 
 ## Behaviour switches
 

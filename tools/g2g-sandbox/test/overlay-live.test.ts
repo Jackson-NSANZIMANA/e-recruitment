@@ -1,8 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { loadPrivatePersona, PrivatePersonaRefused } from '../src/overlay.js';
+import { loadPrivatePersona, loadPrivatePersonas, nidHintOf, PrivatePersonaRefused } from '../src/overlay.js';
 import { createLiveNesa } from '../src/live-nesa.js';
 import { redact } from '../src/log.js';
 import { NIDA_IDENTITY_PATH } from '../src/modules/nida-irembo.js';
@@ -69,4 +71,56 @@ test('live NESA: one upstream call per minute, cache replay, drift detected', as
 
 test('logger redaction is an allowlist', () => {
   assert.deepEqual(redact({ module: 'nida-irembo', nid: '1200389990001000', name: 'X', status: 200, persona: '1200389990001000' }), { module: 'nida-irembo', status: 200 });
+});
+
+test('overlay: a subject with no consent record is refused, by count not by name', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'usrp-overlay-consent-'));
+  const nid = '1200389990777000';
+  writeFileSync(join(dir, 'identity.json'), JSON.stringify({ data: { userProfileDto: { identificationNumber: nid }, identityInfo: { surname: 'OVERLAY' } } }));
+
+  // No consent.json at all.
+  assert.throws(() => loadPrivatePersonas(dir), (e: unknown) => {
+    assert.ok(e instanceof PrivatePersonaRefused);
+    assert.match(e.message, /consent\.json/);
+    assert.doesNotMatch(e.message, new RegExp(nid), 'a refusal must never print a real NID');
+    return true;
+  });
+
+  // Present, but covering somebody else.
+  writeFileSync(join(dir, 'consent.json'), JSON.stringify({ subjects: [{ nid: '1200389990111000', basis: 'someone else', recordedOn: '2026-01-01' }] }));
+  assert.throws(() => loadPrivatePersonas(dir), (e: unknown) => {
+    assert.ok(e instanceof PrivatePersonaRefused);
+    assert.doesNotMatch(e.message, new RegExp(nid), 'a refusal must never print a real NID');
+    return true;
+  });
+
+  // A basis is required, not just a listing.
+  writeFileSync(join(dir, 'consent.json'), JSON.stringify({ subjects: [{ nid, basis: '   ', recordedOn: '2026-01-01' }] }));
+  assert.throws(() => loadPrivatePersonas(dir), PrivatePersonaRefused);
+
+  writeFileSync(join(dir, 'consent.json'), JSON.stringify({ subjects: [{ nid, basis: 'test subject', recordedOn: '2026-01-01' }] }));
+  assert.equal(loadPrivatePersonas(dir).length, 1);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('overlay: several subjects, each paired to its own results by the NID hint', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'usrp-overlay-many-'));
+  const a = '1200389990111000';
+  const b = '1200779990222000';
+  for (const [nid, file] of [[a, 'a.json'], [b, 'b.json']] as const) {
+    writeFileSync(join(dir, file), JSON.stringify({ data: { userProfileDto: { identificationNumber: nid }, identityInfo: { surname: 'OVERLAY', documentNumber: nid } } }));
+  }
+  // Deliberately named so that filename order does NOT match subject order.
+  writeFileSync(join(dir, 'z-results.json'), JSON.stringify({ studentIndexNumber: 'IDX-B', studentNationalIdHint: nidHintOf(b), rawMark: [] }));
+  writeFileSync(join(dir, 'consent.json'), JSON.stringify({ subjects: [
+    { nid: a, basis: 'test subject', recordedOn: '2026-01-01' },
+    { nid: b, basis: 'test subject', recordedOn: '2026-01-01' },
+  ] }));
+
+  const people = loadPrivatePersonas(dir);
+  assert.equal(people.length, 2);
+  const byNid = new Map(people.map((p) => [p.nid, p]));
+  assert.equal(byNid.get(a)?.nesa, null, 'an unhinted subject gets no results when several exist');
+  assert.equal(byNid.get(b)?.nesa?.['studentIndexNumber'], 'IDX-B');
+  rmSync(dir, { recursive: true, force: true });
 });

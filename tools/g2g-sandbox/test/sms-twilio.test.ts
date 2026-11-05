@@ -18,7 +18,7 @@ const PATH = `/2010-04-01/Accounts/${DEV_TWILIO_ACCOUNT_SID}/Messages.json`;
 async function start(sms: Parameters<typeof createSmsTwilioModule>[0] = {}) {
   const module = createSmsTwilioModule(sms);
   const server = await createSandboxServer({
-    world: { population: population(5), overlay: null, live: null, now: () => new Date(), log: captureLog().log, clientTokens: new Set([TOKEN]) },
+    world: { population: population(5), overlay: null, overlays: new Map(), live: null, now: () => new Date(), log: captureLog().log, clientTokens: new Set([TOKEN]) },
     environment: 'development', port: 0, host: '127.0.0.1', latencyScale: 0, profiles: GENEROUS,
     modules: [...buildModules().filter((m) => m.id !== 'sms-twilio'), module],
   });

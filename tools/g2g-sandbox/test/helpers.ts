@@ -29,10 +29,12 @@ export function captureLog(): { log: SandboxLog; lines: string[] } {
   };
 }
 
-export async function startSandbox(opts: { pop?: Population; overlay?: PrivatePersona | null; live?: LiveNesaPassthrough | null; log?: SandboxLog; timeoutHoldMs?: number; realBudgets?: boolean; host?: string } = {}) {
+export async function startSandbox(opts: { pop?: Population; overlay?: PrivatePersona | null; overlays?: readonly PrivatePersona[]; live?: LiveNesaPassthrough | null; log?: SandboxLog; timeoutHoldMs?: number; realBudgets?: boolean; host?: string } = {}) {
   const pop = opts.pop ?? population();
+  // `overlay` stays the single-subject shorthand; `overlays` is the many-subject world (ADR-047 §3.5).
+  const subjects = opts.overlays ?? (opts.overlay == null ? [] : [opts.overlay]);
   const server = await createSandboxServer({
-    world: { population: pop, overlay: opts.overlay ?? null, live: opts.live ?? null, now: () => new Date(), log: opts.log ?? captureLog().log, clientTokens: new Set([TOKEN]) },
+    world: { population: pop, overlay: subjects[0] ?? null, overlays: new Map(subjects.map((s) => [s.nid, s])), live: opts.live ?? null, now: () => new Date(), log: opts.log ?? captureLog().log, clientTokens: new Set([TOKEN]) },
     environment: 'development',
     port: 0,
     host: opts.host ?? '127.0.0.1',
@@ -49,5 +51,7 @@ export function syntheticOverlayDir(nid: string, index: string | null): string {
   writeFileSync(join(dir, 'identity.json'), JSON.stringify({ status: true, data: { userProfileDto: { identificationNumber: nid }, identityInfo: { forename: 'Test', surname: 'OVERLAY', sex: 'MALE', dateOfBirth: '01/01/2003', district: 'Gasabo', province: 'Umujyi wa Kigali', nationality: 'RW', citizenStatus: 'NORMAL', documentNumber: nid } } }));
   if (index !== null) writeFileSync(join(dir, 'results.json'), JSON.stringify({ studentIndexNumber: index, studentNames: 'OVERLAY Test', rawMark: [] }));
   writeFileSync(join(dir, 'notes.txt'), 'not json');
+  // Every subject the sandbox serves needs a recorded basis (ADR-047 §3.5).
+  writeFileSync(join(dir, 'consent.json'), JSON.stringify({ subjects: [{ nid, basis: 'synthetic test subject', recordedOn: '2026-01-01' }] }));
   return dir;
 }

@@ -21,8 +21,9 @@ export const nesaSdmsModule: SimulatorModule = {
   authorize: () => ({ client: 'public' }),
   subject(req, world): Subject | null {
     const index = req.query.get('indexNumber')?.trim() ?? '';
-    const overlayIndex = world.overlay?.nesa?.['studentIndexNumber'];
-    if (world.overlay !== null && overlayIndex === index) return { kind: 'private', persona: world.overlay };
+    for (const persona of world.overlays.values()) {
+      if (persona.nesa?.['studentIndexNumber'] === index) return { kind: 'private', persona };
+    }
     const hit = world.population.findByIndex(index);
     return hit === null ? null : { kind: 'synthetic', citizen: hit.citizen };
   },

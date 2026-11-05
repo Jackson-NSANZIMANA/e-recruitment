@@ -16,7 +16,7 @@
 import { assertSimulatorAllowed, EnvValidationError } from '@usrp/shared-config';
 import { consoleLog } from './log.js';
 import { createLiveNesa } from './live-nesa.js';
-import { loadPrivatePersona, PrivatePersonaRefused, withDistrict } from './overlay.js';
+import { loadPrivatePersonas, PrivatePersonaRefused, withDistrict } from './overlay.js';
 import { DISTRICT_TO_PROVINCE, type District } from '@usrp/shared-types';
 import { districtLabel, PROVINCE_LABEL_RW } from './population/geography.js';
 import { kigaliReferenceDate, Population } from './population/population.js';
@@ -56,14 +56,22 @@ async function main(): Promise<void> {
     throw new EnvValidationError(['The SMS emulator must not use the published development credentials in the sandbox profile.']);
   }
 
-  const loaded = loadPrivatePersona(process.env['SANDBOX_PRIVATE_PERSONA_DIR']);
+  // Every consented subject in the directory (ADR-047 §3.5). loadPrivatePersona stays for
+  // callers that want the first one; the simulator serves all of them.
+  const subjects = loadPrivatePersonas(process.env['SANDBOX_PRIVATE_PERSONA_DIR']);
   const drillDistrict = process.env['SANDBOX_PRIVATE_PERSONA_DISTRICT']?.trim().toUpperCase() ?? '';
-  let overlay = loaded;
-  if (loaded !== null && drillDistrict !== '') {
+  let district: District | null = null;
+  if (drillDistrict !== '') {
     if (!Object.hasOwn(DISTRICT_TO_PROVINCE, drillDistrict)) throw new EnvValidationError(['SANDBOX_PRIVATE_PERSONA_DISTRICT must be a district.']);
-    const district = drillDistrict as District;
-    overlay = withDistrict(loaded, districtLabel(district), PROVINCE_LABEL_RW[DISTRICT_TO_PROVINCE[district]]);
+    district = drillDistrict as District;
   }
+  let placed = subjects;
+  if (district !== null) {
+    const d: District = district;
+    placed = subjects.map((s) => withDistrict(s, districtLabel(d), PROVINCE_LABEL_RW[DISTRICT_TO_PROVINCE[d]]));
+  }
+  const overlays = new Map(placed.map((s) => [s.nid, s]));
+  const overlay = placed[0] ?? null;
   const liveWanted = process.env['SANDBOX_NESA_LIVE'] === '1';
   const liveIndex = process.env['SANDBOX_NESA_LIVE_INDEX']?.trim() ?? '';
   if (liveWanted && environment !== 'sandbox') throw new EnvValidationError(['SANDBOX_NESA_LIVE is allowed in the sandbox profile only (never in development or CI).']);
@@ -74,7 +82,7 @@ async function main(): Promise<void> {
   const population = new Population({ seed, size: intEnv('SANDBOX_POPULATION_SIZE', 2000), referenceDate: kigaliReferenceDate(new Date()) });
   const port = intEnv('SANDBOX_PORT', intEnv('PORT', 4900));
   const server = await createSandboxServer({
-    world: { population, overlay, live, now: () => new Date(), log, clientTokens },
+    world: { population, overlay, overlays, live, now: () => new Date(), log, clientTokens },
     environment,
     port,
     modules: buildModules({
@@ -87,7 +95,7 @@ async function main(): Promise<void> {
   });
   log.info('sandbox_listening', {
     port: server.port, environment, seed, citizens: population.citizens.length, personas: PERSONAS.length,
-    overlay: overlay !== null, live: live !== null, modules: 4,
+    overlay: overlay !== null, subjects: overlays.size, live: live !== null, modules: 4,
   });
 }
 

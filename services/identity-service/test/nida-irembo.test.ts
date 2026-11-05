@@ -16,7 +16,7 @@ const pop = new Population({ seed: 3, size: 10, referenceDate: new Date(Date.UTC
 
 async function withSimulator(run: (gateway: NidaIremboGateway, url: string) => Promise<void>, env: Record<string, string> = { NODE_ENV: 'development' }): Promise<void> {
   const server = await createSandboxServer({
-    world: { population: pop, overlay: null, live: null, now: () => new Date(), log: silentLog, clientTokens: new Set([TOKEN]) },
+    world: { population: pop, overlay: null, overlays: new Map(), live: null, now: () => new Date(), log: silentLog, clientTokens: new Set([TOKEN]) },
     environment: 'development', port: 0, host: '127.0.0.1', latencyScale: 0, timeoutHoldMs: 200, profiles: GENEROUS,
   });
   try {

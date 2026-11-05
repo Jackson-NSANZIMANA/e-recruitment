@@ -7,6 +7,11 @@
 #   pnpm sandbox:full --kafka-ui          also a Kafka UI on the sandbox broker (:4994, +256 MB)
 #   pnpm sandbox:full --rebuild           rebuild the services, and the three apps past the turbo cache (--force)
 #   pnpm sandbox:full --lan               the three apps also over HTTPS on this machine's LAN address (below)
+#   pnpm sandbox:full --lan-real-sms      --lan AND --real-sms together: the APPLICANT PORTAL ONLY on the
+#                                         network, live Twilio behind it, guarded to TWILIO_TO (ADR-053 §3.5)
+#   SANDBOX_LAN_APPS=...                  which apps leave loopback under --lan: a comma-separated list of
+#                                         applicant-portal, officer-console, field-station, or 'all'.
+#                                         Defaults to all three; to the applicant portal alone with live SMS.
 #   pnpm sandbox:full --no-staging        boot without staging the campaigns, rehearsal staff and personas
 #                                         (an empty database stays empty; see pnpm sandbox:clean)
 #   pnpm sandbox:full --status            what is running
@@ -31,6 +36,8 @@
 # work tree; TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM, TWILIO_TO) and the owner's private persona
 # from ~/.config/usrp/persona when present. Every destination except TWILIO_TO is refused before Twilio is
 # called, and --journeys is refused with --real-sms (the synthetic population has real-looking numbers).
+# --lan with --real-sms is refused unless --lan-real-sms (or SANDBOX_I_ACCEPT_LAN_SMS=1) acknowledges it;
+# that exception serves the applicant portal ALONE on the network and never exposes the edge (ADR-053 §3.5).
 #
 # The frontend repository owns how its apps are built: this script never calls vite itself, never picks an
 # output directory and keeps no build stamp of its own. The bundles are the apps' ordinary dist/ folders and
@@ -65,12 +72,20 @@ export SANDBOX_DB="${SANDBOX_DB:-usrp_sandbox}" SANDBOX_FORENSICS=1 REHEARSAL_CO
 EDGE="http://localhost:4921"
 CA_DIR="${SANDBOX_CA_DIR:-$HOME/.config/usrp/sandbox-ca}"; TLS="$STATE/tls"
 APPS=("applicant-portal:4930" "officer-console:4931" "field-station:4932")
+# Which of those leave loopback under --lan. Narrowed to the applicant portal alone when live SMS is
+# behind it (ADR-053 §3.5): the officer console and field station carry staff credentials, and the
+# citizen journey is the only one that needs a phone on the network.
+LAN_APPS=("${APPS[@]}")
 
 REAL_SMS=0; JOURNEYS=0; KAFKA_UI=0; REBUILD=0; LAN=0; STAGE=1; ACTION=up
+# The narrowed ADR-053 escape hatch: set ONLY by --lan-real-sms or SANDBOX_I_ACCEPT_LAN_SMS=1, and it
+# never reaches the launcher's own SANDBOX_EXPOSE_LAN (raw edge on the LAN), which stays absolutely barred.
+ALLOW_LAN_SMS=0
+[ "${SANDBOX_I_ACCEPT_LAN_SMS:-}" = 1 ] && ALLOW_LAN_SMS=1
 [ "${SANDBOX_EXPOSE_LAN:-}" = 1 ] && LAN=1
 for arg in "$@"; do
   case "$arg" in
-    --real-sms) REAL_SMS=1 ;; --journeys) JOURNEYS=1 ;; --kafka-ui) KAFKA_UI=1 ;; --rebuild) REBUILD=1 ;; --lan) LAN=1 ;; --no-staging) STAGE=0 ;;
+    --real-sms) REAL_SMS=1 ;; --lan-real-sms) LAN=1; REAL_SMS=1; ALLOW_LAN_SMS=1 ;; --journeys) JOURNEYS=1 ;; --kafka-ui) KAFKA_UI=1 ;; --rebuild) REBUILD=1 ;; --lan) LAN=1 ;; --no-staging) STAGE=0 ;;
     --down) ACTION=down ;; --status) ACTION=status ;;
     *) echo "✗ unknown option $arg (see the header of $0)" >&2; exit 2 ;;
   esac
@@ -178,15 +193,30 @@ status() {
   for a in "${APPS[@]}"; do printf '%-28s %s\n' "${a%%:*} :${a##*:}" "$(app_state "${a%%:*}" "${a##*:}")"; done
   if [ -f "$PIDS/web-tls" ] && [ -s "$TLS/address" ]; then
     local ip; ip="$(cat "$TLS/address")"
-    for a in "${APPS[@]}"; do
+    # Only the apps on the LAN surface: under --lan-real-sms the other two are deliberately
+    # loopback-only, and a ✗ row for them reads as a fault rather than as the decision it is.
+    for a in "${LAN_APPS[@]}"; do
       printf '%-28s %s\n' "${a%%:*} (LAN)" "$([ "$(tls_code "https://$ip:${a##*:}/")" = 200 ] && echo "✓ https://$ip:${a##*:}" || echo "✗ https://$ip:${a##*:} not answering")"
+    done
+    for a in "${APPS[@]}"; do
+      on_lan "${a##*:}" || printf '%-28s %s\n' "${a%%:*} (LAN)" "— loopback only by choice: http://localhost:${a##*:}"
     done
   fi
   docker ps --format '{{.Names}}\t{{.Status}}' | grep -E '^usrp-' | while IFS=$'\t' read -r n s; do printf '%-28s %s\n' "$n" "$s"; done
   printf '%-28s %s\n' "database" "$(node -e 'try { const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); console.log(r.db + " (complete boot " + r.startedAt + ")"); } catch { console.log("no complete boot recorded"); }' "$STATE/running.json")"
   printf '%-28s %s\n' "SMS" "$(grep -o 'SMS: [^·]*' "$LOGS/sandbox-up.out" 2>/dev/null | tail -1)"
+  # ADR-047 §3.5: presence only, never the directory's contents or the identity's values. The simulator
+  # reports it as a boolean on its own `sandbox_listening` line; a refused directory never gets this far
+  # (loadPrivatePersona throws and :4900 does not come up at all).
+  local overlay; overlay="$(grep -o '"overlay":[a-z]*' "$LOGS/g2g-sandbox.log" 2>/dev/null | tail -1)"
+  case "$overlay" in
+    '"overlay":true')  printf '%-28s %s\n' "private persona" "overlaid (PRIVATE)" ;;
+    '"overlay":false') printf '%-28s %s\n' "private persona" "none (synthetic population only; set SANDBOX_PRIVATE_PERSONA_DIR to overlay yours)" ;;
+    *)                 printf '%-28s %s\n' "private persona" "unknown (no sandbox_listening line yet in .sandbox/logs/g2g-sandbox.log)" ;;
+  esac
   if [ -f "$PIDS/web-tls" ] && [ -s "$TLS/address" ]; then
-    printf '%-28s %s\n' "Exposure" "⚠ the three apps on https://$(cat "$TLS/address"):4930-4932; edge, services, data on loopback"
+    local served; served="$(cat "$TLS/ports" 2>/dev/null)"; [ -n "$served" ] || served="4930-4932"
+    printf '%-28s %s\n' "Exposure" "⚠ on https://$(cat "$TLS/address") ports $served; edge, services, data on loopback"
   else
     local exposure; exposure="$(grep -o 'Exposure: [^·]*' "$LOGS/sandbox-up.out" 2>/dev/null | tail -1)"
     case "$exposure" in
@@ -236,8 +266,25 @@ command -v docker >/dev/null || die "docker is required"
 docker info >/dev/null 2>&1 || die "the docker daemon is not reachable"
 [ "$STAGE" = 1 ] || [ "$JOURNEYS" = 0 ] || die "--journeys plays the staged rehearsal scenarios; it cannot run with --no-staging"
 export SANDBOX_STAGE="$STAGE"
-if [ "$LAN" = 1 ] && [ "$REAL_SMS" = 1 ]; then
-  die "SANDBOX_EXPOSE_LAN=1 (--lan) cannot be combined with --real-sms (ADR-053): a network-reachable sandbox with live SMS behind it"
+if [ "$LAN" = 1 ] && [ "$REAL_SMS" = 1 ] && [ "$ALLOW_LAN_SMS" != 1 ]; then
+  die "SANDBOX_EXPOSE_LAN=1 (--lan) cannot be combined with --real-sms (ADR-053): a network-reachable sandbox with live SMS behind it. The owner-acknowledged exception is --lan-real-sms, which serves the applicant portal alone on the network (widen it deliberately with SANDBOX_LAN_APPS)."
+fi
+# Which apps leave loopback. Default: all three under --lan; the applicant portal ALONE when live SMS is
+# behind it (ADR-053 §3.5). SANDBOX_LAN_APPS overrides either default with a comma-separated list of app
+# names, or "all". Widening it under live SMS puts staff credentials on the network, so it says so loudly.
+if [ -n "${SANDBOX_LAN_APPS:-}" ]; then
+  wanted="${SANDBOX_LAN_APPS//,/ }"
+  [ "$wanted" = all ] && wanted="$(printf '%s ' "${APPS[@]%%:*}")"
+  LAN_APPS=()
+  for want in $wanted; do
+    match=""
+    for a in "${APPS[@]}"; do [ "${a%%:*}" = "$want" ] && match="$a"; done
+    [ -n "$match" ] || die "SANDBOX_LAN_APPS: unknown app '$want' (choose from ${APPS[*]%%:*}, or 'all')"
+    LAN_APPS+=("$match")
+  done
+  [ "${#LAN_APPS[@]}" -gt 0 ] || die "SANDBOX_LAN_APPS is empty: name at least one app, or unset it for the default"
+elif [ "$LAN" = 1 ] && [ "$REAL_SMS" = 1 ]; then
+  LAN_APPS=("applicant-portal:4930")
 fi
 # Here the APPS are what the network reaches, over TLS, and the edge stays on loopback behind their /edge
 # proxies. The launcher's own SANDBOX_EXPOSE_LAN binds the edge (plain http) to the LAN address instead,
@@ -308,7 +355,8 @@ say "frontend dependencies ($UI)"
 anchor="$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).QR_INVITATION_PUBLIC_KEY_B64 ?? '')" "$STATE/secrets.json" 2>/dev/null)"
 force=""; [ "$REBUILD" = 1 ] && force="--force"
 # The origin each app is built for: where the browser loads it. --lan bakes the https LAN address.
-app_origin() { if [ "$LAN" = 1 ]; then printf 'https://%s:%s' "$LAN_IP" "$1"; else printf 'http://localhost:%s' "$1"; fi; }
+on_lan() { local p; for p in "${LAN_APPS[@]}"; do [ "${p##*:}" = "$1" ] && return 0; done; return 1; }
+app_origin() { if [ "$LAN" = 1 ] && on_lan "$1"; then printf 'https://%s:%s' "$LAN_IP" "$1"; else printf 'http://localhost:%s' "$1"; fi; }
 # The TLS front shares the app ports (LAN address vs loopback); it is restarted after the previews below, so
 # a preview that has to be started again never finds its port held by it.
 stop_recorded web-tls
@@ -357,15 +405,17 @@ for a in ${started[@]+"${started[@]}"}; do
     || printf '\033[0;33m! %s did not answer on :%s; see %s\033[0m\n' "${a%%:*}" "${a##*:}" "$LOGS/full-web-${a%%:*}.out"
 done
 if [ "$LAN" = 1 ]; then
-  say "HTTPS on the network: https://$LAN_IP:4930, :4931, :4932 (only these three ports leave loopback)"
-  maps=(); for a in "${APPS[@]}"; do maps+=("$LAN_IP:${a##*:}=${a##*:}"); done
+  lan_ports="$(printf '%s ' "${LAN_APPS[@]##*:}" | sed 's/ $//')"
+  say "HTTPS on the network: $LAN_IP, port(s) $lan_ports (only these leave loopback)"
+  maps=(); for a in "${LAN_APPS[@]}"; do maps+=("$LAN_IP:${a##*:}=${a##*:}"); done
+  printf '%s' "$(printf '%s ' "${LAN_APPS[@]##*:}" | sed 's/ $//')" > "$TLS/ports"
   ( exec setsid node "$REPO/infrastructure/sandbox/tls-proxy.mjs" --cert "$TLS/server.crt" --key "$TLS/server.key" \
       --ca "$CA_DIR/ca.crt" "${maps[@]}" ) > "$LOGS/full-web-tls.out" 2>&1 < /dev/null &
   echo $! > "$PIDS/web-tls"
   for _ in $(seq 1 20); do grep -q 'tls-proxy ready' "$LOGS/full-web-tls.out" 2>/dev/null && break; kill -0 "$(cat "$PIDS/web-tls")" 2>/dev/null || break; sleep 0.5; done
   grep -q 'tls-proxy ready' "$LOGS/full-web-tls.out" \
     || { cat "$LOGS/full-web-tls.out" >&2; stop_recorded web-tls; die "--lan: the HTTPS front did not start; see $LOGS/full-web-tls.out"; }
-  for a in "${APPS[@]}"; do
+  for a in "${LAN_APPS[@]}"; do
     [ "$(tls_code "https://$LAN_IP:${a##*:}/")" = 200 ] \
       || printf '\033[0;33m! https://%s:%s does not answer with a certificate the sandbox CA verifies; see %s\033[0m\n' "$LAN_IP" "${a##*:}" "$LOGS/full-web-tls.out"
   done
@@ -390,6 +440,25 @@ if [ "$JOURNEYS" = 1 ]; then
 fi
 
 status
+if [ "$LAN" = 1 ] && [ "$REAL_SMS" = 1 ]; then
+  printf '\033[0;33m
+  ⚠ LIVE SMS BEHIND A NETWORK-REACHABLE SANDBOX (ADR-053 §3.5, acknowledged by --lan-real-sms)
+    On the network   %s
+                     The edge, the services and the data never leave loopback.
+    Twilio           every destination except TWILIO_TO is refused before the provider is called, so
+                     nobody else on this network can be texted by this sandbox. They CAN still spend
+                     your daily SMS cap and ring your number: do not leave this up unattended.
+    When you are done  pnpm sandbox:full --down
+\033[0m
+' "$(printf '%s ' "${LAN_APPS[@]%%:*}" | sed 's/ $//') on https://$LAN_IP"
+  # Widening past the portal puts officer and station credentials on the network: say so separately,
+  # so it can never be mistaken for the vetted default.
+  if [ "${#LAN_APPS[@]}" -gt 1 ]; then
+    printf '\033[0;31m    ⚠ STAFF CREDENTIALS ARE ON THIS NETWORK: SANDBOX_LAN_APPS widened the surface past the
+      applicant portal. Anyone on this Wi-Fi can reach the officer console and/or field station
+      sign-in. Use it on a network you control, never at a venue.\033[0m\n'
+  fi
+fi
 cat <<EOF
 
 ✓ sandbox:full is up
@@ -407,6 +476,6 @@ if [ "$LAN" = 1 ]; then
   ON THE NETWORK (this machine and every device on it; open the https addresses above, not localhost)
   trust the CA once per device   http://$LAN_IP:4930/usrp-sandbox-ca.crt  (or $CA_DIR/ca.crt)
     SHA-256 fingerprint          $CA_FINGERPRINT
-  a device that cannot connect   allow 4930-4932/tcp in this machine's firewall (ufw: sudo ufw allow 4930:4932/tcp)
+  a device that cannot connect   allow$(printf ' %s' "${LAN_APPS[@]##*:}")/tcp in this machine's firewall (ufw: sudo ufw allow $(printf '%s ' "${LAN_APPS[@]##*:}" | sed 's/ $//' | tr ' ' ',')/tcp)
 EOF
 fi

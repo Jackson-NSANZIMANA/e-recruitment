@@ -113,7 +113,7 @@ async function main(): Promise<void> {
 
   const GENEROUS = Object.fromEntries(Object.entries(DEFAULT_PROFILES).map(([k, v]) => [k, { ...v, bucketCapacity: 10_000 }])) as typeof DEFAULT_PROFILES;
   const server = await createSandboxServer({
-    world: { population: pop, overlay: null, live: null, now: () => new Date(), log: silentLog, clientTokens: new Set([DEV_G2G_CLIENT_TOKEN]) },
+    world: { population: pop, overlay: null, overlays: new Map(), live: null, now: () => new Date(), log: silentLog, clientTokens: new Set([DEV_G2G_CLIENT_TOKEN]) },
     environment: 'development', port: 0, host: '127.0.0.1', latencyScale: 0, profiles: GENEROUS,
   });
   const bus = new InMemoryEventBus();
