@@ -85,7 +85,7 @@ async function main(): Promise<void> {
   if (iremboLiveWanted && environment !== 'sandbox') throw new EnvValidationError(['SANDBOX_IREMBO_LIVE is allowed in the sandbox profile only (never in development or CI).']);
   const liveNumbers = new Set((process.env['SANDBOX_IREMBO_LIVE_NUMBERS'] ?? '').split(',').map((n) => n.trim().toUpperCase()).filter((n) => n !== ''));
   if (iremboLiveWanted && (liveNumbers.size === 0 || [...liveNumbers].some((n) => !APPLICATION_NUMBER_PATTERN.test(n)))) {
-    throw new EnvValidationError(['SANDBOX_IREMBO_LIVE needs SANDBOX_IREMBO_LIVE_NUMBERS: comma-separated certificate application numbers (a letter, 12 digits, 4 letters), one per consented subject.']);
+    throw new EnvValidationError(['SANDBOX_IREMBO_LIVE needs SANDBOX_IREMBO_LIVE_NUMBERS: comma-separated certificate application numbers (a letter, 12 digits, 4 letters or digits), one per consented subject.']);
   }
   const liveCertificates = iremboLiveWanted ? createLiveIremboCertificates({ numbers: liveNumbers, log }) : null;
 

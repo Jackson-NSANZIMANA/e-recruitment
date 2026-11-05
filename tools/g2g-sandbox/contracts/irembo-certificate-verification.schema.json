@@ -32,7 +32,7 @@
             },
             "REFERENCE_NUMBER": {
               "type": "string",
-              "pattern": "^[A-Z][0-9]{12}[A-Z]{4}$"
+              "pattern": "^[A-Z][0-9]{12}[A-Z0-9]{4}$"
             },
             "SIGNED_BY": {
               "type": "string"

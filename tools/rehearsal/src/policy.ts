@@ -127,11 +127,26 @@ const NOTARISED_TYPES: ReadonlySet<string> = new Set(['ALEVEL_CERTIFICATE', 'DEG
 /** §5: four-year track, "at least 70% in secondary science subjects" (weightedPercent; default taken, owner to confirm). */
 const SCIENCE_BAR: Readonly<Record<string, number>> = { OFFICER_FOUR_YEAR_UR: 70 };
 
-/** Placeholder Irembo criminal-record codes (ADR-048 §2.5): the real codes are for RIB/Irembo to give. */
+/** Placeholder Irembo criminal-record codes (ADR-048 §2.5): the synthetic population's certificates carry them. */
 export const SANDBOX_CLEARANCE_CODES = {
   noRecord: 'SANDBOX_PLACEHOLDER_CRIMINAL_NO_RECORD',
   extract: 'SANDBOX_PLACEHOLDER_CRIMINAL_RECORD_EXTRACT',
 } as const;
+
+/**
+ * The real Irembo APPLICATION_CODE of NPPA's Criminal Record Certificate, observed on the public
+ * endpoint (ADR-048 §4). Owner decision 2026-11-05: ACCEPTED, and NOT conclusive "no record": an
+ * officer reads its content (CLEARANCE_CONTENT_REVIEW).
+ */
+export const IREMBO_CRIMINAL_RECORD_CODE = 'NEW_CRIMINAL_RECORD_CLEARANCE_CERTIFICATE';
+
+/**
+ * Owner decision 2026-11-05: NPPA issues the certificate valid for six months from issuance. The
+ * window is counted in days (ClearancePolicy); 184 is the longest six-calendar-month span, so a
+ * certificate Irembo still reports in force is never refused as too old. Irembo's own STATUS:false
+ * refuses one past its real expiry, before the window is consulted (ADR-048 §2.5 amendment).
+ */
+export const CLEARANCE_VALIDITY_DAYS = 184;
 
 /** PURE. The v2 block of one category, derived from the printed facts. Throws only on a fact the model cannot express. */
 export function policyV2FromAnnouncement(agency: Agency, facts: AnnouncementCategoryFacts): PolicyV2 {
@@ -155,7 +170,11 @@ export function policyV2FromAnnouncement(agency: Agency, facts: AnnouncementCate
     conviction: { rule, notUnderProsecution: facts.underProsecutionBars === true },
     documents,
     clearance: needsClearance
-      ? { allowedCertificateCodes: [SANDBOX_CLEARANCE_CODES.noRecord, SANDBOX_CLEARANCE_CODES.extract], noRecordCertificateCodes: [SANDBOX_CLEARANCE_CODES.noRecord], validityDays: 90 }
+      ? {
+          allowedCertificateCodes: [SANDBOX_CLEARANCE_CODES.noRecord, SANDBOX_CLEARANCE_CODES.extract, IREMBO_CRIMINAL_RECORD_CODE],
+          noRecordCertificateCodes: [SANDBOX_CLEARANCE_CODES.noRecord],
+          validityDays: CLEARANCE_VALIDITY_DAYS,
+        }
       : null,
   });
 }

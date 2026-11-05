@@ -64,6 +64,9 @@ test('RCS notarises the academic certificate; RDF does not; clearance values rid
   const rcs = category('rcs-junior-2025', 'GENERAL_ENLISTEE');
   assert.equal(rcs.documents.find((d) => d.type === 'ALEVEL_CERTIFICATE')?.notarised, true);
   assert.equal(category('rdf-2026', 'RESERVE_FORCE_ALEVEL').documents.some((d) => d.notarised), false);
-  assert.equal(rcs.clearance?.validityDays, 90);
+  // Owner decisions 2026-11-05 (ADR-048 §4): six months, and NPPA's real code accepted but read by an officer.
+  assert.equal(rcs.clearance?.validityDays, 184);
+  assert.ok(rcs.clearance?.allowedCertificateCodes.includes('NEW_CRIMINAL_RECORD_CLEARANCE_CERTIFICATE'));
+  assert.ok(!rcs.clearance?.noRecordCertificateCodes.includes('NEW_CRIMINAL_RECORD_CLEARANCE_CERTIFICATE'));
   assert.equal(category('rnp-basic-2025', 'BASIC_POLICE_COURSE').clearance, null);
 });

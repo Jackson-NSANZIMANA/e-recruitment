@@ -2,7 +2,7 @@
 // g2g-sandbox — irembo-certificates: certificate verification, IremboGov wire
 //
 //   GET /irembo/rest/public/request/verify-certificate-by-application-number
-//   applicationnumber: <letter, 12 digits, 4 letters>
+//   applicationnumber: <letter, 12 digits, 4 letters or digits>
 //   Authorization: Bearer <sandbox G2G client token>   (NEVER a citizen token)
 //
 // Found: {status, data:{ISSUED_ON, STATUS, REFERENCE_NUMBER, SIGNED_BY,
@@ -26,8 +26,8 @@ import { ddmmyyyy } from './nida-irembo.js';
 
 export const IREMBO_CERTIFICATE_PATH = '/irembo/rest/public/request/verify-certificate-by-application-number';
 export const APPLICATION_NUMBER_HEADER = 'applicationnumber';
-/** The observed shape of the citizen-held number: a letter, 12 digits, 4 letters. */
-export const APPLICATION_NUMBER_PATTERN = /^[A-Z][0-9]{12}[A-Z]{4}$/;
+/** The observed shape of the citizen-held number: a letter, 12 digits, 4 letters or digits (a second capture showed a digit in the suffix, ADR-048 §2.3). */
+export const APPLICATION_NUMBER_PATTERN = /^[A-Z][0-9]{12}[A-Z0-9]{4}$/;
 
 export const CERT_CODES = {
   FOUND: { code: '3104', message: 'Dosiye yabonetse' },

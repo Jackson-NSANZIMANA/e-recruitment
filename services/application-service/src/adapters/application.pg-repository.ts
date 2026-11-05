@@ -50,7 +50,8 @@ import type {
 import type { StageEvents } from '../ports/event-outbox.js';
 import { ApplicationPersistenceError } from '../domain/application.errors.js';
 import { AGENCY_TARGET } from '../domain/agency-schema.js';
-import { deriveApplicationStatus } from '../domain/lifecycle.js';
+import { deriveApplicationStatus, type LifecycleOptions } from '../domain/lifecycle.js';
+import { criminalContentReviewOnly } from './clearance-content-review.pg.js';
 import {
   CampaignUnavailableForApplicationError,
   insertOpeningHistory,
@@ -75,7 +76,18 @@ interface ApplicationStateRow {
   readonly category: ApplicationCategory;
 }
 
+export interface PgApplicationRepositoryOptions {
+  /** CLEARANCE_CONTENT_REVIEW_ADMITS_TO_EXAM (see LifecycleOptions). Default false. */
+  readonly clearanceContentReviewAdmitsToExam?: boolean;
+}
+
 export class PgApplicationRepository implements ApplicationRepository {
+  readonly #lifecycle: LifecycleOptions;
+
+  constructor(options: PgApplicationRepositoryOptions = {}) {
+    this.#lifecycle = { clearanceContentReviewAdmitsToExam: options.clearanceContentReviewAdmitsToExam === true };
+  }
+
   async createApplication(
     input: CreateApplicationInput,
     stage?: StageEvents<CreateApplicationResult>,
@@ -184,11 +196,22 @@ export class PgApplicationRepository implements ApplicationRepository {
                 failureCodeOf(result.detail) !== failureCodeOf(current.academic_eligibility_detail)
               : newCriminal !== current.criminal_clearance_status;
 
-        const toStatus = deriveApplicationStatus(current.status, {
-          ageStatus: newAge,
-          academicStatus: newAcademic,
-          criminalStatus: newCriminal,
-        });
+        // A content-only criminal review lets scheduling proceed when the policy
+        // says so (LifecycleOptions); asked only when it can change the answer.
+        const contentReviewOnly =
+          this.#lifecycle.clearanceContentReviewAdmitsToExam === true && newCriminal === 'UNDER_REVIEW'
+            ? await criminalContentReviewOnly(tx, target.schema, result.applicationId)
+            : false;
+        const toStatus = deriveApplicationStatus(
+          current.status,
+          {
+            ageStatus: newAge,
+            academicStatus: newAcademic,
+            criminalStatus: newCriminal,
+            criminalContentReviewOnly: contentReviewOnly,
+          },
+          this.#lifecycle,
+        );
         const statusChanged = toStatus !== current.status;
 
         // Idempotent redelivery: nothing to do, write nothing.

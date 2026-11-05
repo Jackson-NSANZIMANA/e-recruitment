@@ -100,6 +100,8 @@ What already exists to build on:
 4. **Liveness for the pilot:** the placeholder scripted challenge in the sandbox, or wait for NIDA's.
 5. **Build order:** the B2 tablet capture first (it serves `CARD_PORTRAIT` too), or the NIDA path first.
 
+**Owner, 2026-11-05: the face model is deferred.** The sandbox runs the whole platform on one 8 GB machine, and a face-recognition model plus its runtime could starve the twelve services, Kafka, Postgres, MinIO and ClamAV. Nothing that loads a model is built until the owner chooses one. Parts that need no model (the simulator's scenario scores for synthetic people, the transport/mapping split, the B2 consent and capture screens) may be built first, if the owner asks.
+
 ## 6. Consequences
 
 - The NIDA-portrait path becomes **provable end to end** in the sandbox (tablet → edge → biometric-service → simulator → score → evidence → gate) while production stays fail-closed.

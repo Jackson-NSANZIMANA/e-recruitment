@@ -9,7 +9,7 @@
 // network can never be used to query Irembo about anyone else:
 //
 //   GET https://irembo.gov.rw/irembo/rest/public/request/verify-certificate-by-application-number
-//   applicationnumber: <letter, 12 digits, 4 letters>
+//   applicationnumber: <letter, 12 digits, 4 letters or digits>
 //   x-current-user-role: ROLE_CITIZEN
 //
 // Same fences as the live-NESA passthrough (ADR-047 §3.6):

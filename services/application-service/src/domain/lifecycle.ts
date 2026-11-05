@@ -44,6 +44,28 @@ export interface VettingEvidence {
   readonly ageStatus: AgeEligibilityStatus;
   readonly academicStatus: AcademicEligibilityStatus;
   readonly criminalStatus: CriminalClearanceStatus;
+  /**
+   * The criminal gate is UNDER_REVIEW for ONE reason only: an officer must read
+   * the CONTENT of a certificate the registry already proved authentic, in force,
+   * of an accepted type, within the validity window and bound to this applicant
+   * (the latest Irembo verification is REVIEW with exactly
+   * `CLEARANCE_CONTENT_REVIEW`). Absent means false. An identity doubt
+   * (`IDENTITY_NAME_PARTIAL`, `IDENTITY_HOLDER_UNREADABLE`) is never this.
+   */
+  readonly criminalContentReviewOnly?: boolean;
+}
+
+/** How a policy lets the exam go ahead while an officer still has a certificate to read. */
+export interface LifecycleOptions {
+  /**
+   * CLEARANCE_CONTENT_REVIEW_ADMITS_TO_EXAM (owner decision 2026-11-05, the
+   * sandbox): a content-only criminal review does not hold scheduling, so the
+   * applicant gets the slot, the invitation and the QR while the officer reads.
+   * The criminal hold stays open and the officer still decides it: CLEAR records
+   * CLEARED; REJECT is terminal and withdraws the QR; acceptance is refused
+   * until it is decided. Default false: ADR-033's rule (no QR before CLEARED).
+   */
+  readonly clearanceContentReviewAdmitsToExam?: boolean;
 }
 
 /** Statuses this projection will never move away from once reached. */
@@ -83,12 +105,22 @@ function isHardFail(evidence: VettingEvidence): boolean {
   );
 }
 
-/** True when all three gates have positively passed — the green-lane condition. */
-function allGatesPassed(evidence: VettingEvidence): boolean {
+/** The criminal gate lets scheduling proceed: CLEARED, or (when the policy allows it) a content-only review. */
+function criminalAllowsScheduling(evidence: VettingEvidence, options: LifecycleOptions): boolean {
+  if (evidence.criminalStatus === 'CLEARED') return true;
+  return (
+    options.clearanceContentReviewAdmitsToExam === true &&
+    evidence.criminalStatus === 'UNDER_REVIEW' &&
+    evidence.criminalContentReviewOnly === true
+  );
+}
+
+/** True when all three gates allow the green lane — the scheduling condition. */
+function allGatesPassed(evidence: VettingEvidence, options: LifecycleOptions): boolean {
   return (
     evidence.ageStatus === 'ELIGIBLE' &&
     evidence.academicStatus === 'ELIGIBLE' &&
-    evidence.criminalStatus === 'CLEARED'
+    criminalAllowsScheduling(evidence, options)
   );
 }
 
@@ -101,6 +133,7 @@ function allGatesPassed(evidence: VettingEvidence): boolean {
 export function deriveApplicationStatus(
   current: ApplicationStatus,
   evidence: VettingEvidence,
+  options: LifecycleOptions = {},
 ): ApplicationStatus {
   // Terminal states are never left by the projection.
   if (TERMINAL.has(current)) return current;
@@ -140,7 +173,7 @@ export function deriveApplicationStatus(
   // upward, and only within the linear ladder. All three gates passing is the
   // furthest: it reaches the positive terminal (green lane). Below that, the
   // stage tracks the deepest vetting dimension that has produced a verdict.
-  const candidate: ApplicationStatus = allGatesPassed(evidence)
+  const candidate: ApplicationStatus = allGatesPassed(evidence, options)
     ? 'DOCUMENT_REVIEW_GREEN'
     : evidence.criminalStatus !== 'PENDING'
       ? 'CRIMINAL_CLEARANCE'

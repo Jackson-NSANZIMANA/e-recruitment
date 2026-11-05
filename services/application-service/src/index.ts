@@ -120,10 +120,13 @@ export function createApplicationService(
 ): ApplicationService {
   const identityReader = new PgIdentityReader();
   const campaignReader = new PgCampaignReader();
-  const repository = new PgApplicationRepository();
+  // One reading of the content-review rule for BOTH writers of the status.
+  const lifecycle = { clearanceContentReviewAdmitsToExam: config.clearanceContentReviewAdmitsToExam === true };
+  const repository = new PgApplicationRepository(lifecycle);
   const readRepository = new PgApplicationReadRepository();
   const officerTransitionRepository = new PgOfficerTransitionRepository(
     config.separationOfDuties,
+    lifecycle,
   );
   // Outbox fast path (ADR-025) for the use cases already converted. The rest
   // still publish directly and are listed as the mechanical follow-up.
@@ -412,7 +415,7 @@ export type {
   StatusHistoryEntry,
   ReadOneInput,
 } from './ports/application-read-repository.js';
-export { loadApplicationConfig } from './config.js';
+export { loadClearanceContentReviewAdmitsToExam, loadApplicationConfig } from './config.js';
 export type { ApplicationServiceConfig } from './config.js';
 export type { IdentityReader, ApplicantIdentitySummary } from './ports/identity-reader.js';
 export type {
