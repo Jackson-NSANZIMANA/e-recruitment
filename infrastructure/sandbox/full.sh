@@ -152,6 +152,23 @@ stop_recorded() { # name
   fi
   rm -f "$file"
 }
+# Who holds a port, so a refusal says what to stop instead of leaving the operator to find it. It never stops
+# anything itself: a server with no record here may be someone else's. A preview of this very app, run from
+# the frontend checkout, is named as the likely leftover of an earlier run that lost its record.
+holder() { # port app
+  local pid pgid cmd cwd
+  for pid in $(ss -H -ltnp "sport = :$1" 2>/dev/null | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u); do
+    pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ')"
+    cmd="$(ps -o args= -p "$pid" 2>/dev/null | cut -c1-120)"
+    cwd="$(readlink "/proc/$pid/cwd" 2>/dev/null)"
+    printf '  held by pid %s (group %s): %s\n' "$pid" "${pgid:-?}" "${cmd:-unknown}"
+    [ -n "$cwd" ] && printf '  running in %s\n' "$cwd"
+    if [ -n "$UI" ] && [ "$cwd" = "$UI/apps/$2" ] && [[ "$cmd" == *vite* ]]; then
+      printf '  This looks like the %s preview left by an earlier sandbox run. Stop it, then run this again:\n    kill -TERM -- -%s\n' "$2" "${pgid:-$pid}"
+    fi
+  done
+  [ -n "${pid:-}" ] || printf '  (ss could not name the process; try: sudo ss -ltnp "sport = :%s")\n' "$1"
+}
 # Is the app's port served by the preview this script recorded? Answering HTTP 200 is not proof: the recorded
 # PID must be ours AND lead the process group of a process listening on that port (the PID is pnpm under
 # setsid; the listener is the `vite preview` node process below it).
@@ -396,7 +413,8 @@ for a in "${APPS[@]}"; do
   # Stop the preview BEFORE the build touches dist/: vite empties it and writes it again, and a preview kept
   # running through that serves pages without their entry script. A closed port says what is happening.
   stop_recorded "web-$app"; rm -f "$PIDS/web-$app.build"
-  busy "$port" && die ":$port is busy with a server this script did not start; stop it first"
+  busy "$port" && die ":$port is busy with a server this script did not start; stop it first
+$(holder "$port" "$app")"
   say "building $app (${hash:0:8}): pnpm build --filter=$pkg... ${force:+$force }(the frontend's own build, sandbox banner on)"
   if ! ( cd "$UI" && env "${benv[@]}" pnpm run build --filter="$pkg..." --ui=stream --no-daemon ${force:+"$force"} ) \
       > "$LOGS/full-build-$app.out" 2>&1 || [ ! -f "$UI/apps/$app/dist/index.html" ]; then

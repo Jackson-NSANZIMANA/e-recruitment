@@ -7,7 +7,7 @@
 // plays the part of the frontend: `run build` writes the app's dist/index.html, `run preview` becomes a
 // sleeping process whose port the curl stub then reports as 200.
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -65,6 +65,7 @@ if [ -f "$STUB_STATE/up-$port" ] && kill -0 "$(cat "$STUB_STATE/up-$port")" 2>/d
 fi
 case " \${STUB_BUSY:-} " in *" $port "*) echo "LISTEN 0 511 127.0.0.1:$port 0.0.0.0:* users:((\"python3\",pid=1,fd=3))" ;; esac
 [ -f "$STUB_STATE/foreign-$port" ] && echo "LISTEN 0 511 127.0.0.1:$port 0.0.0.0:* users:((\"python3\",pid=1,fd=3))"
+[ -f "$STUB_STATE/holder-$port" ] && echo "LISTEN 0 511 127.0.0.1:$port 0.0.0.0:* users:((\"node\",pid=$(cat "$STUB_STATE/holder-$port"),fd=3))"
 exit 0
 `,
   docker: '#!/usr/bin/env bash\nexit 0\n',
@@ -288,6 +289,24 @@ test('a port held by a server this script did not start is refused, not taken ov
   assert.match(out, /:4931 is busy with a server this script did not start; stop it first/);
   assert.equal(existsSync(join(fx.repo, '.sandbox/pids/web-officer-console')), false);
   assert.equal(calls.filter((c) => c.includes('|run preview --port 4931')).length, 0);
+});
+
+test('a refused port names its holder, and a leftover preview of the app gets the command that stops it', (t) => {
+  // A preview whose record an earlier run lost: it runs in the app's directory, but no PID file names it,
+  // so the script must not stop it. It says who holds the port and how to stop it instead.
+  const fx = fixture(t);
+  const leftover = spawn('bash', ['-c', 'exec -a "node /x/vite/bin/vite.js preview --port 4930" sleep 300'], {
+    cwd: join(fx.ui, 'apps/applicant-portal'), detached: true, stdio: 'ignore',
+  });
+  t.after(() => { try { process.kill(-leftover.pid, 'SIGKILL'); } catch { /* gone */ } });
+  writeFileSync(join(fx.state, 'holder-4930'), String(leftover.pid));
+  const { status, out } = run(fx);
+  assert.equal(status, 1);
+  assert.match(out, /:4930 is busy with a server this script did not start/);
+  assert.match(out, new RegExp(`held by pid ${leftover.pid} \\(group ${leftover.pid}\\): node /x/vite/bin/vite\\.js preview`));
+  assert.match(out, /looks like the applicant-portal preview left by an earlier sandbox run/);
+  assert.match(out, new RegExp(`kill -TERM -- -${leftover.pid}`));
+  process.kill(leftover.pid, 0); // refused, never stopped
 });
 
 test('a missing or wrong frontend checkout fails before anything starts, with the fix', (t) => {

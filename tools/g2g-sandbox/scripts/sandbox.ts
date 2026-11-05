@@ -537,7 +537,18 @@ async function up(): Promise<void> {
   // sandbox answering on :4921 used to be reused silently, and staging then failed against it).
   writeFileSync(
     join(STATE, 'running.json'),
-    JSON.stringify({ db: DB, forensics: FORENSICS, simulator: SIMULATOR_PORT, ports: Object.values(SERVICE_PORTS), startedAt: new Date().toISOString() }),
+    JSON.stringify({
+      db: DB,
+      forensics: FORENSICS,
+      // How SMS leaves and whether a private persona is overlaid: both are fixed at boot, so a sandbox started
+      // on the emulator (or without the persona) must not be reused by a boot that asks for real SMS (or one).
+      // Presence only for the persona, never its path or contents (ADR-047 §3.5).
+      sms: (process.env['SANDBOX_SMS'] ?? '').trim().toLowerCase() === 'twilio' ? 'twilio' : 'emulator',
+      persona: (process.env['SANDBOX_PRIVATE_PERSONA_DIR'] ?? '').trim() !== '',
+      simulator: SIMULATOR_PORT,
+      ports: Object.values(SERVICE_PORTS),
+      startedAt: new Date().toISOString(),
+    }),
     { mode: 0o600 },
   );
   out(`✓ sandbox up · edge http://localhost:${String(EDGE_PORT)} · simulators :${String(SIMULATOR_PORT)} · database ${DB} · broker :4992`);
