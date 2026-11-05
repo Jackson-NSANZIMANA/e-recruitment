@@ -16,7 +16,7 @@
 import { assertSimulatorAllowed, EnvValidationError } from '@usrp/shared-config';
 import { consoleLog } from './log.js';
 import { createLiveNesa } from './live-nesa.js';
-import { loadPrivatePersona, loadPrivatePersonas, PrivatePersonaRefused, withDistrict } from './overlay.js';
+import { loadPrivatePersonas, PrivatePersonaRefused, withDistrict } from './overlay.js';
 import { DISTRICT_TO_PROVINCE, type District } from '@usrp/shared-types';
 import { districtLabel, PROVINCE_LABEL_RW } from './population/geography.js';
 import { kigaliReferenceDate, Population } from './population/population.js';

@@ -153,48 +153,22 @@ export function loadPrivatePersonas(dir: string | undefined): readonly PrivatePe
   const personas: PrivatePersona[] = [];
   for (const [nid, identityInfo] of identities) {
     const hint = nidHintOf(nid);
-    const nesa = results.find((r) => r['studentNationalIdHint'] === hint) ?? null;
+    let nesa = results.find((r) => r['studentNationalIdHint'] === hint) ?? null;
+    // A capture with no hint cannot be attributed, so it is only ever paired when
+    // this directory holds exactly one subject — never guessed between several.
+    if (nesa === null && identities.size === 1) {
+      nesa = results.find((r) => r['studentNationalIdHint'] === undefined) ?? null;
+    }
     personas.push({ nid, identityInfo, nesa });
   }
   return personas;
 }
 
-/** Load the overlay, or null when unset. Throws PrivatePersonaRefused on any guard. */
+/**
+ * The first consented subject, or null when unset. Kept for callers that want one
+ * persona (tools/rehearsal). It delegates, so the consent gate cannot be bypassed.
+ */
 export function loadPrivatePersona(dir: string | undefined): PrivatePersona | null {
-  if (dir === undefined || dir.trim() === '') return null;
-  if (!existsSync(dir) || !statSync(dir).isDirectory()) throw new PrivatePersonaRefused('SANDBOX_PRIVATE_PERSONA_DIR is not a directory.');
-  if (enclosingGitWorkTree(dir) !== null) {
-    throw new PrivatePersonaRefused('SANDBOX_PRIVATE_PERSONA_DIR is inside a git work tree. The private persona must live outside every repository.');
-  }
-  let nid: string | null = null;
-  let identityInfo: Record<string, unknown> | null = null;
-  let nesa: Record<string, unknown> | null = null;
-  for (const name of readdirSync(dir)) {
-    if (!name.toLowerCase().endsWith('.json')) continue;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(readFileSync(join(dir, name), 'utf8'));
-    } catch {
-      continue; // not JSON: ignore without reporting its content
-    }
-    if (!isRecord(parsed)) continue;
-    const data = parsed['data'];
-    if (isRecord(data) && isRecord(data['identityInfo'])) {
-      const info = data['identityInfo'];
-      const profile = isRecord(data['userProfileDto']) ? data['userProfileDto'] : null;
-      const fromProfile = typeof profile?.['identificationNumber'] === 'string' ? profile['identificationNumber'] : null;
-      const fromDocument = typeof info['documentNumber'] === 'string' ? info['documentNumber'].replace(/\s+/g, '') : null;
-      const candidate = fromProfile ?? fromDocument;
-      if (candidate !== null && /^\d{16}$/.test(candidate)) {
-        nid = candidate;
-        identityInfo = info;
-      }
-    } else if (typeof parsed['studentIndexNumber'] === 'string' && Array.isArray(parsed['rawMark'])) {
-      nesa = parsed;
-    }
-  }
-  if (nid === null || identityInfo === null) {
-    throw new PrivatePersonaRefused('SANDBOX_PRIVATE_PERSONA_DIR holds no Irembo identity capture (a JSON file with data.identityInfo).');
-  }
-  return { nid, identityInfo, nesa };
+  return loadPrivatePersonas(dir)[0] ?? null;
 }
+

@@ -37,7 +37,7 @@ const numberOf = (persona: string): string => pop.persona(persona).certificates[
 
 async function withGateway(run: (gateway: IremboCertificateGateway) => Promise<void>, env: Record<string, string> = { NODE_ENV: 'development' }): Promise<void> {
   const server = await createSandboxServer({
-    world: { population: pop, overlay: null, live: null, now: () => new Date(), log: silentLog, clientTokens: new Set([DEV_G2G_CLIENT_TOKEN]) },
+    world: { population: pop, overlay: null, overlays: new Map(), live: null, now: () => new Date(), log: silentLog, clientTokens: new Set([DEV_G2G_CLIENT_TOKEN]) },
     environment: 'development', port: 0, host: '127.0.0.1', latencyScale: 0, timeoutHoldMs: 100, profiles: GENEROUS,
   });
   try {

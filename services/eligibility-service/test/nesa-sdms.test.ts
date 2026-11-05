@@ -19,7 +19,7 @@ const identityOf = (id: string) => {
 
 async function withGateway(run: (gateway: NesaSdmsGateway) => Promise<void>, env: Record<string, string> = { NODE_ENV: 'development' }): Promise<void> {
   const server = await createSandboxServer({
-    world: { population: pop, overlay: null, live: null, now: () => new Date(), log: silentLog, clientTokens: new Set() },
+    world: { population: pop, overlay: null, overlays: new Map(), live: null, now: () => new Date(), log: silentLog, clientTokens: new Set() },
     environment: 'development', port: 0, host: '127.0.0.1', latencyScale: 0, timeoutHoldMs: 100, profiles: GENEROUS,
   });
   try {
