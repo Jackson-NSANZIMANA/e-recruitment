@@ -156,8 +156,12 @@ Captured by the owner with `curl` against `https://irembo.gov.rw/irembo/rest/pub
 
 **The issuer is NPPA, not RIB.** The National Public Prosecution Authority's service page ("Gutanga icyemezo cy'uko utakatiwe n'inkiko", *Issuance of a Criminal Record Certificate*) describes the certificate as applied for, paid for, approved and downloaded through IremboGov. The verification strategy of §2.3 (the public Irembo check by application number) is therefore the issuer's own channel. "RIB" in this ADR and in code identifiers (`RIB_VETTING_COMPLETED`, registry `RIB`, `CLEARANCE_MODE=RIB_HASH`) stays as named: those are contracts other services consume, and renaming them is a separate, versioned change. A structured G2G clearance, if one is ever authorised, is NPPA's to provide.
 
-**Owner decisions still open** (each is a campaign-policy value, ADR-049, never code):
+**Owner decisions, 2026-11-05** (each is a campaign-policy value, ADR-049, never code):
 
-1. Is `NEW_CRIMINAL_RECORD_CLEARANCE_CERTIFICATE` an accepted clearance type (`allowedCertificateCodes`)? Until it is, a real certificate in force and bound to the applicant is answered `CERTIFICATE_WRONG_TYPE`.
-2. Is it a conclusive "no record" type (`noRecordCertificateCodes`), or can it list convictions so that an officer reads its content (`CLEARANCE_CONTENT_REVIEW`)? The Kinyarwanda service name ("certificate that you have not been convicted by the courts") suggests the former and the English title ("Criminal Record Certificate") the latter; NPPA is the one to confirm.
-3. The validity window: the confirmed default is 90 days (§2.5); the owner reports the certificate is issued valid for six months. A change is a new policy version, not a configuration edit.
+| Question | Decision | Where it lives |
+|---|---|---|
+| Is `NEW_CRIMINAL_RECORD_CLEARANCE_CERTIFICATE` an accepted clearance type? | **Yes.** | `allowedCertificateCodes` of every category that requires clearance (`tools/rehearsal/src/policy.ts` stages it for the six campaigns) |
+| Conclusive "no record", or does an officer read it? | **An officer reads it.** It is not in `noRecordCertificateCodes`, so an authentic, bound, in-window certificate is `REVIEW` with `CLEARANCE_CONTENT_REVIEW`. | `noRecordCertificateCodes` (unchanged: placeholders only) |
+| Validity window | **Six months from issuance** (NPPA). Counted as **184 days**, the longest six-calendar-month span, so a certificate Irembo still reports in force is never refused as too old; Irembo's `STATUS:false` refuses one past its real expiry first. Supersedes the 90-day default of §2.5. | `validityDays` in the policy; `DEFAULT_CLEARANCE_VALIDITY_DAYS` (184) only where a policy carries none |
+
+Campaigns already published keep the values they were published with (policy versions are immutable, ADR-030); the new values reach a sandbox when its campaigns are staged again.

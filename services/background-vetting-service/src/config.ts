@@ -56,13 +56,16 @@ export interface ClearanceCertificateConfig {
 }
 
 /**
- * Owner decisions (ADR-048 §2.3, defaults taken, owner to confirm):
- *   • validity 90 days before submission;
+ * Owner decisions (ADR-048 §2.3 and §4):
+ *   • validity: six months from issuance (owner, 2026-11-05: NPPA issues the
+ *     certificate valid for six months), counted as 184 days, the longest
+ *     six-calendar-month span; this fallback applies only where a campaign
+ *     policy (ADR-049) carries no clearance values;
  *   • the Irembo APPLICATION_CODE allowlist is configuration, required and
  *     never defaulted: the sandbox sets clearly named placeholders;
  *   • no distinct "no record" type unless configured, so content review is human.
  */
-export const DEFAULT_CLEARANCE_VALIDITY_DAYS = 90;
+export const DEFAULT_CLEARANCE_VALIDITY_DAYS = 184;
 
 function codes(raw: string | undefined): ReadonlySet<string> {
   return new Set((raw ?? '').split(',').map((c) => c.trim()).filter((c) => c !== ''));
