@@ -109,6 +109,8 @@ Mechanical guards:
 
 The SDMS results endpoint is public. With `SANDBOX_NESA_LIVE=1`, the NESA adapter calls the real `rne.sdms.gov.rw` for **one allowlisted index number** (the owner's own, set locally), and the simulator answers everything else. This proves the adapter against production bytes without a G2G agreement. It is rate-limited to 1 request per minute and refused in production until the authorisation exists.
 
+**Amendment (2026-11-05) — live IremboGov certificates.** The certificate-verification endpoint is public too (`applicationnumber` + `x-current-user-role: ROLE_CITIZEN`, no citizen bearer). With `SANDBOX_IREMBO_LIVE=1` (sandbox profile only) the `irembo-certificates` simulator forwards any well-formed number the synthetic population does not hold to `irembo.gov.rw` and passes the answer through; a found answer is re-validated against the captured contract (drift → 502). Upstream calls are spaced ≥2 s apart and a number answered within a minute is replayed. `scripts/sandbox.ts` then admits Irembo's real `NEW_CRIMINAL_RECORD_CLEARANCE_CERTIFICATE` code as an allowed, conclusive "no record" type with a 183-day validity (`SANDBOX_IREMBO_LIVE_CONTENT_REVIEW=1` keeps an officer on content). As with NESA, no USRP service ever holds the real URL; the "not found" responseCode is logged (code only) so it can be captured.
+
 ### 3.7 Production cutover changes configuration, not code
 
 Each adapter's transport sits behind its existing port: `NidaGateway`, `NesaGateway`, `SmsChannel`, and the new `ClearanceCertificateGateway` (ADR-048). Cutover means:

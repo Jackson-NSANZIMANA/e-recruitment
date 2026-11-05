@@ -3,6 +3,7 @@
 //
 //   GET {base}/irembo/rest/public/request/verify-certificate-by-application-number
 //   applicationnumber: <number>
+//   x-current-user-role: ROLE_CITIZEN   (the public endpoint answers only with it)
 //   Authorization: Bearer <G2G client token>
 //
 // The citizen-session API answers to the citizen's own bearer; USRP never
@@ -50,7 +51,7 @@ export class HttpIremboCertificateTransport implements IremboCertificateTranspor
     try {
       const response = await this.#fetch(`${this.#baseUrl}${IREMBO_CERTIFICATE_PATH}`, {
         method: 'GET',
-        headers: { accept: 'application/json', applicationnumber: applicationNumber, authorization: `Bearer ${this.#token}`, 'x-request-id': requestId },
+        headers: { accept: 'application/json', applicationnumber: applicationNumber, 'x-current-user-role': 'ROLE_CITIZEN', authorization: `Bearer ${this.#token}`, 'x-request-id': requestId },
         signal: AbortSignal.timeout(this.#timeoutMs),
       });
       return { status: response.status, headers: response.headers, bodyText: await response.text() };

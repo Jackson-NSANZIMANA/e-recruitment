@@ -8,6 +8,7 @@ export { SYNTHETIC_NID_PATTERN, isSyntheticNid, maskedHint, spacedDocumentNumber
 export { validateContract, CONTRACTS, type ContractName } from './contracts.js';
 export { loadPrivatePersona, enclosingGitWorkTree, PrivatePersonaRefused, type PrivatePersona } from './overlay.js';
 export { createLiveNesa, type LiveNesaPassthrough } from './live-nesa.js';
+export { createLiveIremboCertificates, LIVE_IREMBO_DEFAULT_BASE_URL, type LiveIremboCertificates, type LiveCertificateAnswer } from './live-irembo-certificates.js';
 export { consoleLog, silentLog, redact, type SandboxLog } from './log.js';
 export { BEHAVIOUR_HEADER, DEFAULT_PROFILES, type AuthorityProfile } from './behaviour.js';
 export { NIDA_IDENTITY_PATH, SUBJECT_HEADER } from './modules/nida-irembo.js';

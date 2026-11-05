@@ -11,11 +11,13 @@
 //                              (sandbox REQUIRES them; development defaults)
 //   SANDBOX_SMS_INBOX_FILE     the emulator's inbox (JSON lines, mode 0600)
 //   SANDBOX_NESA_LIVE=1 + SANDBOX_NESA_LIVE_INDEX (optional; sandbox only)
+//   SANDBOX_IREMBO_LIVE=1     (optional; sandbox only) real IremboGov certificate checks
 // ══════════════════════════════════════════════════════════════════
 
 import { assertSimulatorAllowed, EnvValidationError } from '@usrp/shared-config';
 import { consoleLog } from './log.js';
 import { createLiveNesa } from './live-nesa.js';
+import { createLiveIremboCertificates } from './live-irembo-certificates.js';
 import { loadPrivatePersonas, PrivatePersonaRefused, withDistrict } from './overlay.js';
 import { DISTRICT_TO_PROVINCE, type District } from '@usrp/shared-types';
 import { districtLabel, PROVINCE_LABEL_RW } from './population/geography.js';
@@ -77,12 +79,15 @@ async function main(): Promise<void> {
   if (liveWanted && environment !== 'sandbox') throw new EnvValidationError(['SANDBOX_NESA_LIVE is allowed in the sandbox profile only (never in development or CI).']);
   if (liveWanted && !/^[0-9A-Za-z]{8,32}$/.test(liveIndex)) throw new EnvValidationError(['SANDBOX_NESA_LIVE needs exactly one SANDBOX_NESA_LIVE_INDEX.']);
   const live = liveWanted ? createLiveNesa({ index: liveIndex, log }) : null;
+  const iremboLiveWanted = process.env['SANDBOX_IREMBO_LIVE'] === '1';
+  if (iremboLiveWanted && environment !== 'sandbox') throw new EnvValidationError(['SANDBOX_IREMBO_LIVE is allowed in the sandbox profile only (never in development or CI).']);
+  const liveCertificates = iremboLiveWanted ? createLiveIremboCertificates({ log }) : null;
 
   const seed = intEnv('SANDBOX_SEED', 20261025);
   const population = new Population({ seed, size: intEnv('SANDBOX_POPULATION_SIZE', 2000), referenceDate: kigaliReferenceDate(new Date()) });
   const port = intEnv('SANDBOX_PORT', intEnv('PORT', 4900));
   const server = await createSandboxServer({
-    world: { population, overlay, overlays, live, now: () => new Date(), log, clientTokens },
+    world: { population, overlay, overlays, live, liveCertificates, now: () => new Date(), log, clientTokens },
     environment,
     port,
     modules: buildModules({
@@ -95,7 +100,7 @@ async function main(): Promise<void> {
   });
   log.info('sandbox_listening', {
     port: server.port, environment, seed, citizens: population.citizens.length, personas: PERSONAS.length,
-    overlay: overlay !== null, subjects: overlays.size, live: live !== null, modules: 4,
+    overlay: overlay !== null, subjects: overlays.size, live: live !== null || liveCertificates !== null, modules: 4,
   });
 }
 
