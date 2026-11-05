@@ -31,6 +31,11 @@ export const LIVE_IREMBO_DEFAULT_BASE_URL = 'https://irembo.gov.rw';
 export const LIVE_IREMBO_PATH = '/irembo/rest/public/request/verify-certificate-by-application-number';
 const MIN_INTERVAL_MS = 2_000;
 const REPLAY_MS = 60_000;
+/**
+ * Below background-vetting-service's own IREMBO_CERTIFICATES_TIMEOUT_MS default (5 s), so a slow
+ * upstream answers as a 503 the service retries, instead of an answer nobody is waiting for.
+ */
+const UPSTREAM_TIMEOUT_MS = 4_000;
 
 export type LiveCertificateAnswer =
   | { readonly kind: 'OK'; readonly body: unknown }
@@ -71,7 +76,7 @@ export function createLiveIremboCertificates(options: LiveIremboCertificatesOpti
       }
       lastCallAt = now;
       const controller = new AbortController();
-      const timer = setTimeout(() => { controller.abort(); }, options.timeoutMs ?? 10_000);
+      const timer = setTimeout(() => { controller.abort(); }, options.timeoutMs ?? UPSTREAM_TIMEOUT_MS);
       try {
         const response = await fetchImpl(`${baseUrl}${LIVE_IREMBO_PATH}`, {
           method: 'GET',
