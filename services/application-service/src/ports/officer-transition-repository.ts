@@ -157,7 +157,16 @@ export type AcceptOutcome =
       readonly category: ApplicationCategory;
     }
   | { readonly kind: 'NO_CHANGE'; readonly currentStatus: ApplicationStatus }
-  | { readonly kind: 'NOT_APPLICABLE'; readonly currentStatus: ApplicationStatus }
+  | {
+      readonly kind: 'NOT_APPLICABLE';
+      readonly currentStatus: ApplicationStatus;
+      /**
+       * A vetting hold is still open (a certificate an officer has not read yet,
+       * when the policy let the exam go ahead without it): acceptance waits for
+       * the officer's decision in these lanes.
+       */
+      readonly heldLanes?: readonly AdjudicationLane[];
+    }
   | { readonly kind: 'NOT_FOUND' }
   | { readonly kind: 'CROSS_AGENCY_LOCKED'; readonly lockedByAgency: Agency }
   | SeparationOfDutiesOutcome;

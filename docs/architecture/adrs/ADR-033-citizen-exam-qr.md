@@ -64,3 +64,24 @@ download and bring to the screening.
   retry either places the citizen, re-announces the original slot, or records
   another deferral. Proven by `verify-slot-retry.ts`.
 - SMS delivery of the QR remains a **known gap**.
+
+## Amendment — 2026-11-05: the exam may go ahead while an officer reads a certificate (sandbox)
+
+**Owner decision** (ADR-048 §4): NPPA's Irembo criminal-record certificate is accepted, but an officer reads its content. For the sandbox, an applicant whose certificate Irembo has proved valid should still receive the invitation and the QR and sit the exam while that reading happens.
+
+**Rule.** With `CLEARANCE_CONTENT_REVIEW_ADMITS_TO_EXAM=true`, a criminal gate that is `UNDER_REVIEW` for **one reason only** counts as passing for scheduling. That reason is `CLEARANCE_CONTENT_REVIEW`: the certificate is authentic, in force, of an accepted type, within the policy window and bound to the applicant, and only its content is left to read.
+
+- The application then reaches `DOCUMENT_REVIEW_GREEN`, so the slot, the SMS invitation and this page's QR follow as usual.
+- An identity doubt (`IDENTITY_NAME_PARTIAL`, `IDENTITY_HOLDER_UNREADABLE`) is never content-only, and still holds the QR.
+
+**The officer still decides.** The criminal hold stays in the amber queue (the CRIMINAL lane of `adjudicate`, ADR-051):
+
+- **CLEAR** records `CLEARED`.
+- **REJECT** makes the application `REJECTED`: this page closes and the gate refuses it (ADR-034).
+- **Acceptance waits.** `accept` answers `409 ADJUDICATION_LANE_REQUIRED` with the open lanes until the hold is decided.
+
+**Where it lives.** One pure rule (`deriveApplicationStatus` with `LifecycleOptions`) and one reading of the verification row (`clearance-content-review.pg.ts`) serve both writers of the status: the vetting projection and adjudication.
+
+**Scope.**
+- The switch defaults off. application-service **refuses to boot with it in production**, so production keeps this ADR's original rule (no QR before every gate passes) until a decision records otherwise.
+- `scripts/sandbox.ts` turns it on.

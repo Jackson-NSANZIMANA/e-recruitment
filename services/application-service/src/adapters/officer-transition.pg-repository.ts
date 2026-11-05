@@ -46,13 +46,16 @@ import type {
 } from '../ports/officer-transition-repository.js';
 import { ApplicationPersistenceError } from '../domain/application.errors.js';
 import { schemaForAgency } from '../domain/agency-schema.js';
-import { deriveApplicationStatus, type VettingEvidence } from '../domain/lifecycle.js';
+import { deriveApplicationStatus, type LifecycleOptions, type VettingEvidence } from '../domain/lifecycle.js';
+import { criminalContentReviewOnly } from './clearance-content-review.pg.js';
 import { adjudicationLanes, type AdjudicationLane } from '../domain/adjudication-lanes.js';
 
 export class PgOfficerTransitionRepository implements OfficerTransitionRepository {
   readonly #sod: SeparationOfDutiesConfig;
+  readonly #lifecycle: LifecycleOptions;
 
-  constructor(separationOfDuties?: SeparationOfDutiesConfig) {
+  constructor(separationOfDuties?: SeparationOfDutiesConfig, lifecycle: LifecycleOptions = {}) {
+    this.#lifecycle = { clearanceContentReviewAdmitsToExam: lifecycle.clearanceContentReviewAdmitsToExam === true };
     // Default = the roadmap's stated rule only; see config.ts.
     this.#sod = separationOfDuties ?? {
       finalDecisionExcludesMedicalReviewer: true,
@@ -224,11 +227,17 @@ export class PgOfficerTransitionRepository implements OfficerTransitionRepositor
             category: ApplicationCategory;
             final_decision_by_id: string | null;
             vetting_hold_resolvers: string[];
+            criminal_clearance_status: string;
+            academic_status: string;
+            academic_eligibility_detail: Record<string, unknown> | null;
           }[]
         >`
           SELECT status, applicant_id, campaign_id, category,
                  final_decision_by_id::text AS final_decision_by_id,
-                 vetting_hold_resolvers::text[] AS vetting_hold_resolvers
+                 vetting_hold_resolvers::text[] AS vetting_hold_resolvers,
+                 criminal_clearance_status::text AS criminal_clearance_status,
+                 academic_status::text AS academic_status,
+                 academic_eligibility_detail
           FROM ${schema}.applications
           WHERE id = ${applicationId} FOR UPDATE
         `;
@@ -236,6 +245,19 @@ export class PgOfficerTransitionRepository implements OfficerTransitionRepositor
         const outcome = decide(current?.status, requiredFrom, target);
         if (outcome.kind !== 'APPLIED') return outcome;
         if (current === undefined) return { kind: 'NOT_FOUND' }; // unreachable: decide() maps a missing row to NOT_FOUND
+
+        // No one is enlisted on an undecided vetting hold. Before the content-review
+        // rule (LifecycleOptions) a criminal hold could never reach FINAL_SHORTLIST;
+        // with it, the exam goes ahead while an officer still reads the certificate,
+        // so acceptance is where that reading becomes mandatory. The refusal names
+        // the lanes, which the edge relays as ADJUDICATION_LANE_REQUIRED.
+        const openHolds = adjudicationLanes({
+          status: current.status,
+          criminalStatus: current.criminal_clearance_status,
+          academicStatus: current.academic_status,
+          academicDetail: current.academic_eligibility_detail,
+        });
+        if (openHolds.length > 0) return { kind: 'NOT_APPLICABLE', currentStatus: current.status, heldLanes: openHolds };
 
         // Four-eyes (policy-gated): the signer of the final decision may not
         // also enlist the applicant. Checked BEFORE the cross-agency lock so a
@@ -350,10 +372,17 @@ export class PgOfficerTransitionRepository implements OfficerTransitionRepositor
         // never from the queue entry the officer was looking at: the queue is a
         // snapshot, and a decision made against a stale copy must not silently
         // apply to a different hold.
+        // The same content-review reading the projection uses, so the officer's
+        // path and the machine's never place this row differently.
+        const contentReviewOnly =
+          this.#lifecycle.clearanceContentReviewAdmitsToExam === true && current.criminal_clearance_status === 'UNDER_REVIEW'
+            ? await criminalContentReviewOnly(tx, schemaForAgency(actor.agency), applicationId)
+            : false;
         let evidence: VettingEvidence = {
           ageStatus: current.age_eligibility_status,
           academicStatus: current.academic_status,
           criminalStatus: current.criminal_clearance_status,
+          criminalContentReviewOnly: contentReviewOnly,
         };
         const held = adjudicationLanes({
           status: current.status,
@@ -384,7 +413,7 @@ export class PgOfficerTransitionRepository implements OfficerTransitionRepositor
             // lane runs exactly as for a green-lane clearance); gates still
             // pending → the furthest justified vetting stage, never a premature
             // green on unanswered evidence.
-            target = deriveApplicationStatus('SUBMITTED', evidence);
+            target = deriveApplicationStatus('SUBMITTED', evidence, this.#lifecycle);
           } else {
             // CLEAR from ADJUDICATION_REVIEW: the officer dismisses the late
             // flag — restore the stage the row held when the flag arrived,
@@ -432,9 +461,14 @@ export class PgOfficerTransitionRepository implements OfficerTransitionRepositor
           // document hold (or a second lane) is still open, the top-level status
           // does not move — otherwise a criminal CLEAR would walk a row past a
           // document review no human has performed.
-          target = held.some((other) => other !== decided)
+          // A criminal hold that only awaits the certificate's content, under a
+          // policy that lets the exam go ahead, does not hold the status either.
+          const blocking = held.filter(
+            (other) => other !== decided && !(other === 'CRIMINAL' && contentReviewOnly && this.#lifecycle.clearanceContentReviewAdmitsToExam === true),
+          );
+          target = blocking.length > 0
             ? current.status
-            : deriveApplicationStatus(current.status, evidence);
+            : deriveApplicationStatus(current.status, evidence, this.#lifecycle);
         }
 
         // The DOCUMENT lane keeps its idempotent no-op; the dimension lanes

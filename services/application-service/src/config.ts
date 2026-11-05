@@ -17,7 +17,9 @@ import {
   loadDatabaseConfig,
   loadEnv,
   loadRuntimeConfig,
+  resolveUsrpEnvironment,
   withDefault,
+  EnvValidationError,
   type AuthVerifyConfig,
   type DatabaseConfig,
   type EnvSource,
@@ -34,6 +36,8 @@ export interface ApplicationServiceConfig {
   readonly separationOfDuties: SeparationOfDutiesConfig;
   /** The stalled-clearance re-announce sweep (scheduling deferrals). */
   readonly slotRetry: SlotRetryConfig;
+  /** CLEARANCE_CONTENT_REVIEW_ADMITS_TO_EXAM (see its loader). Absent means false. */
+  readonly clearanceContentReviewAdmitsToExam?: boolean;
 }
 
 /**
@@ -108,5 +112,29 @@ export function loadApplicationConfig(source: EnvSource = process.env): Applicat
     auth: loadAuthVerifyConfig(source),
     separationOfDuties: loadSeparationOfDutiesConfig(source),
     slotRetry: loadSlotRetryConfig(source),
+    clearanceContentReviewAdmitsToExam: loadClearanceContentReviewAdmitsToExam(source),
   };
 }
+
+/**
+ * CLEARANCE_CONTENT_REVIEW_ADMITS_TO_EXAM (owner decision 2026-11-05, ADR-048 §4):
+ * a criminal-record certificate the registry proved authentic, in force, of an
+ * accepted type, in-window and bound to the applicant, with only its CONTENT
+ * left for an officer to read, does not hold scheduling: the applicant gets the
+ * slot, the invitation and the QR while the officer reads. The officer still
+ * decides (CLEAR, or REJECT which withdraws the QR) and acceptance waits for it.
+ *
+ * `true` | `false` | unset (false). Allowed in the sandbox and development
+ * profiles only: in production it reverses ADR-033 ("no QR before the gates
+ * pass"), which needs its own recorded decision, so the boot refuses it.
+ */
+export function loadClearanceContentReviewAdmitsToExam(source: EnvSource = process.env): boolean {
+  const raw = (source['CLEARANCE_CONTENT_REVIEW_ADMITS_TO_EXAM'] ?? '').trim().toLowerCase();
+  if (raw === '' || raw === 'false') return false;
+  if (raw !== 'true') throw new EnvValidationError(['CLEARANCE_CONTENT_REVIEW_ADMITS_TO_EXAM must be true or false.']);
+  if (resolveUsrpEnvironment(source) === 'production') {
+    throw new EnvValidationError(['CLEARANCE_CONTENT_REVIEW_ADMITS_TO_EXAM is a sandbox decision (ADR-048 §4); production keeps ADR-033 until a decision records otherwise.']);
+  }
+  return true;
+}
+

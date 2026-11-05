@@ -328,6 +328,10 @@ function serviceEnv(s: Secrets): Record<string, string> {
     CLEARANCE_ALLOWED_APPLICATION_CODES: `${CERTIFICATE_APPLICATION_CODES.NO_RECORD},${CERTIFICATE_APPLICATION_CODES.RECORD_EXTRACT}`,
     CLEARANCE_NO_RECORD_APPLICATION_CODES: CERTIFICATE_APPLICATION_CODES.NO_RECORD,
     CLEARANCE_REFERENCE_HMAC_KEY: s['CLEARANCE_REFERENCE_HMAC_KEY'] ?? '',
+    // Owner decision 2026-11-05 (ADR-048 §4): a certificate Irembo proves valid and the
+    // applicant's, with only its content left for an officer to read, lets the exam go ahead.
+    // The officer still decides, and acceptance waits for it. Refused in production.
+    CLEARANCE_CONTENT_REVIEW_ADMITS_TO_EXAM: 'true',
     BIOMETRIC_MODE_RDF: 'SHADOW',
     SMS_CAP_STATE_FILE: join(STATE, 'sms', 'daily-cap.log'),
     CORS_ORIGINS: 'http://localhost:4930,http://localhost:4931,http://localhost:4932',
