@@ -6,6 +6,7 @@ import { Population } from '../src/population/population.js';
 import type { SandboxLog } from '../src/log.js';
 import type { PrivatePersona } from '../src/overlay.js';
 import type { LiveNesaPassthrough } from '../src/live-nesa.js';
+import type { LiveIremboCertificates } from '../src/live-irembo-certificates.js';
 import { DEFAULT_PROFILES, type AuthorityProfile } from '../src/behaviour.js';
 import type { Authority } from '../src/population/model.js';
 
@@ -29,12 +30,12 @@ export function captureLog(): { log: SandboxLog; lines: string[] } {
   };
 }
 
-export async function startSandbox(opts: { pop?: Population; overlay?: PrivatePersona | null; overlays?: readonly PrivatePersona[]; live?: LiveNesaPassthrough | null; log?: SandboxLog; timeoutHoldMs?: number; realBudgets?: boolean; host?: string } = {}) {
+export async function startSandbox(opts: { pop?: Population; overlay?: PrivatePersona | null; overlays?: readonly PrivatePersona[]; live?: LiveNesaPassthrough | null; liveCertificates?: LiveIremboCertificates | null; log?: SandboxLog; timeoutHoldMs?: number; realBudgets?: boolean; host?: string } = {}) {
   const pop = opts.pop ?? population();
   // `overlay` stays the single-subject shorthand; `overlays` is the many-subject world (ADR-047 §3.5).
   const subjects = opts.overlays ?? (opts.overlay == null ? [] : [opts.overlay]);
   const server = await createSandboxServer({
-    world: { population: pop, overlay: subjects[0] ?? null, overlays: new Map(subjects.map((s) => [s.nid, s])), live: opts.live ?? null, now: () => new Date(), log: opts.log ?? captureLog().log, clientTokens: new Set([TOKEN]) },
+    world: { population: pop, overlay: subjects[0] ?? null, overlays: new Map(subjects.map((s) => [s.nid, s])), live: opts.live ?? null, liveCertificates: opts.liveCertificates ?? null, now: () => new Date(), log: opts.log ?? captureLog().log, clientTokens: new Set([TOKEN]) },
     environment: 'development',
     port: 0,
     host: opts.host ?? '127.0.0.1',

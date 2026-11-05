@@ -41,8 +41,17 @@
 // the one accident this project cannot recover from.
 //
 // Optional: SANDBOX_DB (default usrp_sandbox), SANDBOX_PRIVATE_PERSONA_DIR, SANDBOX_NESA_LIVE=1 +
-// SANDBOX_NESA_LIVE_INDEX are passed to the simulator only. Nothing they hold
-// is written by this script.
+// SANDBOX_NESA_LIVE_INDEX, SANDBOX_IREMBO_LIVE=1 are passed to the simulator only. Nothing they
+// hold is written by this script.
+//
+// Real criminal-record certificates (SANDBOX_IREMBO_LIVE=1): a certificate number the synthetic
+// population does not hold is checked against the public IremboGov endpoint. The services then
+// also accept Irembo's real APPLICATION_CODE (IREMBO_LIVE_CLEARANCE_CODE), treat it as conclusive
+// "no record" — a certificate in force, bound to the applicant, clears with no officer step — and
+// use Irembo's 6-month validity. SANDBOX_IREMBO_LIVE_CONTENT_REVIEW=1 sends every such certificate
+// to an officer instead. The holder must match the applicant's identity (name + date of birth),
+// so a real certificate only clears for a private persona (SANDBOX_PRIVATE_PERSONA_DIR) of the
+// same person.
 // ══════════════════════════════════════════════════════════════════
 
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
@@ -58,6 +67,12 @@ import { CERTIFICATE_APPLICATION_CODES } from '../src/population/model.js';
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const STATE = join(REPO, '.sandbox');
 const PG_CONTAINER = process.env['PG_CONTAINER'] ?? 'usrp-postgres';
+/** Irembo's real APPLICATION_CODE for a criminal-record clearance (observed on the public endpoint). */
+const IREMBO_LIVE_CLEARANCE_CODE = 'NEW_CRIMINAL_RECORD_CLEARANCE_CERTIFICATE';
+const IREMBO_LIVE = process.env['SANDBOX_IREMBO_LIVE'] === '1';
+const IREMBO_LIVE_CONTENT_REVIEW = process.env['SANDBOX_IREMBO_LIVE_CONTENT_REVIEW'] === '1';
+/** IremboGov issues the certificate valid for six months. */
+const IREMBO_LIVE_VALIDITY_DAYS = '183';
 const PG_ADMIN = process.env['PG_ADMIN_USER'] ?? 'usrp_admin';
 const DB = /^[a-z][a-z0-9_]{0,40}$/.test(process.env['SANDBOX_DB'] ?? '') ? (process.env['SANDBOX_DB'] as string) : 'usrp_sandbox';
 const COMPOSE = ['compose', '-p', 'usrp-sandbox', '-f', join(REPO, 'infrastructure/docker/docker-compose.sandbox.yml')];
@@ -320,8 +335,9 @@ function serviceEnv(s: Secrets): Record<string, string> {
     CLEARANCE_MODE: 'IREMBO_CERTIFICATE',
     IREMBO_CERTIFICATES_BASE_URL: local(SIMULATOR_PORT),
     IREMBO_CERTIFICATES_CLIENT_TOKEN: s['NIDA_CLIENT_TOKEN'] ?? '',
-    CLEARANCE_ALLOWED_APPLICATION_CODES: `${CERTIFICATE_APPLICATION_CODES.NO_RECORD},${CERTIFICATE_APPLICATION_CODES.RECORD_EXTRACT}`,
-    CLEARANCE_NO_RECORD_APPLICATION_CODES: CERTIFICATE_APPLICATION_CODES.NO_RECORD,
+    CLEARANCE_ALLOWED_APPLICATION_CODES: [CERTIFICATE_APPLICATION_CODES.NO_RECORD, CERTIFICATE_APPLICATION_CODES.RECORD_EXTRACT, ...(IREMBO_LIVE ? [IREMBO_LIVE_CLEARANCE_CODE] : [])].join(','),
+    CLEARANCE_NO_RECORD_APPLICATION_CODES: [CERTIFICATE_APPLICATION_CODES.NO_RECORD, ...(IREMBO_LIVE && !IREMBO_LIVE_CONTENT_REVIEW ? [IREMBO_LIVE_CLEARANCE_CODE] : [])].join(','),
+    ...(IREMBO_LIVE ? { CLEARANCE_VALIDITY_DAYS: IREMBO_LIVE_VALIDITY_DAYS } : {}),
     CLEARANCE_REFERENCE_HMAC_KEY: s['CLEARANCE_REFERENCE_HMAC_KEY'] ?? '',
     BIOMETRIC_MODE_RDF: 'SHADOW',
     SMS_CAP_STATE_FILE: join(STATE, 'sms', 'daily-cap.log'),
@@ -499,7 +515,7 @@ async function up(): Promise<void> {
     SANDBOX_TWILIO_AUTH_TOKEN: s['TWILIO_AUTH_TOKEN'] ?? '',
     SANDBOX_SMS_INBOX_FILE: join(STATE, 'sms', 'inbox.jsonl'),
   };
-  for (const key of ['SANDBOX_PRIVATE_PERSONA_DIR', 'SANDBOX_PRIVATE_PERSONA_DISTRICT', 'SANDBOX_NESA_LIVE', 'SANDBOX_NESA_LIVE_INDEX', 'SANDBOX_SEED', 'SANDBOX_POPULATION_SIZE']) {
+  for (const key of ['SANDBOX_PRIVATE_PERSONA_DIR', 'SANDBOX_PRIVATE_PERSONA_DISTRICT', 'SANDBOX_NESA_LIVE', 'SANDBOX_NESA_LIVE_INDEX', 'SANDBOX_IREMBO_LIVE', 'SANDBOX_SEED', 'SANDBOX_POPULATION_SIZE']) {
     const value = process.env[key];
     if (value !== undefined && value !== '') simEnv[key] = value;
   }
