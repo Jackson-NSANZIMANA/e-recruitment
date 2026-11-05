@@ -52,12 +52,15 @@ test('number shape: a letter, 12 digits, 4 letters; spaces, hyphens and case are
   for (const bad of ['', 'S99000000000ABCD', '1990000000001ABCD', 'S990000000001ABC', 'S990000000001ABCDE', 'not a number']) assert.equal(parseClearanceNumber(bad), null, bad);
 });
 
-test('mapping: found, not found (3105, data null) and every other shape is a fault', () => {
+test('mapping: found, not found (3103, data null, as captured) and every other shape is a fault', () => {
   assert.equal(isoFromDdMmYyyy('31/02/2026'), null);
   assert.equal(isoFromDdMmYyyy('05/10/2026'), '2026-10-05');
-  assert.equal(mapIremboCertificate({ status: false, responseCode: '3105', data: null }).kind, 'NOT_FOUND');
+  // The live capture of a missing number, byte for byte (ADR-048 §2.5).
+  assert.equal(mapIremboCertificate({ status: false, data: null, responseCode: '3103', message: ' Dosiye yabuze.', responseEncrypted: false, traceId: 'ad68a9de48548bc2' }).kind, 'NOT_FOUND');
+  // The old sandbox assumption (3105) was never observed: it is no longer read as "not found".
+  assert.equal(mapIremboCertificate({ status: false, responseCode: '3105', data: null }).kind, 'FAULT');
   assert.equal(mapIremboCertificate({ status: false, responseCode: '5000', data: null }).kind, 'FAULT');
-  assert.equal(mapIremboCertificate({ status: false, responseCode: '3105', data: { x: 1 } }).kind, 'FAULT');
+  assert.equal(mapIremboCertificate({ status: false, responseCode: '3103', data: { x: 1 } }).kind, 'FAULT');
   assert.equal(mapIremboCertificate('x').kind, 'FAULT');
   assert.equal(mapIremboCertificate({ status: true, data: { NAME: 'A B' } }).kind, 'FAULT');
 });
