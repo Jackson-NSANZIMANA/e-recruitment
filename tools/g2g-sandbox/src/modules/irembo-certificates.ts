@@ -11,9 +11,10 @@
 // (contracts/irembo-certificate-verification.schema.json; shape only, no value
 // from the third-party sample appears here).
 //
-// SANDBOX ASSUMPTIONS until a live capture shows them: not found → HTTP 200,
-// status:false, responseCode 3105, "Dosiye ntabwo yabonetse", data null; a
-// malformed number → 400 / 4000; any other failure → status:false with
+// Not found is CAPTURED (2026-11-05, a well-formed number that does not exist):
+// HTTP 200, status:false, data null, responseCode 3103, message " Dosiye yabuze."
+// (the leading space is Irembo's own). SANDBOX ASSUMPTIONS until a live capture
+// shows them: a malformed number → 400 / 4000; any other failure → status:false with
 // responseCode 5000 (so an adapter can tell "no such certificate" from "the
 // registry failed", which must never become a negative verdict).
 // The APPLICATION_CODE values are clearly named PLACEHOLDERS (model.ts).
@@ -30,7 +31,8 @@ export const APPLICATION_NUMBER_PATTERN = /^[A-Z][0-9]{12}[A-Z]{4}$/;
 
 export const CERT_CODES = {
   FOUND: { code: '3104', message: 'Dosiye yabonetse' },
-  NOT_FOUND: { code: '3105', message: 'Dosiye ntabwo yabonetse' },
+  // Captured live; the leading space is part of Irembo's message.
+  NOT_FOUND: { code: '3103', message: ' Dosiye yabuze.' },
   BAD_NUMBER: { code: '4000', message: 'Nimero ya dosiye ntiyujujwe neza' },
   UNAUTHORIZED: { code: '4010', message: 'Ntabwo wemerewe' },
   TOO_MANY: { code: '4290', message: 'Ibyifuzo byabaye byinshi, ongera ugerageze nyuma' },
@@ -74,9 +76,9 @@ export const iremboCertificatesModule: SimulatorModule = {
     const number = req.header(APPLICATION_NUMBER_HEADER)?.trim() ?? '';
     if (!APPLICATION_NUMBER_PATTERN.test(number)) return { status: 400, json: envelope(CERT_CODES.BAD_NUMBER, false, null) };
     const hit = world.population.findByCertificate(number);
-    // SANDBOX_IREMBO_LIVE: a number no synthetic citizen holds is the owner's REAL
-    // certificate; ask the public IremboGov endpoint and pass its answer through.
-    if (hit === null && world.liveCertificates != null) {
+    // SANDBOX_IREMBO_LIVE: an ALLOWLISTED number (a consented subject's real
+    // certificate) is asked of the public IremboGov endpoint, and its answer passed through.
+    if (hit === null && world.liveCertificates?.appliesTo(number) === true) {
       const live = await world.liveCertificates.fetch(number);
       switch (live.kind) {
         case 'OK': return { status: 200, json: live.body };

@@ -11,13 +11,15 @@
 //                              (sandbox REQUIRES them; development defaults)
 //   SANDBOX_SMS_INBOX_FILE     the emulator's inbox (JSON lines, mode 0600)
 //   SANDBOX_NESA_LIVE=1 + SANDBOX_NESA_LIVE_INDEX (optional; sandbox only)
-//   SANDBOX_IREMBO_LIVE=1     (optional; sandbox only) real IremboGov certificate checks
+//   SANDBOX_IREMBO_LIVE=1 + SANDBOX_IREMBO_LIVE_NUMBERS (optional; sandbox only) real IremboGov
+//                              checks for the listed certificate numbers of consented subjects
 // ══════════════════════════════════════════════════════════════════
 
 import { assertSimulatorAllowed, EnvValidationError } from '@usrp/shared-config';
 import { consoleLog } from './log.js';
 import { createLiveNesa } from './live-nesa.js';
 import { createLiveIremboCertificates } from './live-irembo-certificates.js';
+import { APPLICATION_NUMBER_PATTERN } from './modules/irembo-certificates.js';
 import { loadPrivatePersonas, PrivatePersonaRefused, withDistrict } from './overlay.js';
 import { DISTRICT_TO_PROVINCE, type District } from '@usrp/shared-types';
 import { districtLabel, PROVINCE_LABEL_RW } from './population/geography.js';
@@ -81,7 +83,11 @@ async function main(): Promise<void> {
   const live = liveWanted ? createLiveNesa({ index: liveIndex, log }) : null;
   const iremboLiveWanted = process.env['SANDBOX_IREMBO_LIVE'] === '1';
   if (iremboLiveWanted && environment !== 'sandbox') throw new EnvValidationError(['SANDBOX_IREMBO_LIVE is allowed in the sandbox profile only (never in development or CI).']);
-  const liveCertificates = iremboLiveWanted ? createLiveIremboCertificates({ log }) : null;
+  const liveNumbers = new Set((process.env['SANDBOX_IREMBO_LIVE_NUMBERS'] ?? '').split(',').map((n) => n.trim().toUpperCase()).filter((n) => n !== ''));
+  if (iremboLiveWanted && (liveNumbers.size === 0 || [...liveNumbers].some((n) => !APPLICATION_NUMBER_PATTERN.test(n)))) {
+    throw new EnvValidationError(['SANDBOX_IREMBO_LIVE needs SANDBOX_IREMBO_LIVE_NUMBERS: comma-separated certificate application numbers (a letter, 12 digits, 4 letters), one per consented subject.']);
+  }
+  const liveCertificates = iremboLiveWanted ? createLiveIremboCertificates({ numbers: liveNumbers, log }) : null;
 
   const seed = intEnv('SANDBOX_SEED', 20261025);
   const population = new Population({ seed, size: intEnv('SANDBOX_POPULATION_SIZE', 2000), referenceDate: kigaliReferenceDate(new Date()) });

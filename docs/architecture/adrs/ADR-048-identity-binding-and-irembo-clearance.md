@@ -124,7 +124,7 @@ body that is truncated *while claiming to be in force* is still a fault.
 | `CORRECTION_NEEDED` | not found, withdrawn, wrong type, expired, not bound, malformed | unchanged (`PENDING`) | **audit only**: a correctable failure is not a verdict, and a `PENDING` event could regress an application that is already `CLEARED` | CORRECTION_NEEDED + a closed code |
 | `PENDING` (outage) | 429, 5xx, timeout, truncated body, `status:false` that is not "not found", a sandbox answer in production | unchanged | none; a deduplicated `REGISTRY_UNAVAILABLE` record, then the error propagates so the offset is not committed and the check is retried | VERIFYING |
 
-**Not found is distinguished from failed.** The only `status:false` answer treated as "no such certificate" is `responseCode 3105` with `data: null` (a **sandbox assumption** until a live capture of a missing number exists). Anything else that is not a well-formed found answer is an outage.
+**Not found is distinguished from failed.** The only `status:false` answer treated as "no such certificate" is `responseCode 3103` with `data: null`. *Captured 2026-11-05* from the public endpoint for a well-formed number that does not exist: HTTP 200, `{"status":false,"data":null,"responseCode":"3103","message":" Dosiye yabuze.","responseEncrypted":false,"traceId":…}` (the leading space is Irembo's). It replaces the earlier sandbox assumption `3105`, which was never observed. Anything else that is not a well-formed found answer is an outage.
 
 **Storage (rls/0040).** `<agency>_ops.clearance_certificate_verifications`, written only through the SECURITY DEFINER `record_clearance_verification`, owner `usrp_clearance_owner` (NOLOGIN, BYPASSRLS, never assumable), EXECUTE for `usrp_vetting_service` alone; the function re-checks the login is `usrp_app` acting as that role and that the application exists in this agency; idempotent for a redelivery. No column can hold a name or date of birth; a trigger rejects any binding key or value other than the four field names and the five per-field results. Reads: the agency officer role and `usrp_system_service` (the citizen's own checklist). `usrp_vetting_service` cannot read it back.
 
@@ -144,3 +144,20 @@ body that is truncated *while claiming to be in force* is still a fault.
 - **Applicants gain a clear, correctable failure.** "This record does not match your identity" isn't a rejection.
 - **The amber queue gains two reasons:** name partial match, and clearance content review. S06's queues must show both.
 - **The edge contract gains a field.** `submitApplication` (or a follow-up `attachClearanceCertificate` operation) carries the number. The frontend apply wizard and checklist need a follow-up change after the contract merges.
+
+## 4. Observations from the live endpoint (2026-11-05) — recorded, not adopted
+
+Captured by the owner with `curl` against `https://irembo.gov.rw/irembo/rest/public/request/verify-certificate-by-application-number` (headers `applicationnumber`, `x-current-user-role: ROLE_CITIZEN`, no bearer):
+
+| Case | Answer |
+|---|---|
+| A real certificate issued in 2023 (no longer in force) | `{"status":true,"data":{"STATUS":false,"APPLICATION_CODE":"NEW_CRIMINAL_RECORD_CLEARANCE_CERTIFICATE"},"responseCode":"3104","message":"Dosiye yabonetse",…}`, the reduced shape of the §2.5 amendment. Two runs, same body, different `traceId`. |
+| A well-formed number that does not exist | `{"status":false,"data":null,"responseCode":"3103","message":" Dosiye yabuze.",…}`, now the mapping's "not found" (§2.5). |
+
+**The issuer is NPPA, not RIB.** The National Public Prosecution Authority's service page ("Gutanga icyemezo cy'uko utakatiwe n'inkiko", *Issuance of a Criminal Record Certificate*) describes the certificate as applied for, paid for, approved and downloaded through IremboGov. The verification strategy of §2.3 (the public Irembo check by application number) is therefore the issuer's own channel. "RIB" in this ADR and in code identifiers (`RIB_VETTING_COMPLETED`, registry `RIB`, `CLEARANCE_MODE=RIB_HASH`) stays as named: those are contracts other services consume, and renaming them is a separate, versioned change. A structured G2G clearance, if one is ever authorised, is NPPA's to provide.
+
+**Owner decisions still open** (each is a campaign-policy value, ADR-049, never code):
+
+1. Is `NEW_CRIMINAL_RECORD_CLEARANCE_CERTIFICATE` an accepted clearance type (`allowedCertificateCodes`)? Until it is, a real certificate in force and bound to the applicant is answered `CERTIFICATE_WRONG_TYPE`.
+2. Is it a conclusive "no record" type (`noRecordCertificateCodes`), or can it list convictions so that an officer reads its content (`CLEARANCE_CONTENT_REVIEW`)? The Kinyarwanda service name ("certificate that you have not been convicted by the courts") suggests the former and the English title ("Criminal Record Certificate") the latter; NPPA is the one to confirm.
+3. The validity window: the confirmed default is 90 days (§2.5); the owner reports the certificate is issued valid for six months. A change is a new policy version, not a configuration edit.

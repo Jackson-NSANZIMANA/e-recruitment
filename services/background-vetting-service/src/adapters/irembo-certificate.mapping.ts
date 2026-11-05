@@ -4,8 +4,8 @@
 // tools/g2g-sandbox) into the domain's ClearanceLookup.
 //
 //   status:true  + data                         → FOUND
-//   status:false + responseCode 3105, data null → NOT_FOUND (a SANDBOX
-//        ASSUMPTION until a live capture of a missing number exists)
+//   status:false + responseCode 3103, data null → NOT_FOUND (captured from the
+//        public endpoint, 2026-11-05: message " Dosiye yabuze.")
 //   anything else (any other status:false code, a missing field, a bad
 //   date, a non-object body)                    → FAULT
 //
@@ -15,8 +15,13 @@
 
 import type { ClearanceCertificate } from '../domain/clearance.types.js';
 
-/** The Irembo responseCode that means "no certificate with this number" (sandbox assumption). */
-export const IREMBO_NOT_FOUND_CODE = '3105';
+/**
+ * The Irembo responseCode that means "no certificate with this number". Captured live on
+ * 2026-11-05 for a well-formed number that does not exist: HTTP 200, status:false, data:null,
+ * responseCode "3103", message " Dosiye yabuze." (ADR-048 §2.5). Replaces the sandbox
+ * assumption 3105, which was never observed.
+ */
+export const IREMBO_NOT_FOUND_CODE = '3103';
 
 export type CertificateMapping =
   | { readonly kind: 'FOUND'; readonly certificate: ClearanceCertificate }
