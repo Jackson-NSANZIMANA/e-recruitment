@@ -16,7 +16,7 @@
 # ══════════════════════════════════════════════════════════════════
 
 # ── Build: compile the service and its workspace dependencies ──────
-FROM node:24-bookworm-slim@sha256:a5f4366e834695d5f363b920c104953a535d3a9864d1bdf74566a0ebe01daee5 AS build
+FROM node:24-bookworm-slim@sha256:6042915a8b58012e6699f998ed96bca43ec9d8582447bdb68bc2445d0fafeb79 AS build
 ENV PNPM_HOME=/pnpm
 ENV PATH="$PNPM_HOME:$PATH"
 ENV CI=true
@@ -49,7 +49,7 @@ RUN --mount=type=cache,id=usrp-pnpm-store,target=/pnpm/store \
  && rm -rf patches turbo.json tsconfig.base.json
 
 # ── Runtime ────────────────────────────────────────────────────────
-FROM node:24-bookworm-slim@sha256:a5f4366e834695d5f363b920c104953a535d3a9864d1bdf74566a0ebe01daee5 AS runtime
+FROM node:24-bookworm-slim@sha256:6042915a8b58012e6699f998ed96bca43ec9d8582447bdb68bc2445d0fafeb79 AS runtime
 # A service needs node and nothing else. npm, npx, corepack and yarn (with
 # their bundled dependency trees) are most of the base image's scanner surface
 # and are never executed here, so they are removed, not merely unused.

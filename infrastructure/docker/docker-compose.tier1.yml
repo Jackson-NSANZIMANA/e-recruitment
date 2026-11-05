@@ -107,7 +107,7 @@ services:
   # container restarts until dist/ exists). Published on 3100 AND 3101, so the
   # existing NIDA_BASE_URL / NESA_BASE_URL defaults keep working.
   g2g-sandbox:
-    image: node:24-bookworm-slim@sha256:a5f4366e834695d5f363b920c104953a535d3a9864d1bdf74566a0ebe01daee5
+    image: node:24-bookworm-slim@sha256:6042915a8b58012e6699f998ed96bca43ec9d8582447bdb68bc2445d0fafeb79
     container_name: usrp-g2g-sandbox
     restart: unless-stopped
     working_dir: /repo
