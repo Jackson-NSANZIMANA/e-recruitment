@@ -63,3 +63,32 @@ test('every sandbox persona a scenario names exists in the catalogue', () => {
     for (const p of scenario.personas) if (p.sandboxPersona !== undefined) assert.ok(PERSONA_IDS.includes(p.sandboxPersona), `${file}: ${p.sandboxPersona}`);
   }
 });
+
+// Every printed district gets an exam session, or its applicants clear every gate and
+// then wait forever: scheduling finds NO_VENUE and no slot, invitation or QR follows.
+test('each announcement campaign stages a session in every district its announcement prints a venue for', () => {
+  const now = new Date('2026-10-26T08:00:00Z');
+  for (const id of ANNOUNCED) {
+    const scenario = load(id);
+    const printed = new Set((scenario.announcement?.venues ?? []).flatMap((v) => v.districts));
+    for (const staged of stageCampaigns(scenario, now)) {
+      const districts = staged.sessions.map((s) => s.district);
+      assert.equal(new Set(districts).size, districts.length, `${id}: one session per district (BUILD-001)`);
+      for (const d of printed) assert.ok(districts.includes(d as never), `${id}: no session for printed district ${d}`);
+      assert.deepEqual([...staged.draft.targetDistricts].sort(), [...districts].sort(), `${id}: target districts follow the sessions`);
+      for (const s of staged.sessions) {
+        assert.ok(s.examDate >= staged.draft.examinationStartDate && s.examDate <= staged.draft.examinationEndDate, `${id}/${s.district}: exam day inside the window`);
+      }
+    }
+  }
+  // RDF 2026 prints all 30 districts; it used to stage Nyagatare alone.
+  const rdf = stageCampaigns(load('rdf-2026'), now)[0];
+  assert.equal(rdf?.sessions.length, 30);
+  // A hand-written session keeps its own venue and capacity.
+  const nyagatare = rdf?.sessions.find((s) => s.district === 'NYAGATARE');
+  assert.equal(nyagatare?.venueName, 'Rehearsal Venue — Nyagatare stadium');
+  assert.equal(nyagatare?.capacityLimit, 400);
+  // A regional venue serves each of its districts (RCS officer: Kayonza district office for the East).
+  const officer = stageCampaigns(load('rcs-officer-2026-1y'), now)[0];
+  assert.equal(officer?.sessions.length, 30);
+});

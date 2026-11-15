@@ -340,13 +340,52 @@ function titleCase(district: string): string {
 }
 
 /** PURE. The concrete control-plane commands a scenario produces on the day of `now`. */
+/** Whole days from one YYYY-MM-DD to another (negative when `to` is earlier). */
+function daysFrom(from: string, to: string): number {
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
+}
+
+/**
+ * The sessions a campaign stages: one per district the announcement PRINTS a venue for
+ * (BUILD-001 allows one session per district), plus any hand-written session, which wins for
+ * its district. Without this, a campaign published from an announcement that covers all 30
+ * districts was staged with only its hand-written sessions (RDF 2026 and RCS junior: Nyagatare
+ * alone), so every applicant from another district passed every gate and then waited forever
+ * at DOCUMENT_REVIEW_GREEN: scheduling found NO_VENUE and no slot, invitation or QR followed.
+ *
+ *   • a venue serving several districts (RCS officer regional venues) gives each district its
+ *     own session at that venue; their capacity is not shared (ADR-049: shared multi-district
+ *     capacity remains a known gap);
+ *   • the printed day maps into the rehearsal's compressed examination window by its distance
+ *     from the printed start, clamped to the window (a two-day sitting stages its first day);
+ *   • capacity and reporting hour follow the campaign's hand-written sessions (or 100 and the
+ *     campaign hour when it has none).
+ */
+export function campaignSessions(campaign: ScenarioCampaign, announcement: Announcement | undefined): readonly ScenarioSession[] {
+  const written = new Map(campaign.sessions.map((s) => [s.district, s]));
+  if (announcement === undefined || announcement.agency !== campaign.agency || announcement.examination === null) return campaign.sessions;
+  const printedStart = announcement.examination.start;
+  const { startOffsetDays, endOffsetDays } = campaign.examination;
+  const capacity = campaign.sessions[0]?.capacity ?? 100;
+  const derived: ScenarioSession[] = [];
+  for (const venue of announcement.venues) {
+    const first = [...venue.dates].sort()[0] ?? printedStart;
+    const examOffsetDays = Math.min(endOffsetDays, Math.max(startOffsetDays, startOffsetDays + daysFrom(printedStart, first)));
+    for (const district of venue.districts) {
+      if (written.has(district)) continue;
+      derived.push({ district, venue: venue.venue, examOffsetDays, reportingHour: campaign.reportingHour, capacity });
+    }
+  }
+  return [...campaign.sessions, ...derived];
+}
+
 export function stageCampaigns(scenario: Scenario, now: Date): readonly StagedCampaign[] {
   validateScenario(scenario);
   return scenario.campaigns.map((campaign) => {
     const agency = campaign.agency as Agency;
     const publicCode = rehearsalCode(agency, now, campaign.codeTag);
     const today = kigaliDate(now);
-    const sessions = campaign.sessions.map((session): SessionCommand => {
+    const sessions = campaignSessions(campaign, scenario.announcement).map((session): SessionCommand => {
       const district = session.district as District;
       return {
         publicCode,

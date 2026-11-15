@@ -185,7 +185,7 @@ SANDBOX_IREMBO_LIVE=1 SANDBOX_IREMBO_LIVE_NUMBERS=<number>,<number> pnpm sandbox
 ```
 
 - Only the listed numbers (a letter, 12 digits, 4 letters or digits; one per consented subject) leave the machine. Every other number is answered by the simulator, so a sandbox on the network cannot query Irembo about anyone else.
-- It changes no clearance rule. The accepted certificate types, the conclusive "no record" types and the validity window are the campaign policy's (ADR-049). The six campaigns still list the ADR-048 placeholder codes, so a real certificate that is in force and yours is answered "This is not a criminal-record certificate" until the owner decides on Irembo's real code (`NEW_CRIMINAL_RECORD_CLEARANCE_CERTIFICATE`, ADR-048 §4). A certificate no longer in force is answered "no longer valid", and a number that does not exist "not found", exactly as in production.
+- It changes no clearance rule. The accepted certificate types, the conclusive "no record" types and the validity window are the campaign policy's (ADR-049). The six campaigns accept Irembo's real code (`NEW_CRIMINAL_RECORD_CLEARANCE_CERTIFICATE`, owner decision of 2026-11-05, ADR-048 §4), read by an officer, valid six months; in the sandbox the applicant sits the exam while the officer reads it (ADR-033 amendment). A certificate no longer in force is answered "no longer valid", and a number that does not exist "not found", exactly as in production.
 - The holder's name and date of birth must match the subject's identity capture.
 
 ## Behaviour switches
