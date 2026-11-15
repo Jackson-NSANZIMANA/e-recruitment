@@ -45,14 +45,13 @@ export interface VettingEvidence {
   readonly academicStatus: AcademicEligibilityStatus;
   readonly criminalStatus: CriminalClearanceStatus;
   /**
-   * The criminal gate is UNDER_REVIEW for ONE reason only: an officer must read
-   * the CONTENT of a certificate the registry already proved authentic, in force,
-   * of an accepted type, within the validity window and bound to this applicant
-   * (the latest Irembo verification is REVIEW with exactly
-   * `CLEARANCE_CONTENT_REVIEW`). Absent means false. An identity doubt
-   * (`IDENTITY_NAME_PARTIAL`, `IDENTITY_HOLDER_UNREADABLE`) is never this.
+   * The criminal gate is UNDER_REVIEW and an officer has only a DECISION to record:
+   * the latest Irembo verification asks for the certificate's CONTENT to be read
+   * (REVIEW with exactly `CLEARANCE_CONTENT_REVIEW`), or the category asks for no
+   * certificate and the agency checks its own records (RNP). Absent means false.
+   * An identity doubt (`IDENTITY_NAME_PARTIAL`, `IDENTITY_HOLDER_UNREADABLE`) is never this.
    */
-  readonly criminalContentReviewOnly?: boolean;
+  readonly criminalReviewAdmitsExam?: boolean;
 }
 
 /** How a policy lets the exam go ahead while an officer still has a certificate to read. */
@@ -111,7 +110,7 @@ function criminalAllowsScheduling(evidence: VettingEvidence, options: LifecycleO
   return (
     options.clearanceContentReviewAdmitsToExam === true &&
     evidence.criminalStatus === 'UNDER_REVIEW' &&
-    evidence.criminalContentReviewOnly === true
+    evidence.criminalReviewAdmitsExam === true
   );
 }
 

@@ -85,3 +85,20 @@ download and bring to the screening.
 **Scope.**
 - The switch defaults off. application-service **refuses to boot with it in production**, so production keeps this ADR's original rule (no QR before every gate passes) until a decision records otherwise.
 - `scripts/sandbox.ts` turns it on.
+
+## Amendment — 2026-11-15: categories that ask for no certificate (the agency record check)
+
+**Problem found.** RNP Basic and RNP Cadet print no criminal-record certificate among their documents, but they apply a criminal rule ("never sentenced to six months or more"). With `CLEARANCE_MODE=IREMBO_CERTIFICATE`, the criminal gate is answered only by a certificate number, and the applicant is never asked for one. The gate stayed `PENDING` forever, so no RNP applicant reached a slot or a QR.
+
+The sandbox journeys hid this. They posted a certificate number straight to the API, a route no real applicant has. They now attach a number only when the applicant's own checklist offers the field.
+
+**Owner decision.** The agency checks its own records and an officer records the result. In the sandbox the exam goes ahead meanwhile.
+
+**Rule.**
+- **When it applies.** With the Irembo certificate flow on, the category's required documents (resolved exactly as the checklist resolves them, ADR-032) don't include `NON_CONVICTION_CERTIFICATE`, and no certificate verification exists.
+- **What happens.** The first vetting result to arrive moves a `PENDING` criminal gate to `UNDER_REVIEW`. The application then appears in the CRIMINAL lane of the amber queue as "Criminal record needs a human reading" (`CRIMINAL_RECORD_REVIEW`).
+- **The officer decides.** CLEAR records `CLEARED`; REJECT rejects the application. Acceptance waits for the decision.
+- **Everywhere, not just the sandbox.** This part applies whenever the Irembo flow is on, production included. Without it an RNP application is stuck forever.
+- **The early QR stays sandbox-only.** With `CLEARANCE_CONTENT_REVIEW_ADMITS_TO_EXAM=true`, an agency record check, like a certificate-content review, lets the applicant reach `DOCUMENT_REVIEW_GREEN`, so the slot, the SMS and the QR follow.
+
+**Where it lives.** `clearance-content-review.pg.ts` (`agencyRecordCheckApplies`, `criminalReviewAdmitsExam`) is read by both writers. The projection starts the check, and never over an officer's decision.

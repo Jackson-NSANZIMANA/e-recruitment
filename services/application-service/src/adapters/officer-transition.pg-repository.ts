@@ -47,7 +47,7 @@ import type {
 import { ApplicationPersistenceError } from '../domain/application.errors.js';
 import { schemaForAgency } from '../domain/agency-schema.js';
 import { deriveApplicationStatus, type LifecycleOptions, type VettingEvidence } from '../domain/lifecycle.js';
-import { criminalContentReviewOnly } from './clearance-content-review.pg.js';
+import { criminalReviewAdmitsExam } from './clearance-content-review.pg.js';
 import { adjudicationLanes, type AdjudicationLane } from '../domain/adjudication-lanes.js';
 
 export class PgOfficerTransitionRepository implements OfficerTransitionRepository {
@@ -376,13 +376,13 @@ export class PgOfficerTransitionRepository implements OfficerTransitionRepositor
         // path and the machine's never place this row differently.
         const contentReviewOnly =
           this.#lifecycle.clearanceContentReviewAdmitsToExam === true && current.criminal_clearance_status === 'UNDER_REVIEW'
-            ? await criminalContentReviewOnly(tx, schemaForAgency(actor.agency), applicationId)
+            ? await criminalReviewAdmitsExam(tx, schemaForAgency(actor.agency), applicationId)
             : false;
         let evidence: VettingEvidence = {
           ageStatus: current.age_eligibility_status,
           academicStatus: current.academic_status,
           criminalStatus: current.criminal_clearance_status,
-          criminalContentReviewOnly: contentReviewOnly,
+          criminalReviewAdmitsExam: contentReviewOnly,
         };
         const held = adjudicationLanes({
           status: current.status,

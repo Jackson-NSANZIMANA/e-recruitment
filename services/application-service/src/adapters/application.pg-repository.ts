@@ -51,7 +51,7 @@ import type { StageEvents } from '../ports/event-outbox.js';
 import { ApplicationPersistenceError } from '../domain/application.errors.js';
 import { AGENCY_TARGET } from '../domain/agency-schema.js';
 import { deriveApplicationStatus, type LifecycleOptions } from '../domain/lifecycle.js';
-import { criminalContentReviewOnly } from './clearance-content-review.pg.js';
+import { agencyRecordCheckApplies, criminalReviewAdmitsExam } from './clearance-content-review.pg.js';
 import {
   CampaignUnavailableForApplicationError,
   insertOpeningHistory,
@@ -79,13 +79,21 @@ interface ApplicationStateRow {
 export interface PgApplicationRepositoryOptions {
   /** CLEARANCE_CONTENT_REVIEW_ADMITS_TO_EXAM (see LifecycleOptions). Default false. */
   readonly clearanceContentReviewAdmitsToExam?: boolean;
+  /**
+   * The Irembo certificate flow is on (CLEARANCE_MODE=IREMBO_CERTIFICATE): a category that
+   * asks for no certificate gets the agency record check. Default false (RIB_HASH answers
+   * every category on applicant.submitted).
+   */
+  readonly agencyRecordCheck?: boolean;
 }
 
 export class PgApplicationRepository implements ApplicationRepository {
   readonly #lifecycle: LifecycleOptions;
+  readonly #agencyRecordCheck: boolean;
 
   constructor(options: PgApplicationRepositoryOptions = {}) {
     this.#lifecycle = { clearanceContentReviewAdmitsToExam: options.clearanceContentReviewAdmitsToExam === true };
+    this.#agencyRecordCheck = options.agencyRecordCheck === true;
   }
 
   async createApplication(
@@ -179,8 +187,23 @@ export class PgApplicationRepository implements ApplicationRepository {
           result.dimension === 'AGE' ? result.ageStatus : current.age_eligibility_status;
         const newAcademic =
           result.dimension === 'ACADEMIC' ? result.academicStatus : current.academic_status;
-        const newCriminal =
+        let newCriminal =
           result.dimension === 'CRIMINAL' ? result.criminalStatus : current.criminal_clearance_status;
+
+        // AGENCY RECORD CHECK (owner decision 2026-11-15, ADR-033 amendment). With the Irembo
+        // certificate flow, the criminal gate is answered only by a certificate number; a
+        // category that asks the citizen for NO certificate (RNP, as printed) was left PENDING
+        // for ever. Its check is the agency's own: the first verdict to arrive hands the
+        // criminal gate to an officer (UNDER_REVIEW), who records the result in the CRIMINAL
+        // lane, and acceptance waits for it. A verdict of the criminal dimension itself, or a
+        // dimension an officer already decided, is never overridden here.
+        const agencyCheckStarts =
+          this.#agencyRecordCheck &&
+          result.dimension !== 'CRIMINAL' &&
+          current.criminal_clearance_status === 'PENDING' &&
+          !decidedByHuman(current.vetting_hold_resolved_dimensions, 'CRIMINAL') &&
+          (await agencyRecordCheckApplies(tx, target.schema, result.applicationId));
+        if (agencyCheckStarts) newCriminal = 'UNDER_REVIEW';
 
         // A PENDING academic verdict can still CHANGE MEANING (ADR-048 §2.2):
         // "record not bound to you" → corrected index → "results unpublished".
@@ -188,19 +211,19 @@ export class PgApplicationRepository implements ApplicationRepository {
         // change to record, not an idempotent redelivery to skip.
         const failureCodeOf = (detail: unknown): unknown =>
           typeof detail === 'object' && detail !== null ? (detail as Record<string, unknown>)['failureCode'] ?? null : null;
-        const columnChanged =
-          result.dimension === 'AGE'
+        const columnChanged = agencyCheckStarts ||
+          (result.dimension === 'AGE'
             ? newAge !== current.age_eligibility_status
             : result.dimension === 'ACADEMIC'
               ? newAcademic !== current.academic_status ||
                 failureCodeOf(result.detail) !== failureCodeOf(current.academic_eligibility_detail)
-              : newCriminal !== current.criminal_clearance_status;
+              : newCriminal !== current.criminal_clearance_status);
 
         // A content-only criminal review lets scheduling proceed when the policy
         // says so (LifecycleOptions); asked only when it can change the answer.
         const contentReviewOnly =
           this.#lifecycle.clearanceContentReviewAdmitsToExam === true && newCriminal === 'UNDER_REVIEW'
-            ? await criminalContentReviewOnly(tx, target.schema, result.applicationId)
+            ? await criminalReviewAdmitsExam(tx, target.schema, result.applicationId)
             : false;
         const toStatus = deriveApplicationStatus(
           current.status,
@@ -208,7 +231,7 @@ export class PgApplicationRepository implements ApplicationRepository {
             ageStatus: newAge,
             academicStatus: newAcademic,
             criminalStatus: newCriminal,
-            criminalContentReviewOnly: contentReviewOnly,
+            criminalReviewAdmitsExam: contentReviewOnly,
           },
           this.#lifecycle,
         );
@@ -216,6 +239,15 @@ export class PgApplicationRepository implements ApplicationRepository {
 
         // Idempotent redelivery: nothing to do, write nothing.
         if (!columnChanged && !statusChanged) return { kind: 'NO_CHANGE' };
+
+        if (agencyCheckStarts) {
+          await tx`
+            UPDATE ${schema}.applications SET
+              criminal_clearance_status = 'UNDER_REVIEW'::${schema}.criminal_clearance_status,
+              updated_at = now()
+            WHERE id = ${result.applicationId}
+          `;
+        }
 
         if (result.dimension === 'AGE') {
           await tx`

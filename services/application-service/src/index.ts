@@ -122,7 +122,7 @@ export function createApplicationService(
   const campaignReader = new PgCampaignReader();
   // One reading of the content-review rule for BOTH writers of the status.
   const lifecycle = { clearanceContentReviewAdmitsToExam: config.clearanceContentReviewAdmitsToExam === true };
-  const repository = new PgApplicationRepository(lifecycle);
+  const repository = new PgApplicationRepository({ ...lifecycle, agencyRecordCheck: clearanceFlowEnabled() });
   const readRepository = new PgApplicationReadRepository();
   const officerTransitionRepository = new PgOfficerTransitionRepository(
     config.separationOfDuties,

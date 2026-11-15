@@ -66,7 +66,7 @@ const READING: VettingEvidence = {
   ageStatus: 'ELIGIBLE',
   academicStatus: 'ELIGIBLE',
   criminalStatus: 'UNDER_REVIEW',
-  criminalContentReviewOnly: true,
+  criminalReviewAdmitsExam: true,
 };
 const ADMITS = { clearanceContentReviewAdmitsToExam: true } as const;
 
@@ -81,7 +81,7 @@ test('content-only review: with the policy off (production default), ADR-033 hol
 });
 
 test('an identity doubt is never content-only: a partial name still waits for the officer before any QR', () => {
-  const doubt: VettingEvidence = { ...READING, criminalContentReviewOnly: false };
+  const doubt: VettingEvidence = { ...READING, criminalReviewAdmitsExam: false };
   assert.equal(deriveApplicationStatus('SUBMITTED', doubt, ADMITS), 'CRIMINAL_CLEARANCE');
   const unknown: VettingEvidence = { ageStatus: 'ELIGIBLE', academicStatus: 'ELIGIBLE', criminalStatus: 'UNDER_REVIEW' };
   assert.equal(deriveApplicationStatus('SUBMITTED', unknown, ADMITS), 'CRIMINAL_CLEARANCE');

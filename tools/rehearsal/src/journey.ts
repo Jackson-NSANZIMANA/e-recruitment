@@ -135,8 +135,12 @@ export async function runJourney(subject: JourneySubject, config: JourneyConfig)
   if (!note('application listed', applicationId !== null)) return steps;
 
   // The sandbox runs the Irembo certificate flow (ADR-048): a persona that holds a certificate
-  // gives its number so the criminal gate can clear and the journey can reach the gate.
-  if (subject.expect.outcome !== 'CLEARANCE' && subject.clearanceNumber !== null && subject.clearanceNumber !== undefined && applicationId !== null) {
+  // gives its number so the criminal gate can clear and the journey can reach the gate. Only when
+  // the citizen's OWN checklist asks for it, exactly as the portal shows the field: posting a number
+  // the screen never offers (RNP asks for no certificate) once let the journeys clear a gate that no
+  // real applicant could, and hid that RNP applicants never reached a QR.
+  const asked = applicationId === null ? false : await clearanceAsked(citizen, applicationId);
+  if (asked && subject.expect.outcome !== 'CLEARANCE' && subject.clearanceNumber !== null && subject.clearanceNumber !== undefined && applicationId !== null) {
     const given = await citizen.post('/edge/v1/me/applications/clearance-certificate', { applicationId, clearanceCertificateNumber: subject.clearanceNumber });
     if (!note('clearance certificate number given (or the application is already closed)', given.status === 200 || given.status === 202 || given.status === 409, statusOf(given))) return steps;
   }
@@ -270,3 +274,11 @@ async function clearanceSteps(subject: JourneySubject, expect: ClearanceExpectat
   }
   return steps;
 }
+
+/** Does the citizen's own document checklist offer the criminal-record certificate number field? */
+async function clearanceAsked(citizen: EdgeSession, applicationId: string): Promise<boolean> {
+  const checklist = rec((await citizen.get(`/edge/v1/me/applications/document-checklist?applicationId=${applicationId}`)).body);
+  const items = Array.isArray(checklist['items']) ? (checklist['items'] as unknown[]) : [];
+  return items.some((item) => typeof item === 'object' && item !== null && 'clearance' in item);
+}
+
