@@ -335,6 +335,7 @@ run_ts "application-service: front-door submit"   services/application-service/s
 run_ts "identity-service: LIVE Identity → Forensics document door (IAM token → ClamAV → MinIO → PostgreSQL; Edge not included)" services/identity-service/selfcheck/verify-applicant-document-door.ts
 run_ts "application-service: document checklist + venue verification (advisory, attributed, write-once)" services/application-service/selfcheck/verify-document-checklist.ts
 run_ts "application-service: citizen exam QR (persisted, owner-scoped, verifies offline, write-once)" services/application-service/selfcheck/verify-exam-invitation.ts
+run_ts "application-service: agency record check — RNP reaches the exam; acceptance waits for the officer (ADR-033)" services/application-service/selfcheck/verify-agency-record-check.ts
 run_ts "application-service: stalled clearances re-offered to scheduling (bounded, outbox-staged)" services/application-service/selfcheck/verify-slot-retry.ts
 run_ts "gate admission LIVE (identity front door -> application authority: single-use QR, identity-bound, append-only)" services/identity-service/selfcheck/verify-gate-admission.ts
 run_ts "application-service: campaign-bound submission (chosen code, policy + evaluation-date binding, write-once)" services/application-service/selfcheck/verify-campaign-bound-submission.ts
